@@ -377,6 +377,7 @@ export const useGame = create<GameState>((set, get) => {
   }
 
   /** One round of a run: deploy SOL on the current round. */
+  const ROUND_RENT_SOL = 0.01;
   async function runRound() {
     const st = get();
     const run = st.run;
@@ -403,8 +404,9 @@ export const useGame = create<GameState>((set, get) => {
     set({ selected: idx });
     try {
       if (onChain && owner) {
-        if (st.wallet.sol + st.wallet.sessionSol < total + 0.003) throw new Error('insufficient SOL');
-        const s = await ensureSession(owner, Math.min(chain.MAX_SESSION_FUND_SOL - 0.01, total * run.left));
+        if (st.wallet.sol + st.wallet.sessionSol < total + ROUND_RENT_SOL) throw new Error('insufficient SOL');
+        // the session key also pays account rent (round pot, reveal, stake) and fees, ~0.01 SOL a round
+        const s = await ensureSession(owner, Math.min(chain.MAX_SESSION_FUND_SOL - 0.01, (total + ROUND_RENT_SOL) * run.left));
         setWallet({ busy: `Deploying ${total.toFixed(4)} SOL…` });
         if (roundOf(chainNow(get().offsetMs)) !== roundId) throw new Error('RoundLocked');
         await chain.sessionDeploy(owner, s, roundId, mask, perBlock);
