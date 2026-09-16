@@ -68,7 +68,8 @@ export const useChat = create<ChatState>((set, get) => ({
   tipTarget: null,
 
   setOpen: (open) => {
-    set({ open, unread: open ? 0 : get().unread });
+    // reopening reloads the room, so messages hidden by a moderator drop out
+    set(open ? { open, unread: 0, msgs: [], lastId: 0 } : { open });
     if (open) void get().poll();
   },
 

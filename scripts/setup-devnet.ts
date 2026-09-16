@@ -29,7 +29,10 @@ async function main() {
   console.log('wallet', wallet.publicKey.toBase58(), 'program', PROGRAM_ID.toBase58());
 
   let mint: PublicKey;
-  if (process.env.SKR_MINT) {
+  const existingCfg = await (gali.account as any).config.fetchNullable(pda.config());
+  if (existingCfg) {
+    mint = existingCfg.skrMint; // already set up: keep the mint the program uses
+  } else if (process.env.SKR_MINT) {
     mint = new PublicKey(process.env.SKR_MINT);
   } else {
     mint = await createMint(conn, wallet.payer, wallet.publicKey, null, DECIMALS);
@@ -54,7 +57,7 @@ async function main() {
         rewardsPoolBps: 4_000, //              40% Rewards Pool, 30% treasury
         potFeeBps: 1_000, // 10% of each SOL pot goes to the treasury wallet
         minDeploy: new anchor.BN(100_000), // 0.0001 SOL per block
-        roundRewardSkr: skr(25), // SKR mined per round, split by the winners
+        roundRewardSkr: skr(200), // SKR mined per round: split, or all to one lucky winner
       })
       .accountsStrict({
         authority: wallet.publicKey,
@@ -80,13 +83,13 @@ async function main() {
         .rpc();
       console.log(`Motherlode Pool seeded with ${mSeed} SKR`);
     }
-    const rSeed = Number(process.env.REWARDS_SEED ?? 1_000_000);
+    const rSeed = Number(process.env.REWARDS_SEED ?? 5_000_000);
     if (rSeed > 0) {
       await gali.methods
         .fundRewards(skr(rSeed))
         .accountsStrict({ funder: wallet.publicKey, config: pda.config(), skrMint: mint, funderAta: funderAta.address, rewards: pda.rewards(), tokenProgram: TOKEN_PROGRAM_ID })
         .rpc();
-      console.log(`Rewards Pool seeded with ${rSeed} SKR (${Math.floor(rSeed / 25 / 1440)} days at 25 SKR a round)`);
+      console.log(`Rewards Pool seeded with ${rSeed} SKR (${Math.floor(rSeed / 200 / 1440)} days at 200 SKR a round)`);
     }
   } else console.log('config already exists');
 

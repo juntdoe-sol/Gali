@@ -77,7 +77,7 @@ export const SKR_USD = 0.018;
 export const MOTHERLODE_SKR = 5_000; // motherlode round: shared by the miners on the winning block (capped by the pool)
 export const MOTHERLODE_POOL_SHARE = 0.3; // share of each gear sale that feeds the Motherlode Pool
 export const REWARDS_POOL_SHARE = 0.4; // share of each gear sale that feeds the Rewards Pool
-export const ROUND_REWARD_SKR = 25; // SKR mined per round, split by the miners on the winning block
+export const ROUND_REWARD_SKR = 200; // SKR mined per round: 50/50 split pro rata, or all to one lucky winner (odds = share of SOL on the block)
 export const usd = (skr: number) => `$${(skr * SKR_USD).toLocaleString(undefined, { maximumFractionDigits: skr * SKR_USD < 10 ? 2 : 0 })}`;
 
 export const RARITY_COLOR: Record<Rarity, string> = {

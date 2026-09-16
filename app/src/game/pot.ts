@@ -70,15 +70,18 @@ export const maskOf = (idx: number[]) => idx.reduce((m, i) => m | (1 << i), 0);
 export const idxOf = (mask: number) => [...Array(BLOCKS).keys()].filter((i) => mask & (1 << i));
 
 /**
- * What `claim_pot` pays: your share of the winning block (your SOL there / all SOL there)
- * times the SOL pool (pot minus fee) and times the SKR mined that round.
+ * What `claim_pot` pays. The SOL pool (pot minus fee) is always shared by SOL on the winning block.
+ * The round's SKR is either split the same way, or goes whole to one lucky winner, drawn with odds
+ * equal to their share of the block (`luckyRoll` is a uniform number in [0, 1)).
  */
-export function payoutFor(pot: PotView, win: number, minePerBlock: number, mask: number, motherlode = false) {
+export function payoutFor(pot: PotView, win: number, minePerBlock: number, mask: number, motherlode: boolean, split: boolean, luckyRoll: number) {
   const mine = mask & (1 << win) ? minePerBlock : 0;
   const onWin = pot.perBlock[win];
-  if (!mine || !onWin) return { sol: 0, skr: 0 };
+  if (!mine || !onWin) return { sol: 0, skr: 0, lucky: false };
   const share = mine / onWin;
-  return { sol: share * pot.total * (1 - POT_FEE), skr: share * (ROUND_REWARD_SKR + (motherlode ? MOTHERLODE_SKR : 0)) };
+  const reward = ROUND_REWARD_SKR + (motherlode ? MOTHERLODE_SKR : 0);
+  const lucky = !split && luckyRoll < share;
+  return { sol: share * pot.total * (1 - POT_FEE), skr: split ? share * reward : lucky ? reward : 0, lucky };
 }
 
 export const optimalPerRound = (amount: number) => {

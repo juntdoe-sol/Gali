@@ -26,6 +26,25 @@ describe('gali', () => {
   const skrOf = async (k: PublicKey) => Number((await getAccount(provider.connection, k)).amount);
   const acc = program.account as any;
 
+  // round ids come from the validator's clock, which can drift from this machine's clock
+  const chainSecs = async () => {
+    const slot = await provider.connection.getSlot();
+    return (await provider.connection.getBlockTime(slot)) ?? Math.floor(Date.now() / 1000);
+  };
+  /** Waits until the current round has at least `need` seconds left, then returns its id. */
+  const freshRound = async (need: number) => {
+    let now = await chainSecs();
+    if (ROUND - (now % ROUND) < need) {
+      await sleep((ROUND - (now % ROUND) + 1) * 1000);
+      now = await chainSecs();
+    }
+    return Math.floor(now / ROUND);
+  };
+  /** Waits until round `r` has ended on-chain. */
+  const afterRound = async (r: number) => {
+    while ((await chainSecs()) < (r + 1) * ROUND) await sleep(1000);
+  };
+
   const player = Keypair.generate();
   const playerPda = find(Buffer.from('player'), player.publicKey.toBuffer());
   let mint: PublicKey;
@@ -106,9 +125,7 @@ describe('gali', () => {
     const rivalPda = find(Buffer.from('player'), rival.publicKey.toBuffer());
     await program.methods.initPlayer().accountsStrict({ owner: rival.publicKey, player: rivalPda, systemProgram: SystemProgram.programId }).signers([rival]).rpc();
 
-    const now = Math.floor(Date.now() / 1000);
-    if (ROUND - (now % ROUND) < 8) await sleep((ROUND - (now % ROUND) + 1) * 1000);
-    const round = Math.floor(Date.now() / 1000 / ROUND);
+    const round = await freshRound(8);
     const pot = find(Buffer.from('pot'), u64le(round));
     const stakeOf = (o: PublicKey) => find(Buffer.from('stake'), o.toBuffer(), u64le(round));
     const deploy = (kp: Keypair, pda: PublicKey, mask: number, lamports: number) =>
@@ -126,15 +143,25 @@ describe('gali', () => {
     }
     expect(failed).to.eq(true);
 
+    // both cover every block, so every run has two winners: 1/3 player, 2/3 rival
     await deploy(player, playerPda, (1 << 25) - 1, 10_000_000); // 0.01 SOL on every block
-    await deploy(rival, rivalPda, 1, 10_000_000); // 0.01 on block 0...
-    await deploy(rival, rivalPda, 1, 10_000_000); // ...topped up to 0.02
+    await deploy(rival, rivalPda, (1 << 25) - 1, 20_000_000); // 0.02 on every block, after the player
+    // one deposit per block per round keeps each stake's range contiguous for the lucky draw
+    let again = '';
+    try {
+      await deploy(rival, rivalPda, 1, 10_000_000);
+    } catch (e) {
+      again = String(e);
+    }
+    expect(again).to.contain('AlreadyOnBlock');
     const before = await acc.pot.fetch(pot);
-    expect(before.total.toNumber()).to.eq(270_000_000);
+    expect(before.total.toNumber()).to.eq(750_000_000);
     expect(before.perBlock[0].toNumber()).to.eq(30_000_000);
     expect(before.miners).to.eq(2);
+    const rivalStake = await acc.stake.fetch(stakeOf(rival.publicKey));
+    expect(rivalStake.start[0].toNumber()).to.eq(10_000_000); // after the player's 0.01
 
-    await sleep((ROUND - (Math.floor(Date.now() / 1000) % ROUND) + 1) * 1000);
+    await afterRound(round);
     const roundPda = find(Buffer.from('round'), u64le(round));
     await program.methods
       .revealRound(new anchor.BN(round))
@@ -148,18 +175,18 @@ describe('gali', () => {
       .rpc();
     const settled = await acc.pot.fetch(pot);
     expect(settled.settled).to.eq(true);
-    expect(settled.pool.toNumber()).to.eq(243_000_000); // 10% SOL fee
+    expect(settled.pool.toNumber()).to.eq(675_000_000); // 10% SOL fee
     expect(settled.skrReward.toNumber()).to.be.gte(25_000_000); // + Motherlode if it hit
     expect(rewardsBefore - (await skrOf(rewards))).to.eq(25_000_000);
 
     const rivalAta = (await getOrCreateAssociatedTokenAccount(conn, (provider.wallet as anchor.Wallet).payer, mint, rival.publicKey)).address;
-    const rent = await conn.getMinimumBalanceForRentExemption(8 + 32 + 32 + 8 + 25 * 8 + 1);
     const got: { sol: number; skr: number }[] = [];
     for (const [kp, pda, ataK] of [
       [player, playerPda, userAta],
       [rival, rivalPda, rivalAta],
     ] as const) {
       const sol0 = await conn.getBalance(kp.publicKey);
+      const rent = await conn.getBalance(stakeOf(kp.publicKey)); // refunded to the payer on close
       const skr0 = await skrOf(ataK);
       await program.methods
         .claimPot(new anchor.BN(round))
@@ -184,29 +211,36 @@ describe('gali', () => {
       expect(await conn.getAccountInfo(stakeOf(kp.publicKey))).to.eq(null);
     }
     const reward = settled.skrReward.toNumber();
-    if (r.winningBlock === 0) {
-      expect(got[0].sol).to.be.closeTo(81_000_000, 1);
-      expect(got[1].sol).to.be.closeTo(162_000_000, 1);
-      expect(got[0].skr + got[1].skr).to.be.closeTo(reward, 1);
+    const w = r.winningBlock;
+    expect(settled.splitReward).to.eq(r.splitReward);
+    console.log(`      round mode: ${r.splitReward ? 'split' : 'one lucky winner'} (block ${w}, lucky index ${settled.luckyIndex.toNumber()})`);
+    expect(got[0].sol).to.be.closeTo(225_000_000, 1);
+    expect(got[1].sol).to.be.closeTo(450_000_000, 1);
+    if (r.splitReward) {
+      expect(got[0].skr).to.be.closeTo(Math.floor(reward / 3), 1);
       expect(got[1].skr).to.be.closeTo(Math.floor((reward * 2) / 3), 1);
     } else {
-      expect(got[0].sol).to.be.closeTo(243_000_000, 1);
-      expect(got[0].skr).to.eq(reward);
-      expect(got[1]).to.deep.eq({ sol: 0, skr: 0 });
+      // on the winning block, lamports 0..10M belong to the player and 10M..30M to the rival
+      const idx = settled.luckyIndex.toNumber();
+      expect(idx).to.be.lessThan(30_000_000);
+      const playerWins = idx < 10_000_000;
+      expect(got[0].skr).to.eq(playerWins ? reward : 0);
+      expect(got[1].skr).to.eq(playerWins ? 0 : reward);
     }
+    expect((await acc.stake.fetchNullable(stakeOf(player.publicKey)))).to.eq(null);
+    void w;
+
     // points: 40 x 25 / blocks covered, x1.25 for the player's staked SKR (+10,000 base on a motherlode)
     const p = await acc.player.fetch(playerPda);
     const q = await acc.player.fetch(rivalPda);
     const ml = r.motherlode ? 10_000 : 0;
     expect(p.solDeployed.toNumber()).to.eq(250_000_000);
     expect(p.rounds).to.eq(1);
-    expect(q.rounds).to.eq(1); // two deploys, one round
+    expect(q.rounds).to.eq(1);
     expect(p.wins).to.eq(1);
-    expect(p.points.toNumber()).to.eq(Math.floor(((40 + ml) * 12_500) / 10_000));
-    if (r.winningBlock === 0) {
-      expect(q.wins).to.eq(1);
-      expect(q.points.toNumber()).to.eq(1_000 + ml);
-    } else expect(q.points.toNumber()).to.eq(0);
+    expect(q.wins).to.eq(1);
+    expect(p.points.toNumber()).to.eq(Math.floor(((40 + ml) * 12_500) / 10_000)); // staked: 1.25x
+    expect(q.points.toNumber()).to.eq(40 + ml);
   });
 
   const session = Keypair.generate();
@@ -220,12 +254,10 @@ describe('gali', () => {
     expect(await provider.connection.getBalance(session.publicKey)).to.eq(50_000_000);
   });
 
-  const deployAs = async (signer: Keypair, lamports: number) => {
-    const now = Math.floor(Date.now() / 1000);
-    if (ROUND - (now % ROUND) < 6) await sleep((ROUND - (now % ROUND) + 1) * 1000);
-    const round = Math.floor(Date.now() / 1000 / ROUND);
+  const deployAs = async (signer: Keypair, lamports: number, mask = 0b11) => {
+    const round = await freshRound(6);
     await program.methods
-      .deploy(new anchor.BN(round), 0b11, new anchor.BN(lamports))
+      .deploy(new anchor.BN(round), mask, new anchor.BN(lamports))
       .accountsStrict({
         signer: signer.publicKey,
         owner: player.publicKey,
@@ -309,5 +341,95 @@ describe('gali', () => {
       .rpc();
     const p = await acc.player.fetch(playerPda);
     expect(p.stakedSkr.toNumber()).to.eq(0);
+  });
+  describe('admin', () => {
+    const admin = provider.wallet.publicKey;
+    const rando = Keypair.generate();
+    const upd = (u: Record<string, unknown>) => ({
+      basePoints: null,
+      motherlodePoints: null,
+      boostTier1: null,
+      boostTier2: null,
+      gearPrices: null,
+      motherlodeSkr: null,
+      motherlodePoolBps: null,
+      rewardsPoolBps: null,
+      potFeeBps: null,
+      minDeploy: null,
+      roundRewardSkr: null,
+      ...u,
+    });
+    const fails = async (p: Promise<unknown>, msg: string) => {
+      let err = '';
+      try {
+        await p;
+      } catch (e) {
+        err = String(e);
+      }
+      expect(err).to.contain(msg);
+    };
+
+    before(async () => {
+      await provider.connection.confirmTransaction(await provider.connection.requestAirdrop(rando.publicKey, LAMPORTS_PER_SOL));
+    });
+
+    it('updates settings within the caps', async () => {
+      await program.methods
+        .updateConfig(upd({ potFeeBps: 800, roundRewardSkr: new anchor.BN(30_000_000) }))
+        .accountsStrict({ authority: admin, config })
+        .rpc();
+      const c = await acc.config.fetch(config);
+      expect(c.potFeeBps).to.eq(800);
+      expect(c.roundRewardSkr.toNumber()).to.eq(30_000_000);
+      expect(c.minDeploy.toNumber()).to.eq(1_000_000); // untouched
+      await fails(program.methods.updateConfig(upd({ potFeeBps: 5_000 })).accountsStrict({ authority: admin, config }).rpc(), 'BadConfig');
+      await fails(
+        program.methods.updateConfig(upd({ motherlodePoolBps: 6_000, rewardsPoolBps: 6_000 })).accountsStrict({ authority: admin, config }).rpc(),
+        'BadConfig',
+      );
+    });
+
+    it('refuses admin calls from anyone else', async () => {
+      await fails(
+        program.methods.updateConfig(upd({ potFeeBps: 0 })).accountsStrict({ authority: rando.publicKey, config }).signers([rando]).rpc(),
+        'ConstraintHasOne',
+      );
+      await fails(program.methods.setPaused(true).accountsStrict({ authority: rando.publicKey, config }).signers([rando]).rpc(), 'ConstraintHasOne');
+    });
+
+    it('pause stops deploys and gear sales, then resumes', async () => {
+      await program.methods.setPaused(true).accountsStrict({ authority: admin, config }).rpc();
+      await fails(deployAs(player, 1_000_000, 0b1100), 'Paused');
+      await program.methods.setPaused(false).accountsStrict({ authority: admin, config }).rpc();
+      await deployAs(player, 1_000_000, 0b1100); // other blocks than the session's deploy
+    });
+
+    it('withdraws treasury SKR only for the authority', async () => {
+      const payer = (provider.wallet as anchor.Wallet).payer;
+      const dest = (await getOrCreateAssociatedTokenAccount(provider.connection, payer, mint, payer.publicKey)).address;
+      const accounts = (authority: PublicKey) => ({ authority, config, skrMint: mint, treasury, destination: dest, tokenProgram: TOKEN_PROGRAM_ID });
+      const t0 = await skrOf(treasury);
+      expect(t0).to.be.gte(5_000_000);
+      await fails(program.methods.withdrawTreasury(new anchor.BN(1)).accountsStrict(accounts(rando.publicKey)).signers([rando]).rpc(), 'ConstraintHasOne');
+      await fails(program.methods.withdrawTreasury(new anchor.BN(t0 + 1)).accountsStrict(accounts(admin)).rpc(), 'BadAmount');
+      const d0 = await skrOf(dest);
+      await program.methods.withdrawTreasury(new anchor.BN(5_000_000)).accountsStrict(accounts(admin)).rpc();
+      expect(await skrOf(treasury)).to.eq(t0 - 5_000_000);
+      expect((await skrOf(dest)) - d0).to.eq(5_000_000);
+    });
+
+    it('hands over authority in two steps, and back', async () => {
+      await fails(program.methods.acceptAuthority().accountsStrict({ newAuthority: rando.publicKey, config }).signers([rando]).rpc(), 'NotAuthorised');
+      await program.methods.proposeAuthority(rando.publicKey).accountsStrict({ authority: admin, config }).rpc();
+      await program.methods.acceptAuthority().accountsStrict({ newAuthority: rando.publicKey, config }).signers([rando]).rpc();
+      let c = await acc.config.fetch(config);
+      expect(c.authority.toBase58()).to.eq(rando.publicKey.toBase58());
+      expect(c.pendingAuthority.toBase58()).to.eq(PublicKey.default.toBase58());
+      await fails(program.methods.setPaused(true).accountsStrict({ authority: admin, config }).rpc(), 'ConstraintHasOne');
+      await program.methods.proposeAuthority(admin).accountsStrict({ authority: rando.publicKey, config }).signers([rando]).rpc();
+      await program.methods.acceptAuthority().accountsStrict({ newAuthority: admin, config }).rpc();
+      c = await acc.config.fetch(config);
+      expect(c.authority.toBase58()).to.eq(admin.toBase58());
+    });
   });
 });

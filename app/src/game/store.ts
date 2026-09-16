@@ -23,6 +23,8 @@ export interface RoundResult {
   solIn: number; // SOL deployed this round
   solOut: number; // SOL won this round
   skrMined: number; // SKR mined from the round reward
+  split?: boolean; // the round's SKR was split (false: one lucky winner took it)
+  lucky?: boolean; // you were the lucky winner
 }
 
 export interface Preset {
@@ -199,6 +201,8 @@ export const roundEnd = (rid: number) => (rid + 1) * ROUND_SECS * 1000;
 const errMsg = (e: unknown) => {
   const m = String((e as Error)?.message ?? e);
   if (/RoundLocked/.test(m)) return 'Round is locking. Try next round';
+  if (/AlreadyOnBlock/.test(m)) return 'You already have SOL on one of those blocks this round';
+  if (/Paused/.test(m)) return 'Gali is paused for maintenance. Try again soon';
   if (/insufficient|0x1\b/i.test(m)) return 'Not enough balance';
   if (/declined|cancel|rejected/i.test(m)) return 'Cancelled in wallet';
   if (/found no installed|wallet/i.test(m) && /not found|no.*wallet/i.test(m)) return 'No Solana wallet app found';
@@ -275,6 +279,8 @@ export const useGame = create<GameState>((set, get) => {
     let motherlode = false;
     let solOut = 0;
     let skrTotal = 0;
+    let split = true;
+    let lucky = false;
     if (pending.onChain) {
       const owner = ownerKey();
       try {
@@ -284,6 +290,8 @@ export const useGame = create<GameState>((set, get) => {
         motherlode = r.motherlode;
         solOut = r.payout;
         skrTotal = r.skr;
+        split = r.split;
+        lucky = r.lucky;
       } catch (e) {
         get().toast(`Couldn't settle round: ${errMsg(e)}`, 'bad');
         set({ phase: 'mining', pending: null, roundId: roundOf(chainNow(offsetMs)) });
@@ -293,10 +301,12 @@ export const useGame = create<GameState>((set, get) => {
       await new Promise((r) => setTimeout(r, 900));
       winning = Math.floor(Math.random() * BLOCKS);
       motherlode = Math.random() < 1 / MOTHERLODE_ODDS;
+      split = Math.random() < 0.5;
       const final = addToPot(simPot(roundId, 1), pending.mask, pending.perBlock);
-      const pay = payoutFor(final, winning, pending.perBlock, pending.mask, motherlode);
+      const pay = payoutFor(final, winning, pending.perBlock, pending.mask, motherlode, split, Math.random());
       solOut = pay.sol;
       skrTotal = pay.skr;
+      lucky = pay.lucky;
     }
     play('rumble');
     set({ phase: 'reveal', winning, revealStartAt: Date.now() });
@@ -314,7 +324,7 @@ export const useGame = create<GameState>((set, get) => {
           ? (skrTotal * MOTHERLODE_SKR) / (MOTHERLODE_SKR + ROUND_REWARD_SKR)
           : 0;
       const skrMined = Math.max(0, skrTotal - skr);
-      const result: RoundResult = { roundId, winning, covered, won, points, motherlode, onChain: pending.onChain, skr, solIn, solOut, skrMined };
+      const result: RoundResult = { roundId, winning, covered, won, points, motherlode, onChain: pending.onChain, skr, solIn, solOut, skrMined, split, lucky };
       updateSave((s) => {
         const winStreak = won ? s.winStreak + 1 : 0;
         const qp = { ...s.questProgress };

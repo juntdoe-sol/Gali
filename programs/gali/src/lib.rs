@@ -5,11 +5,19 @@
 //! * After a round ends, anyone can `reveal_round`, which fixes the winning block and the 1-in-625
 //!   motherlode. Anyone can then `settle_pot`: the SOL fee goes to the treasury wallet and the round's
 //!   SKR (the per-round reward, plus the Motherlode on a motherlode round) moves into escrow.
-//! * `claim_pot` pays each stake its share of the winning block: SOL pool and SKR pro rata, plus
+//! * The round's SKR is paid one of two ways, 50/50 at reveal: split pro rata between everyone on the
+//!   winning block, or all of it to one lucky winner, drawn with odds equal to their share of the SOL on
+//!   that block. To keep the draw exact, a player can deploy on each block once per round.
+//! * `claim_pot` pays each stake its share of the winning block: SOL pool pro rata, the SKR as above, plus
 //!   points scaled by 25 / blocks covered (boosted by staked SKR). Nobody on the winning block means
 //!   the whole SOL pot is fee and no SKR leaves the pools.
 //! * SKR can't be minted by the game: gear sales (bought with SKR) and top-ups fill the Motherlode
 //!   and Rewards Pools.
+//!
+//! * Admin (config authority): `update_config` (with hard caps), `set_paused` (stops new deploys and
+//!   gear sales; reveals, settlements, claims and unstaking keep working), `withdraw_treasury`
+//!   (treasury SKR only; the pools and staked SKR can't be withdrawn), and a two-step authority
+//!   hand-over (`propose_authority` + `accept_authority`).
 //!
 //! Randomness: devnet build uses the most recent SlotHashes entry mixed with the round id.
 //! This is leader-influenceable and must be replaced with a VRF before any mainnet use.
@@ -32,16 +40,28 @@ pub const MAX_SESSION_FUND: u64 = 1_000_000_000; // 1 SOL
 pub const MAX_GEAR: usize = 32;
 pub const MAX_POT_FEE_BPS: u16 = 2_000;
 
+fn check_config(cfg: &Config) -> Result<()> {
+    require!(cfg.round_secs >= 15, GaliError::BadConfig);
+    require!(cfg.gear_prices.len() <= MAX_GEAR, GaliError::BadConfig);
+    require!(cfg.pot_fee_bps <= MAX_POT_FEE_BPS, GaliError::BadConfig);
+    require!(
+        cfg.motherlode_pool_bps as u64 + cfg.rewards_pool_bps as u64 <= BPS,
+        GaliError::BadConfig
+    );
+    require!(cfg.min_deploy > 0, GaliError::BadConfig);
+    require!(
+        cfg.boost_tier2 == 0 || cfg.boost_tier2 >= cfg.boost_tier1,
+        GaliError::BadConfig
+    );
+    Ok(())
+}
+
 #[program]
 pub mod gali {
     use super::*;
 
     pub fn init_config(ctx: Context<InitConfig>, args: ConfigArgs) -> Result<()> {
-        require!(args.round_secs >= 15, GaliError::BadConfig);
         require!(args.gear_prices.len() <= MAX_GEAR, GaliError::BadConfig);
-        require!(args.motherlode_pool_bps as u64 <= BPS, GaliError::BadConfig);
-        require!(args.pot_fee_bps <= MAX_POT_FEE_BPS, GaliError::BadConfig);
-        require!(args.motherlode_pool_bps as u64 + args.rewards_pool_bps as u64 <= BPS, GaliError::BadConfig);
         let c = &mut ctx.accounts.config;
         c.authority = ctx.accounts.authority.key();
         c.skr_mint = ctx.accounts.skr_mint.key();
@@ -57,7 +77,118 @@ pub mod gali {
         c.pot_fee_bps = args.pot_fee_bps;
         c.min_deploy = args.min_deploy;
         c.round_reward_skr = args.round_reward_skr;
+        c.paused = false;
+        c.pending_authority = Pubkey::default();
         c.bump = ctx.bumps.config;
+        check_config(c)
+    }
+
+    /* ---------------- admin ---------------- */
+
+    /// Change game settings. Only fields that are `Some` change. `round_secs` and the mint are fixed.
+    pub fn update_config(ctx: Context<AdminConfig>, u: ConfigUpdate) -> Result<()> {
+        let c = &mut ctx.accounts.config;
+        if let Some(v) = u.base_points {
+            c.base_points = v;
+        }
+        if let Some(v) = u.motherlode_points {
+            c.motherlode_points = v;
+        }
+        if let Some(v) = u.boost_tier1 {
+            c.boost_tier1 = v;
+        }
+        if let Some(v) = u.boost_tier2 {
+            c.boost_tier2 = v;
+        }
+        if let Some(v) = u.gear_prices {
+            require!(v.len() <= MAX_GEAR, GaliError::BadConfig);
+            c.gear_prices = v;
+        }
+        if let Some(v) = u.motherlode_skr {
+            c.motherlode_skr = v;
+        }
+        if let Some(v) = u.motherlode_pool_bps {
+            c.motherlode_pool_bps = v;
+        }
+        if let Some(v) = u.rewards_pool_bps {
+            c.rewards_pool_bps = v;
+        }
+        if let Some(v) = u.pot_fee_bps {
+            c.pot_fee_bps = v;
+        }
+        if let Some(v) = u.min_deploy {
+            c.min_deploy = v;
+        }
+        if let Some(v) = u.round_reward_skr {
+            c.round_reward_skr = v;
+        }
+        check_config(c)?;
+        emit!(ConfigUpdated {
+            authority: c.authority
+        });
+        Ok(())
+    }
+
+    /// Stop (or restart) new deploys and gear sales. Settling, claiming and unstaking always work.
+    pub fn set_paused(ctx: Context<AdminConfig>, paused: bool) -> Result<()> {
+        ctx.accounts.config.paused = paused;
+        emit!(PausedSet { paused });
+        Ok(())
+    }
+
+    /// Move SKR from the treasury (the protocol's cut of gear sales) to any SKR account.
+    /// The Motherlode Pool, Rewards Pool, pot escrow and staking vault have no withdraw path.
+    pub fn withdraw_treasury(ctx: Context<WithdrawTreasury>, amount: u64) -> Result<()> {
+        require!(
+            amount > 0 && amount <= ctx.accounts.treasury.amount,
+            GaliError::BadAmount
+        );
+        let bump = ctx.accounts.config.bump;
+        let signer: &[&[&[u8]]] = &[&[b"config", &[bump]]];
+        token_interface::transfer_checked(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                TransferChecked {
+                    from: ctx.accounts.treasury.to_account_info(),
+                    mint: ctx.accounts.skr_mint.to_account_info(),
+                    to: ctx.accounts.destination.to_account_info(),
+                    authority: ctx.accounts.config.to_account_info(),
+                },
+                signer,
+            ),
+            amount,
+            ctx.accounts.skr_mint.decimals,
+        )?;
+        emit!(TreasuryWithdrawn {
+            to: ctx.accounts.destination.key(),
+            amount
+        });
+        Ok(())
+    }
+
+    /// Step 1 of handing over admin (and the SOL fee stream): name the new authority.
+    /// Pass the default (all-zero) key to cancel.
+    pub fn propose_authority(ctx: Context<AdminConfig>, new_authority: Pubkey) -> Result<()> {
+        ctx.accounts.config.pending_authority = new_authority;
+        emit!(AuthorityProposed {
+            current: ctx.accounts.config.authority,
+            proposed: new_authority
+        });
+        Ok(())
+    }
+
+    /// Step 2: the proposed authority signs to take over.
+    pub fn accept_authority(ctx: Context<AcceptAuthority>) -> Result<()> {
+        let c = &mut ctx.accounts.config;
+        let new = ctx.accounts.new_authority.key();
+        require!(
+            c.pending_authority != Pubkey::default() && c.pending_authority == new,
+            GaliError::NotAuthorised
+        );
+        let old = c.authority;
+        c.authority = new;
+        c.pending_authority = Pubkey::default();
+        emit!(AuthorityChanged { old, new });
         Ok(())
     }
 
@@ -71,7 +202,12 @@ pub mod gali {
 
     /// Authorise a device-held session key to deploy SOL (and pay rent) for this player,
     /// so the phone doesn't ask the wallet to sign every round. Optionally funds it with SOL to deploy.
-    pub fn set_session(ctx: Context<SetSession>, session: Pubkey, expires_at: i64, fund_lamports: u64) -> Result<()> {
+    pub fn set_session(
+        ctx: Context<SetSession>,
+        session: Pubkey,
+        expires_at: i64,
+        fund_lamports: u64,
+    ) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
         require!(expires_at <= now + MAX_SESSION_SECS, GaliError::BadSession);
         let p = &mut ctx.accounts.player;
@@ -91,28 +227,50 @@ pub mod gali {
                 fund_lamports,
             )?;
         }
-        emit!(SessionSet { owner: p.owner, session, expires_at });
+        emit!(SessionSet {
+            owner: p.owner,
+            session,
+            expires_at
+        });
         Ok(())
     }
 
     /// Put `lamports_per_block` SOL on every block in `mask` for the current round.
     /// Signed by the owner or their active session key (the SOL comes from the signer).
-    pub fn deploy(ctx: Context<Deploy>, round_id: u64, mask: u32, lamports_per_block: u64) -> Result<()> {
+    pub fn deploy(
+        ctx: Context<Deploy>,
+        round_id: u64,
+        mask: u32,
+        lamports_per_block: u64,
+    ) -> Result<()> {
         let signer = ctx.accounts.signer.key();
         let cfg = &ctx.accounts.config;
         let now = Clock::get()?.unix_timestamp;
         {
             let p = &ctx.accounts.player;
             let is_owner = signer == p.owner;
-            let is_session = signer == p.session && p.session != Pubkey::default() && now < p.session_expires;
+            let is_session =
+                signer == p.session && p.session != Pubkey::default() && now < p.session_expires;
             require!(is_owner || is_session, GaliError::NotAuthorised);
         }
+        require!(!cfg.paused, GaliError::Paused);
         let current = (now / cfg.round_secs as i64) as u64;
         require!(round_id == current, GaliError::WrongRound);
-        require!((current as i64 + 1) * cfg.round_secs as i64 - now > LOCK_SECS, GaliError::RoundLocked);
-        require!(mask != 0 && mask & !ALL_BLOCKS_MASK == 0, GaliError::BadMask);
-        require!(lamports_per_block >= cfg.min_deploy.max(1), GaliError::BadAmount);
-        let total = lamports_per_block.checked_mul(mask.count_ones() as u64).ok_or(GaliError::BadAmount)?;
+        require!(
+            (current as i64 + 1) * cfg.round_secs as i64 - now > LOCK_SECS,
+            GaliError::RoundLocked
+        );
+        require!(
+            mask != 0 && mask & !ALL_BLOCKS_MASK == 0,
+            GaliError::BadMask
+        );
+        require!(
+            lamports_per_block >= cfg.min_deploy.max(1),
+            GaliError::BadAmount
+        );
+        let total = lamports_per_block
+            .checked_mul(mask.count_ones() as u64)
+            .ok_or(GaliError::BadAmount)?;
 
         anchor_lang::system_program::transfer(
             CpiContext::new(
@@ -144,8 +302,14 @@ pub mod gali {
         }
         for i in 0..BLOCKS as usize {
             if mask & (1 << i) != 0 {
-                pot.per_block[i] = pot.per_block[i].checked_add(lamports_per_block).ok_or(GaliError::BadAmount)?;
-                st.per_block[i] = st.per_block[i].checked_add(lamports_per_block).ok_or(GaliError::BadAmount)?;
+                // one deposit per block per round, so each stake owns one contiguous
+                // lamport range [start, start + amount) for the lucky-winner draw
+                require!(st.per_block[i] == 0, GaliError::AlreadyOnBlock);
+                st.start[i] = pot.per_block[i];
+                st.per_block[i] = lamports_per_block;
+                pot.per_block[i] = pot.per_block[i]
+                    .checked_add(lamports_per_block)
+                    .ok_or(GaliError::BadAmount)?;
             }
         }
         pot.total = pot.total.checked_add(total).ok_or(GaliError::BadAmount)?;
@@ -154,13 +318,23 @@ pub mod gali {
         if first_in_round {
             let today = (now / SECONDS_PER_DAY) as u32;
             if p.day != today {
-                p.streak = if p.day + 1 == today { p.streak.saturating_add(1) } else { 1 };
+                p.streak = if p.day + 1 == today {
+                    p.streak.saturating_add(1)
+                } else {
+                    1
+                };
                 p.day = today;
             }
             p.rounds = p.rounds.saturating_add(1);
             p.xp = p.xp.saturating_add(10 + mask.count_ones() as u64);
         }
-        emit!(Deployed { owner, round_id, mask, lamports_per_block, pot_total: pot.total });
+        emit!(Deployed {
+            owner,
+            round_id,
+            mask,
+            lamports_per_block,
+            pot_total: pot.total
+        });
         Ok(())
     }
 
@@ -173,10 +347,22 @@ pub mod gali {
         require!(!ctx.accounts.pot.settled, GaliError::AlreadySettled);
 
         let total = ctx.accounts.pot.total;
-        let fee = if has_winners { ((total as u128 * cfg.pot_fee_bps as u128) / BPS as u128) as u64 } else { total };
+        let fee = if has_winners {
+            ((total as u128 * cfg.pot_fee_bps as u128) / BPS as u128) as u64
+        } else {
+            total
+        };
         if fee > 0 {
-            **ctx.accounts.pot.to_account_info().try_borrow_mut_lamports()? -= fee;
-            **ctx.accounts.fee_to.to_account_info().try_borrow_mut_lamports()? += fee;
+            **ctx
+                .accounts
+                .pot
+                .to_account_info()
+                .try_borrow_mut_lamports()? -= fee;
+            **ctx
+                .accounts
+                .fee_to
+                .to_account_info()
+                .try_borrow_mut_lamports()? += fee;
         }
 
         // SKR mined this round (+ the Motherlode on a motherlode round), capped by what the pools hold
@@ -187,7 +373,11 @@ pub mod gali {
             let signer: &[&[&[u8]]] = &[&[b"config", &[bump]]];
             let decimals = ctx.accounts.skr_mint.decimals;
             let from_rewards = cfg.round_reward_skr.min(ctx.accounts.rewards.amount);
-            let from_motherlode = if r.motherlode { cfg.motherlode_skr.min(ctx.accounts.motherlode.amount) } else { 0 };
+            let from_motherlode = if r.motherlode {
+                cfg.motherlode_skr.min(ctx.accounts.motherlode.amount)
+            } else {
+                0
+            };
             for (amount, src) in [
                 (from_rewards, ctx.accounts.rewards.to_account_info()),
                 (from_motherlode, ctx.accounts.motherlode.to_account_info()),
@@ -219,8 +409,22 @@ pub mod gali {
         pot.skr_reward = skr;
         pot.motherlode_skr = motherlode_part;
         pot.motherlode = r.motherlode;
+        pot.split_reward = r.split_reward;
+        // the lamport on the winning block that wins everything in a single-winner round
+        pot.lucky_index = if has_winners {
+            r.lucky % pot.per_block[win]
+        } else {
+            0
+        };
         pot.settled = true;
-        emit!(PotSettled { round_id: pot.round_id, winning_block: win as u8, total, fee, pool: pot.pool, skr_reward: skr });
+        emit!(PotSettled {
+            round_id: pot.round_id,
+            winning_block: win as u8,
+            total,
+            fee,
+            pool: pot.pool,
+            skr_reward: skr
+        });
         Ok(())
     }
 
@@ -231,18 +435,39 @@ pub mod gali {
         let mine = ctx.accounts.stake.per_block[win] as u128;
         let on_win = ctx.accounts.pot.per_block[win] as u128;
         let won = mine > 0 && on_win > 0;
-        let (sol, skr, from_motherlode) = if won {
+        let pot = &ctx.accounts.pot;
+        let sol = if won {
+            (mine * pot.pool as u128 / on_win) as u64
+        } else {
+            0
+        };
+        let (skr, from_motherlode, lucky) = if !won {
+            (0, 0, false)
+        } else if pot.split_reward {
             (
-                (mine * ctx.accounts.pot.pool as u128 / on_win) as u64,
-                (mine * ctx.accounts.pot.skr_reward as u128 / on_win) as u64,
-                (mine * ctx.accounts.pot.motherlode_skr as u128 / on_win) as u64,
+                (mine * pot.skr_reward as u128 / on_win) as u64,
+                (mine * pot.motherlode_skr as u128 / on_win) as u64,
+                false,
             )
         } else {
-            (0, 0, 0)
+            let start = ctx.accounts.stake.start[win] as u128;
+            let hit =
+                (pot.lucky_index as u128) >= start && (pot.lucky_index as u128) < start + mine;
+            if hit {
+                (pot.skr_reward, pot.motherlode_skr, true)
+            } else {
+                (0, 0, false)
+            }
         };
         let points = if won {
             let cfg = &ctx.accounts.config;
-            let covered = ctx.accounts.stake.per_block.iter().filter(|v| **v > 0).count() as u64;
+            let covered = ctx
+                .accounts
+                .stake
+                .per_block
+                .iter()
+                .filter(|v| **v > 0)
+                .count() as u64;
             let mut base = cfg.base_points.saturating_mul(BLOCKS as u64) / covered.max(1);
             if ctx.accounts.pot.motherlode {
                 base = base.saturating_add(cfg.motherlode_points);
@@ -253,8 +478,16 @@ pub mod gali {
         };
         let round_id = ctx.accounts.pot.round_id;
         if sol > 0 {
-            **ctx.accounts.pot.to_account_info().try_borrow_mut_lamports()? -= sol;
-            **ctx.accounts.owner.to_account_info().try_borrow_mut_lamports()? += sol;
+            **ctx
+                .accounts
+                .pot
+                .to_account_info()
+                .try_borrow_mut_lamports()? -= sol;
+            **ctx
+                .accounts
+                .owner
+                .to_account_info()
+                .try_borrow_mut_lamports()? += sol;
         }
         if skr > 0 {
             let bump = ctx.accounts.config.bump;
@@ -283,7 +516,15 @@ pub mod gali {
             p.wins = p.wins.saturating_add(1);
             p.xp = p.xp.saturating_add(50);
         }
-        emit!(PotClaimed { owner: p.owner, round_id, won, sol, skr, points });
+        emit!(PotClaimed {
+            owner: p.owner,
+            round_id,
+            won,
+            lucky,
+            sol,
+            skr,
+            points
+        });
         Ok(())
     }
 
@@ -303,7 +544,10 @@ pub mod gali {
             amount,
             ctx.accounts.skr_mint.decimals,
         )?;
-        emit!(RewardsFunded { funder: ctx.accounts.funder.key(), amount });
+        emit!(RewardsFunded {
+            funder: ctx.accounts.funder.key(),
+            amount
+        });
         Ok(())
     }
 
@@ -320,14 +564,23 @@ pub mod gali {
         let seed = hashv(&[recent, &round_id.to_le_bytes(), b"gali"]).to_bytes();
         let a = u64::from_le_bytes(seed[0..8].try_into().unwrap());
         let b = u64::from_le_bytes(seed[8..16].try_into().unwrap());
+        let c = u64::from_le_bytes(seed[16..24].try_into().unwrap());
+        let d = u64::from_le_bytes(seed[24..32].try_into().unwrap());
 
         let r = &mut ctx.accounts.round;
         r.round_id = round_id;
         r.winning_block = (a % BLOCKS as u64) as u8;
         r.motherlode = b % MOTHERLODE_ODDS == 0;
+        r.split_reward = c % 2 == 0;
+        r.lucky = d;
         r.revealed_at = now;
         r.bump = ctx.bumps.round;
-        emit!(Revealed { round_id, winning_block: r.winning_block, motherlode: r.motherlode });
+        emit!(Revealed {
+            round_id,
+            winning_block: r.winning_block,
+            motherlode: r.motherlode,
+            split_reward: r.split_reward,
+        });
         Ok(())
     }
 
@@ -347,7 +600,10 @@ pub mod gali {
             amount,
             ctx.accounts.skr_mint.decimals,
         )?;
-        emit!(MotherlodeFunded { funder: ctx.accounts.funder.key(), amount });
+        emit!(MotherlodeFunded {
+            funder: ctx.accounts.funder.key(),
+            amount
+        });
         Ok(())
     }
 
@@ -367,8 +623,15 @@ pub mod gali {
             ctx.accounts.skr_mint.decimals,
         )?;
         let p = &mut ctx.accounts.player;
-        p.staked_skr = p.staked_skr.checked_add(amount).ok_or(GaliError::BadAmount)?;
-        emit!(Staked { owner: p.owner, amount, total: p.staked_skr });
+        p.staked_skr = p
+            .staked_skr
+            .checked_add(amount)
+            .ok_or(GaliError::BadAmount)?;
+        emit!(Staked {
+            owner: p.owner,
+            amount,
+            total: p.staked_skr
+        });
         Ok(())
     }
 
@@ -392,13 +655,21 @@ pub mod gali {
             amount,
             ctx.accounts.skr_mint.decimals,
         )?;
-        emit!(Staked { owner: p.owner, amount: 0, total: p.staked_skr });
+        emit!(Staked {
+            owner: p.owner,
+            amount: 0,
+            total: p.staked_skr
+        });
         Ok(())
     }
 
     pub fn buy_gear(ctx: Context<BuyGear>, item: u8) -> Result<()> {
         let cfg = &ctx.accounts.config;
-        let price = *cfg.gear_prices.get(item as usize).ok_or(GaliError::UnknownItem)?;
+        require!(!cfg.paused, GaliError::Paused);
+        let price = *cfg
+            .gear_prices
+            .get(item as usize)
+            .ok_or(GaliError::UnknownItem)?;
         let p = &mut ctx.accounts.player;
         require!((item as usize) < MAX_GEAR, GaliError::UnknownItem);
         require!(p.gear_mask & (1u32 << item) == 0, GaliError::AlreadyOwned);
@@ -431,7 +702,11 @@ pub mod gali {
             }
         }
         p.gear_mask |= 1u32 << item;
-        emit!(GearBought { owner: p.owner, item, price });
+        emit!(GearBought {
+            owner: p.owner,
+            item,
+            price
+        });
         Ok(())
     }
 }
@@ -474,7 +749,26 @@ pub struct Config {
     pub min_deploy: u64,
     /// raw SKR mined per round, split between the miners on the winning block
     pub round_reward_skr: u64,
+    /// when true, `deploy` and `buy_gear` are refused
+    pub paused: bool,
+    /// set by `propose_authority`, cleared by `accept_authority`
+    pub pending_authority: Pubkey,
     pub bump: u8,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Default)]
+pub struct ConfigUpdate {
+    pub base_points: Option<u64>,
+    pub motherlode_points: Option<u64>,
+    pub boost_tier1: Option<u64>,
+    pub boost_tier2: Option<u64>,
+    pub gear_prices: Option<Vec<u64>>,
+    pub motherlode_skr: Option<u64>,
+    pub motherlode_pool_bps: Option<u16>,
+    pub rewards_pool_bps: Option<u16>,
+    pub pot_fee_bps: Option<u16>,
+    pub min_deploy: Option<u64>,
+    pub round_reward_skr: Option<u64>,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
@@ -524,6 +818,10 @@ pub struct Round {
     pub round_id: u64,
     pub winning_block: u8,
     pub motherlode: bool,
+    /// true: the round's SKR is split pro rata; false: one lucky winner takes it all
+    pub split_reward: bool,
+    /// random number used to draw the lucky winner
+    pub lucky: u64,
     pub revealed_at: i64,
     pub bump: u8,
 }
@@ -542,6 +840,9 @@ pub struct Pot {
     pub skr_reward: u64,
     pub motherlode_skr: u64,
     pub motherlode: bool,
+    /// copied from the round at settlement
+    pub split_reward: bool,
+    pub lucky_index: u64,
     pub miners: u32,
     pub settled: bool,
     pub bump: u8,
@@ -556,6 +857,8 @@ pub struct Stake {
     pub payer: Pubkey,
     pub round_id: u64,
     pub per_block: [u64; 25],
+    /// where this stake's lamports start on each block (the pot's total there before it deposited)
+    pub start: [u64; 25],
     /// points boost locked in at the player's first deploy of the round
     pub boost_bps: u16,
     pub bump: u8,
@@ -595,6 +898,33 @@ pub struct InitConfig<'info> {
     pub pot_vault: Box<InterfaceAccount<'info, TokenAccount>>,
     pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct AdminConfig<'info> {
+    pub authority: Signer<'info>,
+    #[account(mut, seeds = [b"config"], bump = config.bump, has_one = authority)]
+    pub config: Box<Account<'info, Config>>,
+}
+
+#[derive(Accounts)]
+pub struct AcceptAuthority<'info> {
+    pub new_authority: Signer<'info>,
+    #[account(mut, seeds = [b"config"], bump = config.bump)]
+    pub config: Box<Account<'info, Config>>,
+}
+
+#[derive(Accounts)]
+pub struct WithdrawTreasury<'info> {
+    pub authority: Signer<'info>,
+    #[account(seeds = [b"config"], bump = config.bump, has_one = authority, has_one = skr_mint)]
+    pub config: Box<Account<'info, Config>>,
+    pub skr_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(mut, seeds = [b"treasury"], bump)]
+    pub treasury: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, token::mint = skr_mint, token::token_program = token_program)]
+    pub destination: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub token_program: Interface<'info, TokenInterface>,
 }
 
 #[derive(Accounts)]
@@ -819,6 +1149,7 @@ pub struct Revealed {
     pub round_id: u64,
     pub winning_block: u8,
     pub motherlode: bool,
+    pub split_reward: bool,
 }
 
 #[event]
@@ -845,6 +1176,8 @@ pub struct PotClaimed {
     pub owner: Pubkey,
     pub round_id: u64,
     pub won: bool,
+    /// took the whole SKR reward in a single-winner round
+    pub lucky: bool,
     pub sol: u64,
     pub skr: u64,
     pub points: u64,
@@ -854,6 +1187,34 @@ pub struct PotClaimed {
 pub struct RewardsFunded {
     pub funder: Pubkey,
     pub amount: u64,
+}
+
+#[event]
+pub struct ConfigUpdated {
+    pub authority: Pubkey,
+}
+
+#[event]
+pub struct PausedSet {
+    pub paused: bool,
+}
+
+#[event]
+pub struct TreasuryWithdrawn {
+    pub to: Pubkey,
+    pub amount: u64,
+}
+
+#[event]
+pub struct AuthorityProposed {
+    pub current: Pubkey,
+    pub proposed: Pubkey,
+}
+
+#[event]
+pub struct AuthorityChanged {
+    pub old: Pubkey,
+    pub new: Pubkey,
 }
 
 #[event]
@@ -904,4 +1265,8 @@ pub enum GaliError {
     AlreadySettled,
     #[msg("Settle the pot first")]
     NotSettled,
+    #[msg("Gali is paused for maintenance")]
+    Paused,
+    #[msg("You already have SOL on that block this round")]
+    AlreadyOnBlock,
 }

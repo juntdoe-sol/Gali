@@ -122,7 +122,7 @@ export function RoundCard() {
           ◎ Pot {pot.roundId === roundId ? fmtSol(pot.total) : '0.0'} SOL · {pot.roundId === roundId ? pot.miners : 0} miners
         </T>
         <T v="muted" style={{ fontSize: 11, color: run ? COLORS.teal : COLORS.muted }}>
-          {run ? `Autopilot ${run.total - run.left}/${run.total}` : pending ? `You: ${fmtSol(pending.total)} SOL` : `+${ROUND_REWARD_SKR} SKR mined`}
+          {run ? `Autopilot ${run.total - run.left}/${run.total}` : pending ? `You: ${fmtSol(pending.total)} SOL` : `${ROUND_REWARD_SKR} SKR to mine`}
         </T>
       </View>
       <View style={[styles.row, { marginTop: 2 }]}>

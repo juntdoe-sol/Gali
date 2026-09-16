@@ -92,7 +92,11 @@ function SolLine({ res, dark, big }: { res: RoundResult; dark: boolean; big?: bo
       </T>
       {res.skrMined ? (
         <T v="display" style={{ fontSize: big ? 24 : 18, color: dark ? '#3d5a00' : '#eaffc4' }}>
-          +{res.skrMined.toLocaleString(undefined, { maximumFractionDigits: 2 })} SKR mined
+          {res.lucky ? '🍀 ' : ''}+{res.skrMined.toLocaleString(undefined, { maximumFractionDigits: 2 })} SKR {res.lucky ? 'lucky winner!' : 'mined'}
+        </T>
+      ) : res.won && res.split === false ? (
+        <T v="bold" style={{ fontSize: 12, color: dark ? '#3d5a00' : '#eaffc4' }}>
+          Lucky draw round: another miner took the SKR
         </T>
       ) : null}
       <T v="bold" style={{ fontSize: 12, color: dark ? '#6b3a00' : '#fff' }}>
@@ -186,7 +190,7 @@ export function Busy() {
 
 const STEPS = [
   { t: 'Deploy SOL. Strike gold.', b: 'Every minute a new round opens on a 5x5 mine. Put SOL on the blocks you pick. One block strikes gold, and its miners split 90% of the pot.' },
-  { t: 'Mine SKR as you go', b: 'Winners also share 25 SKR every round, and a 1-in-625 motherlode drops 5,000 SKR. Fewer blocks means a bigger share and more points. Shake your phone to Smart-pick.' },
+  { t: 'Mine SKR as you go', b: 'Every round mines 200 SKR. Half the time the winners split it; the other half one lucky winner takes it all (more SOL on the block, better odds). A 1-in-625 motherlode adds 5,000 SKR. Shake your phone to Smart-pick.' },
   { t: 'Bring your Seeker wallet', b: 'Practice first with 2 play SOL, or connect with Mobile Wallet Adapter. Fund a 24h session once and LITE or PRO autopilot deploys every round for you. It is a game of chance: only use SOL you can afford to lose.' },
 ];
 

@@ -353,7 +353,7 @@ function Me() {
         <T style={{ flex: 1 }}>Mute sound</T>
         <Switch id="mute" value={save.muted} onValueChange={setMute} trackColor={{ true: COLORS.teal, false: COLORS.card2 }} />
       </Card>
-      <T v="muted">How it works: each minute is a round on a 5x5 mine. Put SOL on 1 to 25 blocks. One block strikes gold, and everyone on it splits 90% of the round's SOL pot and the 25 SKR it mines, in proportion to their SOL there. Fewer blocks also pay more points: 1,000 for a single block, 40 for all 25. A 1-in-625 motherlode adds 5,000 SKR. This is a game of chance: only play with SOL you can afford to lose.</T>
+      <T v="muted">How it works: each minute is a round on a 5x5 mine. Put SOL on 1 to 25 blocks. One block strikes gold, and everyone on it splits 90% of the round's SOL pot in proportion to their SOL there. The round also mines 200 SKR: half the time it is split the same way, the other half one lucky winner takes it all, with odds equal to their share. Fewer blocks also pay more points: 1,000 for a single block, 40 for all 25. A 1-in-625 motherlode adds 5,000 SKR. This is a game of chance: only play with SOL you can afford to lose.</T>
       <Pressable onPress={() => Linking.openURL(`https://explorer.solana.com/address/${PROGRAM_ID.toBase58()}?cluster=${CLUSTER}`)}>
         <T v="muted" style={{ textDecorationLine: 'underline' }}>
           Program {short(PROGRAM_ID.toBase58())} on Solana Explorer
