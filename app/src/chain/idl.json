@@ -1,0 +1,967 @@
+{
+  "address": "GamTh2wWNNGU6CB5G3aF7Xeu1m7fQEtd9caRGtgPcMmV",
+  "metadata": {
+    "name": "gali",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Gali: a mining game for Solana Seeker"
+  },
+  "instructions": [
+    {
+      "name": "init_config",
+      "discriminator": [
+        23,
+        235,
+        115,
+        232,
+        168,
+        96,
+        1,
+        231
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true
+        },
+        {
+          "name": "skr_mint"
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "ConfigArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "init_player",
+      "discriminator": [
+        114,
+        27,
+        219,
+        144,
+        50,
+        15,
+        228,
+        66
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "player",
+          "writable": true
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "set_session",
+      "docs": [
+        "Authorise a device-held session key to dig (and pay rent) for this player,",
+        "so the phone doesn't ask the wallet to sign every round. Optionally funds it."
+      ],
+      "discriminator": [
+        156,
+        135,
+        126,
+        111,
+        184,
+        206,
+        194,
+        141
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "player",
+          "writable": true
+        },
+        {
+          "name": "session",
+          "writable": true
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "session",
+          "type": "pubkey"
+        },
+        {
+          "name": "expires_at",
+          "type": "i64"
+        },
+        {
+          "name": "fund_lamports",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "dig",
+      "discriminator": [
+        230,
+        62,
+        156,
+        235,
+        127,
+        60,
+        110,
+        71
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "docs": [
+            "the player's wallet or their active session key; pays rent for the ticket"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "owner"
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "player",
+          "writable": true
+        },
+        {
+          "name": "dig",
+          "writable": true
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "round_id",
+          "type": "u64"
+        },
+        {
+          "name": "mask",
+          "type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "reveal_round",
+      "discriminator": [
+        146,
+        249,
+        2,
+        210,
+        169,
+        145,
+        120,
+        6
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "round",
+          "writable": true
+        },
+        {
+          "name": "slot_hashes"
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "round_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "claim",
+      "discriminator": [
+        62,
+        198,
+        214,
+        193,
+        213,
+        159,
+        108,
+        210
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "docs": [
+            "anyone can settle a revealed dig; points always go to the owner's player account"
+          ],
+          "signer": true
+        },
+        {
+          "name": "owner"
+        },
+        {
+          "name": "payer",
+          "writable": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "player",
+          "writable": true
+        },
+        {
+          "name": "round"
+        },
+        {
+          "name": "dig",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "_round_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "stake_skr",
+      "discriminator": [
+        1,
+        218,
+        232,
+        36,
+        151,
+        113,
+        160,
+        26
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "player",
+          "writable": true
+        },
+        {
+          "name": "skr_mint"
+        },
+        {
+          "name": "user_ata",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "unstake_skr",
+      "discriminator": [
+        110,
+        198,
+        72,
+        203,
+        175,
+        191,
+        224,
+        43
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "player",
+          "writable": true
+        },
+        {
+          "name": "skr_mint"
+        },
+        {
+          "name": "user_ata",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "associated_token_program"
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "buy_gear",
+      "discriminator": [
+        202,
+        140,
+        42,
+        43,
+        206,
+        81,
+        8,
+        28
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "player",
+          "writable": true
+        },
+        {
+          "name": "skr_mint"
+        },
+        {
+          "name": "user_ata",
+          "writable": true
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "item",
+          "type": "u8"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Config",
+      "discriminator": [
+        155,
+        12,
+        170,
+        224,
+        30,
+        250,
+        204,
+        130
+      ]
+    },
+    {
+      "name": "DigTicket",
+      "discriminator": [
+        99,
+        64,
+        146,
+        62,
+        120,
+        47,
+        249,
+        32
+      ]
+    },
+    {
+      "name": "Player",
+      "discriminator": [
+        205,
+        222,
+        112,
+        7,
+        165,
+        155,
+        206,
+        218
+      ]
+    },
+    {
+      "name": "Round",
+      "discriminator": [
+        87,
+        127,
+        165,
+        51,
+        73,
+        78,
+        116,
+        174
+      ]
+    }
+  ],
+  "events": [
+    {
+      "discriminator": [
+        217,
+        192,
+        123,
+        72,
+        108,
+        150,
+        248,
+        33
+      ],
+      "name": "Claimed"
+    },
+    {
+      "discriminator": [
+        181,
+        5,
+        202,
+        231,
+        71,
+        172,
+        129,
+        20
+      ],
+      "name": "Dug"
+    },
+    {
+      "discriminator": [
+        201,
+        119,
+        173,
+        213,
+        171,
+        168,
+        125,
+        15
+      ],
+      "name": "GearBought"
+    },
+    {
+      "discriminator": [
+        180,
+        7,
+        199,
+        88,
+        154,
+        19,
+        181,
+        154
+      ],
+      "name": "Revealed"
+    },
+    {
+      "discriminator": [
+        217,
+        40,
+        191,
+        250,
+        153,
+        135,
+        184,
+        144
+      ],
+      "name": "SessionSet"
+    },
+    {
+      "discriminator": [
+        11,
+        146,
+        45,
+        205,
+        230,
+        58,
+        213,
+        240
+      ],
+      "name": "Staked"
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "BadConfig",
+      "msg": "Invalid config"
+    },
+    {
+      "code": 6001,
+      "name": "WrongRound",
+      "msg": "That round isn't open"
+    },
+    {
+      "code": 6002,
+      "name": "RoundLocked",
+      "msg": "This round is locked; wait for the next one"
+    },
+    {
+      "code": 6003,
+      "name": "BadMask",
+      "msg": "Pick between 1 and 25 blocks"
+    },
+    {
+      "code": 6004,
+      "name": "OutOfDigs",
+      "msg": "No free digs left today"
+    },
+    {
+      "code": 6005,
+      "name": "RoundNotOver",
+      "msg": "Round hasn't ended yet"
+    },
+    {
+      "code": 6006,
+      "name": "NoEntropy",
+      "msg": "No slot hash available"
+    },
+    {
+      "code": 6007,
+      "name": "BadAmount",
+      "msg": "Invalid amount"
+    },
+    {
+      "code": 6008,
+      "name": "UnknownItem",
+      "msg": "Unknown gear item"
+    },
+    {
+      "code": 6009,
+      "name": "AlreadyOwned",
+      "msg": "You already own this item"
+    },
+    {
+      "code": 6010,
+      "name": "NotAuthorised",
+      "msg": "Signer is not the player or an active session"
+    },
+    {
+      "code": 6011,
+      "name": "BadSession",
+      "msg": "Invalid session"
+    }
+  ],
+  "types": [
+    {
+      "name": "Claimed",
+      "type": {
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "won",
+            "type": "bool"
+          },
+          {
+            "name": "points",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "Config",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "skr_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "round_secs",
+            "type": "u32"
+          },
+          {
+            "name": "daily_free_digs",
+            "type": "u16"
+          },
+          {
+            "name": "base_points",
+            "type": "u64"
+          },
+          {
+            "name": "motherlode_points",
+            "type": "u64"
+          },
+          {
+            "name": "boost_tier1",
+            "docs": [
+              "raw SKR amounts (with decimals) for the 1.25x and 1.5x boosts"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "boost_tier2",
+            "type": "u64"
+          },
+          {
+            "name": "gear_prices",
+            "docs": [
+              "raw SKR price per gear item, index = item id"
+            ],
+            "type": {
+              "vec": "u64"
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ConfigArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round_secs",
+            "type": "u32"
+          },
+          {
+            "name": "daily_free_digs",
+            "type": "u16"
+          },
+          {
+            "name": "base_points",
+            "type": "u64"
+          },
+          {
+            "name": "motherlode_points",
+            "type": "u64"
+          },
+          {
+            "name": "boost_tier1",
+            "type": "u64"
+          },
+          {
+            "name": "boost_tier2",
+            "type": "u64"
+          },
+          {
+            "name": "gear_prices",
+            "type": {
+              "vec": "u64"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "DigTicket",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "payer",
+            "docs": [
+              "who paid rent for this ticket; refunded on claim"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "mask",
+            "type": "u32"
+          },
+          {
+            "name": "boost_bps",
+            "type": "u16"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Dug",
+      "type": {
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "mask",
+            "type": "u32"
+          },
+          {
+            "name": "boost_bps",
+            "type": "u16"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "GearBought",
+      "type": {
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "item",
+            "type": "u8"
+          },
+          {
+            "name": "price",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "Player",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "points",
+            "type": "u64"
+          },
+          {
+            "name": "xp",
+            "type": "u64"
+          },
+          {
+            "name": "wins",
+            "type": "u32"
+          },
+          {
+            "name": "digs",
+            "type": "u32"
+          },
+          {
+            "name": "day",
+            "type": "u32"
+          },
+          {
+            "name": "digs_today",
+            "type": "u16"
+          },
+          {
+            "name": "streak",
+            "type": "u16"
+          },
+          {
+            "name": "staked_skr",
+            "type": "u64"
+          },
+          {
+            "name": "gear_mask",
+            "type": "u32"
+          },
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "session_expires",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Revealed",
+      "type": {
+        "fields": [
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "winning_block",
+            "type": "u8"
+          },
+          {
+            "name": "motherlode",
+            "type": "bool"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "Round",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "winning_block",
+            "type": "u8"
+          },
+          {
+            "name": "motherlode",
+            "type": "bool"
+          },
+          {
+            "name": "revealed_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SessionSet",
+      "type": {
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "session",
+            "type": "pubkey"
+          },
+          {
+            "name": "expires_at",
+            "type": "i64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "Staked",
+      "type": {
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "total",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    }
+  ]
+}
