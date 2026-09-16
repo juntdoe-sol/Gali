@@ -90,6 +90,8 @@ Without `deployment.json` filled in, the app runs in **practice mode**: 2 play S
 
 ### 2b. Web test build on Bounded (before the APK)
 
+Live test build: https://galimine.bounded.page
+
 The same app runs in a desktop or mobile browser with Phantom, Solflare or Backpack (the browser extension signs instead of Mobile Wallet Adapter). Everything else is the same: devnet program, session key, autopilot, chat and tips.
 
 ```bash
@@ -97,7 +99,7 @@ cd app
 npm install --legacy-peer-deps
 npx bounded login                 # once
 npm run deploy:bounded            # builds dist/ and uploads it (private at first)
-npx bounded domains slug gali     # optional: pick the URL name
+npx bounded domains slug galimine # the URL name (gali was taken)
 npx bounded site privacy public   # let testers open it
 ```
 

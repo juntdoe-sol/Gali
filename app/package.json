@@ -50,7 +50,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "build:web": "expo export --platform web",
-    "deploy:bounded": "npm run build:web && bounded site deploy ./dist"
+    "deploy:bounded": "npm run build:web && bounded site deploy ./dist --no-source"
   },
   "private": true
 }

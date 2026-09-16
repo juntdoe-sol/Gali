@@ -1,0 +1,11 @@
+{
+  "appId": "6bf01359c3d718819fe8ee15",
+  "name": "app",
+  "env": "production",
+  "protocol": "realtime_offchain",
+  "sitePrivate": true,
+  "owner": "4dKYFnNOPt3NvmEvMJQGAp85FrAAuvm2",
+  "ownerKeySource": "web (Bounded Auth)",
+  "linkedAccount": "juntdoe@gmail.com",
+  "createdAt": "2026-09-16T23:13:49Z"
+}
