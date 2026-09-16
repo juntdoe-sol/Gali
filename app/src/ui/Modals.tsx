@@ -2,6 +2,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Image, Modal, Pressable, StyleSheet, View } from 'react-native';
 import { COLORS, gearByKey, RARITY_COLOR } from '../game/constants';
+import { GEAR_ICON } from './icons';
 import { play } from '../game/sfx';
 import { useGame } from '../game/store';
 import { Btn, T } from './kit';
@@ -40,7 +41,10 @@ export function ResultPop() {
                   💎 MOTHERLODE 💎
                 </T>
                 <T v="display" style={[styles.rBig, { color: '#fff' }]}>
-                  +{res.points.toLocaleString()}
+                  +{res.points.toLocaleString()} pts
+                </T>
+                <T v="display" style={{ fontSize: 28, color: '#eaffc4' }}>
+                  {res.onChain ? (res.skr > 0 ? `+${res.skr.toLocaleString()} SKR` : 'Pool was empty') : '+500 SKR on-chain'}
                 </T>
               </>
             ) : res.won ? (
@@ -114,6 +118,7 @@ export function GearReveal() {
   }, [key, flip]);
   if (!key) return null;
   const g = gearByKey(key);
+  if (!g) return null;
   const c = RARITY_COLOR[g.rarity];
   return (
     <Modal transparent visible animationType="fade" onRequestClose={dismiss}>
@@ -129,7 +134,7 @@ export function GearReveal() {
             {g.rarity.toUpperCase()}
           </T>
           <View style={[styles.orb, { backgroundColor: g.accent, shadowColor: g.accent }]}>
-            <T style={{ fontSize: 50 }}>{g.kind === 'pickaxe' ? '⛏' : '⛑'}</T>
+            <T style={{ fontSize: 50 }}>{GEAR_ICON[g.kind]}</T>
           </View>
           <T v="display" style={{ fontSize: 28 }}>
             {g.name}

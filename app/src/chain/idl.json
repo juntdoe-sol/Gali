@@ -41,6 +41,10 @@
           "writable": true
         },
         {
+          "name": "motherlode",
+          "writable": true
+        },
+        {
           "name": "token_program"
         },
         {
@@ -240,8 +244,9 @@
         {
           "name": "cranker",
           "docs": [
-            "anyone can settle a revealed dig; points always go to the owner's player account"
+            "anyone can settle a revealed dig; points and SKR always go to the owner"
           ],
+          "writable": true,
           "signer": true
         },
         {
@@ -264,11 +269,76 @@
         {
           "name": "dig",
           "writable": true
+        },
+        {
+          "name": "skr_mint"
+        },
+        {
+          "name": "motherlode",
+          "writable": true
+        },
+        {
+          "name": "owner_ata",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "associated_token_program"
+        },
+        {
+          "name": "system_program"
         }
       ],
       "args": [
         {
           "name": "_round_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "fund_motherlode",
+      "docs": [
+        "Anyone (team, sponsors, partners) can add SKR to the Motherlode Pool."
+      ],
+      "discriminator": [
+        31,
+        167,
+        176,
+        17,
+        72,
+        194,
+        1,
+        87
+      ],
+      "accounts": [
+        {
+          "name": "funder",
+          "signer": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "skr_mint"
+        },
+        {
+          "name": "funder_ata",
+          "writable": true
+        },
+        {
+          "name": "motherlode",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
           "type": "u64"
         }
       ]
@@ -410,6 +480,10 @@
           "writable": true
         },
         {
+          "name": "motherlode",
+          "writable": true
+        },
+        {
           "name": "token_program"
         }
       ],
@@ -514,6 +588,32 @@
         15
       ],
       "name": "GearBought"
+    },
+    {
+      "discriminator": [
+        186,
+        11,
+        24,
+        211,
+        145,
+        126,
+        229,
+        72
+      ],
+      "name": "MotherlodeFunded"
+    },
+    {
+      "discriminator": [
+        196,
+        149,
+        31,
+        27,
+        12,
+        35,
+        1,
+        62
+      ],
+      "name": "MotherlodePaid"
     },
     {
       "discriminator": [
@@ -637,6 +737,10 @@
           {
             "name": "points",
             "type": "u64"
+          },
+          {
+            "name": "skr",
+            "type": "u64"
           }
         ],
         "kind": "struct"
@@ -685,11 +789,25 @@
           {
             "name": "gear_prices",
             "docs": [
-              "raw SKR price per gear item, index = item id"
+              "raw SKR price per gear item, index = item id (bit in Player::gear_mask)"
             ],
             "type": {
               "vec": "u64"
             }
+          },
+          {
+            "name": "motherlode_skr",
+            "docs": [
+              "raw SKR paid to each winner of a motherlode round (capped by the pool balance)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "motherlode_pool_bps",
+            "docs": [
+              "share of every gear sale routed to the Motherlode Pool, in bps"
+            ],
+            "type": "u16"
           },
           {
             "name": "bump",
@@ -732,6 +850,14 @@
             "type": {
               "vec": "u64"
             }
+          },
+          {
+            "name": "motherlode_skr",
+            "type": "u64"
+          },
+          {
+            "name": "motherlode_pool_bps",
+            "type": "u16"
           }
         ]
       }
@@ -816,6 +942,42 @@
       }
     },
     {
+      "name": "MotherlodeFunded",
+      "type": {
+        "fields": [
+          {
+            "name": "funder",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "MotherlodePaid",
+      "type": {
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
       "name": "Player",
       "type": {
         "kind": "struct",
@@ -867,6 +1029,13 @@
           {
             "name": "session_expires",
             "type": "i64"
+          },
+          {
+            "name": "skr_won",
+            "docs": [
+              "lifetime raw SKR won from the Motherlode Pool"
+            ],
+            "type": "u64"
           },
           {
             "name": "bump",

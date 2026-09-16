@@ -20,6 +20,7 @@ describe('gali', () => {
   const config = find(Buffer.from('config'));
   const vault = find(Buffer.from('vault'));
   const treasury = find(Buffer.from('treasury'));
+  const motherlode = find(Buffer.from('motherlode'));
   const acc = program.account as any;
 
   const player = Keypair.generate();
@@ -47,6 +48,8 @@ describe('gali', () => {
         boostTier1: new anchor.BN(1_000_000_000),
         boostTier2: new anchor.BN(10_000_000_000),
         gearPrices: [new anchor.BN(0), new anchor.BN(50_000_000)],
+        motherlodeSkr: new anchor.BN(500_000_000),
+        motherlodePoolBps: 5_000,
       })
       .accountsStrict({
         authority: provider.wallet.publicKey,
@@ -54,6 +57,7 @@ describe('gali', () => {
         skrMint: mint,
         vault,
         treasury,
+        motherlode,
         tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
       })
@@ -113,7 +117,21 @@ describe('gali', () => {
     await reveal();
     await program.methods
       .claim(new anchor.BN(round))
-      .accountsStrict({ cranker: provider.wallet.publicKey, owner: player.publicKey, payer: player.publicKey, config, player: playerPda, round: roundPda, dig })
+      .accountsStrict({
+        cranker: provider.wallet.publicKey,
+        owner: player.publicKey,
+        payer: player.publicKey,
+        config,
+        player: playerPda,
+        round: roundPda,
+        dig,
+        skrMint: mint,
+        motherlode,
+        ownerAta: userAta,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
       .rpc();
     const p = await acc.player.fetch(playerPda);
     expect(p.wins).to.eq(1);
@@ -175,12 +193,25 @@ describe('gali', () => {
   it('buys gear with SKR', async () => {
     await program.methods
       .buyGear(1)
-      .accountsStrict({ owner: player.publicKey, config, player: playerPda, skrMint: mint, userAta, treasury, tokenProgram: TOKEN_PROGRAM_ID })
+      .accountsStrict({ owner: player.publicKey, config, player: playerPda, skrMint: mint, userAta, treasury, motherlode, tokenProgram: TOKEN_PROGRAM_ID })
       .signers([player])
       .rpc();
     const p = await acc.player.fetch(playerPda);
     expect(p.gearMask & 2).to.eq(2);
-    expect(Number((await getAccount(provider.connection, treasury)).amount)).to.eq(50_000_000);
+    // 50% of the price feeds the Motherlode Pool
+    expect(Number((await getAccount(provider.connection, treasury)).amount)).to.eq(25_000_000);
+    expect(Number((await getAccount(provider.connection, motherlode)).amount)).to.eq(25_000_000);
+  });
+
+  it('lets anyone fund the Motherlode Pool', async () => {
+    const payer = (provider.wallet as anchor.Wallet).payer;
+    const funderAta = (await getOrCreateAssociatedTokenAccount(provider.connection, payer, mint, payer.publicKey)).address;
+    await mintTo(provider.connection, payer, mint, funderAta, payer, 1_000_000_000n);
+    await program.methods
+      .fundMotherlode(new anchor.BN(1_000_000_000))
+      .accountsStrict({ funder: payer.publicKey, config, skrMint: mint, funderAta, motherlode, tokenProgram: TOKEN_PROGRAM_ID })
+      .rpc();
+    expect(Number((await getAccount(provider.connection, motherlode)).amount)).to.eq(1_025_000_000);
   });
 
   it('unstakes SKR', async () => {

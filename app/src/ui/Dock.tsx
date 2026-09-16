@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Accelerometer } from 'expo-sensors';
+import { watchMotion } from '../game/motion';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { boostFor, COLORS, LOCK_MS, pointsFor } from '../game/constants';
 import { roundEnd, useGame } from '../game/store';
@@ -22,15 +22,13 @@ export function Dock() {
   // shake the phone to dig
   useEffect(() => {
     let last = 0;
-    Accelerometer.setUpdateInterval(120);
-    const sub = Accelerometer.addListener(({ x, y, z }) => {
+    return watchMotion(({ x, y, z }) => {
       const g = Math.sqrt(x * x + y * y + z * z);
       if (g > SHAKE_G && Date.now() - last > 2500) {
         last = Date.now();
         void useGame.getState().dig('shake');
       }
     });
-    return () => sub.remove();
   }, []);
 
   const n = selected.length;

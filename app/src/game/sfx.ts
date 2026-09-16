@@ -48,8 +48,9 @@ export function play(s: Sound) {
   const p = players.get(s);
   if (!p) return;
   try {
-    p.seekTo(0);
-    p.play();
+    void Promise.resolve(p.seekTo(0)).catch(() => undefined);
+    const r = p.play() as unknown;
+    if (r && typeof (r as Promise<void>).catch === 'function') (r as Promise<void>).catch(() => undefined);
   } catch {
     /* ignore */
   }

@@ -2,12 +2,12 @@ import { LilitaOne_400Regular } from '@expo-google-fonts/lilita-one';
 import { Nunito_700Bold, Nunito_800ExtraBold, Nunito_900Black } from '@expo-google-fonts/nunito';
 import { useFonts } from 'expo-font';
 import * as Notifications from 'expo-notifications';
-import { Accelerometer } from 'expo-sensors';
 import { StatusBar } from 'expo-status-bar';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Image, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { COLORS } from './game/constants';
+import { watchMotion } from './game/motion';
 import { initAudio } from './game/sfx';
 import { useGame } from './game/store';
 import { Dock } from './ui/Dock';
@@ -45,14 +45,13 @@ export default function App() {
     initAudio();
     void useGame.getState().boot();
     const id = setInterval(() => useGame.getState().tick(), 100);
-    Accelerometer.setUpdateInterval(120);
-    const sub = Accelerometer.addListener(({ x, y }) => {
+    const stop = watchMotion(({ x, y }) => {
       tilt.x += (x - tilt.x) * 0.15;
       tilt.y += (y - tilt.y) * 0.15;
     });
     return () => {
       clearInterval(id);
-      sub.remove();
+      stop();
     };
   }, [tilt]);
 

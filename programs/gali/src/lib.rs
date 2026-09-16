@@ -5,7 +5,9 @@
 //! * After a round ends, anyone can `reveal_round`, which fixes the winning block.
 //! * Players `claim` their dig: covering the winning block pays points scaled by 25 / blocks covered,
 //!   so the expected value is the same whatever you pick. A 1-in-625 motherlode pays a bonus.
-//! * SKR staked in the game vault boosts points. SKR buys cosmetic gear (sent to the treasury).
+//! * SKR staked in the game vault boosts points. SKR buys cosmetic gear.
+//! * Part of every gear sale (plus any top-ups) fills the SKR Motherlode Pool. Each winner of a
+//!   motherlode round receives up to `motherlode_skr` from the pool when they claim.
 //!
 //! Randomness: devnet build uses the most recent SlotHashes entry mixed with the round id.
 //! This is leader-influenceable and must be replaced with a VRF before any mainnet use.
@@ -25,6 +27,7 @@ pub const MOTHERLODE_ODDS: u64 = 625;
 pub const BPS: u64 = 10_000;
 pub const MAX_SESSION_SECS: i64 = 7 * SECONDS_PER_DAY;
 pub const MAX_SESSION_FUND: u64 = 1_000_000_000; // 1 SOL
+pub const MAX_GEAR: usize = 32;
 
 #[program]
 pub mod gali {
@@ -33,7 +36,8 @@ pub mod gali {
     pub fn init_config(ctx: Context<InitConfig>, args: ConfigArgs) -> Result<()> {
         require!(args.round_secs >= 15, GaliError::BadConfig);
         require!(args.daily_free_digs > 0, GaliError::BadConfig);
-        require!(args.gear_prices.len() <= 16, GaliError::BadConfig);
+        require!(args.gear_prices.len() <= MAX_GEAR, GaliError::BadConfig);
+        require!(args.motherlode_pool_bps as u64 <= BPS, GaliError::BadConfig);
         let c = &mut ctx.accounts.config;
         c.authority = ctx.accounts.authority.key();
         c.skr_mint = ctx.accounts.skr_mint.key();
@@ -44,6 +48,8 @@ pub mod gali {
         c.boost_tier1 = args.boost_tier1;
         c.boost_tier2 = args.boost_tier2;
         c.gear_prices = args.gear_prices;
+        c.motherlode_skr = args.motherlode_skr;
+        c.motherlode_pool_bps = args.motherlode_pool_bps;
         c.bump = ctx.bumps.config;
         Ok(())
     }
@@ -165,8 +171,55 @@ pub mod gali {
             p.wins = p.wins.saturating_add(1);
             p.xp = p.xp.saturating_add(50);
         }
-        emit!(Claimed { owner: p.owner, round_id: r.round_id, won, points });
-        Ok(()) // dig account is closed back to the owner by the `close` constraint
+        let owner = p.owner;
+        let round_id = r.round_id;
+        let mut skr = 0u64;
+        if won && r.motherlode {
+            skr = cfg.motherlode_skr.min(ctx.accounts.motherlode.amount);
+            if skr > 0 {
+                let bump = cfg.bump;
+                let signer: &[&[&[u8]]] = &[&[b"config", &[bump]]];
+                token_interface::transfer_checked(
+                    CpiContext::new_with_signer(
+                        ctx.accounts.token_program.to_account_info(),
+                        TransferChecked {
+                            from: ctx.accounts.motherlode.to_account_info(),
+                            mint: ctx.accounts.skr_mint.to_account_info(),
+                            to: ctx.accounts.owner_ata.to_account_info(),
+                            authority: ctx.accounts.config.to_account_info(),
+                        },
+                        signer,
+                    ),
+                    skr,
+                    ctx.accounts.skr_mint.decimals,
+                )?;
+                let p = &mut ctx.accounts.player;
+                p.skr_won = p.skr_won.saturating_add(skr);
+                emit!(MotherlodePaid { owner, round_id, amount: skr });
+            }
+        }
+        emit!(Claimed { owner, round_id, won, points, skr });
+        Ok(()) // the ticket's rent goes back to whoever paid it (`close = payer`)
+    }
+
+    /// Anyone (team, sponsors, partners) can add SKR to the Motherlode Pool.
+    pub fn fund_motherlode(ctx: Context<FundMotherlode>, amount: u64) -> Result<()> {
+        require!(amount > 0, GaliError::BadAmount);
+        token_interface::transfer_checked(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                TransferChecked {
+                    from: ctx.accounts.funder_ata.to_account_info(),
+                    mint: ctx.accounts.skr_mint.to_account_info(),
+                    to: ctx.accounts.motherlode.to_account_info(),
+                    authority: ctx.accounts.funder.to_account_info(),
+                },
+            ),
+            amount,
+            ctx.accounts.skr_mint.decimals,
+        )?;
+        emit!(MotherlodeFunded { funder: ctx.accounts.funder.key(), amount });
+        Ok(())
     }
 
     pub fn stake_skr(ctx: Context<StakeSkr>, amount: u64) -> Result<()> {
@@ -218,23 +271,35 @@ pub mod gali {
         let cfg = &ctx.accounts.config;
         let price = *cfg.gear_prices.get(item as usize).ok_or(GaliError::UnknownItem)?;
         let p = &mut ctx.accounts.player;
-        require!(p.gear_mask & (1 << item) == 0, GaliError::AlreadyOwned);
+        require!((item as usize) < MAX_GEAR, GaliError::UnknownItem);
+        require!(p.gear_mask & (1u32 << item) == 0, GaliError::AlreadyOwned);
         if price > 0 {
-            token_interface::transfer_checked(
-                CpiContext::new(
-                    ctx.accounts.token_program.to_account_info(),
-                    TransferChecked {
-                        from: ctx.accounts.user_ata.to_account_info(),
-                        mint: ctx.accounts.skr_mint.to_account_info(),
-                        to: ctx.accounts.treasury.to_account_info(),
-                        authority: ctx.accounts.owner.to_account_info(),
-                    },
-                ),
-                price,
-                ctx.accounts.skr_mint.decimals,
-            )?;
+            let to_pool = price.saturating_mul(cfg.motherlode_pool_bps as u64) / BPS;
+            let to_treasury = price - to_pool;
+            let decimals = ctx.accounts.skr_mint.decimals;
+            for (amount, dest) in [
+                (to_pool, ctx.accounts.motherlode.to_account_info()),
+                (to_treasury, ctx.accounts.treasury.to_account_info()),
+            ] {
+                if amount == 0 {
+                    continue;
+                }
+                token_interface::transfer_checked(
+                    CpiContext::new(
+                        ctx.accounts.token_program.to_account_info(),
+                        TransferChecked {
+                            from: ctx.accounts.user_ata.to_account_info(),
+                            mint: ctx.accounts.skr_mint.to_account_info(),
+                            to: dest,
+                            authority: ctx.accounts.owner.to_account_info(),
+                        },
+                    ),
+                    amount,
+                    decimals,
+                )?;
+            }
         }
-        p.gear_mask |= 1 << item;
+        p.gear_mask |= 1u32 << item;
         emit!(GearBought { owner: p.owner, item, price });
         Ok(())
     }
@@ -264,9 +329,13 @@ pub struct Config {
     /// raw SKR amounts (with decimals) for the 1.25x and 1.5x boosts
     pub boost_tier1: u64,
     pub boost_tier2: u64,
-    /// raw SKR price per gear item, index = item id
-    #[max_len(16)]
+    /// raw SKR price per gear item, index = item id (bit in Player::gear_mask)
+    #[max_len(32)]
     pub gear_prices: Vec<u64>,
+    /// raw SKR paid to each winner of a motherlode round (capped by the pool balance)
+    pub motherlode_skr: u64,
+    /// share of every gear sale routed to the Motherlode Pool, in bps
+    pub motherlode_pool_bps: u16,
     pub bump: u8,
 }
 
@@ -279,6 +348,8 @@ pub struct ConfigArgs {
     pub boost_tier1: u64,
     pub boost_tier2: u64,
     pub gear_prices: Vec<u64>,
+    pub motherlode_skr: u64,
+    pub motherlode_pool_bps: u16,
 }
 
 #[account]
@@ -296,6 +367,8 @@ pub struct Player {
     pub gear_mask: u32,
     pub session: Pubkey,
     pub session_expires: i64,
+    /// lifetime raw SKR won from the Motherlode Pool
+    pub skr_won: u64,
     pub bump: u8,
 }
 
@@ -326,18 +399,23 @@ pub struct InitConfig<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
     #[account(init, payer = authority, space = 8 + Config::INIT_SPACE, seeds = [b"config"], bump)]
-    pub config: Account<'info, Config>,
-    pub skr_mint: InterfaceAccount<'info, Mint>,
+    pub config: Box<Account<'info, Config>>,
+    pub skr_mint: Box<InterfaceAccount<'info, Mint>>,
     #[account(
         init, payer = authority, seeds = [b"vault"], bump,
         token::mint = skr_mint, token::authority = config, token::token_program = token_program
     )]
-    pub vault: InterfaceAccount<'info, TokenAccount>,
+    pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
     #[account(
         init, payer = authority, seeds = [b"treasury"], bump,
         token::mint = skr_mint, token::authority = config, token::token_program = token_program
     )]
-    pub treasury: InterfaceAccount<'info, TokenAccount>,
+    pub treasury: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(
+        init, payer = authority, seeds = [b"motherlode"], bump,
+        token::mint = skr_mint, token::authority = config, token::token_program = token_program
+    )]
+    pub motherlode: Box<InterfaceAccount<'info, TokenAccount>>,
     pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
 }
@@ -404,24 +482,50 @@ pub struct RevealRound<'info> {
 #[derive(Accounts)]
 #[instruction(round_id: u64)]
 pub struct Claim<'info> {
-    /// anyone can settle a revealed dig; points always go to the owner's player account
+    /// anyone can settle a revealed dig; points and SKR always go to the owner
+    #[account(mut)]
     pub cranker: Signer<'info>,
     /// CHECK: identity only; bound via has_one
     pub owner: UncheckedAccount<'info>,
     /// CHECK: rent refund destination, must match the ticket's payer
     #[account(mut, address = dig.payer)]
     pub payer: UncheckedAccount<'info>,
-    #[account(seeds = [b"config"], bump = config.bump)]
-    pub config: Account<'info, Config>,
+    #[account(seeds = [b"config"], bump = config.bump, has_one = skr_mint)]
+    pub config: Box<Account<'info, Config>>,
     #[account(mut, seeds = [b"player", owner.key().as_ref()], bump = player.bump, has_one = owner)]
-    pub player: Account<'info, Player>,
+    pub player: Box<Account<'info, Player>>,
     #[account(seeds = [b"round".as_ref(), round_id.to_le_bytes().as_ref()], bump = round.bump)]
-    pub round: Account<'info, Round>,
+    pub round: Box<Account<'info, Round>>,
     #[account(
         mut, close = payer, has_one = owner,
         seeds = [b"dig", owner.key().as_ref(), &round_id.to_le_bytes()], bump = dig.bump
     )]
-    pub dig: Account<'info, DigTicket>,
+    pub dig: Box<Account<'info, DigTicket>>,
+    pub skr_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(mut, seeds = [b"motherlode"], bump)]
+    pub motherlode: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(
+        init_if_needed, payer = cranker,
+        associated_token::mint = skr_mint, associated_token::authority = owner,
+        associated_token::token_program = token_program
+    )]
+    pub owner_ata: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct FundMotherlode<'info> {
+    pub funder: Signer<'info>,
+    #[account(seeds = [b"config"], bump = config.bump, has_one = skr_mint)]
+    pub config: Box<Account<'info, Config>>,
+    pub skr_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(mut, token::mint = skr_mint, token::authority = funder, token::token_program = token_program)]
+    pub funder_ata: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, seeds = [b"motherlode"], bump)]
+    pub motherlode: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub token_program: Interface<'info, TokenInterface>,
 }
 
 #[derive(Accounts)]
@@ -475,6 +579,8 @@ pub struct BuyGear<'info> {
     pub user_ata: InterfaceAccount<'info, TokenAccount>,
     #[account(mut, seeds = [b"treasury"], bump)]
     pub treasury: InterfaceAccount<'info, TokenAccount>,
+    #[account(mut, seeds = [b"motherlode"], bump)]
+    pub motherlode: InterfaceAccount<'info, TokenAccount>,
     pub token_program: Interface<'info, TokenInterface>,
 }
 
@@ -508,6 +614,20 @@ pub struct Claimed {
     pub round_id: u64,
     pub won: bool,
     pub points: u64,
+    pub skr: u64,
+}
+
+#[event]
+pub struct MotherlodePaid {
+    pub owner: Pubkey,
+    pub round_id: u64,
+    pub amount: u64,
+}
+
+#[event]
+pub struct MotherlodeFunded {
+    pub funder: Pubkey,
+    pub amount: u64,
 }
 
 #[event]

@@ -90,6 +90,7 @@ export function RoundCard() {
   const phase = useGame((s) => s.phase);
   const pending = useGame((s) => s.pending);
   const boost = useGame((s) => s.pending?.boostBps ?? 10_000);
+  const pool = useGame((s) => s.wallet.pool);
   const left = Math.max(0, roundEnd(roundId) - now);
   const secs = Math.ceil(left / 1000);
   const cave = roundId % CAVE_IN_EVERY === 0;
@@ -116,6 +117,14 @@ export function RoundCard() {
         </T>
       )}
       <Bar pct={phase === 'mining' ? (left / 60000) * 100 : 0} />
+      <View style={[styles.row, { marginTop: 5 }]}>
+        <T v="bold" style={{ fontSize: 11, color: COLORS.teal }}>
+          💎 Motherlode {pool > 0 ? `${pool.toLocaleString()} SKR` : 'SKR pool'}
+        </T>
+        <T v="muted" style={{ fontSize: 11 }}>
+          1 in 625 · up to 500 SKR
+        </T>
+      </View>
       {pending && boost > 10_000 ? (
         <T v="bold" style={{ color: COLORS.skr, fontSize: 11, textAlign: 'center', marginTop: 4 }}>
           SKR boost {boost / 10_000}x active

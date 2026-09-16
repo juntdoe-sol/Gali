@@ -47,6 +47,7 @@ export const pda = {
   config: find(Buffer.from('config')),
   vault: find(Buffer.from('vault')),
   treasury: find(Buffer.from('treasury')),
+  motherlode: find(Buffer.from('motherlode')),
   player: (o: PublicKey) => find(Buffer.from('player'), o.toBuffer()),
   dig: (o: PublicKey, r: number) => find(Buffer.from('dig'), o.toBuffer(), u64le(r)),
   round: (r: number) => find(Buffer.from('round'), u64le(r)),
@@ -67,6 +68,7 @@ export interface ChainPlayer {
   gearMask: number;
   session: string;
   sessionExpires: number;
+  skrWon: number; // whole SKR won from the Motherlode Pool
 }
 const toNum = (v: BN | number) => (typeof v === 'number' ? v : Number(v.toString()));
 const fromRaw = (v: BN | number) => toNum(v) / 10 ** SKR_DECIMALS;
@@ -86,6 +88,7 @@ export async function fetchPlayer(owner: PublicKey): Promise<ChainPlayer | null>
     gearMask: p.gearMask,
     session: p.session.toBase58(),
     sessionExpires: toNum(p.sessionExpires),
+    skrWon: fromRaw(p.skrWon),
   };
 }
 
@@ -97,6 +100,16 @@ export async function fetchRound(roundId: number): Promise<{ winning: number; mo
 export async function fetchSkrBalance(owner: PublicKey): Promise<number> {
   try {
     const b = await connection.getTokenAccountBalance(ata(owner));
+    return Number(b.value.uiAmount ?? 0);
+  } catch {
+    return 0;
+  }
+}
+
+/** Current SKR in the Motherlode Pool (whole SKR). */
+export async function fetchMotherlodePool(): Promise<number> {
+  try {
+    const b = await connection.getTokenAccountBalance(pda.motherlode);
     return Number(b.value.uiAmount ?? 0);
   } catch {
     return 0;
@@ -225,6 +238,12 @@ export async function sessionSettle(owner: PublicKey, session: Keypair, roundId:
       player: pda.player(owner),
       round: pda.round(roundId),
       dig: pda.dig(owner, roundId),
+      skrMint: SKR_MINT,
+      motherlode: pda.motherlode,
+      ownerAta: ata(owner),
+      tokenProgram: TOKEN_PROGRAM_ID,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
     })
     .instruction();
   const revealIx = await program.methods
@@ -275,7 +294,7 @@ export const buyGear = (item: number) =>
   sendWithWallet(async (o) => [
     await program.methods
       .buyGear(item)
-      .accountsStrict({ owner: o, config: pda.config, player: pda.player(o), skrMint: SKR_MINT, userAta: ata(o), treasury: pda.treasury, tokenProgram: TOKEN_PROGRAM_ID })
+      .accountsStrict({ owner: o, config: pda.config, player: pda.player(o), skrMint: SKR_MINT, userAta: ata(o), treasury: pda.treasury, motherlode: pda.motherlode, tokenProgram: TOKEN_PROGRAM_ID })
       .instruction(),
   ]);
 

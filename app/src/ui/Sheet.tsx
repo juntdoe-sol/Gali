@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import { Linking, Modal, Pressable, ScrollView, StyleSheet, Switch, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  ACHIEVEMENTS, BOOST_TIERS, COLORS, DAILY_FREE_DIGS, GEAR, levelFromXp, localDay, QUESTS, RARITY_COLOR, SEASON, type Gear,
+  ACHIEVEMENTS, BOOST_TIERS, COLORS, DAILY_FREE_DIGS, GEAR, GEAR_KINDS, levelFromXp, localDay, MOTHERLODE_ODDS, MOTHERLODE_POINTS,
+  MOTHERLODE_POOL_SHARE, MOTHERLODE_SKR, QUESTS, RARITY_COLOR, SEASON, type Gear, type GearKind,
 } from '../game/constants';
+import { GEAR_ICON, ITEM_ICON } from './icons';
 import { useGame, useLevelXp, useOwnedMask, usePoints } from '../game/store';
 import { chainReady, CLUSTER, fetchLeaderboard, PROGRAM_ID, short, SKR_MINT, type LeaderRow } from '../chain/client';
 import { Bar, Btn, Card, Pill, T } from './kit';
@@ -102,7 +104,8 @@ function Quests() {
 function GearIcon({ g }: { g: Gear }) {
   return (
     <View style={[styles.gearIcon, { borderColor: RARITY_COLOR[g.rarity], backgroundColor: g.accent + '33' }]}>
-      <T style={{ fontSize: 26 }}>{g.kind === 'pickaxe' ? (g.key === 'pick-neon' ? '🔩' : '⛏') : g.key === 'hat-crown' ? '👑' : '⛑'}</T>
+      <View style={[styles.swatch, { backgroundColor: g.color }]} />
+      <T style={{ fontSize: 24 }}>{ITEM_ICON[g.key] ?? GEAR_ICON[g.kind]}</T>
     </View>
   );
 }
@@ -113,12 +116,26 @@ function GearTab() {
   const skr = useGame((s) => s.wallet.skr);
   const owner = useGame((s) => s.wallet.owner);
   const { buyGear, equip } = useGame.getState();
+  const [kind, setKind] = useState<GearKind>('pickaxe');
+  const equipped = [save.pickaxe, save.helmet, save.outfit, save.pet];
+  const items = GEAR.filter((g) => g.kind === kind);
   return (
     <>
-      <T v="muted">Cosmetic gear, bought with SKR on-chain. Gear never changes your odds.</T>
-      {GEAR.map((g) => {
+      <T v="muted">
+        {GEAR.length} items bought with SKR. Gear is cosmetic and never changes your odds. Half of every sale feeds the SKR Motherlode Pool.
+      </T>
+      <View style={styles.seg}>
+        {GEAR_KINDS.map((k) => (
+          <Pressable key={k.kind} onPress={() => setKind(k.kind)} style={[styles.segBtn, kind === k.kind && styles.tabOn]}>
+            <T v="bold" style={{ fontSize: 12, color: kind === k.kind ? COLORS.text : COLORS.muted }}>
+              {GEAR_ICON[k.kind]} {k.label}
+            </T>
+          </Pressable>
+        ))}
+      </View>
+      {items.map((g) => {
         const has = Boolean(owned & (1 << g.id));
-        const on = save.pickaxe === g.key || save.helmet === g.key;
+        const on = equipped.includes(g.key);
         return (
           <Card key={g.key} style={[styles.rowCard, { borderColor: RARITY_COLOR[g.rarity] + '99' }]}>
             <GearIcon g={g} />
@@ -130,14 +147,34 @@ function GearTab() {
               <T v="muted">{g.perk}</T>
             </View>
             {has ? (
-              <Btn small label={on ? 'Equipped' : 'Equip'} disabled={on} onPress={() => equip(g.key)} />
+              <Btn small label={on ? (g.kind === 'pet' ? 'Unequip' : 'Equipped') : 'Equip'} disabled={on && g.kind !== 'pet'} onPress={() => equip(g.key)} />
             ) : (
-              <Btn small kind="skr" label={`${g.priceSkr} SKR`} disabled={!owner || skr < g.priceSkr} onPress={() => void buyGear(g.key)} />
+              <Btn small kind="skr" label={`${g.priceSkr.toLocaleString()} SKR`} disabled={!owner || skr < g.priceSkr} onPress={() => void buyGear(g.key)} />
             )}
           </Card>
         );
       })}
     </>
+  );
+}
+
+function MotherlodeCard() {
+  const pool = useGame((s) => s.wallet.pool);
+  const owner = useGame((s) => s.wallet.owner);
+  const won = useGame((s) => s.wallet.player?.skrWon ?? 0);
+  return (
+    <Card glow={COLORS.teal}>
+      <T v="label">💎 SKR Motherlode Pool</T>
+      <T v="display" style={{ fontSize: 34, color: COLORS.teal }}>
+        {chainReady ? `${pool.toLocaleString()} SKR` : 'Opens on devnet'}
+      </T>
+      <T>
+        1 round in {MOTHERLODE_ODDS} is a motherlode. Every miner on the winning block gets up to {MOTHERLODE_SKR.toLocaleString()} SKR from the pool, plus {MOTHERLODE_POINTS.toLocaleString()} points.
+      </T>
+      <T v="muted" style={{ marginTop: 6 }}>
+        The pool fills with {Math.round(MOTHERLODE_POOL_SHARE * 100)}% of every gear sale, and anyone can top it up.{owner && won > 0 ? ` You've won ${won.toLocaleString()} SKR.` : ''}
+      </T>
+    </Card>
   );
 }
 
@@ -150,6 +187,8 @@ function SkrTab() {
   const next = BOOST_TIERS.find((t) => t.min > stakedAmt);
   if (!w.owner)
     return (
+      <>
+      <MotherlodeCard />
       <Card glow={COLORS.skr}>
         <T v="display" style={{ fontSize: 22 }}>
           Stake SKR, dig harder
@@ -157,10 +196,12 @@ function SkrTab() {
         <T style={{ marginVertical: 8 }}>Stake SKR in the Gali vault to boost every win: 1.25x at 1,000 SKR, 1.5x at 10,000 SKR. Unstake any time.</T>
         <Btn kind="skr" label="Connect wallet" onPress={() => void connect()} />
       </Card>
+      </>
     );
   const n = Number(amt) || 0;
   return (
     <>
+      <MotherlodeCard />
       <Card glow={COLORS.skr}>
         <T v="label">Your boost</T>
         <T v="display" style={{ fontSize: 34, color: COLORS.skr }}>
@@ -304,7 +345,7 @@ function Me() {
         <T style={{ flex: 1 }}>Mute sound</T>
         <Switch id="mute" value={save.muted} onValueChange={setMute} trackColor={{ true: COLORS.teal, false: COLORS.card2 }} />
       </Card>
-      <T v="muted">How it works: each minute is a round on a 5x5 mine. Dig up to 25 blocks for free (30 digs a day). One block strikes ore. Fewer blocks pay more: 1,000 pts for a single block, 40 for all 25.</T>
+      <T v="muted">How it works: each minute is a round on a 5x5 mine. Dig up to 25 blocks for free (30 digs a day). One block strikes ore. Fewer blocks pay more: 1,000 pts for a single block, 40 for all 25. A 1-in-625 motherlode also pays SKR from the Motherlode Pool.</T>
       <Pressable onPress={() => Linking.openURL(`https://explorer.solana.com/address/${PROGRAM_ID.toBase58()}?cluster=${CLUSTER}`)}>
         <T v="muted" style={{ textDecorationLine: 'underline' }}>
           Program {short(PROGRAM_ID.toBase58())} on Solana Explorer
@@ -332,7 +373,10 @@ const styles = StyleSheet.create({
   rowCard: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   badge: { width: '48.5%', backgroundColor: COLORS.card, borderColor: COLORS.line, borderWidth: 2, borderRadius: 14, padding: 10, gap: 2, opacity: 0.85 },
-  gearIcon: { width: 54, height: 54, borderRadius: 14, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  gearIcon: { width: 54, height: 54, borderRadius: 14, borderWidth: 2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  swatch: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 10 },
+  seg: { flexDirection: 'row', gap: 4, backgroundColor: '#00000055', borderRadius: 14, padding: 4 },
+  segBtn: { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 10 },
   rank: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: COLORS.card, borderRadius: 12, borderWidth: 2, borderColor: 'transparent', padding: 10 },
   input: { marginTop: 6, backgroundColor: '#00000055', borderColor: COLORS.line, borderWidth: 2, borderRadius: 12, color: COLORS.text, fontSize: 20, paddingHorizontal: 12, paddingVertical: 8, fontFamily: 'Nunito_800ExtraBold' },
 });

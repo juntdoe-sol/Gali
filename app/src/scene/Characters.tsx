@@ -2,7 +2,7 @@ import { useFrame } from '@react-three/fiber/native';
 import { Outlines, Sparkles } from '@react-three/drei/native';
 import { useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import { gearByKey, LOCK_MS } from '../game/constants';
+import { GEAR, gearByKey, LOCK_MS } from '../game/constants';
 import { roundEnd, useGame } from '../game/store';
 import { play } from '../game/sfx';
 import { BLOCK_TOP, blockPos, fx, revealEl } from './fx';
@@ -35,9 +35,12 @@ export function Miner() {
 
   const pickId = useGame((s) => s.save.pickaxe);
   const hatId = useGame((s) => s.save.helmet);
-  const pick = gearByKey(pickId);
-  const hat = gearByKey(hatId);
+  const fitId = useGame((s) => s.save.outfit);
+  const pick = gearByKey(pickId) ?? GEAR[0];
+  const hat = gearByKey(hatId) ?? GEAR[6];
+  const fit = gearByKey(fitId) ?? GEAR[12];
   const glow = pick.rarity !== 'common';
+  const fitGlow = fit.key === 'fit-hazard' ? 0.35 : fit.key === 'fit-gold' ? 0.25 : 0;
 
   const motion = useRef({
     from: HOME_WIDE.clone(),
@@ -241,7 +244,7 @@ export function Miner() {
             <group key={String(x)} ref={ref as React.RefObject<THREE.Group>} position={[x as number, 0.42, 0]}>
               <mesh position={[0, -0.14, 0]} castShadow>
                 <capsuleGeometry args={[0.12, 0.18, 4, 10]} />
-                <Toon c="#2f5fd0" />
+                <Toon c={fit.color} e={fit.color} ei={fitGlow} />
                 <Outlines thickness={OUT} color={INK} />
               </mesh>
               <mesh position={[0, -0.34, 0.05]} castShadow>
@@ -254,16 +257,16 @@ export function Miner() {
           {/* torso: shirt + overalls */}
           <mesh position={[0, 0.86, 0]} castShadow>
             <sphereGeometry args={[0.42, 24, 18]} />
-            <Toon c="#ff8a3d" />
+            <Toon c={fit.accent} />
             <Outlines thickness={OUT} color={INK} />
           </mesh>
           <mesh position={[0, 0.74, 0]} castShadow scale={[1, 0.85, 1]}>
             <sphereGeometry args={[0.44, 24, 18, 0, Math.PI * 2, Math.PI * 0.45, Math.PI * 0.55]} />
-            <Toon c="#2f5fd0" />
+            <Toon c={fit.color} e={fit.color} ei={fitGlow} />
           </mesh>
           <mesh position={[0, 0.92, 0.33]} rotation={[-0.25, 0, 0]}>
             <boxGeometry args={[0.36, 0.28, 0.06]} />
-            <Toon c="#2f5fd0" />
+            <Toon c={fit.color} e={fit.color} ei={fitGlow} />
             <Outlines thickness={OUT} color={INK} />
           </mesh>
           {[-0.12, 0.12].map((x) => (
@@ -355,7 +358,31 @@ export function Miner() {
             </mesh>
 
             {/* helmet */}
-            {hat.key === 'hat-crown' ? (
+            {hat.key === 'hat-songkok' ? (
+              <group position={[0, 0.3, 0]}>
+                <mesh castShadow>
+                  <cylinderGeometry args={[0.36, 0.4, 0.3, 24]} />
+                  <Toon c={hat.color} />
+                  <Outlines thickness={OUT} color={INK} />
+                </mesh>
+                <mesh position={[0, -0.1, 0]}>
+                  <cylinderGeometry args={[0.405, 0.405, 0.06, 24]} />
+                  <Toon c={hat.accent} e={hat.accent} ei={0.3} />
+                </mesh>
+              </group>
+            ) : hat.key === 'hat-astro' ? (
+              <group>
+                <mesh>
+                  <sphereGeometry args={[0.62, 28, 20]} />
+                  <meshToonMaterial color={hat.accent} transparent opacity={0.28} depthWrite={false} />
+                </mesh>
+                <mesh position={[0, -0.42, 0]} rotation={[Math.PI / 2, 0, 0]}>
+                  <torusGeometry args={[0.5, 0.07, 10, 28]} />
+                  <Toon c={hat.color} />
+                  <Outlines thickness={OUT} color={INK} />
+                </mesh>
+              </group>
+            ) : hat.key === 'hat-crown' ? (
               <group position={[0, 0.34, 0]}>
                 <mesh castShadow>
                   <cylinderGeometry args={[0.3, 0.27, 0.22, 10, 1, true]} />
@@ -408,7 +435,7 @@ export function Miner() {
           <group ref={armL} position={[-0.44, 1.02, 0]}>
             <mesh position={[0, -0.2, 0]} castShadow>
               <capsuleGeometry args={[0.1, 0.22, 4, 10]} />
-              <Toon c="#ff8a3d" />
+              <Toon c={fit.accent} />
               <Outlines thickness={OUT} color={INK} />
             </mesh>
             <mesh position={[0, -0.44, 0]}>
@@ -422,7 +449,7 @@ export function Miner() {
           <group ref={armR} position={[0.44, 1.02, 0]}>
             <mesh position={[0, -0.2, 0]} castShadow>
               <capsuleGeometry args={[0.1, 0.22, 4, 10]} />
-              <Toon c="#ff8a3d" />
+              <Toon c={fit.accent} />
               <Outlines thickness={OUT} color={INK} />
             </mesh>
             <mesh position={[0, -0.44, 0]}>
@@ -468,6 +495,89 @@ export function Miner() {
         </group>
       </group>
       {glow && <Sparkles count={pick.rarity === 'legendary' ? 24 : 10} scale={[1.4, 1.6, 1.4]} position={[0, 0.8, 0]} size={3.5} color={pick.accent} speed={0.7} />}
+      <Pet />
+    </group>
+  );
+}
+
+/* ---------------- Pets: ride along with the miner ---------------- */
+function Pet() {
+  const petId = useGame((s) => s.save.pet);
+  const g = useRef<THREE.Group>(null);
+  const wing = useRef<THREE.Group>(null);
+  const pet = gearByKey(petId);
+  useFrame((state) => {
+    const t = state.clock.elapsedTime;
+    const st = useGame.getState();
+    const cheer = st.lastResult?.won && Date.now() - st.resultAt < 3200;
+    if (!g.current || !pet) return;
+    if (pet.key === 'pet-mole') {
+      g.current.position.set(0.62, Math.abs(Math.sin(t * (cheer ? 10 : 3))) * (cheer ? 0.35 : 0.06), -0.25);
+    } else if (pet.key === 'pet-bat') {
+      g.current.position.set(Math.cos(t * 2) * 0.7, 1.75 + Math.sin(t * 4) * 0.1, Math.sin(t * 2) * 0.7);
+      g.current.rotation.y = -t * 2;
+      if (wing.current) wing.current.rotation.z = Math.sin(t * 22) * 0.6;
+    } else {
+      g.current.position.set(0.7 + Math.sin(t * 1.3) * 0.12, 1.45 + Math.sin(t * 2.2) * 0.14, 0.1);
+      g.current.rotation.y = t * 1.5;
+    }
+  });
+  if (!pet) return null;
+  return (
+    <group ref={g}>
+      {pet.key === 'pet-mole' && (
+        <group scale={0.55}>
+          <mesh position={[0, 0.25, 0]} scale={[1, 1.1, 1]}>
+            <sphereGeometry args={[0.26, 18, 14]} />
+            <Toon c={pet.color} />
+            <Outlines thickness={0.02} color={INK} />
+          </mesh>
+          <mesh position={[0, 0.3, 0.24]}>
+            <sphereGeometry args={[0.06, 10, 8]} />
+            <Toon c={pet.accent} />
+          </mesh>
+          {[-0.09, 0.09].map((x) => (
+            <mesh key={x} position={[x, 0.4, 0.2]}>
+              <sphereGeometry args={[0.035, 8, 6]} />
+              <meshBasicMaterial color={INK} />
+            </mesh>
+          ))}
+        </group>
+      )}
+      {pet.key === 'pet-bat' && (
+        <group scale={0.5}>
+          <mesh>
+            <sphereGeometry args={[0.2, 14, 12]} />
+            <Toon c={pet.color} />
+            <Outlines thickness={0.02} color={INK} />
+          </mesh>
+          {[-0.07, 0.07].map((x) => (
+            <mesh key={x} position={[x, 0.04, 0.17]}>
+              <sphereGeometry args={[0.035, 8, 6]} />
+              <meshBasicMaterial color={pet.accent} />
+            </mesh>
+          ))}
+          <group ref={wing}>
+            {[-1, 1].map((sd) => (
+              <mesh key={sd} position={[sd * 0.32, 0, 0]} rotation={[0, 0, sd * 0.3]}>
+                <coneGeometry args={[0.18, 0.4, 3]} />
+                <Toon c={pet.color} />
+              </mesh>
+            ))}
+          </group>
+        </group>
+      )}
+      {(pet.key === 'pet-sprite' || pet.key === 'pet-firefly') && (
+        <group scale={0.5}>
+          <mesh scale={pet.key === 'pet-sprite' ? [1, 1.6, 1] : [1, 1, 1]}>
+            {pet.key === 'pet-sprite' ? <octahedronGeometry args={[0.22, 0]} /> : <sphereGeometry args={[0.16, 14, 12]} />}
+            <Toon c={pet.color} e={pet.color} ei={1.2} />
+            <Outlines thickness={0.02} color={INK} />
+          </mesh>
+          <pointLight intensity={pet.key === 'pet-firefly' ? 4 : 1.5} distance={pet.key === 'pet-firefly' ? 6 : 2.5} color={pet.color} />
+          <Sparkles count={pet.key === 'pet-firefly' ? 16 : 8} scale={[1, 1, 1]} size={4} color={pet.accent} speed={0.8} />
+        </group>
+      )}
     </group>
   );
 }
