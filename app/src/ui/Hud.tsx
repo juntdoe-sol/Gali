@@ -1,8 +1,10 @@
 import { Image, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CAVE_IN_EVERY, COLORS, DAILY_FREE_DIGS, LOCK_MS, levelFromXp, localDay, xpForLevel } from '../game/constants';
+import { CAVE_IN_EVERY, COLORS, ROUND_REWARD_SKR, LOCK_MS, levelFromXp, xpForLevel } from '../game/constants';
+import { chainReady } from '../chain/client';
 import { roundEnd, useGame, useLevelXp, usePoints } from '../game/store';
 import { short } from '../chain/client';
+import { fmtSol } from '../game/pot';
 import { Bar, F, Pill, T } from './kit';
 
 export function TopBar({ onMenu }: { onMenu: () => void }) {
@@ -14,11 +16,7 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
   const points = usePoints();
   const lvl = levelFromXp(xp);
   const pct = ((xp - xpForLevel(lvl)) / (xpForLevel(lvl + 1) - xpForLevel(lvl))) * 100;
-  const digsUsed = useGame((s) => {
-    const p = s.wallet.player;
-    if (p && p.day === Math.floor((Date.now() + s.offsetMs) / 86_400_000)) return p.digsToday;
-    return s.save.digDay === localDay() ? s.save.digsToday : 0;
-  });
+  const sol = useGame((s) => (s.wallet.owner && chainReady ? s.wallet.sol + s.wallet.sessionSol : s.save.practiceSol));
   const streak = useGame((s) => s.save.winStreak);
 
   return (
@@ -62,7 +60,7 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
             <Bar pct={pct} colors={[COLORS.teal, '#8ff5e6']} />
           </View>
         </View>
-        <Stat icon="⛏" color={COLORS.skr} value={`${Math.max(0, DAILY_FREE_DIGS - digsUsed)}`} label="digs" />
+        <Stat icon="◎" color={COLORS.sol} value={sol.toFixed(sol >= 100 ? 1 : 3)} label="SOL" />
         {streak >= 2 ? <Stat icon="🔥" color={COLORS.red} value={`x${streak}`} label="" /> : null}
       </View>
     </View>
@@ -91,6 +89,8 @@ export function RoundCard() {
   const pending = useGame((s) => s.pending);
   const boost = useGame((s) => s.pending?.boostBps ?? 10_000);
   const pool = useGame((s) => s.wallet.pool);
+  const pot = useGame((s) => s.pot);
+  const run = useGame((s) => s.run);
   const left = Math.max(0, roundEnd(roundId) - now);
   const secs = Math.ceil(left / 1000);
   const cave = roundId % CAVE_IN_EVERY === 0;
@@ -108,21 +108,29 @@ export function RoundCard() {
             {Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}
           </T>
           <T v="muted" style={{ color: locking ? COLORS.red : COLORS.muted }}>
-            {locking ? 'LOCKED' : pending ? `${covered} block${covered > 1 ? 's' : ''} dug` : 'to dig'}
+            {locking ? 'LOCKED' : pending ? `${covered} block${covered > 1 ? 's' : ''} in` : 'to deploy'}
           </T>
         </View>
       ) : (
         <T v="display" style={{ fontSize: 34, color: COLORS.gold, textAlign: 'center' }}>
-          {phase === 'settling' ? (pending?.onChain ? 'SETTLING ON-CHAIN…' : 'DIGGING…') : 'STRIKE!'}
+          {phase === 'settling' ? (pending?.onChain ? 'SETTLING ON-CHAIN…' : 'MINING…') : 'STRIKE!'}
         </T>
       )}
       <Bar pct={phase === 'mining' ? (left / 60000) * 100 : 0} />
       <View style={[styles.row, { marginTop: 5 }]}>
+        <T v="bold" style={{ fontSize: 11, color: COLORS.sol }}>
+          ◎ Pot {pot.roundId === roundId ? fmtSol(pot.total) : '0.0'} SOL · {pot.roundId === roundId ? pot.miners : 0} miners
+        </T>
+        <T v="muted" style={{ fontSize: 11, color: run ? COLORS.teal : COLORS.muted }}>
+          {run ? `Autopilot ${run.total - run.left}/${run.total}` : pending ? `You: ${fmtSol(pending.total)} SOL` : `+${ROUND_REWARD_SKR} SKR mined`}
+        </T>
+      </View>
+      <View style={[styles.row, { marginTop: 2 }]}>
         <T v="bold" style={{ fontSize: 11, color: COLORS.teal }}>
           💎 Motherlode {pool > 0 ? `${pool.toLocaleString()} SKR` : 'SKR pool'}
         </T>
         <T v="muted" style={{ fontSize: 11 }}>
-          1 in 625 · up to 500 SKR
+          1 in 625 · 5,000 SKR
         </T>
       </View>
       {pending && boost > 10_000 ? (

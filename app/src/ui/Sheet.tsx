@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { Linking, Modal, Pressable, ScrollView, StyleSheet, Switch, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  ACHIEVEMENTS, BOOST_TIERS, COLORS, DAILY_FREE_DIGS, GEAR, GEAR_KINDS, levelFromXp, localDay, MOTHERLODE_ODDS, MOTHERLODE_POINTS,
-  MOTHERLODE_POOL_SHARE, MOTHERLODE_SKR, QUESTS, RARITY_COLOR, SEASON, type Gear, type GearKind,
+  ACHIEVEMENTS, BOOST_TIERS, COLORS, GEAR, GEAR_KINDS, levelFromXp, localDay, MOTHERLODE_ODDS, MOTHERLODE_POINTS,
+  MOTHERLODE_POOL_SHARE, MOTHERLODE_SKR, QUESTS, REWARDS_POOL_SHARE, ROUND_REWARD_SKR, usd, RARITY_COLOR, SEASON, type Gear, type GearKind,
 } from '../game/constants';
 import { GEAR_ICON, ITEM_ICON } from './icons';
 import { useGame, useLevelXp, useOwnedMask, usePoints } from '../game/store';
@@ -122,7 +122,7 @@ function GearTab() {
   return (
     <>
       <T v="muted">
-        {GEAR.length} items bought with SKR. Gear is cosmetic and never changes your odds. Half of every sale feeds the SKR Motherlode Pool.
+        {GEAR.length} items bought with SKR. Gear is cosmetic and never changes your odds. Each sale feeds the pools: 30% Motherlode, 40% Rewards (paid to miners), 30% treasury.
       </T>
       <View style={styles.seg}>
         {GEAR_KINDS.map((k) => (
@@ -149,7 +149,14 @@ function GearTab() {
             {has ? (
               <Btn small label={on ? (g.kind === 'pet' ? 'Unequip' : 'Equipped') : 'Equip'} disabled={on && g.kind !== 'pet'} onPress={() => equip(g.key)} />
             ) : (
-              <Btn small kind="skr" label={`${g.priceSkr.toLocaleString()} SKR`} disabled={!owner || skr < g.priceSkr} onPress={() => void buyGear(g.key)} />
+              <Btn
+                small
+                kind="skr"
+                label={`${g.priceSkr.toLocaleString()} SKR`}
+                sub={usd(g.priceSkr)}
+                disabled={!owner || skr < g.priceSkr}
+                onPress={() => void buyGear(g.key)}
+              />
             )}
           </Card>
         );
@@ -169,10 +176,10 @@ function MotherlodeCard() {
         {chainReady ? `${pool.toLocaleString()} SKR` : 'Opens on devnet'}
       </T>
       <T>
-        1 round in {MOTHERLODE_ODDS} is a motherlode. Every miner on the winning block gets up to {MOTHERLODE_SKR.toLocaleString()} SKR from the pool, plus {MOTHERLODE_POINTS.toLocaleString()} points.
+        1 round in {MOTHERLODE_ODDS} is a motherlode. Miners on the winning block share {MOTHERLODE_SKR.toLocaleString()} SKR (~{usd(MOTHERLODE_SKR)}) by their SOL there, and each gets {MOTHERLODE_POINTS.toLocaleString()} bonus points. Payouts are capped by the pool.
       </T>
       <T v="muted" style={{ marginTop: 6 }}>
-        The pool fills with {Math.round(MOTHERLODE_POOL_SHARE * 100)}% of every gear sale, and anyone can top it up.{owner && won > 0 ? ` You've won ${won.toLocaleString()} SKR.` : ''}
+        The pool fills with {Math.round(MOTHERLODE_POOL_SHARE * 100)}% of every gear sale, and anyone can top it up. Another {Math.round(REWARDS_POOL_SHARE * 100)}% fills the Rewards Pool that pays {ROUND_REWARD_SKR} SKR to SOL miners every round.{owner && won > 0 ? ` You've won ${won.toLocaleString()} SKR.` : ''}
       </T>
     </Card>
   );
@@ -191,9 +198,9 @@ function SkrTab() {
       <MotherlodeCard />
       <Card glow={COLORS.skr}>
         <T v="display" style={{ fontSize: 22 }}>
-          Stake SKR, dig harder
+          Stake SKR, score harder
         </T>
-        <T style={{ marginVertical: 8 }}>Stake SKR in the Gali vault to boost every win: 1.25x at 1,000 SKR, 1.5x at 10,000 SKR. Unstake any time.</T>
+        <T style={{ marginVertical: 8 }}>Stake SKR in the Gali vault to boost every win: 1.25x at 5,000 SKR (~$90), 1.5x at 50,000 SKR (~$900). Unstake any time.</T>
         <Btn kind="skr" label="Connect wallet" onPress={() => void connect()} />
       </Card>
       </>
@@ -269,7 +276,7 @@ function Ranks() {
       </T>
       {!chainReady || !list.length ? (
         <Card>
-          <T>{rows === null && chainReady ? 'Loading the leaderboard…' : 'The on-chain board fills up as miners dig.'}</T>
+          <T>{rows === null && chainReady ? 'Loading the leaderboard…' : 'The on-chain board fills up as miners play rounds.'}</T>
           <T v="muted" style={{ marginTop: 6 }}>
             You: {points.toLocaleString()} pts · level {levelFromXp(xp)}
           </T>
@@ -299,7 +306,6 @@ function Me() {
   const w = useGame((s) => s.wallet);
   const save = useGame((s) => s.save);
   const { connect, disconnect, airdrop, setMute, refreshWallet } = useGame.getState();
-  const digsLeft = DAILY_FREE_DIGS - (w.player?.digsToday ?? save.digsToday);
   return (
     <>
       <Card>
@@ -310,7 +316,7 @@ function Me() {
               {short(w.owner)} · {w.sol.toFixed(3)} SOL · {w.skr.toLocaleString()} SKR
             </T>
             <T v="muted" style={{ marginTop: 4 }}>
-              Dig session key: {w.sessionSol.toFixed(3)} SOL
+              Session key: {w.sessionSol.toFixed(3)} SOL to deploy
               {w.player?.sessionExpires ? ` · expires ${new Date(w.player.sessionExpires * 1000).toLocaleString()}` : ''}
             </T>
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
@@ -321,14 +327,16 @@ function Me() {
           </>
         ) : (
           <>
-            <T style={{ marginVertical: 6 }}>Connect a Solana wallet (Seed Vault on Seeker) to dig on-chain, climb the leaderboard, stake SKR and buy gear.</T>
+            <T style={{ marginVertical: 6 }}>Connect a Solana wallet (Seed Vault on Seeker) to mine on-chain with SOL, climb the leaderboard, stake SKR and buy gear.</T>
             <Btn kind="skr" label="Connect wallet" onPress={() => void connect()} />
           </>
         )}
       </Card>
       <View style={styles.grid}>
         {[
-          ['Digs left today', String(Math.max(0, digsLeft))],
+          ['Rounds played', String(w.player?.rounds ?? save.digs)],
+          ['SOL won', (w.player?.solWon ?? 0).toFixed(3)],
+          ['SKR mined', Math.floor(w.player?.skrMined ?? save.practiceSkr).toLocaleString()],
           ['Wins', String(w.player?.wins ?? save.wins)],
           ['Day streak', String(w.player?.streak ?? save.dayStreak)],
           ['Moles bonked', String(save.moles)],
@@ -345,7 +353,7 @@ function Me() {
         <T style={{ flex: 1 }}>Mute sound</T>
         <Switch id="mute" value={save.muted} onValueChange={setMute} trackColor={{ true: COLORS.teal, false: COLORS.card2 }} />
       </Card>
-      <T v="muted">How it works: each minute is a round on a 5x5 mine. Dig up to 25 blocks for free (30 digs a day). One block strikes gold. Fewer blocks pay more: 1,000 pts for a single block, 40 for all 25. A 1-in-625 motherlode also pays SKR from the Motherlode Pool.</T>
+      <T v="muted">How it works: each minute is a round on a 5x5 mine. Put SOL on 1 to 25 blocks. One block strikes gold, and everyone on it splits 90% of the round's SOL pot and the 25 SKR it mines, in proportion to their SOL there. Fewer blocks also pay more points: 1,000 for a single block, 40 for all 25. A 1-in-625 motherlode adds 5,000 SKR. This is a game of chance: only play with SOL you can afford to lose.</T>
       <Pressable onPress={() => Linking.openURL(`https://explorer.solana.com/address/${PROGRAM_ID.toBase58()}?cluster=${CLUSTER}`)}>
         <T v="muted" style={{ textDecorationLine: 'underline' }}>
           Program {short(PROGRAM_ID.toBase58())} on Solana Explorer

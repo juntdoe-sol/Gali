@@ -16,10 +16,13 @@ export const pda = {
   vault: () => PublicKey.findProgramAddressSync([Buffer.from('vault')], PROGRAM_ID)[0],
   treasury: () => PublicKey.findProgramAddressSync([Buffer.from('treasury')], PROGRAM_ID)[0],
   motherlode: () => PublicKey.findProgramAddressSync([Buffer.from('motherlode')], PROGRAM_ID)[0],
+  rewards: () => PublicKey.findProgramAddressSync([Buffer.from('rewards')], PROGRAM_ID)[0],
+  potVault: () => PublicKey.findProgramAddressSync([Buffer.from('pot_vault')], PROGRAM_ID)[0],
   player: (owner: PublicKey) => PublicKey.findProgramAddressSync([Buffer.from('player'), owner.toBuffer()], PROGRAM_ID)[0],
   dig: (owner: PublicKey, round: number | bigint) =>
     PublicKey.findProgramAddressSync([Buffer.from('dig'), owner.toBuffer(), u64le(round)], PROGRAM_ID)[0],
   round: (round: number | bigint) => PublicKey.findProgramAddressSync([Buffer.from('round'), u64le(round)], PROGRAM_ID)[0],
+  pot: (round: number | bigint) => PublicKey.findProgramAddressSync([Buffer.from('pot'), u64le(round)], PROGRAM_ID)[0],
 };
 
 export function loadWallet(): Keypair {

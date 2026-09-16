@@ -1,6 +1,6 @@
 # Gali
 
-A cartoon 3D mining game for Solana Seeker. Every minute a round opens on a 5x5 mine. Dig blocks for free, strike gold, climb the on-chain leaderboard, and stake SKR to boost your points.
+A cartoon 3D mining game for Solana Seeker. Every minute a round opens on a 5x5 mine. Miners deploy SOL on blocks, split the pot when their block strikes gold, mine SKR every round, chat, and tip each other SKR.
 
 Built for **CLOCK IN**, the Solana Mobile hackathon by Radiants (submissions close 9 Oct 2026, 14:59 GMT+8).
 
@@ -8,23 +8,25 @@ Built for **CLOCK IN**, the Solana Mobile hackathon by Radiants (submissions clo
 
 | Path | What it is |
 | --- | --- |
-| `programs/gali` | Anchor program: rounds, free daily digs, session keys, reveal, claim, SKR staking, gear purchases |
+| `programs/gali` | Anchor program: rounds, SOL deploys, reveal, pot settlement and claims, session keys, SKR pools, staking, gear |
 | `tests/gali.ts` | Anchor tests (localnet) |
-| `scripts/` | Devnet setup, mock-SKR faucet, optional reveal crank, IDL generator |
-| `app/` | Expo (React Native) Android app: React Three Fiber scene, Mobile Wallet Adapter, haptics, shake-to-dig, daily reminders |
+| `scripts/` | Devnet setup, mock-SKR faucet, reveal + settle crank, IDL generator |
+| `app/` | Expo (React Native) Android app: React Three Fiber scene, LITE/PRO deploy panel with autopilot, miners chat, SKR tips, Mobile Wallet Adapter |
+| `supabase/` | Chat server: `messages` table and the `chat-post` edge function |
 | `.github/workflows` | CI: build + test program, optional devnet deploy, release APK |
 
 ## How the game works
 
 - **Rounds:** `round_id = unix_time / 60`. No crank opens rounds.
-- **Digs:** a dig marks 1–25 blocks for the current round. Each player gets 30 free digs per UTC day (only network fees apply).
-- **Reveal:** after a round ends, anyone can call `reveal_round`. The devnet build mixes the latest SlotHashes entry with the round id. **This randomness can be influenced by validators; swap in a VRF (Switchboard or ORAO) before mainnet.**
-- **Claim:** permissionless. A win pays `40 × 25 / blocks covered` points (1,000 for a single block). A 1-in-625 motherlode adds 10,000.
-- **Session keys:** the player approves one `set_session` transaction in their wallet (Mobile Wallet Adapter / Seed Vault). The app then digs and settles with a device-held key for 24 hours, so each round is one tap with no wallet pop-up.
-- **SKR:** stake in the game vault for 1.25x (1,000 SKR) or 1.5x (10,000 SKR) points. SKR can't be minted by the game, so there's no token emission.
-- **Shop:** 21 cosmetic items (6 pickaxes, 6 helmets, 5 outfits, 4 pets), bought with SKR via `buy_gear`. 50% of each sale (`motherlode_pool_bps`) goes to the Motherlode Pool and the rest to the treasury.
-- **SKR Motherlode:** a 1-in-625 motherlode win also pays `motherlode_skr` (500 SKR) from the pool on `claim`, capped by the pool balance so it can never go insolvent. Anyone can top up the pool with `fund_motherlode`. `npm run setup:devnet` seeds it with `MOTHERLODE_SEED` (default 50,000 test SKR).
+- **Deploy:** put SOL on 1 to 25 blocks with `deploy` (min 0.0001 SOL per block). Several deploys in one round add up.
+- **Reveal:** after a round ends, anyone can call `reveal_round`. The devnet build mixes the latest SlotHashes entry with the round id. **Validators can influence this; swap in a VRF (Switchboard or ORAO) before mainnet.**
+- **Settle:** anyone calls `settle_pot`. 10% of the SOL pot goes to the treasury wallet (config authority). 25 SKR from the Rewards Pool (plus 5,000 SKR from the Motherlode Pool on a 1-in-625 motherlode) moves into escrow. If nobody covered the winning block, the whole pot is fee and no SKR moves.
+- **Claim:** anyone calls `claim_pot` for a stake. The owner gets `their SOL on the gold block / all SOL on it` of the SOL pool and of the escrowed SKR, plus points (`40 x 25 / blocks covered`, +10,000 on a motherlode, x1.25 or x1.5 with staked SKR).
+- **Session keys:** the wallet approves one `set_session` transaction that also funds a device key (up to 1 SOL). The app then deploys and settles every round without pop-ups. LITE spreads a budget over rounds; PRO has 4 presets, All/Smart block picking and a round count.
+- **SKR:** Gali never mints SKR. Gear sales (21 items, 200 to 15,000 SKR) go 30% Motherlode Pool, 40% Rewards Pool, 30% treasury. Anyone can top up with `fund_motherlode` / `fund_rewards`. Staking 5,000 / 50,000 SKR boosts points. Prices assume 1 SKR ≈ $0.018.
+- **Chat + tips:** messages are signed by the player's session key; the edge function checks the signature against the on-chain Player account. Tips are plain SPL transfers from the wallet, then posted to the room with the transaction signature, which the server verifies.
 - **Devnet:** uses a mock SKR mint. Real SKR mint: `SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3` (verify decimals and token program before switching).
+- **Chance:** winners split losers' SOL, so this is a game of chance. A real-money launch needs age gating and a legal review per market.
 
 ## Run it on your Mac
 
@@ -47,8 +49,9 @@ anchor deploy --provider.cluster devnet
 cp target/idl/gali.json app/src/chain/idl.json
 
 npm install
-npm run setup:devnet         # creates mock SKR, inits config, writes app/src/chain/deployment.json
-npx ts-node scripts/faucet.ts <tester-wallet> 5000   # send test SKR
+npm run setup:devnet         # mock SKR, config, seeds pools (MOTHERLODE_SEED, REWARDS_SEED), writes app/src/chain/deployment.json
+npx ts-node scripts/faucet.ts <tester-wallet> 50000   # send test SKR
+npx ts-node scripts/crank.ts # optional: reveal + settle each round as the authority
 ```
 
 Local tests: `anchor test --provider.cluster localnet`.
@@ -66,15 +69,27 @@ npx expo run:android --variant release   # installs on a USB-connected phone
 cd android && ./gradlew assembleRelease  # app/android/app/build/outputs/apk/release/
 ```
 
-Without `deployment.json` filled in, the app runs in **practice mode** (same game, local results).
+Without `deployment.json` filled in, the app runs in **practice mode**: 2 play SOL and simulated miners.
+
+### 3. Chat server (Supabase)
+
+```bash
+supabase init                                      # once, keeps the existing supabase/ files
+supabase link --project-ref <ref>
+supabase db push                                   # creates the messages table
+supabase secrets set SKR_MINT=<mint> GALI_PROGRAM_ID=GamTh2wWNNGU6CB5G3aF7Xeu1m7fQEtd9caRGtgPcMmV
+supabase functions deploy chat-post --no-verify-jwt
+```
+
+Then put the project URL and anon key in `app/src/chain/chat.json`. Without them the chat shows as offline; SKR tips still work.
 
 ## Hackathon checklist
 
 - [x] Android APK (Expo prebuild + Gradle, or the `android-apk` workflow)
-- [x] Solana Mobile Stack: Mobile Wallet Adapter for connect, session approval, staking and gear
-- [x] Mobile-first: portrait 3D scene, haptics, shake-to-dig, tilt parallax, daily reminder notifications
-- [x] Meaningful Solana use: every dig, reveal and claim is a devnet transaction; on-chain leaderboard
-- [x] SKR integration: staking boosts + SKR-priced gear
+- [x] Solana Mobile Stack: Mobile Wallet Adapter for connect, session funding, staking, gear and SKR tips
+- [x] Built for the phone: portrait 3D scene, haptics, shake to Smart-pick, tilt parallax, daily reminder
+- [x] Meaningful Solana use: every deploy, reveal, settlement and claim is a devnet transaction; on-chain leaderboard
+- [x] SKR integration: SKR mined each round, Motherlode, SKR-priced gear, staking boosts, tips
 - [ ] 3-minute demo video recorded on a device
 - [ ] Pitch deck
 - [ ] Release signing key for the Solana dApp Store (the default build uses the debug keystore)
