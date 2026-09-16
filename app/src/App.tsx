@@ -13,7 +13,7 @@ import { useGame } from './game/store';
 import { ChatButton, ChatSheet } from './ui/Chat';
 import { Dock } from './ui/Dock';
 import { RoundCard, Toasts, TopBar } from './ui/Hud';
-import { Busy, GearReveal, LevelUp, Onboarding, ResultPop } from './ui/Modals';
+import { Busy, GearReveal, LevelUp, Onboarding, ResultPop, WalletPicker } from './ui/Modals';
 import { Sheet } from './ui/Sheet';
 
 const Scene = lazy(() => import('./scene/Scene'));
@@ -95,6 +95,7 @@ export default function App() {
         <Sheet open={menu} onClose={() => setMenu(false)} />
         <ChatSheet />
         <Onboarding />
+        <WalletPicker />
       </View>
     </SafeAreaProvider>
   );

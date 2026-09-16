@@ -15,7 +15,7 @@ export function ChatButton() {
   const setOpen = useChat((s) => s.setOpen);
   useEffect(() => startChatPolling(), []);
   return (
-    <Pressable onPress={() => setOpen(true)} style={[styles.fab, { top: insets.top + 262 }]} accessibilityLabel="Open miners chat">
+    <Pressable onPress={() => setOpen(true)} style={[styles.fab, { top: insets.top + 196 }]} accessibilityLabel="Open miners chat">
       <T style={{ fontSize: 20 }}>💬</T>
       {unread > 0 ? (
         <View style={styles.badge}>

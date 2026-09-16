@@ -176,6 +176,43 @@ export function GearReveal() {
   );
 }
 
+export function WalletPicker() {
+  const wallets = useGame((s) => s.walletPicker);
+  const close = useGame((s) => s.closeWalletPicker);
+  const connect = useGame((s) => s.connect);
+  if (!wallets) return null;
+  return (
+    <Modal transparent visible animationType="fade" onRequestClose={close}>
+      <View style={[styles.center, { backgroundColor: '#0d0814dd', padding: 16 }]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={close} accessibilityLabel="Close wallet list" />
+        <View style={styles.intro}>
+          <T v="display" style={{ fontSize: 24, marginBottom: 4 }}>
+            Connect a wallet
+          </T>
+          <T v="muted" style={{ marginBottom: 14 }}>
+            Switch the wallet to Solana devnet to see your test balances.
+          </T>
+          {wallets.map((w) => (
+            <Pressable
+              key={w.name}
+              onPress={() => void connect(w.name)}
+              style={({ pressed }) => [styles.walletRow, pressed && { opacity: 0.7 }]}
+              accessibilityRole="button"
+              accessibilityLabel={`Connect ${w.name}`}
+            >
+              {w.icon ? <Image source={{ uri: w.icon }} style={styles.walletIcon} /> : <View style={[styles.walletIcon, { backgroundColor: COLORS.line }]} />}
+              <T v="bold" style={{ fontSize: 17 }}>
+                {w.name}
+              </T>
+            </Pressable>
+          ))}
+          <Btn kind="ghost" label="Cancel" onPress={close} />
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export function Busy() {
   const busy = useGame((s) => s.wallet.busy);
   if (!busy) return null;
@@ -241,6 +278,8 @@ export function Onboarding() {
 }
 
 const styles = StyleSheet.create({
+  walletRow: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 2, borderColor: COLORS.line, borderRadius: 16, padding: 12, marginBottom: 10 },
+  walletIcon: { width: 32, height: 32, borderRadius: 8 },
   center: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   result: { minWidth: 260, alignItems: 'center', borderRadius: 26, borderWidth: 4, paddingHorizontal: 26, paddingVertical: 16 },
   rTitle: { fontSize: 26 },
