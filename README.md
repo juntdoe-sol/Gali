@@ -80,6 +80,21 @@ cd android && ./gradlew assembleRelease  # app/android/app/build/outputs/apk/rel
 
 Without `deployment.json` filled in, the app runs in **practice mode**: 2 play SOL and simulated miners.
 
+### 2b. Web test build on Bounded (before the APK)
+
+The same app runs in a desktop or mobile browser with Phantom, Solflare or Backpack (the browser extension signs instead of Mobile Wallet Adapter). Everything else is the same: devnet program, session key, autopilot, chat and tips.
+
+```bash
+cd app
+npm install --legacy-peer-deps
+npx bounded login                 # once
+npm run deploy:bounded            # builds dist/ and uploads it (private at first)
+npx bounded domains slug gali     # optional: pick the URL name
+npx bounded site privacy public   # let testers open it
+```
+
+Testers switch their wallet to devnet (Phantom: Settings → Developer Settings → Testnet Mode, Solana Devnet), get devnet SOL from https://faucet.solana.com, and SKR with `npx ts-node scripts/faucet.ts <wallet> 50000`. Set `EXPO_PUBLIC_RPC_URL` before `npm run deploy:bounded` to use your own RPC instead of the public devnet one.
+
 ### 3. Admin page
 
 ```bash

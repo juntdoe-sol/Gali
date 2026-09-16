@@ -6,10 +6,11 @@
     "@coral-xyz/anchor": "^0.31.1",
     "@expo-google-fonts/lilita-one": "^0.4.1",
     "@expo-google-fonts/nunito": "^0.4.2",
+    "@expo/metro-runtime": "~57.0.15",
+    "@noble/curves": "^2.4.0",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-three/drei": "^10.7.8",
     "@react-three/fiber": "^9.7.0",
-    "@noble/curves": "^2.4.0",
     "@solana-mobile/mobile-wallet-adapter-protocol": "^2.3.0",
     "@solana-mobile/mobile-wallet-adapter-protocol-web3js": "^2.3.0",
     "@solana/web3.js": "^1.99.0",
@@ -28,14 +29,17 @@
     "expo-sensors": "~57.0.3",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
+    "react-dom": "19.2.3",
     "react-native": "0.86.3",
     "react-native-get-random-values": "~1.11.0",
     "react-native-safe-area-context": "~5.7.0",
+    "react-native-web": "~0.21.0",
     "text-encoding-polyfill": "^0.6.7",
     "three": "^0.180.0",
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@bounded-sh/cli": "^0.0.133",
     "@types/react": "~19.2.2",
     "@types/three": "^0.186.0",
     "typescript": "~6.0.3"
@@ -44,7 +48,9 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "build:web": "expo export --platform web",
+    "deploy:bounded": "npm run build:web && bounded site deploy ./dist"
   },
   "private": true
 }

@@ -13,11 +13,14 @@ import {
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { Buffer } from 'buffer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
+import { webConnect, webDisconnect, webOwner, webSign } from './webWallet';
 import idlJson from './idl.json';
 import deployment from './deployment.json';
 
 export const CLUSTER = deployment.cluster as 'devnet';
-export const RPC_URL = 'https://api.devnet.solana.com';
+// EXPO_PUBLIC_RPC_URL overrides the endpoint at build time (e.g. a private devnet RPC, or a local validator for tests).
+export const RPC_URL = process.env.EXPO_PUBLIC_RPC_URL || 'https://api.devnet.solana.com';
 export const PROGRAM_ID = new PublicKey(deployment.programId);
 export const SKR_MINT = new PublicKey(deployment.skrMint);
 export const SKR_DECIMALS = deployment.skrDecimals;
@@ -191,7 +194,8 @@ export async function clockOffsetMs(): Promise<number> {
   return t ? t * 1000 - Date.now() : 0;
 }
 
-/* ---------- wallet (Mobile Wallet Adapter) ---------- */
+/* ---------- wallet: Mobile Wallet Adapter on Android, injected browser wallet on web ---------- */
+export const IS_WEB = Platform.OS === 'web';
 const AUTH_KEY = 'gali-mwa-auth';
 async function authorize(wallet: Web3MobileWallet) {
   const saved = await AsyncStorage.getItem(AUTH_KEY);
@@ -201,16 +205,27 @@ async function authorize(wallet: Web3MobileWallet) {
 }
 
 export async function connectWallet(): Promise<PublicKey> {
-  return transact(authorize);
+  return IS_WEB ? webConnect() : transact(authorize);
 }
 
 export async function disconnectWallet() {
+  if (IS_WEB) return webDisconnect();
   const saved = await AsyncStorage.getItem(AUTH_KEY);
   await AsyncStorage.removeItem(AUTH_KEY);
   if (saved) await transact((w) => w.deauthorize({ auth_token: saved })).catch(() => undefined);
 }
 
 async function sendWithWallet(build: (owner: PublicKey) => Promise<TransactionInstruction[]>): Promise<string> {
+  if (IS_WEB) {
+    const owner = await webOwner();
+    const ixs = await build(owner);
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+    const tx = new Transaction({ feePayer: owner, blockhash, lastValidBlockHeight }).add(...ixs);
+    const signed = await webSign(tx);
+    const sig = await connection.sendRawTransaction(signed.serialize());
+    await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
+    return sig;
+  }
   return transact(async (wallet) => {
     const owner = await authorize(wallet);
     const ixs = await build(owner);
