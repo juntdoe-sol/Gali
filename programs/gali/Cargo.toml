@@ -1,7 +1,8 @@
 [package]
 name = "gali"
 version = "0.1.0"
-description = "Gali: a mining game for Seeker. Free daily digs, SKR boosts, on-chain rounds."
+description = "Gali: a mining game for Seeker. SOL rounds that mine SKR."
+rust-version = "1.79"
 edition = "2021"
 
 [lib]

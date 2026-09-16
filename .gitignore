@@ -14,3 +14,5 @@ app/dist
 .env
 target/*
 !target/idl/
+!target/deploy/
+target/deploy/*.json

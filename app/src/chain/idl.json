@@ -71,6 +71,180 @@
       ]
     },
     {
+      "name": "update_config",
+      "docs": [
+        "Change game settings. Only fields that are `Some` change. `round_secs` and the mint are fixed."
+      ],
+      "discriminator": [
+        29,
+        158,
+        252,
+        191,
+        10,
+        83,
+        219,
+        99
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "u",
+          "type": {
+            "defined": {
+              "name": "ConfigUpdate"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "set_paused",
+      "docs": [
+        "Stop (or restart) new deploys and gear sales. Settling, claiming and unstaking always work."
+      ],
+      "discriminator": [
+        91,
+        60,
+        125,
+        192,
+        176,
+        225,
+        166,
+        218
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "paused",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "withdraw_treasury",
+      "docs": [
+        "Move SKR from the treasury (the protocol's cut of gear sales) to any SKR account.",
+        "The Motherlode Pool, Rewards Pool, pot escrow and staking vault have no withdraw path."
+      ],
+      "discriminator": [
+        40,
+        63,
+        122,
+        158,
+        144,
+        216,
+        83,
+        96
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "skr_mint"
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "destination",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "propose_authority",
+      "docs": [
+        "Step 1 of handing over admin (and the SOL fee stream): name the new authority.",
+        "Pass the default (all-zero) key to cancel."
+      ],
+      "discriminator": [
+        20,
+        148,
+        236,
+        198,
+        76,
+        119,
+        99,
+        142
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "new_authority",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "accept_authority",
+      "docs": [
+        "Step 2: the proposed authority signs to take over."
+      ],
+      "discriminator": [
+        107,
+        86,
+        198,
+        91,
+        33,
+        12,
+        107,
+        160
+      ],
+      "accounts": [
+        {
+          "name": "new_authority",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "init_player",
       "discriminator": [
         114,
@@ -695,6 +869,45 @@
   "events": [
     {
       "discriminator": [
+        31,
+        19,
+        174,
+        152,
+        4,
+        82,
+        215,
+        226
+      ],
+      "name": "AuthorityChanged"
+    },
+    {
+      "discriminator": [
+        244,
+        117,
+        94,
+        112,
+        53,
+        151,
+        35,
+        89
+      ],
+      "name": "AuthorityProposed"
+    },
+    {
+      "discriminator": [
+        40,
+        241,
+        230,
+        122,
+        11,
+        19,
+        198,
+        194
+      ],
+      "name": "ConfigUpdated"
+    },
+    {
+      "discriminator": [
         50,
         145,
         94,
@@ -731,6 +944,19 @@
         72
       ],
       "name": "MotherlodeFunded"
+    },
+    {
+      "discriminator": [
+        171,
+        125,
+        127,
+        156,
+        233,
+        81,
+        68,
+        66
+      ],
+      "name": "PausedSet"
     },
     {
       "discriminator": [
@@ -809,6 +1035,19 @@
         240
       ],
       "name": "Staked"
+    },
+    {
+      "discriminator": [
+        143,
+        181,
+        157,
+        169,
+        87,
+        155,
+        170,
+        46
+      ],
+      "name": "TreasuryWithdrawn"
     }
   ],
   "errors": [
@@ -876,9 +1115,51 @@
       "code": 6012,
       "name": "NotSettled",
       "msg": "Settle the pot first"
+    },
+    {
+      "code": 6013,
+      "name": "Paused",
+      "msg": "Gali is paused for maintenance"
+    },
+    {
+      "code": 6014,
+      "name": "AlreadyOnBlock",
+      "msg": "You already have SOL on that block this round"
     }
   ],
   "types": [
+    {
+      "name": "AuthorityChanged",
+      "type": {
+        "fields": [
+          {
+            "name": "old",
+            "type": "pubkey"
+          },
+          {
+            "name": "new",
+            "type": "pubkey"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "AuthorityProposed",
+      "type": {
+        "fields": [
+          {
+            "name": "current",
+            "type": "pubkey"
+          },
+          {
+            "name": "proposed",
+            "type": "pubkey"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
     {
       "name": "Config",
       "type": {
@@ -967,6 +1248,20 @@
             "type": "u64"
           },
           {
+            "name": "paused",
+            "docs": [
+              "when true, `deploy` and `buy_gear` are refused"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "pending_authority",
+            "docs": [
+              "set by `propose_authority`, cleared by `accept_authority`"
+            ],
+            "type": "pubkey"
+          },
+          {
             "name": "bump",
             "type": "u8"
           }
@@ -1032,6 +1327,94 @@
       }
     },
     {
+      "name": "ConfigUpdate",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "base_points",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "motherlode_points",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "boost_tier1",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "boost_tier2",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "gear_prices",
+            "type": {
+              "option": {
+                "vec": "u64"
+              }
+            }
+          },
+          {
+            "name": "motherlode_skr",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "motherlode_pool_bps",
+            "type": {
+              "option": "u16"
+            }
+          },
+          {
+            "name": "rewards_pool_bps",
+            "type": {
+              "option": "u16"
+            }
+          },
+          {
+            "name": "pot_fee_bps",
+            "type": {
+              "option": "u16"
+            }
+          },
+          {
+            "name": "min_deploy",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "round_reward_skr",
+            "type": {
+              "option": "u64"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ConfigUpdated",
+      "type": {
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
       "name": "Deployed",
       "type": {
         "fields": [
@@ -1090,6 +1473,18 @@
           {
             "name": "amount",
             "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "PausedSet",
+      "type": {
+        "fields": [
+          {
+            "name": "paused",
+            "type": "bool"
           }
         ],
         "kind": "struct"
@@ -1228,6 +1623,17 @@
             "type": "bool"
           },
           {
+            "name": "split_reward",
+            "docs": [
+              "copied from the round at settlement"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "lucky_index",
+            "type": "u64"
+          },
+          {
             "name": "miners",
             "type": "u32"
           },
@@ -1256,6 +1662,13 @@
           },
           {
             "name": "won",
+            "type": "bool"
+          },
+          {
+            "docs": [
+              "took the whole SKR reward in a single-winner round"
+            ],
+            "name": "lucky",
             "type": "bool"
           },
           {
@@ -1321,6 +1734,10 @@
           {
             "name": "motherlode",
             "type": "bool"
+          },
+          {
+            "name": "split_reward",
+            "type": "bool"
           }
         ],
         "kind": "struct"
@@ -1358,6 +1775,20 @@
           {
             "name": "motherlode",
             "type": "bool"
+          },
+          {
+            "name": "split_reward",
+            "docs": [
+              "true: the round's SKR is split pro rata; false: one lucky winner takes it all"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "lucky",
+            "docs": [
+              "random number used to draw the lucky winner"
+            ],
+            "type": "u64"
           },
           {
             "name": "revealed_at",
@@ -1423,6 +1854,18 @@
             }
           },
           {
+            "name": "start",
+            "docs": [
+              "where this stake's lamports start on each block (the pot's total there before it deposited)"
+            ],
+            "type": {
+              "array": [
+                "u64",
+                25
+              ]
+            }
+          },
+          {
             "name": "boost_bps",
             "docs": [
               "points boost locked in at the player's first deploy of the round"
@@ -1450,6 +1893,22 @@
           },
           {
             "name": "total",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "TreasuryWithdrawn",
+      "type": {
+        "fields": [
+          {
+            "name": "to",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
             "type": "u64"
           }
         ],

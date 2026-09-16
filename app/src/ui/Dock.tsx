@@ -204,7 +204,7 @@ function LitePanel({ compact }: { compact: boolean }) {
           <Row
             icon="🪙"
             label="Per round"
-            info={`How much SOL goes in each round, spread across all 25 blocks so you share every strike and the ${ROUND_REWARD_SKR} SKR it mines. Optimal splits your amount over ${OPTIMAL_ROUNDS} rounds.`}
+            info={`How much SOL goes in each round, spread across all 25 blocks so you always share the strike and get a shot at the ${ROUND_REWARD_SKR} SKR it mines. Optimal splits your amount over ${OPTIMAL_ROUNDS} rounds.`}
             right={
               <>
                 <Chip label="Optimal" on={perRound === null} onPress={() => setPerRound(null)} />
@@ -234,7 +234,7 @@ function LitePanel({ compact }: { compact: boolean }) {
       <RunButton
         ready={ready}
         label={label}
-        sub={ready ? `${fmtSol(per)} SOL a round on all 25 blocks · winners split the pot + ${ROUND_REWARD_SKR} SKR` : undefined}
+        sub={ready ? `${fmtSol(per)} SOL a round on all 25 blocks · winners split the pot · ${ROUND_REWARD_SKR} SKR draw` : undefined}
         onStart={() => void startRun({ kind: 'lite', perRound: per, blocks: 'all', smartN: BLOCKS, manualMask: 0, total: rounds })}
       />
     </>
@@ -336,7 +336,7 @@ function ProPanel({ compact }: { compact: boolean }) {
           <Row
             icon="🏆"
             label="If it strikes"
-            info="Winning blocks pay your share of 90% of the SOL pot and of the 25 SKR mined, plus points: 40 x 25 / blocks covered. A 1-in-625 motherlode adds 5,000 SKR and 10,000 points."
+            info={`The gold block's miners share 90% of the SOL pot by their SOL there. The ${ROUND_REWARD_SKR} SKR mined is split the same way half the time; otherwise one lucky miner takes it all, with odds equal to their share. Points: 40 x 25 / blocks covered. A 1-in-625 motherlode adds 5,000 SKR and 10,000 points.`}
             last
             right={
               <T v="black" style={{ fontSize: 13, color: COLORS.gold }}>

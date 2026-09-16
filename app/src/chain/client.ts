@@ -100,9 +100,9 @@ export async function fetchPlayer(owner: PublicKey): Promise<ChainPlayer | null>
   };
 }
 
-export async function fetchRound(roundId: number): Promise<{ winning: number; motherlode: boolean } | null> {
+export async function fetchRound(roundId: number): Promise<{ winning: number; motherlode: boolean; split: boolean } | null> {
   const r = await accounts.round.fetchNullable(pda.round(roundId));
-  return r ? { winning: r.winningBlock, motherlode: r.motherlode } : null;
+  return r ? { winning: r.winningBlock, motherlode: r.motherlode, split: r.splitReward } : null;
 }
 
 export interface ChainPot {
@@ -316,7 +316,7 @@ export async function sessionSettlePot(owner: PublicKey, session: Keypair, round
         .instruction(),
     );
   const stake = await accounts.stake.fetchNullable(pda.stake(owner, roundId));
-  if (!stake) return { winning: round.winning, motherlode: round.motherlode, payout: 0, skr: 0 };
+  if (!stake) return { ...round, payout: 0, skr: 0, lucky: false };
   ixs.push(
     await program.methods
       .claimPot(new BN(roundId))
@@ -345,14 +345,19 @@ export async function sessionSettlePot(owner: PublicKey, session: Keypair, round
     if (ixs.length > 1) await sendWithKey(session, ixs.slice(1));
     else throw e;
   }
-  const after = await fetchPot(roundId);
+  // mirror claim_pot's maths from the accounts, in lamports so the lucky draw is exact
+  const potRaw = await accounts.pot.fetch(pda.pot(roundId));
   const w = round.winning;
-  const mine = toNum(stake.perBlock[w]) / LAMPORTS_PER_SOL;
-  const onWin = after?.perBlock[w] ?? 0;
-  const hit = mine > 0 && onWin > 0 && after;
-  const payout = hit ? (mine * after.pool) / onWin : 0;
-  const skr = hit ? (mine * after.skrReward) / onWin : 0;
-  return { winning: w, motherlode: round.motherlode, payout, skr };
+  const mine = toNum(stake.perBlock[w]);
+  const start = toNum(stake.start[w]);
+  const onWin = toNum(potRaw.perBlock[w]);
+  const hit = mine > 0 && onWin > 0;
+  const payout = hit ? (mine * toNum(potRaw.pool)) / onWin / LAMPORTS_PER_SOL : 0;
+  const reward = fromRaw(potRaw.skrReward);
+  const idx = toNum(potRaw.luckyIndex);
+  const lucky = hit && !potRaw.splitReward && idx >= start && idx < start + mine;
+  const skr = !hit ? 0 : potRaw.splitReward ? (mine * reward) / onWin : lucky ? reward : 0;
+  return { ...round, payout, skr, lucky };
 }
 
 /* ---------- SKR transfers between miners ---------- */
