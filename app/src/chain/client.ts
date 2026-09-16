@@ -8,8 +8,9 @@ import {
   SystemProgram,
   SYSVAR_SLOT_HASHES_PUBKEY,
   Transaction,
-  type TransactionInstruction,
+  TransactionInstruction,
 } from '@solana/web3.js';
+import { ed25519 } from '@noble/curves/ed25519.js';
 import { Buffer } from 'buffer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import idlJson from './idl.json';
@@ -48,9 +49,12 @@ export const pda = {
   vault: find(Buffer.from('vault')),
   treasury: find(Buffer.from('treasury')),
   motherlode: find(Buffer.from('motherlode')),
+  rewards: find(Buffer.from('rewards')),
+  potVault: find(Buffer.from('pot_vault')),
   player: (o: PublicKey) => find(Buffer.from('player'), o.toBuffer()),
-  dig: (o: PublicKey, r: number) => find(Buffer.from('dig'), o.toBuffer(), u64le(r)),
   round: (r: number) => find(Buffer.from('round'), u64le(r)),
+  pot: (r: number) => find(Buffer.from('pot'), u64le(r)),
+  stake: (o: PublicKey, r: number) => find(Buffer.from('stake'), o.toBuffer(), u64le(r)),
 };
 export const ata = (owner: PublicKey, mint = SKR_MINT) =>
   PublicKey.findProgramAddressSync([owner.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.toBuffer()], ASSOCIATED_TOKEN_PROGRAM_ID)[0];
@@ -60,8 +64,7 @@ export interface ChainPlayer {
   points: number;
   xp: number;
   wins: number;
-  digs: number;
-  digsToday: number;
+  rounds: number;
   day: number;
   streak: number;
   stakedSkr: number; // whole SKR
@@ -69,6 +72,9 @@ export interface ChainPlayer {
   session: string;
   sessionExpires: number;
   skrWon: number; // whole SKR won from the Motherlode Pool
+  solDeployed: number; // SOL
+  solWon: number; // SOL
+  skrMined: number; // whole SKR mined from rounds
 }
 const toNum = (v: BN | number) => (typeof v === 'number' ? v : Number(v.toString()));
 const fromRaw = (v: BN | number) => toNum(v) / 10 ** SKR_DECIMALS;
@@ -80,8 +86,7 @@ export async function fetchPlayer(owner: PublicKey): Promise<ChainPlayer | null>
     points: toNum(p.points),
     xp: toNum(p.xp),
     wins: p.wins,
-    digs: p.digs,
-    digsToday: p.digsToday,
+    rounds: p.rounds,
     day: p.day,
     streak: p.streak,
     stakedSkr: fromRaw(p.stakedSkr),
@@ -89,6 +94,9 @@ export async function fetchPlayer(owner: PublicKey): Promise<ChainPlayer | null>
     session: p.session.toBase58(),
     sessionExpires: toNum(p.sessionExpires),
     skrWon: fromRaw(p.skrWon),
+    solDeployed: toNum(p.solDeployed) / LAMPORTS_PER_SOL,
+    solWon: toNum(p.solWon) / LAMPORTS_PER_SOL,
+    skrMined: fromRaw(p.skrMined),
   };
 }
 
@@ -97,9 +105,46 @@ export async function fetchRound(roundId: number): Promise<{ winning: number; mo
   return r ? { winning: r.winningBlock, motherlode: r.motherlode } : null;
 }
 
+export interface ChainPot {
+  perBlock: number[]; // SOL
+  total: number; // SOL
+  pool: number; // SOL
+  skrReward: number; // whole SKR
+  miners: number;
+  settled: boolean;
+}
+export async function fetchPot(roundId: number): Promise<ChainPot | null> {
+  const p = await accounts.pot.fetchNullable(pda.pot(roundId));
+  if (!p) return null;
+  return {
+    perBlock: p.perBlock.map((v: BN) => toNum(v) / LAMPORTS_PER_SOL),
+    total: toNum(p.total) / LAMPORTS_PER_SOL,
+    pool: toNum(p.pool) / LAMPORTS_PER_SOL,
+    skrReward: fromRaw(p.skrReward),
+    miners: p.miners,
+    settled: p.settled,
+  };
+}
+
+let feeTo: PublicKey | null = null;
+async function configAuthority() {
+  feeTo = feeTo ?? (await accounts.config.fetch(pda.config)).authority;
+  return feeTo!;
+}
+
 export async function fetchSkrBalance(owner: PublicKey): Promise<number> {
   try {
     const b = await connection.getTokenAccountBalance(ata(owner));
+    return Number(b.value.uiAmount ?? 0);
+  } catch {
+    return 0;
+  }
+}
+
+/** Current SKR in the Rewards Pool (whole SKR). */
+export async function fetchRewardsPool(): Promise<number> {
+  try {
+    const b = await connection.getTokenAccountBalance(pda.rewards);
     return Number(b.value.uiAmount ?? 0);
   } catch {
     return 0;
@@ -186,7 +231,7 @@ async function sendWithKey(signer: Keypair, ixs: TransactionInstruction[]): Prom
   return sig;
 }
 
-/* ---------- session key: one wallet approval, then digs are silent ---------- */
+/* ---------- session key: one wallet approval, then rounds are silent ---------- */
 const sessionKey = (owner: PublicKey) => `gali-session-${owner.toBase58()}`;
 export async function loadSession(owner: PublicKey): Promise<Keypair> {
   const raw = await AsyncStorage.getItem(sessionKey(owner));
@@ -199,10 +244,15 @@ export async function loadSession(owner: PublicKey): Promise<Keypair> {
 export const SESSION_HOURS = 24;
 export const SESSION_FUND_SOL = 0.05;
 
-export async function startSession(owner: PublicKey, session: Keypair, hasPlayer: boolean) {
+export const MAX_SESSION_FUND_SOL = 1;
+
+/** `needSol`: SOL the session key should hold afterwards (for SOL deploys); topped up in the same approval. */
+export async function startSession(owner: PublicKey, session: Keypair, hasPlayer: boolean, needSol = 0) {
   const expires = Math.floor(Date.now() / 1000) + SESSION_HOURS * 3600;
-  const bal = await connection.getBalance(session.publicKey);
-  const fund = bal < 0.02 * LAMPORTS_PER_SOL ? Math.round(SESSION_FUND_SOL * LAMPORTS_PER_SOL) : 0;
+  const bal = (await connection.getBalance(session.publicKey)) / LAMPORTS_PER_SOL;
+  const want = Math.max(SESSION_FUND_SOL, needSol + 0.01);
+  const fundSol = bal < Math.max(0.02, needSol + 0.005) ? Math.min(MAX_SESSION_FUND_SOL, want - bal) : 0;
+  const fund = Math.max(0, Math.round(fundSol * LAMPORTS_PER_SOL));
   return sendWithWallet(async (o) => {
     if (!o.equals(owner)) throw new Error('Wallet changed; reconnect');
     const ixs: TransactionInstruction[] = [];
@@ -218,47 +268,133 @@ export async function startSession(owner: PublicKey, session: Keypair, hasPlayer
   });
 }
 
-export async function sessionDig(owner: PublicKey, session: Keypair, roundId: number, mask: number) {
+/** Put `solPerBlock` on every block in `mask`, paid from the session key. */
+export async function sessionDeploy(owner: PublicKey, session: Keypair, roundId: number, mask: number, solPerBlock: number) {
   const ix = await program.methods
-    .dig(new BN(roundId), mask)
-    .accountsStrict({ signer: session.publicKey, owner, config: pda.config, player: pda.player(owner), dig: pda.dig(owner, roundId), systemProgram: SystemProgram.programId })
+    .deploy(new BN(roundId), mask, new BN(Math.floor(solPerBlock * LAMPORTS_PER_SOL)))
+    .accountsStrict({
+      signer: session.publicKey,
+      owner,
+      config: pda.config,
+      player: pda.player(owner),
+      pot: pda.pot(roundId),
+      stake: pda.stake(owner, roundId),
+      systemProgram: SystemProgram.programId,
+    })
     .instruction();
   return sendWithKey(session, [ix]);
 }
 
-/** Reveal (if nobody has yet) and claim our ticket, paid by the session key. */
-export async function sessionSettle(owner: PublicKey, session: Keypair, roundId: number) {
-  const claimIx = await program.methods
-    .claim(new BN(roundId))
-    .accountsStrict({
-      cranker: session.publicKey,
-      owner,
-      payer: session.publicKey,
-      config: pda.config,
-      player: pda.player(owner),
-      round: pda.round(roundId),
-      dig: pda.dig(owner, roundId),
-      skrMint: SKR_MINT,
-      motherlode: pda.motherlode,
-      ownerAta: ata(owner),
-      tokenProgram: TOKEN_PROGRAM_ID,
-      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-      systemProgram: SystemProgram.programId,
-    })
-    .instruction();
-  const revealIx = await program.methods
-    .revealRound(new BN(roundId))
-    .accountsStrict({ payer: session.publicKey, config: pda.config, round: pda.round(roundId), slotHashes: SYSVAR_SLOT_HASHES_PUBKEY, systemProgram: SystemProgram.programId })
-    .instruction();
-  const existing = await fetchRound(roundId);
+/** Reveal if needed, settle the pot if needed, then claim our stake. Returns SOL and SKR paid to the owner. */
+export async function sessionSettlePot(owner: PublicKey, session: Keypair, roundId: number) {
+  if (!(await fetchRound(roundId))) {
+    const revealIx = await program.methods
+      .revealRound(new BN(roundId))
+      .accountsStrict({ payer: session.publicKey, config: pda.config, round: pda.round(roundId), slotHashes: SYSVAR_SLOT_HASHES_PUBKEY, systemProgram: SystemProgram.programId })
+      .instruction();
+    await sendWithKey(session, [revealIx]).catch(() => undefined); // someone else may have revealed
+  }
+  const round = await fetchRound(roundId);
+  if (!round) throw new Error('round not revealed');
+  const ixs: TransactionInstruction[] = [];
+  const pot = await fetchPot(roundId);
+  if (pot && !pot.settled)
+    ixs.push(
+      await program.methods
+        .settlePot(new BN(roundId))
+        .accountsStrict({
+          config: pda.config,
+          round: pda.round(roundId),
+          pot: pda.pot(roundId),
+          feeTo: await configAuthority(),
+          skrMint: SKR_MINT,
+          rewards: pda.rewards,
+          motherlode: pda.motherlode,
+          potVault: pda.potVault,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .instruction(),
+    );
+  const stake = await accounts.stake.fetchNullable(pda.stake(owner, roundId));
+  if (!stake) return { winning: round.winning, motherlode: round.motherlode, payout: 0, skr: 0 };
+  ixs.push(
+    await program.methods
+      .claimPot(new BN(roundId))
+      .accountsStrict({
+        cranker: session.publicKey,
+        owner,
+        payer: stake.payer,
+        config: pda.config,
+        player: pda.player(owner),
+        round: pda.round(roundId),
+        pot: pda.pot(roundId),
+        stake: pda.stake(owner, roundId),
+        skrMint: SKR_MINT,
+        potVault: pda.potVault,
+        ownerAta: ata(owner),
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .instruction(),
+  );
   try {
-    await sendWithKey(session, existing ? [claimIx] : [revealIx, claimIx]);
+    await sendWithKey(session, ixs);
   } catch (e) {
-    // someone revealed between our read and send: claim only
-    if (!existing) await sendWithKey(session, [claimIx]);
+    // the crank may have settled between our read and send: claim only
+    if (ixs.length > 1) await sendWithKey(session, ixs.slice(1));
     else throw e;
   }
-  return fetchRound(roundId);
+  const after = await fetchPot(roundId);
+  const w = round.winning;
+  const mine = toNum(stake.perBlock[w]) / LAMPORTS_PER_SOL;
+  const onWin = after?.perBlock[w] ?? 0;
+  const hit = mine > 0 && onWin > 0 && after;
+  const payout = hit ? (mine * after.pool) / onWin : 0;
+  const skr = hit ? (mine * after.skrReward) / onWin : 0;
+  return { winning: w, motherlode: round.motherlode, payout, skr };
+}
+
+/* ---------- SKR transfers between miners ---------- */
+const TRANSFER_CHECKED = 12;
+export async function sendSkr(to: PublicKey, amount: number) {
+  return sendWithWallet(async (o) => {
+    if (o.equals(to)) throw new Error("You can't send SKR to yourself");
+    const dest = ata(to);
+    const createIdempotent = new TransactionInstruction({
+      programId: ASSOCIATED_TOKEN_PROGRAM_ID,
+      keys: [
+        { pubkey: o, isSigner: true, isWritable: true },
+        { pubkey: dest, isSigner: false, isWritable: true },
+        { pubkey: to, isSigner: false, isWritable: false },
+        { pubkey: SKR_MINT, isSigner: false, isWritable: false },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+        { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      ],
+      data: Buffer.from([1]),
+    });
+    const data = Buffer.alloc(10);
+    data[0] = TRANSFER_CHECKED;
+    new DataView(data.buffer, data.byteOffset, 10).setBigUint64(1, BigInt(Math.round(amount * 10 ** SKR_DECIMALS)), true);
+    data[9] = SKR_DECIMALS;
+    const transfer = new TransactionInstruction({
+      programId: TOKEN_PROGRAM_ID,
+      keys: [
+        { pubkey: ata(o), isSigner: false, isWritable: true },
+        { pubkey: SKR_MINT, isSigner: false, isWritable: false },
+        { pubkey: dest, isSigner: false, isWritable: true },
+        { pubkey: o, isSigner: true, isWritable: false },
+      ],
+      data,
+    });
+    return [createIdempotent, transfer];
+  });
+}
+
+/** Sign a chat message with the session key (the chat server checks it against the Player account). */
+export function signWithSession(session: Keypair, message: string) {
+  const sig = ed25519.sign(new TextEncoder().encode(message), session.secretKey.slice(0, 32));
+  return Buffer.from(sig).toString('base64');
 }
 
 /* ---------- SKR actions (wallet approval each) ---------- */
@@ -294,7 +430,7 @@ export const buyGear = (item: number) =>
   sendWithWallet(async (o) => [
     await program.methods
       .buyGear(item)
-      .accountsStrict({ owner: o, config: pda.config, player: pda.player(o), skrMint: SKR_MINT, userAta: ata(o), treasury: pda.treasury, motherlode: pda.motherlode, tokenProgram: TOKEN_PROGRAM_ID })
+      .accountsStrict({ owner: o, config: pda.config, player: pda.player(o), skrMint: SKR_MINT, userAta: ata(o), treasury: pda.treasury, motherlode: pda.motherlode, rewards: pda.rewards, tokenProgram: TOKEN_PROGRAM_ID })
       .instruction(),
   ]);
 

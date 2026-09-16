@@ -10,6 +10,7 @@ import { COLORS } from './game/constants';
 import { watchMotion } from './game/motion';
 import { initAudio } from './game/sfx';
 import { useGame } from './game/store';
+import { ChatButton, ChatSheet } from './ui/Chat';
 import { Dock } from './ui/Dock';
 import { RoundCard, Toasts, TopBar } from './ui/Hud';
 import { Busy, GearReveal, LevelUp, Onboarding, ResultPop } from './ui/Modals';
@@ -27,7 +28,7 @@ async function scheduleDailyReminder() {
     if (!perm.granted) return;
     await Notifications.cancelAllScheduledNotificationsAsync();
     await Notifications.scheduleNotificationAsync({
-      content: { title: '⛏ Your 30 free digs are back', body: 'The mine reset. Keep your streak alive and strike gold.' },
+      content: { title: '⛏ The mine is open', body: 'A new round every minute. Keep your streak alive and mine some SKR.' },
       trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour: 9, minute: 0 },
     });
   } catch {
@@ -85,12 +86,14 @@ export default function App() {
         <TopBar onMenu={() => setMenu(true)} />
         <RoundCard />
         <Dock />
+        <ChatButton />
         <Toasts />
         <Busy />
         <ResultPop />
         <LevelUp />
         <GearReveal />
         <Sheet open={menu} onClose={() => setMenu(false)} />
+        <ChatSheet />
         <Onboarding />
       </View>
     </SafeAreaProvider>

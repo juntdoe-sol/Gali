@@ -2,9 +2,10 @@ import { create } from 'zustand';
 import { PublicKey, type Keypair } from '@solana/web3.js';
 import * as chain from '../chain/client';
 import {
-  ACHIEVEMENTS, BLOCKS, boostFor, DAILY_FREE_DIGS, FREE_GEAR_MASK, GEAR, LOCK_MS, localDay, levelFromXp, MOTHERLODE_ODDS,
-  pointsFor, QUESTS, REVEAL_MIN_MS, ROUND_SECS,
+  ACHIEVEMENTS, BLOCKS, boostFor, FREE_GEAR_MASK, GEAR, LOCK_MS, localDay, levelFromXp, MOTHERLODE_ODDS,
+  MOTHERLODE_SKR, pointsFor, QUESTS, REVEAL_MIN_MS, ROUND_REWARD_SKR, ROUND_SECS,
 } from './constants';
+import { addToPot, emptyPot, idxOf, maskOf, MIN_SOL_PER_BLOCK, payoutFor, PRACTICE_SOL, simPot, smartPick, type PotView } from './pot';
 import { haptic, play, setMuted } from './sfx';
 import { loadJson, saveJson } from './storage';
 
@@ -18,7 +19,45 @@ export interface RoundResult {
   points: number;
   motherlode: boolean;
   onChain: boolean;
-  skr: number; // SKR paid from the Motherlode Pool
+  skr: number; // SKR from the Motherlode Pool
+  solIn: number; // SOL deployed this round
+  solOut: number; // SOL won this round
+  skrMined: number; // SKR mined from the round reward
+}
+
+export interface Preset {
+  amount: string; // SOL per round
+  blocks: 'manual' | 'all' | 'smart';
+  smartN: number;
+  rounds: number;
+}
+const defaultPresets = (): Preset[] => [
+  { amount: '0.01', blocks: 'manual', smartN: 5, rounds: 1 },
+  { amount: '0.025', blocks: 'smart', smartN: 5, rounds: 5 },
+  { amount: '0.05', blocks: 'smart', smartN: 10, rounds: 10 },
+  { amount: '0.1', blocks: 'all', smartN: 25, rounds: 20 },
+];
+
+export type DockTab = 'lite' | 'pro';
+
+export interface Run {
+  kind: 'lite' | 'pro';
+  perRound: number; // SOL
+  blocks: Preset['blocks'];
+  smartN: number;
+  manualMask: number;
+  total: number; // rounds planned
+  left: number;
+  lastRound: number;
+}
+
+export interface Pending {
+  roundId: number;
+  mask: number;
+  boostBps: number;
+  onChain: boolean;
+  perBlock: number; // SOL on each covered block
+  total: number; // SOL deployed
 }
 
 export interface Toast {
@@ -32,9 +71,7 @@ export interface Save {
   bonusXp: number; // quest/mole xp that isn't on-chain
   points: number; // practice points
   wins: number;
-  digs: number;
-  digsToday: number;
-  digDay: string;
+  digs: number; // rounds played in practice mode
   dayStreak: number;
   lastDigDay: string;
   winStreak: number;
@@ -49,6 +86,10 @@ export interface Save {
   helmet: string;
   outfit: string;
   pet: string | null;
+  practiceSol: number;
+  practiceSkr: number; // SKR "mined" in practice mode (not real)
+  presets: Preset[];
+  preset: number;
   muted: boolean;
   onboarded: boolean;
 }
@@ -60,8 +101,6 @@ const freshSave = (): Save => ({
   points: 0,
   wins: 0,
   digs: 0,
-  digsToday: 0,
-  digDay: localDay(),
   dayStreak: 0,
   lastDigDay: '',
   winStreak: 0,
@@ -76,6 +115,10 @@ const freshSave = (): Save => ({
   helmet: 'hat-yellow',
   outfit: 'fit-blue',
   pet: null,
+  practiceSol: PRACTICE_SOL,
+  practiceSkr: 0,
+  presets: defaultPresets(),
+  preset: 0,
   muted: false,
   onboarded: false,
 });
@@ -87,6 +130,7 @@ interface Wallet {
   sol: number;
   sessionSol: number;
   pool: number; // SKR in the Motherlode Pool
+  rewards: number; // SKR in the Rewards Pool
   busy: string | null;
 }
 
@@ -101,7 +145,11 @@ interface GameState {
   settleStartAt: number;
   revealStartAt: number;
   winning: number | null;
-  pending: { roundId: number; mask: number; boostBps: number; onChain: boolean } | null;
+  pending: Pending | null;
+  pot: PotView;
+  potAt: number;
+  run: Run | null;
+  dockTab: DockTab;
   selected: number[];
   lastResult: RoundResult | null;
   resultAt: number;
@@ -116,7 +164,7 @@ interface GameState {
   selectRandom: (n: number) => void;
   selectAll: () => void;
   clearSelection: () => void;
-  dig: (via?: 'tap' | 'shake') => Promise<void>;
+  shakePick: () => void;
   bonkMole: () => void;
   doEmote: () => void;
   claimQuest: (id: string) => void;
@@ -131,6 +179,14 @@ interface GameState {
   setMute: (m: boolean) => void;
   finishOnboarding: () => void;
   toast: (text: string, tone?: Toast['tone']) => void;
+  setDockTab: (t: DockTab) => void;
+  startRun: (r: Omit<Run, 'left' | 'lastRound'>) => Promise<void>;
+  stopRun: () => void;
+  refreshPot: () => Promise<void>;
+  choosePreset: (i: number) => void;
+  editPreset: (p: Partial<Preset>) => void;
+  refillPractice: () => void;
+  session: () => Keypair | null;
   dismissLevel: () => void;
   dismissGear: () => void;
 }
@@ -142,7 +198,6 @@ const roundOf = (t: number) => Math.floor(t / 1000 / ROUND_SECS);
 export const roundEnd = (rid: number) => (rid + 1) * ROUND_SECS * 1000;
 const errMsg = (e: unknown) => {
   const m = String((e as Error)?.message ?? e);
-  if (/OutOfDigs/.test(m)) return 'No free digs left today';
   if (/RoundLocked/.test(m)) return 'Round is locking. Try next round';
   if (/insufficient|0x1\b/i.test(m)) return 'Not enough balance';
   if (/declined|cancel|rejected/i.test(m)) return 'Cancelled in wallet';
@@ -154,7 +209,6 @@ function rollDay(s: Save): Save {
   const today = localDay();
   let out = s;
   if (s.questDay !== today) out = { ...out, questDay: today, questProgress: {}, questClaimed: [] };
-  if (s.digDay !== today) out = { ...out, digDay: today, digsToday: 0 };
   return out;
 }
 
@@ -199,16 +253,18 @@ export const useGame = create<GameState>((set, get) => {
     if (after > before) set({ levelUp: after });
   };
 
-  async function ensureSession(owner: PublicKey) {
+  async function ensureSession(owner: PublicKey, needSol: number) {
     session = session ?? (await chain.loadSession(owner));
     const p = get().wallet.player;
     const valid = p && p.session === session.publicKey.toBase58() && p.sessionExpires * 1000 > Date.now() + 120_000;
     const sessionSol = await chain.fetchSolBalance(session.publicKey);
-    if (valid && sessionSol > 0.005) return session;
-    setWallet({ busy: 'Approve a 24h dig session in your wallet' });
-    await chain.startSession(owner, session, Boolean(p));
+    if (valid && sessionSol > Math.max(0.005, needSol + 0.004)) return session;
+    setWallet({
+      busy: `Approve: fund your 24h miner session with ${Math.min(chain.MAX_SESSION_FUND_SOL, needSol + 0.01).toFixed(3)} SOL`,
+    });
+    await chain.startSession(owner, session, Boolean(p), needSol);
     await get().refreshWallet();
-    get().toast('Session started. Digs are now one tap', 'good');
+    get().toast('Session started. Rounds now run without pop-ups', 'good');
     return session;
   }
 
@@ -217,14 +273,17 @@ export const useGame = create<GameState>((set, get) => {
     if (!pending) return;
     let winning: number;
     let motherlode = false;
+    let solOut = 0;
+    let skrTotal = 0;
     if (pending.onChain) {
       const owner = ownerKey();
       try {
         if (!owner || !session) throw new Error('wallet disconnected');
-        const r = await chain.sessionSettle(owner, session, roundId);
-        if (!r) throw new Error('round not revealed');
+        const r = await chain.sessionSettlePot(owner, session, roundId);
         winning = r.winning;
         motherlode = r.motherlode;
+        solOut = r.payout;
+        skrTotal = r.skr;
       } catch (e) {
         get().toast(`Couldn't settle round: ${errMsg(e)}`, 'bad');
         set({ phase: 'mining', pending: null, roundId: roundOf(chainNow(offsetMs)) });
@@ -234,6 +293,10 @@ export const useGame = create<GameState>((set, get) => {
       await new Promise((r) => setTimeout(r, 900));
       winning = Math.floor(Math.random() * BLOCKS);
       motherlode = Math.random() < 1 / MOTHERLODE_ODDS;
+      const final = addToPot(simPot(roundId, 1), pending.mask, pending.perBlock);
+      const pay = payoutFor(final, winning, pending.perBlock, pending.mask, motherlode);
+      solOut = pay.sol;
+      skrTotal = pay.skr;
     }
     play('rumble');
     set({ phase: 'reveal', winning, revealStartAt: Date.now() });
@@ -241,20 +304,30 @@ export const useGame = create<GameState>((set, get) => {
     const skrBefore = get().wallet.player?.skrWon ?? 0;
     const won = (pending.mask & (1 << winning)) !== 0;
     const points = won ? pointsFor(covered, motherlode, pending.boostBps) : 0;
+    const solIn = pending.total;
     setTimeout(async () => {
       if (pending.onChain) await get().refreshWallet();
-      const skr = pending.onChain ? Math.max(0, (get().wallet.player?.skrWon ?? 0) - skrBefore) : 0;
-      const result: RoundResult = { roundId, winning, covered, won, points, motherlode, onChain: pending.onChain, skr };
+      // split the SKR into the Motherlode part and the per-round reward
+      const skr = pending.onChain
+        ? Math.max(0, (get().wallet.player?.skrWon ?? 0) - skrBefore)
+        : motherlode && won
+          ? (skrTotal * MOTHERLODE_SKR) / (MOTHERLODE_SKR + ROUND_REWARD_SKR)
+          : 0;
+      const skrMined = Math.max(0, skrTotal - skr);
+      const result: RoundResult = { roundId, winning, covered, won, points, motherlode, onChain: pending.onChain, skr, solIn, solOut, skrMined };
       updateSave((s) => {
         const winStreak = won ? s.winStreak + 1 : 0;
         const qp = { ...s.questProgress };
         if (won) qp.win1 = (qp.win1 ?? 0) + 1;
         if (won && covered <= 5) qp.sharp = 1;
+        const practiceWin = !pending.onChain && won;
         return {
           ...s,
-          xp: pending.onChain ? s.xp : s.xp + (won ? 50 : 0),
+          xp: pending.onChain ? s.xp : s.xp + (practiceWin ? 50 : 0),
           points: pending.onChain ? s.points : s.points + points,
-          wins: pending.onChain ? s.wins : s.wins + (won ? 1 : 0),
+          wins: pending.onChain ? s.wins : s.wins + (practiceWin ? 1 : 0),
+          practiceSol: pending.onChain ? s.practiceSol : s.practiceSol + solOut,
+          practiceSkr: pending.onChain ? s.practiceSkr : s.practiceSkr + skrTotal,
           winStreak,
           bestStreak: Math.max(s.bestStreak, winStreak),
           questProgress: qp,
@@ -269,6 +342,7 @@ export const useGame = create<GameState>((set, get) => {
         play('lose');
         haptic.lose();
       }
+      const run = get().run;
       set({
         phase: 'mining',
         pending: null,
@@ -276,14 +350,79 @@ export const useGame = create<GameState>((set, get) => {
         lastResult: result,
         resultAt: Date.now(),
         roundId: roundOf(chainNow(get().offsetMs)),
+        run: run && run.left <= 0 ? null : run,
       });
+      if (run && run.left <= 0) get().toast(`Autopilot finished ${run.total} round${run.total > 1 ? 's' : ''}`, 'info');
     }, REVEAL_MIN_MS - 1400);
+  }
+
+  function recordRound(blocks: number, onChain: boolean) {
+    updateSave((s) => {
+      const today = localDay();
+      const yesterday = localDay(Date.now() - 86_400_000);
+      const dayStreak = s.lastDigDay === today ? s.dayStreak : s.lastDigDay === yesterday ? s.dayStreak + 1 : 1;
+      const qp: Record<string, number> = { ...s.questProgress, dig5: (s.questProgress.dig5 ?? 0) + 1 };
+      return { ...s, digs: s.digs + 1, dayStreak, lastDigDay: today, xp: onChain ? s.xp : s.xp + 10 + blocks, questProgress: qp };
+    });
+  }
+
+  /** One round of a run: deploy SOL on the current round. */
+  async function runRound() {
+    const st = get();
+    const run = st.run;
+    if (!run) return;
+    const now = chainNow(st.offsetMs);
+    const roundId = roundOf(now);
+    set({ run: { ...run, lastRound: roundId } });
+    let idx: number[];
+    if (run.blocks === 'all') idx = [...Array(BLOCKS).keys()];
+    else if (run.blocks === 'smart') idx = smartPick(st.pot.roundId === roundId ? st.pot.perBlock : emptyPot(roundId).perBlock, run.smartN);
+    else idx = idxOf(run.manualMask);
+    const stop = (msg: string) => {
+      set({ run: null });
+      setWallet({ busy: null });
+      get().toast(msg, 'bad');
+    };
+    if (!idx.length) return stop('Pick blocks on the mine first');
+    const perBlock = Math.floor((run.perRound / idx.length) * 1e9) / 1e9;
+    if (perBlock < MIN_SOL_PER_BLOCK) return stop(`Minimum is ${MIN_SOL_PER_BLOCK} SOL per block`);
+    const mask = maskOf(idx);
+    const total = perBlock * idx.length;
+    const owner = ownerKey();
+    const onChain = Boolean(owner && chain.chainReady);
+    set({ selected: idx });
+    try {
+      if (onChain && owner) {
+        if (st.wallet.sol + st.wallet.sessionSol < total + 0.003) throw new Error('insufficient SOL');
+        const s = await ensureSession(owner, Math.min(chain.MAX_SESSION_FUND_SOL - 0.01, total * run.left));
+        setWallet({ busy: `Deploying ${total.toFixed(4)} SOL…` });
+        if (roundOf(chainNow(get().offsetMs)) !== roundId) throw new Error('RoundLocked');
+        await chain.sessionDeploy(owner, s, roundId, mask, perBlock);
+      } else {
+        if (get().save.practiceSol < total) throw new Error('insufficient practice SOL. Refill it in the panel');
+        updateSave((sv) => ({ ...sv, practiceSol: sv.practiceSol - total }));
+      }
+    } catch (e) {
+      return stop(errMsg(e));
+    }
+    setWallet({ busy: null });
+    play('dig');
+    haptic.thud();
+    const cur = get().run;
+    set({
+      pending: { roundId, mask, boostBps: boostFor(staked()), onChain, perBlock, total },
+      roundId,
+      run: cur ? { ...cur, left: cur.left - 1 } : null,
+      pot: addToPot(get().pot.roundId === roundId ? get().pot : emptyPot(roundId), mask, perBlock),
+    });
+    recordRound(idx.length, onChain);
+    if (onChain) void get().refreshWallet();
   }
 
   return {
     loaded: false,
     save: freshSave(),
-    wallet: { owner: null, player: null, skr: 0, sol: 0, sessionSol: 0, pool: 0, busy: null },
+    wallet: { owner: null, player: null, skr: 0, sol: 0, sessionSol: 0, pool: 0, rewards: 0, busy: null },
     offsetMs: 0,
     now: Date.now(),
     roundId: roundOf(Date.now()),
@@ -292,6 +431,10 @@ export const useGame = create<GameState>((set, get) => {
     revealStartAt: 0,
     winning: null,
     pending: null,
+    pot: emptyPot(roundOf(Date.now())),
+    potAt: 0,
+    run: null,
+    dockTab: 'lite',
     selected: [],
     lastResult: null,
     resultAt: 0,
@@ -301,7 +444,7 @@ export const useGame = create<GameState>((set, get) => {
     gearReveal: null,
 
     boot: async () => {
-      const save = rollDay(await loadJson(SAVE_KEY, freshSave()));
+      const save = rollDay({ ...freshSave(), ...(await loadJson(SAVE_KEY, freshSave())) });
       setMuted(save.muted);
       const owner = await loadJson<{ owner: string | null }>('gali-owner', { owner: null });
       set({ save, loaded: true });
@@ -337,6 +480,13 @@ export const useGame = create<GameState>((set, get) => {
         set({ roundId: rid, selected: [], pending: null, now });
         return;
       }
+      if (Date.now() - st.potAt > 3000) {
+        set({ potAt: Date.now() });
+        void get().refreshPot();
+      }
+      if (st.run && st.phase === 'mining' && !st.pending && !st.wallet.busy && st.run.lastRound !== rid && roundEnd(rid) - now > LOCK_MS + 8000) {
+        void runRound();
+      }
       if (st.phase === 'mining') {
         const left = roundEnd(st.roundId) - now;
         const prevLeft = roundEnd(st.roundId) - st.now;
@@ -350,8 +500,11 @@ export const useGame = create<GameState>((set, get) => {
 
     toggleBlock: (i) => {
       const st = get();
-      if (st.phase !== 'mining' || st.pending) return;
+      if (st.phase !== 'mining' || st.pending || st.run) return;
       haptic.tap();
+      // tapping a tile by hand means "I pick": switch the PRO preset to manual
+      const cur = st.save.presets[st.save.preset];
+      if (cur && cur.blocks !== 'manual') get().editPreset({ blocks: 'manual' });
       if (st.selected.includes(i)) {
         play('deselect');
         set({ selected: st.selected.filter((x) => x !== i) });
@@ -374,50 +527,16 @@ export const useGame = create<GameState>((set, get) => {
     },
     clearSelection: () => set({ selected: [] }),
 
-    dig: async (via = 'tap') => {
+    shakePick: () => {
       const st = get();
-      if (st.phase !== 'mining' || st.pending || st.wallet.busy) return;
-      let selected = st.selected;
-      if (!selected.length) {
-        if (via !== 'shake') return st.toast('Tap blocks on the mine first', 'bad');
-        selected = [...Array(BLOCKS).keys()].sort(() => Math.random() - 0.5).slice(0, 3);
-        set({ selected });
-      }
-      const now = chainNow(st.offsetMs);
-      const roundId = roundOf(now);
-      if (roundEnd(roundId) - now < LOCK_MS) return st.toast('Round is locking. Get ready for the next one', 'bad');
-      const save = rollDay(st.save);
-      const digsToday = st.wallet.player && st.wallet.player.day === Math.floor(now / 86_400_000) ? st.wallet.player.digsToday : save.digsToday;
-      if (digsToday >= DAILY_FREE_DIGS) return st.toast(`You've used all ${DAILY_FREE_DIGS} free digs today`, 'bad');
-      const mask = selected.reduce((m, i) => m | (1 << i), 0);
-      const owner = ownerKey();
-      const onChain = Boolean(owner && chain.chainReady);
-      const boostBps = boostFor(staked());
-      try {
-        if (onChain && owner) {
-          const s = await ensureSession(owner);
-          setWallet({ busy: 'Digging on Solana…' });
-          const rNow = roundOf(chainNow(get().offsetMs));
-          if (rNow !== roundId) throw new Error('RoundLocked');
-          await chain.sessionDig(owner, s, roundId, mask);
-        }
-      } catch (e) {
-        setWallet({ busy: null });
-        return get().toast(errMsg(e), 'bad');
-      }
-      setWallet({ busy: null });
-      play('dig');
+      if (st.phase !== 'mining' || st.pending || st.run || st.wallet.busy) return;
+      const n = st.selected.length > 0 && st.selected.length < BLOCKS ? st.selected.length : 5;
+      set({ selected: smartPick(st.pot.perBlock, n), dockTab: 'pro' });
+      if (st.save.presets[st.save.preset]) get().editPreset({ blocks: 'smart', smartN: n });
+      play('select');
       haptic.thud();
-      set({ pending: { roundId, mask, boostBps, onChain }, selected, roundId });
-      updateSave((s) => {
-        const today = localDay();
-        const yesterday = localDay(Date.now() - 86_400_000);
-        const dayStreak = s.lastDigDay === today ? s.dayStreak : s.lastDigDay === yesterday ? s.dayStreak + 1 : 1;
-        const qp: Record<string, number> = { ...s.questProgress, dig5: (s.questProgress.dig5 ?? 0) + 1 };
-        if (via === 'shake') qp.shake = 1;
-        return { ...s, digs: s.digs + 1, digsToday: s.digsToday + 1, dayStreak, lastDigDay: today, xp: onChain ? s.xp : s.xp + 10 + selected.length, questProgress: qp };
-      });
-      if (onChain) void get().refreshWallet();
+      updateSave((s) => ({ ...s, questProgress: { ...s.questProgress, shake: 1 } }));
+      get().toast(`Shake! Smart-picked the ${n} emptiest blocks`, 'good');
     },
 
     bonkMole: () => {
@@ -467,7 +586,7 @@ export const useGame = create<GameState>((set, get) => {
       const st = get();
       if (!g) return;
       if (!st.wallet.owner) return st.toast('Connect a wallet to buy gear with SKR', 'bad');
-      if (!st.wallet.player) return st.toast('Dig once first to create your miner', 'bad');
+      if (!st.wallet.player) return st.toast('Play one round first to create your miner', 'bad');
       if (st.wallet.skr < g.priceSkr) return st.toast(`You need ${g.priceSkr} SKR`, 'bad');
       try {
         setWallet({ busy: `Buying ${g.name} for ${g.priceSkr} SKR…` });
@@ -486,7 +605,7 @@ export const useGame = create<GameState>((set, get) => {
 
     stake: async (amount) => {
       const st = get();
-      if (!st.wallet.player) return st.toast('Dig once first to create your miner', 'bad');
+      if (!st.wallet.player) return st.toast('Play one round first to create your miner', 'bad');
       if (amount <= 0 || amount > st.wallet.skr) return st.toast('Not enough SKR', 'bad');
       try {
         setWallet({ busy: `Staking ${amount} SKR…` });
@@ -539,7 +658,7 @@ export const useGame = create<GameState>((set, get) => {
       await chain.disconnectWallet();
       saveJson('gali-owner', { owner: null }, 0);
       session = null;
-      set({ wallet: { owner: null, player: null, skr: 0, sol: 0, sessionSol: 0, pool: 0, busy: null } });
+      set({ run: null, wallet: { owner: null, player: null, skr: 0, sol: 0, sessionSol: 0, pool: 0, rewards: 0, busy: null } });
     },
 
     refreshWallet: async () => {
@@ -547,14 +666,15 @@ export const useGame = create<GameState>((set, get) => {
       if (!owner) return;
       try {
         session = session ?? (await chain.loadSession(owner));
-        const [player, skr, sol, sessionSol, pool] = await Promise.all([
+        const [player, skr, sol, sessionSol, pool, rewards] = await Promise.all([
           chain.fetchPlayer(owner),
           chain.fetchSkrBalance(owner),
           chain.fetchSolBalance(owner),
           chain.fetchSolBalance(session.publicKey),
           chain.fetchMotherlodePool(),
+          chain.fetchRewardsPool(),
         ]);
-        setWallet({ player, skr, sol, sessionSol, pool });
+        setWallet({ player, skr, sol, sessionSol, pool, rewards });
       } catch {
         /* offline */
       }
@@ -574,6 +694,54 @@ export const useGame = create<GameState>((set, get) => {
         setWallet({ busy: null });
       }
     },
+
+    setDockTab: (t) => set({ dockTab: t }),
+
+    startRun: async (r) => {
+      const st = get();
+      if (st.run) return;
+      if (st.wallet.owner && !chain.chainReady) return st.toast('On-chain mode is not deployed yet', 'bad');
+      set({ run: { ...r, left: r.total, lastRound: -1 } });
+      play('select');
+      get().toast(r.total > 1 ? `Autopilot on: ${r.total} rounds` : 'Deploying this round', 'good');
+      const now = chainNow(st.offsetMs);
+      const rid = roundOf(now);
+      if (st.phase === 'mining' && !st.pending && roundEnd(rid) - now > LOCK_MS + 2000) await runRound();
+    },
+
+    stopRun: () => {
+      if (!get().run) return;
+      set({ run: null });
+      get().toast('Autopilot stopped', 'info');
+    },
+
+    refreshPot: async () => {
+      const st = get();
+      const now = chainNow(st.offsetMs);
+      const rid = roundOf(now);
+      if (chain.chainReady && st.wallet.owner) {
+        const p = await chain.fetchPot(rid).catch(() => null);
+        set({ pot: p ? { roundId: rid, perBlock: p.perBlock, total: p.total, miners: p.miners } : emptyPot(rid) });
+        return;
+      }
+      const frac = 1 - (roundEnd(rid) - now) / (ROUND_SECS * 1000);
+      let pot = simPot(rid, frac);
+      const pend = st.pending;
+      if (pend && pend.roundId === rid) pot = addToPot(pot, pend.mask, pend.perBlock);
+      set({ pot });
+    },
+
+    choosePreset: (i) => updateSave((s) => ({ ...s, preset: i })),
+    editPreset: (p) =>
+      updateSave((s) => {
+        const presets = (s.presets?.length === 4 ? s.presets : defaultPresets()).map((x, i) => (i === s.preset ? { ...x, ...p } : x));
+        return { ...s, presets };
+      }),
+    refillPractice: () => {
+      updateSave((s) => ({ ...s, practiceSol: PRACTICE_SOL }));
+      get().toast(`Practice wallet refilled to ${PRACTICE_SOL} SOL`, 'good');
+    },
+    session: () => session,
 
     setMute: (m) => {
       setMuted(m);

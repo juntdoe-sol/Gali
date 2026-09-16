@@ -45,7 +45,7 @@ export function Btn({
       <T v={kind === 'gold' ? 'display' : 'bold'} style={[{ fontSize: small ? 13 : kind === 'gold' ? 22 : 15, color: kind === 'gold' || kind === 'skr' ? '#3a1a00' : COLORS.text, textAlign: 'center' }]}>
         {label}
       </T>
-      {sub ? <T style={{ fontSize: 11, color: kind === 'gold' ? '#6b3a00' : COLORS.muted, textAlign: 'center' }}>{sub}</T> : null}
+      {sub ? <T style={{ fontSize: 11, color: kind === 'gold' ? '#6b3a00' : kind === 'skr' ? '#2f4a00' : COLORS.muted, textAlign: 'center' }}>{sub}</T> : null}
     </>
   );
   return (

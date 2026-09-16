@@ -2,9 +2,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Image, Modal, Pressable, StyleSheet, View } from 'react-native';
 import { COLORS, gearByKey, RARITY_COLOR } from '../game/constants';
+import { fmtSol } from '../game/pot';
 import { GEAR_ICON } from './icons';
 import { play } from '../game/sfx';
-import { useGame } from '../game/store';
+import { useGame, type RoundResult } from '../game/store';
 import { Btn, T } from './kit';
 
 function usePop(trigger: unknown) {
@@ -40,11 +41,12 @@ export function ResultPop() {
                 <T v="display" style={[styles.rTitle, { color: '#fff' }]}>
                   💎 MOTHERLODE 💎
                 </T>
-                <T v="display" style={[styles.rBig, { color: '#fff' }]}>
-                  +{res.points.toLocaleString()} pts
+                <T v="display" style={{ fontSize: 30, color: '#eaffc4' }}>
+                  {res.skr > 0 ? `+${res.skr.toLocaleString(undefined, { maximumFractionDigits: 2 })} SKR` : 'Motherlode Pool was empty'}
                 </T>
-                <T v="display" style={{ fontSize: 28, color: '#eaffc4' }}>
-                  {res.onChain ? (res.skr > 0 ? `+${res.skr.toLocaleString()} SKR` : 'Pool was empty') : '+500 SKR on-chain'}
+                <SolLine res={res} dark={false} />
+                <T v="bold" style={{ color: '#fff' }}>
+                  +{res.points.toLocaleString()} pts
                 </T>
               </>
             ) : res.won ? (
@@ -52,11 +54,9 @@ export function ResultPop() {
                 <T v="display" style={[styles.rTitle, { color: '#4a1f00' }]}>
                   STRUCK GOLD!
                 </T>
-                <T v="display" style={[styles.rBig, { color: '#4a1f00' }]}>
-                  +{res.points.toLocaleString()} pts
-                </T>
+                <SolLine res={res} dark big />
                 <T v="bold" style={{ color: '#6b3a00' }}>
-                  {res.covered === 1 ? 'Single-block snipe!' : `${res.covered} blocks covered`}
+                  +{res.points.toLocaleString()} pts · {res.covered === 1 ? 'single-block snipe!' : `${res.covered} blocks covered`}
                   {res.onChain ? ' · settled on Solana' : ''}
                 </T>
               </>
@@ -65,14 +65,40 @@ export function ResultPop() {
                 <T v="display" style={styles.rTitle}>
                   Dry rock…
                 </T>
+                {res.solIn ? (
+                  <T v="display" style={{ fontSize: 22, color: COLORS.red }}>
+                    −{fmtSol(res.solIn)} SOL
+                  </T>
+                ) : null}
                 <T v="bold" style={{ color: COLORS.muted }}>
-                  Gold was at row {row}, col {col}. Dig again!
+                  Gold was at row {row}, col {col}. Next round!
                 </T>
               </>
             )}
           </LinearGradient>
         </Pressable>
       </Animated.View>
+    </View>
+  );
+}
+
+function SolLine({ res, dark, big }: { res: RoundResult; dark: boolean; big?: boolean }) {
+  if (!res.solIn) return null;
+  const net = res.solOut - res.solIn;
+  return (
+    <View style={{ alignItems: 'center' }}>
+      <T v="display" style={{ fontSize: big ? 40 : 26, lineHeight: big ? 46 : 30, color: dark ? '#0b5a3a' : '#c8ffe6' }}>
+        +{fmtSol(res.solOut)} SOL
+      </T>
+      {res.skrMined ? (
+        <T v="display" style={{ fontSize: big ? 24 : 18, color: dark ? '#3d5a00' : '#eaffc4' }}>
+          +{res.skrMined.toLocaleString(undefined, { maximumFractionDigits: 2 })} SKR mined
+        </T>
+      ) : null}
+      <T v="bold" style={{ fontSize: 12, color: dark ? '#6b3a00' : '#fff' }}>
+        in {fmtSol(res.solIn)} · net {net >= 0 ? '+' : '−'}
+        {fmtSol(Math.abs(net))} SOL
+      </T>
     </View>
   );
 }
@@ -159,9 +185,9 @@ export function Busy() {
 }
 
 const STEPS = [
-  { t: 'Dig. Strike gold. Climb.', b: 'Every minute a new round opens on a 5x5 mine. Tap blocks, then hit DIG. You get 30 free digs a day.' },
-  { t: 'Fewer blocks, bigger strike', b: 'One block strikes gold each round. Cover 1 block and win 1,000 pts. Cover all 25 and win 40. Shake your phone to dig 3 random blocks.' },
-  { t: 'Bring your Seeker wallet', b: 'Connect with Mobile Wallet Adapter to dig on Solana. Approve once and a 24h session key makes each dig one tap. Stake SKR for up to 1.5x points.' },
+  { t: 'Deploy SOL. Strike gold.', b: 'Every minute a new round opens on a 5x5 mine. Put SOL on the blocks you pick. One block strikes gold, and its miners split 90% of the pot.' },
+  { t: 'Mine SKR as you go', b: 'Winners also share 25 SKR every round, and a 1-in-625 motherlode drops 5,000 SKR. Fewer blocks means a bigger share and more points. Shake your phone to Smart-pick.' },
+  { t: 'Bring your Seeker wallet', b: 'Practice first with 2 play SOL, or connect with Mobile Wallet Adapter. Fund a 24h session once and LITE or PRO autopilot deploys every round for you. It is a game of chance: only use SOL you can afford to lose.' },
 ];
 
 export function Onboarding() {

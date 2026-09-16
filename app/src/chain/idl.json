@@ -45,6 +45,14 @@
           "writable": true
         },
         {
+          "name": "rewards",
+          "writable": true
+        },
+        {
+          "name": "pot_vault",
+          "writable": true
+        },
+        {
           "name": "token_program"
         },
         {
@@ -93,8 +101,8 @@
     {
       "name": "set_session",
       "docs": [
-        "Authorise a device-held session key to dig (and pay rent) for this player,",
-        "so the phone doesn't ask the wallet to sign every round. Optionally funds it."
+        "Authorise a device-held session key to deploy SOL (and pay rent) for this player,",
+        "so the phone doesn't ask the wallet to sign every round. Optionally funds it with SOL to deploy."
       ],
       "discriminator": [
         156,
@@ -140,22 +148,26 @@
       ]
     },
     {
-      "name": "dig",
+      "name": "deploy",
+      "docs": [
+        "Put `lamports_per_block` SOL on every block in `mask` for the current round.",
+        "Signed by the owner or their active session key (the SOL comes from the signer)."
+      ],
       "discriminator": [
-        230,
-        62,
-        156,
-        235,
-        127,
-        60,
-        110,
-        71
+        67,
+        36,
+        143,
+        118,
+        36,
+        164,
+        92,
+        217
       ],
       "accounts": [
         {
           "name": "signer",
           "docs": [
-            "the player's wallet or their active session key; pays rent for the ticket"
+            "the player's wallet or their active session key; the SOL and rent come from here"
           ],
           "writable": true,
           "signer": true
@@ -171,7 +183,11 @@
           "writable": true
         },
         {
-          "name": "dig",
+          "name": "pot",
+          "writable": true
+        },
+        {
+          "name": "stake",
           "writable": true
         },
         {
@@ -186,6 +202,186 @@
         {
           "name": "mask",
           "type": "u32"
+        },
+        {
+          "name": "lamports_per_block",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "settle_pot",
+      "docs": [
+        "Permissionless, once per revealed round: pays the SOL fee, escrows the round's SKR reward."
+      ],
+      "discriminator": [
+        120,
+        181,
+        232,
+        100,
+        60,
+        57,
+        32,
+        238
+      ],
+      "accounts": [
+        {
+          "name": "config"
+        },
+        {
+          "name": "round"
+        },
+        {
+          "name": "pot",
+          "writable": true
+        },
+        {
+          "name": "fee_to",
+          "writable": true
+        },
+        {
+          "name": "skr_mint"
+        },
+        {
+          "name": "rewards",
+          "writable": true
+        },
+        {
+          "name": "motherlode",
+          "writable": true
+        },
+        {
+          "name": "pot_vault",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "_round_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "claim_pot",
+      "docs": [
+        "Permissionless: pays a stake its share of the SOL pool and SKR reward (0 if it missed), then closes it."
+      ],
+      "discriminator": [
+        210,
+        85,
+        35,
+        217,
+        204,
+        65,
+        38,
+        17
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "owner",
+          "writable": true
+        },
+        {
+          "name": "payer",
+          "writable": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "player",
+          "writable": true
+        },
+        {
+          "name": "round"
+        },
+        {
+          "name": "pot",
+          "writable": true
+        },
+        {
+          "name": "stake",
+          "writable": true
+        },
+        {
+          "name": "skr_mint"
+        },
+        {
+          "name": "pot_vault",
+          "writable": true
+        },
+        {
+          "name": "owner_ata",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "associated_token_program"
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "_round_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "fund_rewards",
+      "docs": [
+        "Anyone (team, sponsors, partners) can add SKR to the Rewards Pool that pays miners each round."
+      ],
+      "discriminator": [
+        114,
+        64,
+        163,
+        112,
+        175,
+        167,
+        19,
+        121
+      ],
+      "accounts": [
+        {
+          "name": "funder",
+          "signer": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "skr_mint"
+        },
+        {
+          "name": "funder_ata",
+          "writable": true
+        },
+        {
+          "name": "rewards",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
         }
       ]
     },
@@ -224,76 +420,6 @@
       "args": [
         {
           "name": "round_id",
-          "type": "u64"
-        }
-      ]
-    },
-    {
-      "name": "claim",
-      "discriminator": [
-        62,
-        198,
-        214,
-        193,
-        213,
-        159,
-        108,
-        210
-      ],
-      "accounts": [
-        {
-          "name": "cranker",
-          "docs": [
-            "anyone can settle a revealed dig; points and SKR always go to the owner"
-          ],
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "owner"
-        },
-        {
-          "name": "payer",
-          "writable": true
-        },
-        {
-          "name": "config"
-        },
-        {
-          "name": "player",
-          "writable": true
-        },
-        {
-          "name": "round"
-        },
-        {
-          "name": "dig",
-          "writable": true
-        },
-        {
-          "name": "skr_mint"
-        },
-        {
-          "name": "motherlode",
-          "writable": true
-        },
-        {
-          "name": "owner_ata",
-          "writable": true
-        },
-        {
-          "name": "token_program"
-        },
-        {
-          "name": "associated_token_program"
-        },
-        {
-          "name": "system_program"
-        }
-      ],
-      "args": [
-        {
-          "name": "_round_id",
           "type": "u64"
         }
       ]
@@ -484,6 +610,10 @@
           "writable": true
         },
         {
+          "name": "rewards",
+          "writable": true
+        },
+        {
           "name": "token_program"
         }
       ],
@@ -510,19 +640,6 @@
       ]
     },
     {
-      "name": "DigTicket",
-      "discriminator": [
-        99,
-        64,
-        146,
-        62,
-        120,
-        47,
-        249,
-        32
-      ]
-    },
-    {
       "name": "Player",
       "discriminator": [
         205,
@@ -533,6 +650,19 @@
         155,
         206,
         218
+      ]
+    },
+    {
+      "name": "Pot",
+      "discriminator": [
+        238,
+        118,
+        60,
+        175,
+        178,
+        191,
+        59,
+        58
       ]
     },
     {
@@ -547,34 +677,34 @@
         116,
         174
       ]
+    },
+    {
+      "name": "Stake",
+      "discriminator": [
+        150,
+        197,
+        176,
+        29,
+        55,
+        132,
+        112,
+        149
+      ]
     }
   ],
   "events": [
     {
       "discriminator": [
-        217,
-        192,
-        123,
-        72,
-        108,
-        150,
-        248,
-        33
+        50,
+        145,
+        94,
+        59,
+        169,
+        255,
+        159,
+        186
       ],
-      "name": "Claimed"
-    },
-    {
-      "discriminator": [
-        181,
-        5,
-        202,
-        231,
-        71,
-        172,
-        129,
-        20
-      ],
-      "name": "Dug"
+      "name": "Deployed"
     },
     {
       "discriminator": [
@@ -604,16 +734,29 @@
     },
     {
       "discriminator": [
-        196,
-        149,
+        145,
+        213,
+        49,
+        17,
+        203,
+        255,
         31,
-        27,
-        12,
-        35,
-        1,
-        62
+        72
       ],
-      "name": "MotherlodePaid"
+      "name": "PotClaimed"
+    },
+    {
+      "discriminator": [
+        124,
+        98,
+        181,
+        97,
+        181,
+        97,
+        101,
+        89
+      ],
+      "name": "PotSettled"
     },
     {
       "discriminator": [
@@ -627,6 +770,19 @@
         154
       ],
       "name": "Revealed"
+    },
+    {
+      "discriminator": [
+        84,
+        233,
+        245,
+        203,
+        228,
+        147,
+        165,
+        92
+      ],
+      "name": "RewardsFunded"
     },
     {
       "discriminator": [
@@ -678,74 +834,51 @@
     },
     {
       "code": 6004,
-      "name": "OutOfDigs",
-      "msg": "No free digs left today"
-    },
-    {
-      "code": 6005,
       "name": "RoundNotOver",
       "msg": "Round hasn't ended yet"
     },
     {
-      "code": 6006,
+      "code": 6005,
       "name": "NoEntropy",
       "msg": "No slot hash available"
     },
     {
-      "code": 6007,
+      "code": 6006,
       "name": "BadAmount",
       "msg": "Invalid amount"
     },
     {
-      "code": 6008,
+      "code": 6007,
       "name": "UnknownItem",
       "msg": "Unknown gear item"
     },
     {
-      "code": 6009,
+      "code": 6008,
       "name": "AlreadyOwned",
       "msg": "You already own this item"
     },
     {
-      "code": 6010,
+      "code": 6009,
       "name": "NotAuthorised",
       "msg": "Signer is not the player or an active session"
     },
     {
-      "code": 6011,
+      "code": 6010,
       "name": "BadSession",
       "msg": "Invalid session"
+    },
+    {
+      "code": 6011,
+      "name": "AlreadySettled",
+      "msg": "This pot is already settled"
+    },
+    {
+      "code": 6012,
+      "name": "NotSettled",
+      "msg": "Settle the pot first"
     }
   ],
   "types": [
-    {
-      "name": "Claimed",
-      "type": {
-        "fields": [
-          {
-            "name": "owner",
-            "type": "pubkey"
-          },
-          {
-            "name": "round_id",
-            "type": "u64"
-          },
-          {
-            "name": "won",
-            "type": "bool"
-          },
-          {
-            "name": "points",
-            "type": "u64"
-          },
-          {
-            "name": "skr",
-            "type": "u64"
-          }
-        ],
-        "kind": "struct"
-      }
-    },
     {
       "name": "Config",
       "type": {
@@ -762,10 +895,6 @@
           {
             "name": "round_secs",
             "type": "u32"
-          },
-          {
-            "name": "daily_free_digs",
-            "type": "u16"
           },
           {
             "name": "base_points",
@@ -810,6 +939,34 @@
             "type": "u16"
           },
           {
+            "name": "rewards_pool_bps",
+            "docs": [
+              "share of every gear sale routed to the Rewards Pool, in bps (the rest goes to the treasury)"
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "pot_fee_bps",
+            "docs": [
+              "SOL fee on each round's pot, in bps (sent to the authority / treasury wallet)"
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "min_deploy",
+            "docs": [
+              "minimum lamports per block for `deploy`"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "round_reward_skr",
+            "docs": [
+              "raw SKR mined per round, split between the miners on the winning block"
+            ],
+            "type": "u64"
+          },
+          {
             "name": "bump",
             "type": "u8"
           }
@@ -824,10 +981,6 @@
           {
             "name": "round_secs",
             "type": "u32"
-          },
-          {
-            "name": "daily_free_digs",
-            "type": "u16"
           },
           {
             "name": "base_points",
@@ -858,47 +1011,28 @@
           {
             "name": "motherlode_pool_bps",
             "type": "u16"
-          }
-        ]
-      }
-    },
-    {
-      "name": "DigTicket",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "owner",
-            "type": "pubkey"
           },
           {
-            "name": "payer",
-            "docs": [
-              "who paid rent for this ticket; refunded on claim"
-            ],
-            "type": "pubkey"
-          },
-          {
-            "name": "round_id",
-            "type": "u64"
-          },
-          {
-            "name": "mask",
-            "type": "u32"
-          },
-          {
-            "name": "boost_bps",
+            "name": "rewards_pool_bps",
             "type": "u16"
           },
           {
-            "name": "bump",
-            "type": "u8"
+            "name": "pot_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "min_deploy",
+            "type": "u64"
+          },
+          {
+            "name": "round_reward_skr",
+            "type": "u64"
           }
         ]
       }
     },
     {
-      "name": "Dug",
+      "name": "Deployed",
       "type": {
         "fields": [
           {
@@ -914,8 +1048,12 @@
             "type": "u32"
           },
           {
-            "name": "boost_bps",
-            "type": "u16"
+            "name": "lamports_per_block",
+            "type": "u64"
+          },
+          {
+            "name": "pot_total",
+            "type": "u64"
           }
         ],
         "kind": "struct"
@@ -958,26 +1096,6 @@
       }
     },
     {
-      "name": "MotherlodePaid",
-      "type": {
-        "fields": [
-          {
-            "name": "owner",
-            "type": "pubkey"
-          },
-          {
-            "name": "round_id",
-            "type": "u64"
-          },
-          {
-            "name": "amount",
-            "type": "u64"
-          }
-        ],
-        "kind": "struct"
-      }
-    },
-    {
       "name": "Player",
       "type": {
         "kind": "struct",
@@ -999,16 +1117,18 @@
             "type": "u32"
           },
           {
-            "name": "digs",
+            "name": "rounds",
+            "docs": [
+              "rounds played (first deploy in a round)"
+            ],
             "type": "u32"
           },
           {
             "name": "day",
+            "docs": [
+              "UTC day of the last round played, and the consecutive-day streak"
+            ],
             "type": "u32"
-          },
-          {
-            "name": "digs_today",
-            "type": "u16"
           },
           {
             "name": "streak",
@@ -1038,10 +1158,152 @@
             "type": "u64"
           },
           {
+            "name": "sol_deployed",
+            "docs": [
+              "lifetime lamports deployed / won, and raw SKR mined from rounds"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "sol_won",
+            "type": "u64"
+          },
+          {
+            "name": "skr_mined",
+            "type": "u64"
+          },
+          {
             "name": "bump",
             "type": "u8"
           }
         ]
+      }
+    },
+    {
+      "name": "Pot",
+      "docs": [
+        "One per round: SOL on each block (the lamports sit in this account)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "per_block",
+            "type": {
+              "array": [
+                "u64",
+                25
+              ]
+            }
+          },
+          {
+            "name": "total",
+            "type": "u64"
+          },
+          {
+            "name": "pool",
+            "docs": [
+              "lamports winners split after the fee (set by `settle_pot`)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "skr_reward",
+            "docs": [
+              "raw SKR winners split (escrowed in `pot_vault` by `settle_pot`);",
+              "`motherlode_skr` of it came from the Motherlode Pool"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "motherlode_skr",
+            "type": "u64"
+          },
+          {
+            "name": "motherlode",
+            "type": "bool"
+          },
+          {
+            "name": "miners",
+            "type": "u32"
+          },
+          {
+            "name": "settled",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PotClaimed",
+      "type": {
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "won",
+            "type": "bool"
+          },
+          {
+            "name": "sol",
+            "type": "u64"
+          },
+          {
+            "name": "skr",
+            "type": "u64"
+          },
+          {
+            "name": "points",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "PotSettled",
+      "type": {
+        "fields": [
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "winning_block",
+            "type": "u8"
+          },
+          {
+            "name": "total",
+            "type": "u64"
+          },
+          {
+            "name": "fee",
+            "type": "u64"
+          },
+          {
+            "name": "pool",
+            "type": "u64"
+          },
+          {
+            "name": "skr_reward",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
       }
     },
     {
@@ -1059,6 +1321,22 @@
           {
             "name": "motherlode",
             "type": "bool"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "RewardsFunded",
+      "type": {
+        "fields": [
+          {
+            "name": "funder",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
           }
         ],
         "kind": "struct"
@@ -1110,6 +1388,52 @@
           }
         ],
         "kind": "struct"
+      }
+    },
+    {
+      "name": "Stake",
+      "docs": [
+        "One per player per round: their lamports on each block."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "payer",
+            "docs": [
+              "who paid rent for this account; refunded on claim"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "per_block",
+            "type": {
+              "array": [
+                "u64",
+                25
+              ]
+            }
+          },
+          {
+            "name": "boost_bps",
+            "docs": [
+              "points boost locked in at the player's first deploy of the round"
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
       }
     },
     {
