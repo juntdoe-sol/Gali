@@ -44,7 +44,15 @@ solana airdrop 2 -u devnet   # or https://faucet.solana.com (repeat until you ha
 bash scripts/deploy-devnet.sh
 ```
 
-It deploys (or upgrades) the program, creates the mock SKR mint, config and seeded pools (`MOTHERLODE_SEED`, `REWARDS_SEED`), and writes `app/src/chain/deployment.json`. Your wallet becomes the admin and receives the SOL fees. The program account keeps about 4.2 SOL as rent.
+It deploys (or upgrades) the program, creates the mock SKR mint, config and seeded pools (`MOTHERLODE_SEED`, `REWARDS_SEED`), and writes `app/src/chain/deployment.json`. The program account keeps about 4.2 SOL as rent. The CLI wallet keeps the right to upgrade the program and becomes the Gali admin (settings, treasury, SOL fees).
+
+To make a browser wallet (Phantom, Solflare) or a multisig the admin instead:
+
+```bash
+ADMIN=<wallet address> bash scripts/deploy-devnet.sh
+```
+
+Then open the admin page with that wallet, go to **Settings** and click **Accept admin role**. Later hand-overs: `npx ts-node scripts/propose-admin.ts <address>` or the Settings tab.
 
 Then keep rounds moving (reveal, settle, pay every winner even if their app is closed):
 
