@@ -18,6 +18,7 @@ export interface RoundResult {
   points: number;
   motherlode: boolean;
   onChain: boolean;
+  skr: number; // SKR paid from the Motherlode Pool
 }
 
 export interface Toast {
@@ -46,6 +47,8 @@ export interface Save {
   history: RoundResult[];
   pickaxe: string;
   helmet: string;
+  outfit: string;
+  pet: string | null;
   muted: boolean;
   onboarded: boolean;
 }
@@ -71,6 +74,8 @@ const freshSave = (): Save => ({
   history: [],
   pickaxe: 'pick-wood',
   helmet: 'hat-yellow',
+  outfit: 'fit-blue',
+  pet: null,
   muted: false,
   onboarded: false,
 });
@@ -81,6 +86,7 @@ interface Wallet {
   skr: number;
   sol: number;
   sessionSol: number;
+  pool: number; // SKR in the Motherlode Pool
   busy: string | null;
 }
 
@@ -232,11 +238,13 @@ export const useGame = create<GameState>((set, get) => {
     play('rumble');
     set({ phase: 'reveal', winning, revealStartAt: Date.now() });
     const covered = pending.mask.toString(2).split('1').length - 1;
+    const skrBefore = get().wallet.player?.skrWon ?? 0;
     const won = (pending.mask & (1 << winning)) !== 0;
     const points = won ? pointsFor(covered, motherlode, pending.boostBps) : 0;
     setTimeout(async () => {
-      const result: RoundResult = { roundId, winning, covered, won, points, motherlode, onChain: pending.onChain };
       if (pending.onChain) await get().refreshWallet();
+      const skr = pending.onChain ? Math.max(0, (get().wallet.player?.skrWon ?? 0) - skrBefore) : 0;
+      const result: RoundResult = { roundId, winning, covered, won, points, motherlode, onChain: pending.onChain, skr };
       updateSave((s) => {
         const winStreak = won ? s.winStreak + 1 : 0;
         const qp = { ...s.questProgress };
@@ -275,7 +283,7 @@ export const useGame = create<GameState>((set, get) => {
   return {
     loaded: false,
     save: freshSave(),
-    wallet: { owner: null, player: null, skr: 0, sol: 0, sessionSol: 0, busy: null },
+    wallet: { owner: null, player: null, skr: 0, sol: 0, sessionSol: 0, pool: 0, busy: null },
     offsetMs: 0,
     now: Date.now(),
     roundId: roundOf(Date.now()),
@@ -301,6 +309,7 @@ export const useGame = create<GameState>((set, get) => {
         .clockOffsetMs()
         .then((o) => set({ offsetMs: o, roundId: roundOf(chainNow(o)) }))
         .catch(() => undefined);
+      if (chain.chainReady) chain.fetchMotherlodePool().then((pool) => setWallet({ pool })).catch(() => undefined);
       if (owner.owner && chain.chainReady) {
         setWallet({ owner: owner.owner });
         get().refreshWallet();
@@ -445,7 +454,12 @@ export const useGame = create<GameState>((set, get) => {
       const mask = (get().wallet.player?.gearMask ?? 0) | FREE_GEAR_MASK;
       if (!(mask & (1 << g.id))) return;
       play('select');
-      updateSave((s) => (g.kind === 'pickaxe' ? { ...s, pickaxe: key } : { ...s, helmet: key }));
+      updateSave((s) => {
+        if (g.kind === 'pickaxe') return { ...s, pickaxe: key };
+        if (g.kind === 'helmet') return { ...s, helmet: key };
+        if (g.kind === 'outfit') return { ...s, outfit: key };
+        return { ...s, pet: s.pet === key ? null : key };
+      });
     },
 
     buyGear: async (key) => {
@@ -525,7 +539,7 @@ export const useGame = create<GameState>((set, get) => {
       await chain.disconnectWallet();
       saveJson('gali-owner', { owner: null }, 0);
       session = null;
-      set({ wallet: { owner: null, player: null, skr: 0, sol: 0, sessionSol: 0, busy: null } });
+      set({ wallet: { owner: null, player: null, skr: 0, sol: 0, sessionSol: 0, pool: 0, busy: null } });
     },
 
     refreshWallet: async () => {
@@ -533,13 +547,14 @@ export const useGame = create<GameState>((set, get) => {
       if (!owner) return;
       try {
         session = session ?? (await chain.loadSession(owner));
-        const [player, skr, sol, sessionSol] = await Promise.all([
+        const [player, skr, sol, sessionSol, pool] = await Promise.all([
           chain.fetchPlayer(owner),
           chain.fetchSkrBalance(owner),
           chain.fetchSolBalance(owner),
           chain.fetchSolBalance(session.publicKey),
+          chain.fetchMotherlodePool(),
         ]);
-        setWallet({ player, skr, sol, sessionSol });
+        setWallet({ player, skr, sol, sessionSol, pool });
       } catch {
         /* offline */
       }

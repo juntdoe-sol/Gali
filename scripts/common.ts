@@ -15,6 +15,7 @@ export const pda = {
   config: () => PublicKey.findProgramAddressSync([Buffer.from('config')], PROGRAM_ID)[0],
   vault: () => PublicKey.findProgramAddressSync([Buffer.from('vault')], PROGRAM_ID)[0],
   treasury: () => PublicKey.findProgramAddressSync([Buffer.from('treasury')], PROGRAM_ID)[0],
+  motherlode: () => PublicKey.findProgramAddressSync([Buffer.from('motherlode')], PROGRAM_ID)[0],
   player: (owner: PublicKey) => PublicKey.findProgramAddressSync([Buffer.from('player'), owner.toBuffer()], PROGRAM_ID)[0],
   dig: (owner: PublicKey, round: number | bigint) =>
     PublicKey.findProgramAddressSync([Buffer.from('dig'), owner.toBuffer(), u64le(round)], PROGRAM_ID)[0],

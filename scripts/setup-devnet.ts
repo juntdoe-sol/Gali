@@ -12,6 +12,13 @@ import path from 'path';
 import { pda, program, PROGRAM_ID } from './common';
 
 const DECIMALS = 6;
+// whole-SKR prices by gear id; keep in sync with app/src/game/constants.ts
+export const GEAR_PRICES = [
+  0, 50, 200, 500, 1200, 3000, // pickaxes 0-5
+  0, 80, 300, 800, 2000, 4000, // helmets 6-11
+  0, 60, 250, 700, 1500, // outfits 12-16
+  150, 400, 900, 2500, // pets 17-20
+];
 const skr = (n: number) => new anchor.BN(n).mul(new anchor.BN(10).pow(new anchor.BN(DECIMALS)));
 
 async function main() {
@@ -39,8 +46,10 @@ async function main() {
         motherlodePoints: new anchor.BN(10_000),
         boostTier1: skr(1_000),
         boostTier2: skr(10_000),
-        // item ids match app/src/game/constants.ts GEAR order
-        gearPrices: [0, 50, 200, 500, 1200, 0, 80, 300, 2000].map(skr),
+        // item ids match app/src/game/constants.ts GEAR ids
+        gearPrices: GEAR_PRICES.map(skr),
+        motherlodeSkr: skr(500),
+        motherlodePoolBps: 5_000,
       })
       .accountsStrict({
         authority: wallet.publicKey,
@@ -48,11 +57,22 @@ async function main() {
         skrMint: mint,
         vault: pda.vault(),
         treasury: pda.treasury(),
+        motherlode: pda.motherlode(),
         tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
       })
       .rpc();
     console.log('config initialised', sig);
+    // seed the Motherlode Pool with test SKR so the first motherlode pays out
+    const seed = Number(process.env.MOTHERLODE_SEED ?? 50_000);
+    if (seed > 0) {
+      const funderAta = await getOrCreateAssociatedTokenAccount(conn, wallet.payer, mint, wallet.publicKey);
+      await gali.methods
+        .fundMotherlode(skr(seed))
+        .accountsStrict({ funder: wallet.publicKey, config: pda.config(), skrMint: mint, funderAta: funderAta.address, motherlode: pda.motherlode(), tokenProgram: TOKEN_PROGRAM_ID })
+        .rpc();
+      console.log(`Motherlode Pool seeded with ${seed} SKR`);
+    }
   } else console.log('config already exists');
 
   const out = path.join(__dirname, '../app/src/chain/deployment.json');

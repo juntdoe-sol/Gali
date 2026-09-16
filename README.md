@@ -21,7 +21,9 @@ Built for **CLOCK IN**, the Solana Mobile hackathon by Radiants (submissions clo
 - **Reveal:** after a round ends, anyone can call `reveal_round`. The devnet build mixes the latest SlotHashes entry with the round id. **This randomness can be influenced by validators; swap in a VRF (Switchboard or ORAO) before mainnet.**
 - **Claim:** permissionless. A win pays `40 × 25 / blocks covered` points (1,000 for a single block). A 1-in-625 motherlode adds 10,000.
 - **Session keys:** the player approves one `set_session` transaction in their wallet (Mobile Wallet Adapter / Seed Vault). The app then digs and settles with a device-held key for 24 hours, so each round is one tap with no wallet pop-up.
-- **SKR:** stake in the game vault for 1.25x (1,000 SKR) or 1.5x (10,000 SKR) points. Gear is bought with SKR and sent to the treasury. SKR can't be minted by the game, so there's no token emission.
+- **SKR:** stake in the game vault for 1.25x (1,000 SKR) or 1.5x (10,000 SKR) points. SKR can't be minted by the game, so there's no token emission.
+- **Shop:** 21 cosmetic items (6 pickaxes, 6 helmets, 5 outfits, 4 pets), bought with SKR via `buy_gear`. 50% of each sale (`motherlode_pool_bps`) goes to the Motherlode Pool and the rest to the treasury.
+- **SKR Motherlode:** a 1-in-625 motherlode win also pays `motherlode_skr` (500 SKR) from the pool on `claim`, capped by the pool balance so it can never go insolvent. Anyone can top up the pool with `fund_motherlode`. `npm run setup:devnet` seeds it with `MOTHERLODE_SEED` (default 50,000 test SKR).
 - **Devnet:** uses a mock SKR mint. Real SKR mint: `SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3` (verify decimals and token program before switching).
 
 ## Run it on your Mac
