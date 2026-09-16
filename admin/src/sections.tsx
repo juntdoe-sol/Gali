@@ -1,7 +1,7 @@
 import { useWallet, type AnchorWallet } from '@solana/wallet-adapter-react';
 import { PublicKey } from '@solana/web3.js';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { GEAR, MOTHERLODE_ODDS, SKR_USD } from '../../app/src/game/constants';
+import { GEAR, MOTHERLODE_ODDS, SKR_USD } from './game';
 import type { Data, Notice, Run } from './App';
 import {
   acceptAuthority,
