@@ -39,3 +39,13 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Bounded (managed) - never commit private keys or secrets.
+# Public markers bounded.json and .bounded/app.json ARE safe to commit; everything below is not.
+.bounded/credentials
+.bounded/*.key
+*.key
+*.keypair.json
+.env
+.env.*
+!.env.example
