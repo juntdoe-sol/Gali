@@ -27,7 +27,7 @@ async function scheduleDailyReminder() {
     if (!perm.granted) return;
     await Notifications.cancelAllScheduledNotificationsAsync();
     await Notifications.scheduleNotificationAsync({
-      content: { title: '⛏ Your 30 free digs are back', body: 'The mine reset. Keep your streak alive and strike ore.' },
+      content: { title: '⛏ Your 30 free digs are back', body: 'The mine reset. Keep your streak alive and strike gold.' },
       trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour: 9, minute: 0 },
     });
   } catch {

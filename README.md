@@ -1,6 +1,6 @@
 # Gali
 
-A cartoon 3D mining game for Solana Seeker. Every minute a round opens on a 5x5 mine. Dig blocks for free, strike ore, climb the on-chain leaderboard, and stake SKR to boost your points.
+A cartoon 3D mining game for Solana Seeker. Every minute a round opens on a 5x5 mine. Dig blocks for free, strike gold, climb the on-chain leaderboard, and stake SKR to boost your points.
 
 Built for **CLOCK IN**, the Solana Mobile hackathon by Radiants (submissions close 9 Oct 2026, 14:59 GMT+8).
 

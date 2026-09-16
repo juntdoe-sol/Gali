@@ -345,7 +345,7 @@ function Me() {
         <T style={{ flex: 1 }}>Mute sound</T>
         <Switch id="mute" value={save.muted} onValueChange={setMute} trackColor={{ true: COLORS.teal, false: COLORS.card2 }} />
       </Card>
-      <T v="muted">How it works: each minute is a round on a 5x5 mine. Dig up to 25 blocks for free (30 digs a day). One block strikes ore. Fewer blocks pay more: 1,000 pts for a single block, 40 for all 25. A 1-in-625 motherlode also pays SKR from the Motherlode Pool.</T>
+      <T v="muted">How it works: each minute is a round on a 5x5 mine. Dig up to 25 blocks for free (30 digs a day). One block strikes gold. Fewer blocks pay more: 1,000 pts for a single block, 40 for all 25. A 1-in-625 motherlode also pays SKR from the Motherlode Pool.</T>
       <Pressable onPress={() => Linking.openURL(`https://explorer.solana.com/address/${PROGRAM_ID.toBase58()}?cluster=${CLUSTER}`)}>
         <T v="muted" style={{ textDecorationLine: 'underline' }}>
           Program {short(PROGRAM_ID.toBase58())} on Solana Explorer
