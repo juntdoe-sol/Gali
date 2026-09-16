@@ -50,7 +50,7 @@ export function ResultPop() {
             ) : res.won ? (
               <>
                 <T v="display" style={[styles.rTitle, { color: '#4a1f00' }]}>
-                  STRUCK ORE!
+                  STRUCK GOLD!
                 </T>
                 <T v="display" style={[styles.rBig, { color: '#4a1f00' }]}>
                   +{res.points.toLocaleString()} pts
@@ -66,7 +66,7 @@ export function ResultPop() {
                   Dry rock…
                 </T>
                 <T v="bold" style={{ color: COLORS.muted }}>
-                  Ore was at row {row}, col {col}. Dig again!
+                  Gold was at row {row}, col {col}. Dig again!
                 </T>
               </>
             )}
@@ -159,8 +159,8 @@ export function Busy() {
 }
 
 const STEPS = [
-  { t: 'Dig. Strike ore. Climb.', b: 'Every minute a new round opens on a 5x5 mine. Tap blocks, then hit DIG. You get 30 free digs a day.' },
-  { t: 'Fewer blocks, bigger strike', b: 'One block strikes ore each round. Cover 1 block and win 1,000 pts. Cover all 25 and win 40. Shake your phone to dig 3 random blocks.' },
+  { t: 'Dig. Strike gold. Climb.', b: 'Every minute a new round opens on a 5x5 mine. Tap blocks, then hit DIG. You get 30 free digs a day.' },
+  { t: 'Fewer blocks, bigger strike', b: 'One block strikes gold each round. Cover 1 block and win 1,000 pts. Cover all 25 and win 40. Shake your phone to dig 3 random blocks.' },
   { t: 'Bring your Seeker wallet', b: 'Connect with Mobile Wallet Adapter to dig on Solana. Approve once and a 24h session key makes each dig one tap. Stake SKR for up to 1.5x points.' },
 ];
 
