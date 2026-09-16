@@ -15,6 +15,7 @@ import { Buffer } from 'buffer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { webConnect, webDisconnect, webOwner, webSign } from './webWallet';
+export { listWebWallets, PickWalletError, type WebWalletInfo } from './webWallet';
 import idlJson from './idl.json';
 import deployment from './deployment.json';
 
@@ -204,8 +205,9 @@ async function authorize(wallet: Web3MobileWallet) {
   return new PublicKey(Buffer.from(res.accounts[0].address, 'base64'));
 }
 
-export async function connectWallet(): Promise<PublicKey> {
-  return IS_WEB ? webConnect() : transact(authorize);
+/** `webWallet`: on web, the wallet the player picked from the list. */
+export async function connectWallet(webWallet?: string): Promise<PublicKey> {
+  return IS_WEB ? webConnect(webWallet) : transact(authorize);
 }
 
 export async function disconnectWallet() {

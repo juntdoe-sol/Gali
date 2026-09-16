@@ -35,7 +35,7 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
               </T>
             </Pressable>
           ) : (
-            <Pressable onPress={connect} style={[styles.chip, { borderColor: COLORS.skr }]}>
+            <Pressable onPress={() => void connect()} style={[styles.chip, { borderColor: COLORS.skr }]}>
               <T v="bold" style={{ fontSize: 13, color: COLORS.skr }}>
                 Connect wallet
               </T>
@@ -98,46 +98,40 @@ export function RoundCard() {
   const covered = pending ? pending.mask.toString(2).split('1').length - 1 : 0;
   return (
     <View style={[styles.round, { top: insets.top + 104 }, cave && { borderColor: COLORS.red }]}>
-      <View style={[styles.row, { marginBottom: 2 }]}>
-        <T v="muted">Round #{(roundId % 100000).toLocaleString()}</T>
-        {cave ? <Pill text="⚠ CAVE-IN" color={COLORS.red} /> : <Pill text={`Cave-in in ${CAVE_IN_EVERY - (roundId % CAVE_IN_EVERY)}`} />}
-      </View>
-      {phase === 'mining' ? (
-        <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'center', gap: 8 }}>
-          <T v="display" style={{ fontSize: 40, color: secs <= 5 ? COLORS.red : COLORS.text }}>
-            {Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}
+      <View style={styles.row}>
+        {phase === 'mining' ? (
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6, flexShrink: 1 }}>
+            <T v="display" style={{ fontSize: 26, lineHeight: 30, color: secs <= 5 ? COLORS.red : COLORS.text }}>
+              {Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}
+            </T>
+            <T v="muted" style={{ fontSize: 12, color: locking ? COLORS.red : COLORS.muted }}>
+              {locking ? 'LOCKED' : pending ? `${covered} block${covered > 1 ? 's' : ''} in` : 'to deploy'}
+            </T>
+          </View>
+        ) : (
+          <T v="display" style={{ fontSize: 20, lineHeight: 30, color: COLORS.gold, flexShrink: 1 }} numberOfLines={1}>
+            {phase === 'settling' ? (pending?.onChain ? 'SETTLING…' : 'MINING…') : 'STRIKE!'}
           </T>
-          <T v="muted" style={{ color: locking ? COLORS.red : COLORS.muted }}>
-            {locking ? 'LOCKED' : pending ? `${covered} block${covered > 1 ? 's' : ''} in` : 'to deploy'}
-          </T>
-        </View>
-      ) : (
-        <T v="display" style={{ fontSize: 34, color: COLORS.gold, textAlign: 'center' }}>
-          {phase === 'settling' ? (pending?.onChain ? 'SETTLING ON-CHAIN…' : 'MINING…') : 'STRIKE!'}
+        )}
+        {cave ? (
+          <Pill text={`#${(roundId % 100000).toLocaleString()} · ⚠ CAVE-IN`} color={COLORS.red} />
+        ) : (
+          <Pill text={`#${(roundId % 100000).toLocaleString()} · Cave-in in ${CAVE_IN_EVERY - (roundId % CAVE_IN_EVERY)}`} />
+        )}
+      </View>
+      <Bar pct={phase === 'mining' ? (left / 60000) * 100 : 0} height={5} />
+      <View style={[styles.row, { marginTop: 4 }]}>
+        <T v="bold" style={{ fontSize: 11, color: COLORS.sol }} numberOfLines={1}>
+          ◎ {pot.roundId === roundId ? fmtSol(pot.total) : '0.0'} SOL · {pot.roundId === roundId ? pot.miners : 0} miners
         </T>
-      )}
-      <Bar pct={phase === 'mining' ? (left / 60000) * 100 : 0} />
-      <View style={[styles.row, { marginTop: 5 }]}>
-        <T v="bold" style={{ fontSize: 11, color: COLORS.sol }}>
-          ◎ Pot {pot.roundId === roundId ? fmtSol(pot.total) : '0.0'} SOL · {pot.roundId === roundId ? pot.miners : 0} miners
-        </T>
-        <T v="muted" style={{ fontSize: 11, color: run ? COLORS.teal : COLORS.muted }}>
-          {run ? `Autopilot ${run.total - run.left}/${run.total}` : pending ? `You: ${fmtSol(pending.total)} SOL` : `${ROUND_REWARD_SKR} SKR to mine`}
+        <T v="bold" style={{ fontSize: 11, color: COLORS.teal }} numberOfLines={1}>
+          💎 {pool > 0 ? `${pool.toLocaleString()} SKR` : 'Motherlode'} · 1/625
         </T>
       </View>
-      <View style={[styles.row, { marginTop: 2 }]}>
-        <T v="bold" style={{ fontSize: 11, color: COLORS.teal }}>
-          💎 Motherlode {pool > 0 ? `${pool.toLocaleString()} SKR` : 'SKR pool'}
-        </T>
-        <T v="muted" style={{ fontSize: 11 }}>
-          1 in 625 · 5,000 SKR
-        </T>
-      </View>
-      {pending && boost > 10_000 ? (
-        <T v="bold" style={{ color: COLORS.skr, fontSize: 11, textAlign: 'center', marginTop: 4 }}>
-          SKR boost {boost / 10_000}x active
-        </T>
-      ) : null}
+      <T v="muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 1, color: run ? COLORS.teal : pending && boost > 10_000 ? COLORS.skr : COLORS.muted }} numberOfLines={1}>
+        {run ? `Autopilot ${run.total - run.left}/${run.total}` : pending ? `You: ${fmtSol(pending.total)} SOL` : `${ROUND_REWARD_SKR} SKR to mine`}
+        {pending && boost > 10_000 ? ` · ${boost / 10_000}x SKR boost` : ''}
+      </T>
     </View>
   );
 }
@@ -146,7 +140,7 @@ export function Toasts() {
   const toasts = useGame((s) => s.toasts);
   const insets = useSafeAreaInsets();
   return (
-    <View style={[styles.toasts, { top: insets.top + 210 }]} pointerEvents="none">
+    <View style={[styles.toasts, { top: insets.top + 190 }]} pointerEvents="none">
       {toasts.map((t) => (
         <View
           key={t.id}
@@ -201,9 +195,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(45,34,64,0.94)',
     borderColor: COLORS.line,
     borderWidth: 2,
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    gap: 4,
   },
   toasts: { position: 'absolute', left: 24, right: 24, alignItems: 'center', gap: 6 },
   toast: { backgroundColor: COLORS.card2, borderWidth: 2, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 8, fontFamily: F.bold },

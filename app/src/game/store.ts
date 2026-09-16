@@ -159,6 +159,8 @@ interface GameState {
   levelUp: number | null;
   emote: number;
   gearReveal: string | null;
+  /** web only: wallets to choose from when several are installed */
+  walletPicker: chain.WebWalletInfo[] | null;
 
   boot: () => Promise<void>;
   tick: () => void;
@@ -174,7 +176,8 @@ interface GameState {
   buyGear: (key: string) => Promise<void>;
   stake: (amount: number) => Promise<void>;
   unstake: (amount: number) => Promise<void>;
-  connect: () => Promise<void>;
+  connect: (webWallet?: string) => Promise<void>;
+  closeWalletPicker: () => void;
   disconnect: () => Promise<void>;
   refreshWallet: () => Promise<void>;
   airdrop: () => Promise<void>;
@@ -454,6 +457,7 @@ export const useGame = create<GameState>((set, get) => {
     levelUp: null,
     emote: 0,
     gearReveal: null,
+    walletPicker: null,
 
     boot: async () => {
       const save = rollDay({ ...freshSave(), ...(await loadJson(SAVE_KEY, freshSave())) });
@@ -649,22 +653,26 @@ export const useGame = create<GameState>((set, get) => {
       }
     },
 
-    connect: async () => {
+    connect: async (webWallet?: string) => {
       if (!chain.chainReady) return get().toast('On-chain mode is not deployed yet. Playing practice mode', 'info');
+      set({ walletPicker: null });
       try {
         setWallet({ busy: 'Connecting wallet…' });
-        const owner = await chain.connectWallet();
+        const owner = await chain.connectWallet(typeof webWallet === 'string' ? webWallet : undefined);
         saveJson('gali-owner', { owner: owner.toBase58() }, 0);
         session = await chain.loadSession(owner);
         setWallet({ owner: owner.toBase58() });
         await get().refreshWallet();
         get().toast(`Connected ${chain.short(owner.toBase58())}`, 'good');
       } catch (e) {
-        get().toast(errMsg(e), 'bad');
+        if (e instanceof chain.PickWalletError) set({ walletPicker: e.wallets });
+        else get().toast(errMsg(e), 'bad');
       } finally {
         setWallet({ busy: null });
       }
     },
+
+    closeWalletPicker: () => set({ walletPicker: null }),
 
     disconnect: async () => {
       await chain.disconnectWallet();
