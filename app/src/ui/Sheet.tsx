@@ -8,7 +8,7 @@ import {
 import { GEAR_ICON, ITEM_ICON } from './icons';
 import { useGame, useLevelXp, useOwnedMask, usePoints } from '../game/store';
 import { chainReady, CLUSTER, fetchLeaderboard, fetchPastRounds, PROGRAM_ID, short, SKR_MINT, type LeaderRow, type PastRound } from '../chain/client';
-import { emptyPot, fmtSol, practiceMotherlode, simPot, soloMask } from '../game/pot';
+import { ADMIN_FEE, emptyPot, fmtSol, POT_FEE, practiceMotherlode, simPot, soloMask } from '../game/pot';
 import { UnclaimedRow } from './Dock';
 import { Bar, Btn, Card, Pill, T } from './kit';
 
@@ -271,14 +271,15 @@ function practiceRounds(before: number, n: number): PastRound[] {
     const pot = simPot(id, 1);
     const split = (soloMask(id) & (1 << winning)) === 0;
     const motherlode = Math.floor(h * 1e6) % 625 === 0;
+    const fees = pot.perBlock.reduce((sum, d, i) => sum + d * ADMIN_FEE + (i === winning ? 0 : d * (1 - ADMIN_FEE) * POT_FEE), 0);
     return {
       roundId: id,
       winning,
       pot: {
         ...emptyPot(id),
         ...pot,
-        pool: pot.total * 0.9,
-        fees: pot.total * 0.1,
+        fees,
+        pool: pot.total - fees,
         skrReward: pot.perBlock[winning] > 0 ? ROUND_REWARD_SKR : 0,
         motherlodeSkr: motherlode ? practiceMotherlode(id) : 0,
         motherlode,
