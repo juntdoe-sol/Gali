@@ -45,6 +45,27 @@ describe('gali', () => {
     while ((await chainSecs()) < (r + 1) * ROUND) await sleep(1000);
   };
 
+  const draw = (r: number) => find(Buffer.from('draw'), u64le(r));
+  const roundOf = (r: number) => find(Buffer.from('round'), u64le(r));
+  const lockRound = (r: number) =>
+    program.methods
+      .lockRound(new anchor.BN(r))
+      .accountsStrict({ payer: provider.wallet.publicKey, config, draw: draw(r), round: roundOf(r), systemProgram: SystemProgram.programId })
+      .rpc();
+  const revealRound = (r: number) =>
+    program.methods
+      .revealRound(new anchor.BN(r))
+      .accountsStrict({ payer: provider.wallet.publicKey, config, round: roundOf(r), draw: draw(r), slotHashes: SYSVAR_SLOT_HASHES_PUBKEY, systemProgram: SystemProgram.programId })
+      .rpc();
+  const errOf = async (p: Promise<unknown>) => {
+    try {
+      await p;
+      return '';
+    } catch (e) {
+      return String(e);
+    }
+  };
+
   const player = Keypair.generate();
   const playerPda = find(Buffer.from('player'), player.publicKey.toBuffer());
   let mint: PublicKey;
@@ -58,6 +79,47 @@ describe('gali', () => {
     mint = await createMint(conn, payer, payer.publicKey, null, 6);
     userAta = (await getOrCreateAssociatedTokenAccount(conn, payer, mint, player.publicKey)).address;
     await mintTo(conn, payer, mint, userAta, payer, 20_000_000_000n);
+  });
+
+  const programData = PublicKey.findProgramAddressSync([pid.toBuffer()], new PublicKey('BPFLoaderUpgradeab1e11111111111111111111111'))[0];
+
+  it('only lets the upgrade authority initialise config', async () => {
+    const rando = Keypair.generate();
+    await provider.connection.confirmTransaction(await provider.connection.requestAirdrop(rando.publicKey, LAMPORTS_PER_SOL));
+    const err = await errOf(
+      program.methods
+        .initConfig({
+          roundSecs: ROUND,
+          basePoints: new anchor.BN(40),
+          motherlodePoints: new anchor.BN(10_000),
+          boostTier1: new anchor.BN(1),
+          boostTier2: new anchor.BN(2),
+          gearPrices: [],
+          motherlodeSkr: new anchor.BN(1),
+          motherlodePoolBps: 0,
+          rewardsPoolBps: 0,
+          potFeeBps: 0,
+          minDeploy: new anchor.BN(1),
+          roundRewardSkr: new anchor.BN(0),
+        })
+        .accountsStrict({
+          authority: rando.publicKey,
+          program: pid,
+          programData,
+          config,
+          skrMint: mint,
+          vault,
+          treasury,
+          motherlode,
+          rewards,
+          potVault,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([rando])
+        .rpc(),
+    );
+    expect(err).to.contain('NotUpgradeAuthority');
   });
 
   it('initialises config', async () => {
@@ -78,6 +140,8 @@ describe('gali', () => {
       })
       .accountsStrict({
         authority: provider.wallet.publicKey,
+        program: pid,
+        programData,
         config,
         skrMint: mint,
         vault,
@@ -161,12 +225,21 @@ describe('gali', () => {
     const rivalStake = await acc.stake.fetch(stakeOf(rival.publicKey));
     expect(rivalStake.start[0].toNumber()).to.eq(10_000_000); // after the player's 0.01
 
+    // the draw can't be locked or revealed early, or revealed without a lock
+    expect(await errOf(lockRound(round))).to.contain('RoundNotOver');
     await afterRound(round);
-    const roundPda = find(Buffer.from('round'), u64le(round));
-    await program.methods
-      .revealRound(new anchor.BN(round))
-      .accountsStrict({ payer: provider.wallet.publicKey, config, round: roundPda, slotHashes: SYSVAR_SLOT_HASHES_PUBKEY, systemProgram: SystemProgram.programId })
-      .rpc();
+    expect(await errOf(revealRound(round))).to.contain('AccountNotInitialized');
+    const roundPda = roundOf(round);
+    await lockRound(round);
+    expect(await errOf(lockRound(round))).to.contain('AlreadyLocked'); // no re-roll by re-locking
+    for (let i = 0; !(await provider.connection.getAccountInfo(roundPda)); i++) {
+      const e = await errOf(revealRound(round));
+      if (e && (i > 20 || !e.includes('NoEntropy'))) throw new Error(e); // NoEntropy: locked slot not reached yet
+      if (e) await sleep(300);
+    }
+    expect(await errOf(revealRound(round))).to.match(/already in use|AccountNotInitialized/); // one reveal only
+    expect(await provider.connection.getAccountInfo(draw(round))).to.eq(null); // closed by the reveal
+    expect(await errOf(lockRound(round))).to.contain('AlreadyRevealed');
     const r = await acc.round.fetch(roundPda);
     const rewardsBefore = await skrOf(rewards);
     await program.methods
@@ -323,25 +396,34 @@ describe('gali', () => {
     expect((await skrOf(motherlode)) - before).to.eq(1_000_000_000);
   });
 
-  it('unstakes SKR', async () => {
-    await program.methods
-      .unstakeSkr(new anchor.BN(1_000_000_000))
-      .accountsStrict({
-        owner: player.publicKey,
-        config,
-        player: playerPda,
-        skrMint: mint,
-        userAta,
-        vault,
-        tokenProgram: TOKEN_PROGRAM_ID,
-        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-        systemProgram: SystemProgram.programId,
-      })
-      .signers([player])
-      .rpc();
+  it('keeps staked SKR in place while it boosts the current round, then unstakes', async () => {
+    const unstake = (r: number) =>
+      program.methods
+        .unstakeSkr(new anchor.BN(r), new anchor.BN(1_000_000_000))
+        .accountsStrict({
+          owner: player.publicKey,
+          config,
+          player: playerPda,
+          currentStake: find(Buffer.from('stake'), player.publicKey.toBuffer(), u64le(r)),
+          skrMint: mint,
+          userAta,
+          vault,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([player])
+        .rpc();
+    const round = await deployAs(player, 1_000_000, 0b1100);
+    expect(await errOf(unstake(round))).to.contain('StakeInPlay');
+    expect(await errOf(unstake(round - 1))).to.contain('WrongRound');
+    await afterRound(round);
+    const e = await errOf(unstake(Math.floor((await chainSecs()) / ROUND)));
+    if (e) await unstake(Math.floor((await chainSecs()) / ROUND)); // crossed a round boundary; try again
     const p = await acc.player.fetch(playerPda);
     expect(p.stakedSkr.toNumber()).to.eq(0);
   });
+
   describe('admin', () => {
     const admin = provider.wallet.publicKey;
     const rando = Keypair.generate();

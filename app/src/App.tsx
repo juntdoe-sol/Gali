@@ -4,7 +4,7 @@ import { useFonts } from 'expo-font';
 import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Image, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Image, Platform, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { COLORS } from './game/constants';
 import { watchMotion } from './game/motion';
@@ -17,6 +17,9 @@ import { Busy, GearReveal, LevelUp, Onboarding, ResultPop, WalletPicker } from '
 import { Sheet } from './ui/Sheet';
 
 const Scene = lazy(() => import('./scene/Scene'));
+
+// lets browser tests watch the game state
+if (Platform.OS === 'web') (globalThis as { __gali?: unknown }).__gali = useGame;
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({ shouldPlaySound: false, shouldSetBadge: false, shouldShowBanner: true, shouldShowList: true }),

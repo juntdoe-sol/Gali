@@ -12,6 +12,8 @@ import fs from 'fs';
 import path from 'path';
 import { pda, program, PROGRAM_ID } from './common';
 
+const BPF_UPGRADEABLE_LOADER = new PublicKey('BPFLoaderUpgradeab1e11111111111111111111111');
+
 const DECIMALS = 6;
 // Whole-SKR prices by gear id; keep in sync with app/src/game/constants.ts.
 // Priced at roughly 1 SKR = $0.018 (55 SKR = $1): the cheapest paid item is ~$3.6, the top one ~$270.
@@ -60,7 +62,9 @@ async function main() {
         roundRewardSkr: skr(200), // SKR mined per round: split, or all to one lucky winner
       })
       .accountsStrict({
-        authority: wallet.publicKey,
+        authority: wallet.publicKey, // must be the program's upgrade authority
+        program: PROGRAM_ID,
+        programData: PublicKey.findProgramAddressSync([PROGRAM_ID.toBuffer()], BPF_UPGRADEABLE_LOADER)[0],
         config: pda.config(),
         skrMint: mint,
         vault: pda.vault(),

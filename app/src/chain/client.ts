@@ -14,6 +14,7 @@ import { ed25519 } from '@noble/curves/ed25519.js';
 import { Buffer } from 'buffer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import { ROUND_SECS } from '../game/constants';
 import { webConnect, webDisconnect, webOwner, webSign } from './webWallet';
 export { listWebWallets, PickWalletError, type WebWalletInfo } from './webWallet';
 import idlJson from './idl.json';
@@ -59,6 +60,7 @@ export const pda = {
   round: (r: number) => find(Buffer.from('round'), u64le(r)),
   pot: (r: number) => find(Buffer.from('pot'), u64le(r)),
   stake: (o: PublicKey, r: number) => find(Buffer.from('stake'), o.toBuffer(), u64le(r)),
+  draw: (r: number) => find(Buffer.from('draw'), u64le(r)),
 };
 export const ata = (owner: PublicKey, mint = SKR_MINT) =>
   PublicKey.findProgramAddressSync([owner.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.toBuffer()], ASSOCIATED_TOKEN_PROGRAM_ID)[0];
@@ -302,15 +304,52 @@ export async function sessionDeploy(owner: PublicKey, session: Keypair, roundId:
   return sendWithKey(session, [ix]);
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const errText = (e: unknown) => String((e as { message?: string })?.message ?? e) + JSON.stringify((e as { logs?: unknown })?.logs ?? '');
+
+/**
+ * Reveal a finished round: lock it to a future slot, then reveal once that slot has passed
+ * (usually about a second). Safe to race with other players and the crank.
+ */
+export async function lockAndReveal(payer: Keypair, roundId: number) {
+  const lock = () =>
+    program.methods
+      .lockRound(new BN(roundId))
+      .accountsStrict({ payer: payer.publicKey, config: pda.config, draw: pda.draw(roundId), round: pda.round(roundId), systemProgram: SystemProgram.programId })
+      .instruction()
+      .then((ix) => sendWithKey(payer, [ix]))
+      .catch(() => undefined); // someone else may have locked or revealed it
+  for (let i = 0; i < 20; i++) {
+    if (await fetchRound(roundId)) return;
+    if (!(await connection.getAccountInfo(pda.draw(roundId)))) {
+      await lock();
+      await sleep(900);
+      continue;
+    }
+    try {
+      const ix = await program.methods
+        .revealRound(new BN(roundId))
+        .accountsStrict({
+          payer: payer.publicKey,
+          config: pda.config,
+          round: pda.round(roundId),
+          draw: pda.draw(roundId),
+          slotHashes: SYSVAR_SLOT_HASHES_PUBKEY,
+          systemProgram: SystemProgram.programId,
+        })
+        .instruction();
+      await sendWithKey(payer, [ix]);
+      return;
+    } catch (e) {
+      if (/DrawExpired/.test(errText(e))) await lock();
+      await sleep(600); // the locked slot hasn't passed yet, or someone else revealed
+    }
+  }
+}
+
 /** Reveal if needed, settle the pot if needed, then claim our stake. Returns SOL and SKR paid to the owner. */
 export async function sessionSettlePot(owner: PublicKey, session: Keypair, roundId: number) {
-  if (!(await fetchRound(roundId))) {
-    const revealIx = await program.methods
-      .revealRound(new BN(roundId))
-      .accountsStrict({ payer: session.publicKey, config: pda.config, round: pda.round(roundId), slotHashes: SYSVAR_SLOT_HASHES_PUBKEY, systemProgram: SystemProgram.programId })
-      .instruction();
-    await sendWithKey(session, [revealIx]).catch(() => undefined); // someone else may have revealed
-  }
+  await lockAndReveal(session, roundId);
   const round = await fetchRound(roundId);
   if (!round) throw new Error('round not revealed');
   const ixs: TransactionInstruction[] = [];
@@ -431,22 +470,32 @@ export const stakeSkr = (amount: number) =>
   ]);
 
 export const unstakeSkr = (amount: number) =>
-  sendWithWallet(async (o) => [
-    await program.methods
-      .unstakeSkr(raw(amount))
-      .accountsStrict({
-        owner: o,
-        config: pda.config,
-        player: pda.player(o),
-        skrMint: SKR_MINT,
-        userAta: ata(o),
-        vault: pda.vault,
-        tokenProgram: TOKEN_PROGRAM_ID,
-        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-        systemProgram: SystemProgram.programId,
-      })
-      .instruction(),
-  ]);
+  sendWithWallet(async (o) => {
+    const round = await currentRoundOnChain();
+    return [
+      await program.methods
+        .unstakeSkr(new BN(round), raw(amount))
+        .accountsStrict({
+          owner: o,
+          config: pda.config,
+          player: pda.player(o),
+          currentStake: pda.stake(o, round),
+          skrMint: SKR_MINT,
+          userAta: ata(o),
+          vault: pda.vault,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        })
+        .instruction(),
+    ];
+  });
+
+/** The round the chain is in now (unstaking must name it). */
+async function currentRoundOnChain() {
+  const off = await clockOffsetMs().catch(() => 0);
+  return Math.floor((Date.now() + off) / 1000 / ROUND_SECS);
+}
 
 export const buyGear = (item: number) =>
   sendWithWallet(async (o) => [

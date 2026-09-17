@@ -2,8 +2,8 @@
 //!
 //! * Rounds are derived from the clock: `round_id = unix_ts / round_secs`. No crank needed to open a round.
 //! * Players `deploy` SOL on 1 to 25 blocks of the current round (from their wallet or a session key).
-//! * After a round ends, anyone can `reveal_round`, which fixes the winning block and the 1-in-625
-//!   motherlode. Anyone can then `settle_pot`: the SOL fee goes to the treasury wallet and the round's
+//! * After a round ends, anyone can `lock_round` (fixes a future slot) and, a couple of slots later,
+//!   `reveal_round`, which derives the winning block and the 1-in-625 motherlode from that slot's hash. Anyone can then `settle_pot`: the SOL fee goes to the treasury wallet and the round's
 //!   SKR (the per-round reward, plus the Motherlode on a motherlode round) moves into escrow.
 //! * The round's SKR is paid one of two ways, 50/50 at reveal: split pro rata between everyone on the
 //!   winning block, or all of it to one lucky winner, drawn with odds equal to their share of the SOL on
@@ -19,8 +19,9 @@
 //!   (treasury SKR only; the pools and staked SKR can't be withdrawn), and a two-step authority
 //!   hand-over (`propose_authority` + `accept_authority`).
 //!
-//! Randomness: devnet build uses the most recent SlotHashes entry mixed with the round id.
-//! This is leader-influenceable and must be replaced with a VRF before any mainnet use.
+//! Randomness: `lock_round` commits to a slot that doesn't exist yet; `reveal_round` must use the hash
+//! of the first slot at or after it, so the result can't be re-rolled by retrying or reverting the
+//! reveal. The leader of that slot can still influence it: replace with a VRF before mainnet use.
 
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{hash::hashv, sysvar::slot_hashes};
@@ -39,6 +40,10 @@ pub const MAX_SESSION_SECS: i64 = 7 * SECONDS_PER_DAY;
 pub const MAX_SESSION_FUND: u64 = 1_000_000_000; // 1 SOL
 pub const MAX_GEAR: usize = 32;
 pub const MAX_POT_FEE_BPS: u16 = 2_000;
+/// `lock_round` targets the slot this many slots ahead.
+pub const DRAW_DELAY_SLOTS: u64 = 2;
+/// SlotHashes keeps 512 entries; after this many slots a lock is treated as expired and can be redone.
+pub const DRAW_EXPIRY_SLOTS: u64 = 450;
 
 fn check_config(cfg: &Config) -> Result<()> {
     require!(cfg.round_secs >= 15, GaliError::BadConfig);
@@ -551,17 +556,63 @@ pub mod gali {
         Ok(())
     }
 
-    pub fn reveal_round(ctx: Context<RevealRound>, round_id: u64) -> Result<()> {
+    /// Commit a round's draw to a slot that hasn't happened yet. Anyone may call it once the round ends.
+    /// It can be called again only if the target slot has fallen out of SlotHashes without a reveal.
+    pub fn lock_round(ctx: Context<LockRound>, round_id: u64) -> Result<()> {
         let cfg = &ctx.accounts.config;
-        let now = Clock::get()?.unix_timestamp;
+        let clock = Clock::get()?;
         let round_end = (round_id as i64 + 1) * cfg.round_secs as i64;
-        require!(now >= round_end, GaliError::RoundNotOver);
+        require!(clock.unix_timestamp >= round_end, GaliError::RoundNotOver);
+        require!(
+            ctx.accounts.round.data_is_empty(),
+            GaliError::AlreadyRevealed
+        );
+        let d = &mut ctx.accounts.draw;
+        if d.target_slot != 0 {
+            require!(
+                clock.slot > d.target_slot.saturating_add(DRAW_EXPIRY_SLOTS),
+                GaliError::AlreadyLocked
+            );
+        }
+        d.round_id = round_id;
+        d.target_slot = clock.slot + DRAW_DELAY_SLOTS;
+        d.bump = ctx.bumps.draw;
+        Ok(())
+    }
+
+    pub fn reveal_round(ctx: Context<RevealRound>, round_id: u64) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        let target = ctx.accounts.draw.target_slot;
+        require!(target != 0, GaliError::NotLocked);
 
         // SlotHashes layout: u64 len, then (u64 slot, [u8;32] hash) entries, newest first.
+        // Use the first slot at or after the target (the target itself may have been skipped).
         let data = ctx.accounts.slot_hashes.try_borrow_data()?;
-        require!(data.len() >= 48, GaliError::NoEntropy);
-        let recent = &data[16..48];
-        let seed = hashv(&[recent, &round_id.to_le_bytes(), b"gali"]).to_bytes();
+        require!(data.len() >= 8, GaliError::NoEntropy);
+        let len = u64::from_le_bytes(data[0..8].try_into().unwrap()) as usize;
+        let mut chosen: Option<[u8; 32]> = None;
+        let mut older_seen = false;
+        for i in 0..len {
+            let at = 8 + i * 40;
+            if at + 40 > data.len() {
+                break;
+            }
+            let slot = u64::from_le_bytes(data[at..at + 8].try_into().unwrap());
+            if slot >= target {
+                chosen = Some(data[at + 8..at + 40].try_into().unwrap());
+                if slot == target {
+                    older_seen = true;
+                    break;
+                }
+            } else {
+                older_seen = true;
+                break;
+            }
+        }
+        // no hash yet: the target slot hasn't passed. No older entry: the target has expired.
+        let recent = chosen.ok_or(GaliError::NoEntropy)?;
+        require!(older_seen, GaliError::DrawExpired);
+        let seed = hashv(&[&recent, &round_id.to_le_bytes(), b"gali"]).to_bytes();
         let a = u64::from_le_bytes(seed[0..8].try_into().unwrap());
         let b = u64::from_le_bytes(seed[8..16].try_into().unwrap());
         let c = u64::from_le_bytes(seed[16..24].try_into().unwrap());
@@ -635,7 +686,18 @@ pub mod gali {
         Ok(())
     }
 
-    pub fn unstake_skr(ctx: Context<UnstakeSkr>, amount: u64) -> Result<()> {
+    pub fn unstake_skr(ctx: Context<UnstakeSkr>, round_id: u64, amount: u64) -> Result<()> {
+        // staked SKR boosts the round you're playing, so it stays put until that round ends
+        // (otherwise the same SKR could boost several wallets in one round)
+        let now = Clock::get()?.unix_timestamp;
+        require!(
+            round_id == (now / ctx.accounts.config.round_secs as i64) as u64,
+            GaliError::WrongRound
+        );
+        require!(
+            ctx.accounts.current_stake.data_is_empty(),
+            GaliError::StakeInPlay
+        );
         let p = &mut ctx.accounts.player;
         require!(amount > 0 && amount <= p.staked_skr, GaliError::BadAmount);
         p.staked_skr -= amount;
@@ -826,6 +888,15 @@ pub struct Round {
     pub bump: u8,
 }
 
+/// A round's committed draw slot (closed by `reveal_round`).
+#[account]
+#[derive(InitSpace)]
+pub struct Draw {
+    pub round_id: u64,
+    pub target_slot: u64,
+    pub bump: u8,
+}
+
 /// One per round: SOL on each block (the lamports sit in this account).
 #[account]
 #[derive(InitSpace)]
@@ -868,6 +939,11 @@ pub struct Stake {
 pub struct InitConfig<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
+    /// Only the program's upgrade authority can create the config (no front-running after deploy).
+    #[account(constraint = program.programdata_address()? == Some(program_data.key()) @ GaliError::NotUpgradeAuthority)]
+    pub program: Program<'info, crate::program::Gali>,
+    #[account(constraint = program_data.upgrade_authority_address == Some(authority.key()) @ GaliError::NotUpgradeAuthority)]
+    pub program_data: Account<'info, ProgramData>,
     #[account(init, payer = authority, space = 8 + Config::INIT_SPACE, seeds = [b"config"], bump)]
     pub config: Box<Account<'info, Config>>,
     pub skr_mint: Box<InterfaceAccount<'info, Mint>>,
@@ -1058,9 +1134,32 @@ pub struct RevealRound<'info> {
         seeds = [b"round".as_ref(), round_id.to_le_bytes().as_ref()], bump
     )]
     pub round: Account<'info, Round>,
+    #[account(
+        mut, close = payer,
+        seeds = [b"draw".as_ref(), round_id.to_le_bytes().as_ref()], bump = draw.bump
+    )]
+    pub draw: Account<'info, Draw>,
     /// CHECK: address-constrained to the SlotHashes sysvar; only raw bytes are read.
     #[account(address = slot_hashes::ID)]
     pub slot_hashes: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(round_id: u64)]
+pub struct LockRound<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(seeds = [b"config"], bump = config.bump)]
+    pub config: Account<'info, Config>,
+    #[account(
+        init_if_needed, payer = payer, space = 8 + Draw::INIT_SPACE,
+        seeds = [b"draw".as_ref(), round_id.to_le_bytes().as_ref()], bump
+    )]
+    pub draw: Account<'info, Draw>,
+    /// CHECK: must still be empty (the round isn't revealed); only its data length is read.
+    #[account(seeds = [b"round".as_ref(), round_id.to_le_bytes().as_ref()], bump)]
+    pub round: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
 }
 
@@ -1094,6 +1193,7 @@ pub struct StakeSkr<'info> {
 }
 
 #[derive(Accounts)]
+#[instruction(round_id: u64)]
 pub struct UnstakeSkr<'info> {
     #[account(mut)]
     pub owner: Signer<'info>,
@@ -1101,6 +1201,9 @@ pub struct UnstakeSkr<'info> {
     pub config: Account<'info, Config>,
     #[account(mut, seeds = [b"player", owner.key().as_ref()], bump = player.bump, has_one = owner)]
     pub player: Account<'info, Player>,
+    /// CHECK: the owner's stake for the current round; must not exist. Only its data length is read.
+    #[account(seeds = [b"stake", owner.key().as_ref(), &round_id.to_le_bytes()], bump)]
+    pub current_stake: UncheckedAccount<'info>,
     pub skr_mint: InterfaceAccount<'info, Mint>,
     #[account(
         init_if_needed, payer = owner,
@@ -1269,4 +1372,16 @@ pub enum GaliError {
     Paused,
     #[msg("You already have SOL on that block this round")]
     AlreadyOnBlock,
+    #[msg("This round's draw is already locked")]
+    AlreadyLocked,
+    #[msg("Lock the round before revealing it")]
+    NotLocked,
+    #[msg("The locked slot has expired; lock the round again")]
+    DrawExpired,
+    #[msg("This round is already revealed")]
+    AlreadyRevealed,
+    #[msg("Your staked SKR is boosting this round; unstake after it ends")]
+    StakeInPlay,
+    #[msg("Only the program's upgrade authority can do this")]
+    NotUpgradeAuthority,
 }

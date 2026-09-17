@@ -1,13 +1,13 @@
 /**
- * Keeps rounds moving: once a round ends it reveals it, settles its SOL pot, and pays out
+ * Keeps rounds moving: once a round ends it locks and reveals it, settles its SOL pot, and pays out
  * every stake (winners get SOL + SKR even if their app is closed). All three steps are
  * permissionless; settle_pot still sends the SOL fee to the config authority.
  * Run with any funded wallet: `npm run crank` (RPC_URL and ANCHOR_WALLET are honoured).
  */
 import { BN, utils } from '@coral-xyz/anchor';
 import { ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from '@solana/spl-token';
-import { PublicKey, SystemProgram, SYSVAR_SLOT_HASHES_PUBKEY } from '@solana/web3.js';
-import { pda, program, u64le } from './common';
+import { PublicKey, SystemProgram } from '@solana/web3.js';
+import { lockAndReveal, pda, program, u64le } from './common';
 
 const LOOKBACK = Number(process.env.CRANK_LOOKBACK ?? 5); // also retry this many older rounds
 const STAKE_ROUND_OFFSET = 8 + 32 + 32; // Stake: disc | owner | payer | round_id
@@ -24,28 +24,27 @@ async function main() {
     const pot = await acc.pot.fetchNullable(pda.pot(r));
     if (!pot) return; // nobody deployed
     if (!(await conn.getAccountInfo(pda.round(r)))) {
-      await gali.methods
-        .revealRound(new BN(r))
-        .accountsStrict({ payer: wallet.publicKey, config: pda.config(), round: pda.round(r), slotHashes: SYSVAR_SLOT_HASHES_PUBKEY, systemProgram: SystemProgram.programId })
-        .rpc();
+      await lockAndReveal(gali, wallet.publicKey, r);
       console.log('revealed', r);
     }
-    if (!pot.settled) {
+    if (!(await acc.pot.fetch(pda.pot(r))).settled) {
+      const { authority } = await acc.config.fetch(pda.config()); // may have been handed over
       await gali.methods
         .settlePot(new BN(r))
         .accountsStrict({
           config: pda.config(),
           round: pda.round(r),
           pot: pda.pot(r),
-          feeTo: cfg.authority,
+          feeTo: authority,
           skrMint: cfg.skrMint,
           rewards: pda.rewards(),
           motherlode: pda.motherlode(),
           potVault: pda.potVault(),
           tokenProgram: TOKEN_PROGRAM_ID,
         })
-        .rpc();
-      console.log('settled', r, `${Number(pot.total) / 1e9} SOL`);
+        .rpc()
+        .then(() => console.log('settled', r, `${Number(pot.total) / 1e9} SOL`))
+        .catch((e: unknown) => console.log('settle skip', r, short(e))); // a player's app may have settled first
     }
     const stakes = await acc.stake.all([{ memcmp: { offset: STAKE_ROUND_OFFSET, bytes: utils.bytes.bs58.encode(u64le(r)) } }]);
     for (const { publicKey, account: s } of stakes) {
