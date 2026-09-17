@@ -5,8 +5,6 @@ import { BLOCKS, MOTHERLODE_ACCRUAL_SKR, MOTHERLODE_ODDS, ROUND_REWARD_SKR } fro
 export const ADMIN_FEE = 0.01;
 export const POT_FEE = 0.1;
 export const SOLO_SPOTS = 10;
-/** Share of SOL a spot gives back on average: it wins 1 round in 25. */
-export const AVG_RETURN = (1 - ADMIN_FEE) * (1 / BLOCKS + (1 - POT_FEE) * ((BLOCKS - 1) / BLOCKS));
 export const MIN_SOL_PER_BLOCK = 0.0001;
 export const PRACTICE_SOL = 2;
 export const OPTIMAL_ROUNDS = 10;
@@ -99,32 +97,43 @@ export function soloMask(roundId: number): number {
 /** Practice mode: a stand-in Motherlode Pool that grows each round and resets on a hit. */
 export const practiceMotherlode = (roundId: number) => 1_500 + ((roundId * 7) % MOTHERLODE_ODDS) * MOTHERLODE_ACCRUAL_SKR;
 
-/** SOL a stake gets back after fees (`returned_sol` in the program). */
-export function returnedFor(pot: PotView, win: number, minePerBlock: number, mask: number) {
-  let out = 0;
+/** SOL left for the winning spot's miners if spot `win` strikes: everything minus the fees (settle_pot). */
+export function poolFor(pot: PotView, win: number) {
+  let fees = 0;
   for (let i = 0; i < BLOCKS; i++) {
     const d = pot.perBlock[i];
-    if (!(mask & (1 << i)) || !d) continue;
-    const back = d * (1 - ADMIN_FEE) * (i === win ? 1 : 1 - POT_FEE);
-    out += (minePerBlock / d) * back;
+    if (!d) continue;
+    fees += d * ADMIN_FEE + (i === win ? 0 : d * (1 - ADMIN_FEE) * POT_FEE);
   }
-  return out;
+  return pot.perBlock[win] > 0 ? pot.total - fees : 0;
 }
 
 /**
- * What `claim_pot` credits. SOL: every spot you covered gives back your share after its fees (you
- * never get other miners' SOL). SKR: only the winning spot earns. The round's reward is split by SOL
- * there, or on a solo spot goes whole to one miner (odds = their share, `luckyRoll` in [0, 1)).
- * A motherlode pays out the whole pool (`motherlodeSkr`), always split.
+ * What `claim_pot` credits. SOL: the winning spot's miners split the whole pool (their SOL plus the
+ * losing spots' SOL, minus fees) by their SOL on that spot; losing spots get nothing back.
+ * SKR: the round's reward is split the same way, or on a solo spot goes whole to one miner
+ * (odds = their share, `luckyRoll` in [0, 1)). A motherlode pays out the whole pool (`motherlodeSkr`), always split.
  */
 export function payoutFor(pot: PotView, win: number, minePerBlock: number, mask: number, motherlodeSkr: number, split: boolean, luckyRoll: number) {
-  const sol = returnedFor(pot, win, minePerBlock, mask);
   const mine = mask & (1 << win) ? minePerBlock : 0;
   const onWin = pot.perBlock[win];
-  if (!mine || !onWin) return { sol, skr: 0, skrMotherlode: 0, lucky: false };
+  if (!mine || !onWin) return { sol: 0, skr: 0, skrMotherlode: 0, lucky: false };
   const share = mine / onWin;
   const lucky = !split && luckyRoll < share;
-  return { sol, skr: split ? share * ROUND_REWARD_SKR : lucky ? ROUND_REWARD_SKR : 0, skrMotherlode: share * motherlodeSkr, lucky };
+  return { sol: share * poolFor(pot, win), skr: split ? share * ROUND_REWARD_SKR : lucky ? ROUND_REWARD_SKR : 0, skrMotherlode: share * motherlodeSkr, lucky };
+}
+
+/** Your SOL if a spot you cover strikes: the smallest and largest payout over your spots, given the pot so far (yours included). */
+export function strikeRange(pot: PotView, mask: number, perBlock: number) {
+  let lo = Infinity;
+  let hi = 0;
+  for (let i = 0; i < BLOCKS; i++) {
+    if (!(mask & (1 << i))) continue;
+    const v = (perBlock / pot.perBlock[i]) * poolFor(pot, i);
+    lo = Math.min(lo, v);
+    hi = Math.max(hi, v);
+  }
+  return hi > 0 ? { lo, hi } : null;
 }
 
 export const optimalPerRound = (amount: number) => {

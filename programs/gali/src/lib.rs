@@ -4,10 +4,11 @@
 //! * Players `deploy` SOL on 1 to 25 spots of the current round (from their wallet or a session key).
 //! * After a round ends, anyone can `lock_round` (fixes a future slot) and, a couple of slots later,
 //!   `reveal_round`, which derives the winning spot and the 1-in-625 motherlode from that slot's hash.
-//! * SOL is never moved between players. Each spot pays a 1% admin fee, and every spot except the
-//!   winning one also pays `pot_fee_bps` (10%) of the rest. Everything else goes back to the miners on
-//!   that spot, pro rata. Covering all 25 spots therefore always returns a bit less SOL than it cost:
-//!   the reward for mining is SKR.
+//! * Winners take the losers' SOL. Each spot pays a 1% admin fee, and every losing spot also pays
+//!   `pot_fee_bps` (10%) of the rest. The miners on the winning spot then split everything that is
+//!   left (their own SOL plus the losing spots' SOL), pro rata to their SOL on that spot. Miners on
+//!   losing spots get no SOL back. Covering all 25 spots on your own only gets your SOL back minus fees.
+//!   If nobody is on the winning spot, everything after the admin fee counts as protocol fee.
 //! * SKR per round (`round_reward_skr`) goes to the winning spot. Each round, 10 of the 25 spots are
 //!   "solo spots" (fixed in advance from the round id, see `solo_mask`): if one of them wins, one miner
 //!   takes the whole reward, drawn with odds equal to their share of that spot. Otherwise it is split.
@@ -93,21 +94,6 @@ pub fn spot_fees(d: u64, fee_bps: u16) -> (u64, u64) {
     let admin = (d as u128 * ADMIN_FEE_BPS as u128 / BPS as u128) as u64;
     let prot = ((d - admin) as u128 * fee_bps as u128 / BPS as u128) as u64;
     (admin, prot)
-}
-
-/// Lamports a stake gets back: on each spot, its share of what's left after that spot's fees.
-pub fn returned_sol(stake: &[u64; 25], pot: &[u64; 25], win: usize, fee_bps: u16) -> u64 {
-    let mut out = 0u128;
-    for i in 0..BLOCKS as usize {
-        let (mine, d) = (stake[i], pot[i]);
-        if mine == 0 || d == 0 {
-            continue;
-        }
-        let (admin, prot) = spot_fees(d, fee_bps);
-        let back = d - admin - if i == win { 0 } else { prot };
-        out += mine as u128 * back as u128 / d as u128;
-    }
-    out as u64
 }
 
 /// Adds the refined SKR this balance has earned since it last synced with the refinery.
@@ -461,6 +447,10 @@ pub mod gali {
                 protocol_fee += p;
             }
         }
+        if !has_winners {
+            // nobody to pay: everything after the admin fee goes to the protocol
+            protocol_fee = total - admin_fee;
+        }
         let fee = admin_fee + protocol_fee;
         if fee > 0 {
             **ctx.accounts.pot.to_account_info().try_borrow_mut_lamports()? -= fee;
@@ -561,7 +551,12 @@ pub mod gali {
         let mine = stake.per_block[win] as u128;
         let on_win = pot.per_block[win] as u128;
         let won = mine > 0 && on_win > 0;
-        let sol = returned_sol(&stake.per_block, &pot.per_block, win, pot.fee_bps);
+        // winners split the pool (everything after fees) by their SOL on the winning spot; losers get nothing
+        let sol = if won {
+            (mine * pot.pool as u128 / on_win) as u64
+        } else {
+            0
+        };
         // the Motherlode is always split pro rata; the round's SKR is split, or all to one miner on a solo spot
         let from_motherlode = if won {
             (mine * pot.motherlode_skr as u128 / on_win) as u64
@@ -1097,7 +1092,7 @@ pub struct Pot {
     pub round_id: u64,
     pub per_block: [u64; 25],
     pub total: u64,
-    /// lamports returned to miners after fees (set by `settle_pot`)
+    /// lamports the winning spot's miners split after fees (set by `settle_pot`)
     pub pool: u64,
     /// raw SKR mined this round, and the Motherlode Pool paid out (both escrowed in `pot_vault`)
     pub skr_reward: u64,

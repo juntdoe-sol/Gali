@@ -527,16 +527,6 @@ export async function sessionSettlePot(owner: PublicKey, session: Keypair, round
   // mirror claim_pot's maths from the accounts, in lamports so the lucky draw is exact
   const potRaw = await accounts.pot.fetch(pda.pot(roundId));
   const w = round.winning;
-  const feeBps: number = potRaw.feeBps;
-  let back = 0;
-  for (let i = 0; i < 25; i++) {
-    const m = toNum(stake.perBlock[i]);
-    const d = toNum(potRaw.perBlock[i]);
-    if (!m || !d) continue;
-    const admin = Math.floor(d / 100);
-    const kept = d - admin - (i === w ? 0 : Math.floor(((d - admin) * feeBps) / 10_000));
-    back += Math.floor((m * kept) / d);
-  }
   const mine = toNum(stake.perBlock[w]);
   const start = toNum(stake.start[w]);
   const onWin = toNum(potRaw.perBlock[w]);
@@ -546,7 +536,9 @@ export async function sessionSettlePot(owner: PublicKey, session: Keypair, round
   const lucky = hit && !potRaw.splitReward && idx >= start && idx < start + mine;
   const skrMined = !hit ? 0 : potRaw.splitReward ? (mine * reward) / onWin : lucky ? reward : 0;
   const skrMotherlode = hit ? (mine * fromRaw(potRaw.motherlodeSkr)) / onWin : 0;
-  return { ...round, payout: back / LAMPORTS_PER_SOL, skr: skrMined, skrMotherlode, lucky };
+  // winners split the pool by their SOL on the winning spot; losers get nothing
+  const payout = hit ? Math.floor((mine * toNum(potRaw.pool)) / onWin) / LAMPORTS_PER_SOL : 0;
+  return { ...round, payout, skr: skrMined, skrMotherlode, lucky };
 }
 
 /* ---------- SKR transfers between miners ---------- */
