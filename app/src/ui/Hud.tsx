@@ -6,6 +6,7 @@ import { roundEnd, useGame, useLevelXp, usePoints } from '../game/store';
 import { short } from '../chain/client';
 import { fmtSol } from '../game/pot';
 import { Bar, F, Frame, Pill, T } from './kit';
+import { fx } from '../scene/fx';
 
 export function TopBar({ onMenu }: { onMenu: () => void }) {
   const insets = useSafeAreaInsets();
@@ -98,6 +99,13 @@ export function RoundCard() {
   const covered = pending ? pending.mask.toString(2).split('1').length - 1 : 0;
   return (
     <Frame style={[styles.round, { top: insets.top + 104 }]} glow={cave ? COLORS.red : undefined} radius={12}>
+      <View
+        pointerEvents="none"
+        style={StyleSheet.absoluteFill}
+        onLayout={(e) => {
+          fx.viewTop = insets.top + 104 + e.nativeEvent.layout.height + 10;
+        }}
+      />
       <View style={styles.row}>
         {phase === 'mining' ? (
           <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6, flexShrink: 1 }}>

@@ -15,6 +15,9 @@ export const fx = {
   hits: new Map<number, number>(), // block -> performance.now() of last pickaxe impact
   moleBlock: -1,
   narrow: true,
+  /** screen pixels covered by the HUD above and the deploy panel below; the camera keeps the board between them */
+  viewTop: 215,
+  viewBottom: 150,
 };
 
 /**

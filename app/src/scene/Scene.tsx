@@ -1,5 +1,5 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber/native';
-import { Outlines, RoundedBox, Sparkles } from '@react-three/drei/native';
+import { Outlines, RoundedBox } from '@react-three/drei/native';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { BLOCKS, CAVE_IN_EVERY } from '../game/constants';
@@ -7,12 +7,12 @@ import { useGame } from '../game/store';
 import { play } from '../game/sfx';
 import { blockPos, fx, isDug, revealEl } from './fx';
 import { INK, Toon, toonRamp } from './toon';
-import { MineCart, Miner, Mole } from './Characters';
+import { Miner, Mole } from './Characters';
 import { Site, SITE_TOPS, siteKind } from './Sites';
 
-const DIRT = ['#8a5a3a', '#80532f', '#916140', '#7a5035', '#86583a'];
+const DIRT = ['#6b4429', '#633f26', '#71492d', '#5e3c25', '#68432a'];
 const GOLD = new THREE.Color('#ffc83d');
-const DIM = new THREE.Color('#1c2440');
+const DIM = new THREE.Color('#4a3526');
 const SELECT = new THREE.Color('#ffe08a');
 const DUG = new THREE.Color('#c7f284');
 
@@ -235,151 +235,46 @@ function Burst() {
   );
 }
 
+// clean earth ground: one flat soil plane and a few pebbles and grass tufts well outside the board
 function Cave() {
-  const rocks = useMemo(
+  const bits = useMemo(
     () =>
-      Array.from({ length: 22 }, (_, k) => {
-        const a = (k / 22) * Math.PI * 2;
-        const r = 5.4 + seeded(k) * 1.6;
-        return { p: [Math.cos(a) * r, -0.1 + seeded(k + 3) * 0.5, Math.sin(a) * r] as [number, number, number], s: 0.6 + seeded(k + 9) * 0.9, c: ['#2c3b6b', '#243259', '#35467c'][k % 3] };
+      Array.from({ length: 26 }, (_, k) => {
+        const a = seeded(k + 500) * Math.PI * 2;
+        const r = 4.4 + seeded(k + 600) * 5;
+        return {
+          p: [Math.cos(a) * r, -0.3, Math.sin(a) * r] as [number, number, number],
+          s: 0.5 + seeded(k + 700) * 0.8,
+          grass: k % 3 === 0,
+          r: seeded(k + 800) * 3,
+        };
       }),
     [],
   );
-  const crystals = useMemo(
-    () =>
-      Array.from({ length: 12 }, (_, k) => {
-        const a = (k / 12) * Math.PI * 2 + 0.3;
-        const r = 4.1 + (k % 3) * 0.4;
-        return { p: [Math.cos(a) * r, 0.2, Math.sin(a) * r] as [number, number, number], c: ['#ff5fa2', '#3ee6ff', '#b98bff'][k % 3], s: 0.22 + (k % 4) * 0.07 };
-      }),
-    [],
-  );
-  const cg = useRef<THREE.Group>(null);
-  useFrame((state) => {
-    if (cg.current) cg.current.children.forEach((c, k) => (c.position.y = 0.25 + Math.sin(state.clock.elapsedTime * 1.2 + k) * 0.06));
-  });
   return (
     <>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.62, 0]} receiveShadow>
-        <circleGeometry args={[14, 48]} />
-        <Toon c="#0d1a3a" />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.32, 0]} receiveShadow>
+        <planeGeometry args={[80, 80]} />
+        <meshToonMaterial color="#a57c52" gradientMap={toonRamp} />
       </mesh>
-      {/* octagon arena: stone plinth, gold rim, glowing rune ring */}
-      <mesh position={[0, -0.47, 0]} rotation={[0, Math.PI / 8, 0]} receiveShadow>
-        <cylinderGeometry args={[4.35, 4.6, 0.3, 8]} />
-        <Toon c="#34457a" />
-        <Outlines thickness={0.03} color={INK} />
-      </mesh>
-      <mesh position={[0, -0.315, 0]} rotation={[-Math.PI / 2, 0, Math.PI / 8]} receiveShadow>
-        <circleGeometry args={[4.25, 8]} />
-        <Toon c="#2a3866" />
-      </mesh>
-      <mesh position={[0, -0.3, 0]} rotation={[-Math.PI / 2, 0, Math.PI / 8]}>
-        <ringGeometry args={[4.05, 4.25, 8]} />
-        <Toon c="#c9a24e" e="#ffcf4a" ei={0.25} />
-      </mesh>
-      <RuneRing />
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.305, 0]} receiveShadow>
-        <circleGeometry args={[3.2, 40]} />
-        <Toon c="#24305a" />
-      </mesh>
-      {[-0.18, 0.18].map((o) => (
-        <mesh key={o} position={[3.2, -0.29, -0.55 + o]} rotation={[0, -0.5, 0]}>
-          <boxGeometry args={[2.4, 0.03, 0.04]} />
-          <Toon c="#9aa4b8" />
-        </mesh>
-      ))}
-      {rocks.map((r, k) => (
-        <mesh key={k} position={r.p} scale={r.s} rotation={[k, k * 2, 0]}>
-          <dodecahedronGeometry args={[0.7, 0]} />
-          <Toon c={r.c} />
-          <Outlines thickness={0.03} color={INK} />
-        </mesh>
-      ))}
-      <group ref={cg}>
-        {crystals.map((c, k) => (
-          <mesh key={k} position={c.p} scale={[c.s, c.s * 2, c.s]}>
-            <octahedronGeometry args={[0.5, 0]} />
-            <Toon c={c.c} e={c.c} ei={0.8} />
+      {bits.map((b, k) =>
+        b.grass ? (
+          <group key={k} position={b.p} rotation={[0, b.r, 0]} scale={b.s}>
+            {[-0.06, 0, 0.06].map((x, n) => (
+              <mesh key={n} position={[x, 0.08, 0]} rotation={[0, 0, x * 4]}>
+                <coneGeometry args={[0.035, 0.22, 4]} />
+                <Toon c={n === 1 ? '#7fae4a' : '#6a9a3e'} />
+              </mesh>
+            ))}
+          </group>
+        ) : (
+          <mesh key={k} position={b.p} rotation={[b.r, b.r * 2, 0]} scale={[b.s, b.s * 0.6, b.s]}>
+            <dodecahedronGeometry args={[0.1, 0]} />
+            <Toon c={k % 2 ? '#8a7a68' : '#7a6a5a'} />
           </mesh>
-        ))}
-      </group>
-      {[-1, 1].map((sd) => (
-        <group key={sd} position={[sd * 3.4, -0.3, -3.3]}>
-          <mesh position={[0, 1.3, 0]}>
-            <cylinderGeometry args={[0.2, 0.26, 2.6, 8]} />
-            <Toon c="#3a4d86" />
-            <Outlines thickness={0.02} color={INK} />
-          </mesh>
-          <mesh position={[0, 2.62, 0]}>
-            <cylinderGeometry args={[0.34, 0.2, 0.22, 8]} />
-            <Toon c="#c9a24e" e="#ffcf4a" ei={0.2} />
-            <Outlines thickness={0.015} color={INK} />
-          </mesh>
-          <Flame position={[0, 2.95, 0]} />
-        </group>
-      ))}
-      <mesh position={[0, 2.35, -3.6]}>
-        <boxGeometry args={[6.4, 0.32, 0.3]} />
-        <Toon c="#2f4178" />
-        <Outlines thickness={0.02} color={INK} />
-      </mesh>
-      <mesh position={[0, 2.35, -3.43]}>
-        <boxGeometry args={[6.4, 0.06, 0.02]} />
-        <Toon c="#c9a24e" e="#ffcf4a" ei={0.4} />
-      </mesh>
-      <mesh position={[0, 2.35, -3.42]} rotation={[0, 0, Math.PI / 4]}>
-        <boxGeometry args={[0.36, 0.36, 0.05]} />
-        <Toon c="#3ee6ff" e="#3ee6ff" ei={0.9} />
-        <Outlines thickness={0.015} color={INK} />
-      </mesh>
+        ),
+      )}
     </>
-  );
-}
-
-function RuneRing() {
-  const ref = useRef<THREE.Mesh>(null);
-  useFrame((state) => {
-    const m = ref.current;
-    if (!m) return;
-    const t = state.clock.elapsedTime;
-    m.rotation.z = t * 0.15;
-    const cave = useGame.getState().roundId % CAVE_IN_EVERY === 0;
-    const mat = m.material as THREE.MeshBasicMaterial;
-    mat.color.set(cave ? '#ff4d5e' : '#3ee6ff');
-    mat.opacity = 0.35 + Math.sin(t * 2) * 0.12;
-  });
-  return (
-    <mesh ref={ref} position={[0, -0.298, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-      <ringGeometry args={[3.35, 3.5, 64, 1, 0, Math.PI * 1.85]} />
-      <meshBasicMaterial color="#3ee6ff" transparent opacity={0.4} blending={THREE.AdditiveBlending} depthWrite={false} />
-    </mesh>
-  );
-}
-
-function Flame({ position }: { position: [number, number, number] }) {
-  const outer = useRef<THREE.Mesh>(null);
-  const inner = useRef<THREE.Mesh>(null);
-  const seed = useMemo(() => Math.random() * 10, []);
-  useFrame((state) => {
-    const t = state.clock.elapsedTime + seed;
-    const f = 1 + Math.sin(t * 13) * 0.08 + Math.sin(t * 7.3) * 0.06;
-    outer.current?.scale.set(1, f, 1);
-    inner.current?.scale.set(1, f * 1.05, 1);
-    if (outer.current) outer.current.rotation.y = t * 2;
-  });
-  return (
-    <group position={position}>
-      <mesh ref={outer}>
-        <coneGeometry args={[0.2, 0.55, 7]} />
-        <meshBasicMaterial color="#ff8a2a" transparent opacity={0.9} />
-      </mesh>
-      <mesh ref={inner} position={[0, -0.05, 0]}>
-        <coneGeometry args={[0.1, 0.35, 6]} />
-        <meshBasicMaterial color="#fff2b8" />
-      </mesh>
-      <pointLight intensity={2.2} distance={4.5} color="#ffa64d" />
-    </group>
   );
 }
 
@@ -411,15 +306,27 @@ function FallingRocks() {
   );
 }
 
+// board corners (incl. the tallest props) the camera keeps inside the free band
+const BOARD_PTS = [-2.75, 2.75].flatMap((x) => [-2.75, 2.75].flatMap((z) => [new THREE.Vector3(x, -0.3, z), new THREE.Vector3(x, 0.95, z)]));
+
 function Rig({ tilt }: { tilt: { x: number; y: number } }) {
   const { camera, size } = useThree();
-  const look = useMemo(() => new THREE.Vector3(), []);
+  const look = useMemo(() => new THREE.Vector3(0, 0, 0.35), []);
   const target = useMemo(() => new THREE.Vector3(), []);
+  const pt = useMemo(() => new THREE.Vector3(), []);
+  const dist = useRef(18);
+  const offset = useRef(0);
+  const frames = useRef(0);
   useFrame((state) => {
     const cam = camera as THREE.PerspectiveCamera;
-    const aspect = size.width / size.height;
-    fx.narrow = aspect < 0.8;
-    const dist = aspect < 0.5 ? 23 : aspect < 0.8 ? 20 : 13;
+    const W = size.width;
+    const H = size.height;
+    fx.narrow = W / H < 0.8;
+    const top = Math.min(fx.viewTop, H * 0.45);
+    const bottom = Math.min(fx.viewBottom, H * 0.5);
+    const band = Math.max(120, H - top - bottom);
+    const settle = frames.current++ < 30; // converge fast on the first frames, then glide
+
     const el = revealEl();
     let shake = 0;
     let punch = 0;
@@ -429,18 +336,35 @@ function Rig({ tilt }: { tilt: { x: number; y: number } }) {
       punch = 1 - (el - 2500) / 400;
     }
     const t = state.clock.elapsedTime;
-    target.set(tilt.x * 0.8 + Math.sin(t * 0.2) * 0.2, dist * 0.84 + tilt.y * 0.5, dist * 0.52);
-    if (cam.position.distanceTo(target) > 4) cam.position.copy(target);
-    else cam.position.lerp(target, 0.08);
+    const d = dist.current;
+    target.set(tilt.x * 0.8 + Math.sin(t * 0.2) * 0.2, d * 0.84 + tilt.y * 0.5, d * 0.52);
+    if (settle) cam.position.copy(target);
+    else cam.position.lerp(target, 0.1);
     cam.position.x += (Math.random() - 0.5) * shake;
     cam.position.y += (Math.random() - 0.5) * shake;
-    const fov = THREE.MathUtils.lerp(cam.fov, 40 - punch * 3, 0.2);
-    if (Math.abs(fov - cam.fov) > 0.001) {
-      cam.fov = fov;
-      cam.updateProjectionMatrix();
-    }
-    look.set(0, 0, fx.narrow ? 1.1 : 0.4);
+    cam.fov = THREE.MathUtils.lerp(cam.fov, 40 - punch * 3, 0.2);
+    cam.setViewOffset(W, H, 0, -offset.current, W, H);
+    cam.updateProjectionMatrix();
     cam.lookAt(look);
+    cam.updateMatrixWorld();
+
+    // measure where the board lands on screen and nudge distance and offset toward a snug fit
+    let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
+    for (const p of BOARD_PTS) {
+      pt.copy(p).project(cam);
+      const px = (pt.x + 1) * 0.5 * W;
+      const py = (1 - pt.y) * 0.5 * H;
+      minX = Math.min(minX, px);
+      maxX = Math.max(maxX, px);
+      minY = Math.min(minY, py);
+      maxY = Math.max(maxY, py);
+    }
+    const need = Math.max((maxX - minX) / (W * 0.9), (maxY - minY) / (band * 0.86));
+    if (Number.isFinite(need) && need > 0) {
+      dist.current = THREE.MathUtils.clamp(d * Math.pow(need, settle ? 0.8 : 0.08), 7, 45);
+      const miss = top + band / 2 - (minY + maxY) / 2;
+      offset.current += miss * (settle ? 0.8 : 0.08);
+    }
   });
   return null;
 }
@@ -450,11 +374,11 @@ function Lights() {
   const tint = useMemo(() => new THREE.Color(), []);
   useFrame(() => {
     const cave = useGame.getState().roundId % CAVE_IN_EVERY === 0;
-    if (light.current) light.current.color.lerp(tint.set(cave ? '#ff9a8a' : '#c9d8ff'), 0.05);
+    if (light.current) light.current.color.lerp(tint.set(cave ? '#ff9a8a' : '#fff1dc'), 0.05);
   });
   return (
     <>
-      <hemisphereLight ref={light} args={['#c9d8ff', '#1a2244', 1.2]} />
+      <hemisphereLight ref={light} args={['#fff1dc', '#6b4a2e', 1.25]} />
       <directionalLight
         position={[4, 9, 5]}
         intensity={2.3}
@@ -465,7 +389,7 @@ function Lights() {
         shadow-camera-top={6}
         shadow-camera-bottom={-6}
       />
-      <directionalLight position={[-5, 4, -7]} intensity={1.6} color="#3ee6ff" />
+      <directionalLight position={[-5, 4, -7]} intensity={0.8} color="#ffe2b0" />
       <pointLight position={[0, 2.5, 0]} intensity={3.2} distance={8} color="#ffc98a" />
     </>
   );
@@ -490,8 +414,8 @@ export default function Scene({ tilt }: { tilt: { x: number; y: number } }) {
       camera={{ fov: 40, position: [0, 18, 10] }}
       onCreated={() => setReady(true)}
     >
-      <color attach="background" args={['#070d20']} />
-      <fog attach="fog" args={['#070d20', 20, 36]} />
+      <color attach="background" args={['#7d5c3c']} />
+      <fog attach="fog" args={['#7d5c3c', 22, 44]} />
       <Lights />
       <Rig tilt={tilt} />
       <RevealSounds />
@@ -501,10 +425,7 @@ export default function Scene({ tilt }: { tilt: { x: number; y: number } }) {
       ))}
       <Miner />
       <Mole />
-      <MineCart />
       <FallingRocks />
-      <Sparkles count={40} scale={[10, 4, 10]} position={[0, 1.5, 0]} size={3} speed={0.3} color="#ffd98a" opacity={0.6} />
-      <Sparkles count={30} scale={[12, 5, 12]} position={[0, 2, -1]} size={2.5} speed={0.2} color="#3ee6ff" opacity={0.5} />
     </Canvas>
   );
 }
