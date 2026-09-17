@@ -6,6 +6,7 @@ import { BLOCKS, boostFor, COLORS, pointsFor, ROUND_REWARD_SKR } from '../game/c
 import { watchMotion } from '../game/motion';
 import { fmtSol, maskOf, MIN_SOL_PER_BLOCK, OPTIMAL_ROUNDS, optimalPerRound, smartPick } from '../game/pot';
 import { useGame, type DockTab, type Preset } from '../game/store';
+import { fx } from '../scene/fx';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Btn, F, Gem, T } from './kit';
 
@@ -36,7 +37,12 @@ export function Dock() {
   }, []);
 
   return (
-    <View style={[styles.dock, { paddingBottom: insets.bottom + (compact ? 8 : 10) }]}>
+    <View
+      style={[styles.dock, { paddingBottom: insets.bottom + (compact ? 8 : 10) }]}
+      onLayout={(e) => {
+        fx.viewBottom = e.nativeEvent.layout.height + 10;
+      }}
+    >
       <LinearGradient colors={['#15285a', '#0c1838', '#070d20']} style={[StyleSheet.absoluteFill, styles.dockBg]} />
       <View pointerEvents="none" style={styles.dockLit} />
       <Gem size={10} style={styles.dockGem} />
