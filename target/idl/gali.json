@@ -26,6 +26,15 @@
           "signer": true
         },
         {
+          "name": "program",
+          "docs": [
+            "Only the program's upgrade authority can create the config (no front-running after deploy)."
+          ]
+        },
+        {
+          "name": "program_data"
+        },
+        {
           "name": "config",
           "writable": true
         },
@@ -560,6 +569,49 @@
       ]
     },
     {
+      "name": "lock_round",
+      "docs": [
+        "Commit a round's draw to a slot that hasn't happened yet. Anyone may call it once the round ends.",
+        "It can be called again only if the target slot has fallen out of SlotHashes without a reveal."
+      ],
+      "discriminator": [
+        68,
+        124,
+        43,
+        230,
+        30,
+        44,
+        248,
+        227
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "draw",
+          "writable": true
+        },
+        {
+          "name": "round"
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "round_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "reveal_round",
       "discriminator": [
         146,
@@ -582,6 +634,10 @@
         },
         {
           "name": "round",
+          "writable": true
+        },
+        {
+          "name": "draw",
           "writable": true
         },
         {
@@ -716,6 +772,9 @@
           "writable": true
         },
         {
+          "name": "current_stake"
+        },
+        {
           "name": "skr_mint"
         },
         {
@@ -737,6 +796,10 @@
         }
       ],
       "args": [
+        {
+          "name": "round_id",
+          "type": "u64"
+        },
         {
           "name": "amount",
           "type": "u64"
@@ -811,6 +874,19 @@
         250,
         204,
         130
+      ]
+    },
+    {
+      "name": "Draw",
+      "discriminator": [
+        225,
+        131,
+        41,
+        222,
+        122,
+        20,
+        146,
+        202
       ]
     },
     {
@@ -1125,6 +1201,36 @@
       "code": 6014,
       "name": "AlreadyOnBlock",
       "msg": "You already have SOL on that block this round"
+    },
+    {
+      "code": 6015,
+      "name": "AlreadyLocked",
+      "msg": "This round's draw is already locked"
+    },
+    {
+      "code": 6016,
+      "name": "NotLocked",
+      "msg": "Lock the round before revealing it"
+    },
+    {
+      "code": 6017,
+      "name": "DrawExpired",
+      "msg": "The locked slot has expired; lock the round again"
+    },
+    {
+      "code": 6018,
+      "name": "AlreadyRevealed",
+      "msg": "This round is already revealed"
+    },
+    {
+      "code": 6019,
+      "name": "StakeInPlay",
+      "msg": "Your staked SKR is boosting this round; unstake after it ends"
+    },
+    {
+      "code": 6020,
+      "name": "NotUpgradeAuthority",
+      "msg": "Only the program's upgrade authority can do this"
     }
   ],
   "types": [
@@ -1440,6 +1546,29 @@
           }
         ],
         "kind": "struct"
+      }
+    },
+    {
+      "name": "Draw",
+      "docs": [
+        "A round's committed draw slot (closed by `reveal_round`)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "target_slot",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
       }
     },
     {

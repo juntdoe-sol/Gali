@@ -21,17 +21,25 @@ Built for **CLOCK IN**, the Solana Mobile hackathon by Radiants (submissions clo
 
 - **Rounds:** `round_id = unix_time / 60`. No crank opens rounds.
 - **Deploy:** put SOL on 1 to 25 blocks with `deploy` (min 0.0001 SOL per block). You can deploy again in the same round on other blocks.
-- **Reveal:** after a round ends, anyone can call `reveal_round`. The devnet build mixes the latest SlotHashes entry with the round id. **Validators can influence this; swap in a VRF (Switchboard or ORAO) before mainnet.**
+- **Reveal:** after a round ends, anyone calls `lock_round`, which commits the draw to a slot 2 slots in the future. About a second later anyone calls `reveal_round`, which must use that slot's hash (or the next one if it was skipped). The result is fixed before anyone can see it, so it can't be re-rolled by retrying or reverting a reveal. The app, the crank and the admin page all do both steps. **The leader of that slot can still influence it; swap in a VRF (Switchboard or ORAO) before mainnet.**
 - **Deploy rule:** each player can put SOL on a given block once per round (the app deploys once per round anyway). This keeps the lucky draw exact.
 - **Settle:** anyone calls `settle_pot`. 10% of the SOL pot goes to the treasury wallet (config authority). 200 SKR from the Rewards Pool (plus 5,000 SKR from the Motherlode Pool on a 1-in-625 motherlode) moves into escrow. If nobody covered the winning block, the whole pot is fee and no SKR moves.
 - **Claim:** anyone calls `claim_pot` for a stake. The owner gets `their SOL on the gold block / all SOL on it` of the SOL pool, plus points (`40 x 25 / blocks covered`, +10,000 on a motherlode, x1.25 or x1.5 with staked SKR).
 - **The round's SKR:** decided 50/50 at reveal. Either it is split like the SOL, or one lucky winner takes all of it. The lucky winner is the owner of a random lamport on the gold block, so the odds equal your share of the SOL there.
 - **Session keys:** the wallet approves one `set_session` transaction that also funds a device key (up to 1 SOL). The app then deploys and settles every round without pop-ups. LITE spreads a budget over rounds; PRO has 4 presets, All/Smart block picking and a round count.
-- **SKR:** Gali never mints SKR. Gear sales (21 items, 200 to 15,000 SKR) go 30% Motherlode Pool, 40% Rewards Pool, 30% treasury. Anyone can top up with `fund_motherlode` / `fund_rewards`. Staking 5,000 / 50,000 SKR boosts points. Prices assume 1 SKR ≈ $0.018. At 200 SKR a round the Rewards Pool pays out 288,000 SKR a day, so it needs top-ups until gear sales catch up.
-- **Admin:** the config authority can `update_config` (fee capped at 20%, pool shares at 100%), `set_paused` (blocks new deploys and gear sales; settling, claiming and unstaking keep working), `withdraw_treasury` (treasury SKR only; pools and staked SKR have no withdraw path) and hand over admin in two steps (`propose_authority`, `accept_authority`). Use a multisig as the authority before real money.
+- **SKR:** Gali never mints SKR. Gear sales (21 items, 200 to 15,000 SKR) go 30% Motherlode Pool, 40% Rewards Pool, 30% treasury. Anyone can top up with `fund_motherlode` / `fund_rewards`. Staking 5,000 / 50,000 SKR boosts points. Staked SKR can't be unstaked while it boosts the current round, so the same SKR can't boost several wallets in one round. Prices assume 1 SKR ≈ $0.018. At 200 SKR a round the Rewards Pool pays out 288,000 SKR a day, so it needs top-ups until gear sales catch up.
+- **Admin:** only the program's upgrade authority can create the config (`init_config`). The config authority can `update_config` (fee capped at 20%, pool shares at 100%), `set_paused` (blocks new deploys and gear sales; settling, claiming and unstaking keep working), `withdraw_treasury` (treasury SKR only; pools and staked SKR have no withdraw path) and hand over admin in two steps (`propose_authority`, `accept_authority`). Use a multisig as the authority before real money.
 - **Chat + tips:** messages are signed by the player's session key; the edge function checks the signature against the on-chain Player account. Tips are plain SPL transfers from the wallet, then posted to the room with the transaction signature, which the server verifies.
 - **Devnet:** uses a mock SKR mint. Real SKR mint: `SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3` (verify decimals and token program before switching).
 - **Chance:** winners split losers' SOL, so this is a game of chance. A real-money launch needs age gating and a legal review per market.
+
+## Known limitations (devnet build)
+
+- Randomness is slot-hash based (see Reveal). Use a VRF before real money.
+- Leftovers stay in program accounts: each round's pot rent, lamports lost to rounding, SKR rounding dust, and SKR escrowed for a lucky winner who never claims (the crank claims for everyone, so this needs the crank to be down). There is no sweep instruction yet.
+- If the admin wallet holds almost no SOL, a settlement whose fee is below the rent-exempt minimum fails until the wallet is funded. Keep the admin wallet funded.
+- The admin can change the pot fee (max 20%) and the SKR reward while a round is open. Use a multisig and a published change policy before real money.
+- The SKR mint must not charge transfer fees.
 
 ## Run it on your Mac
 
@@ -63,7 +71,7 @@ npx ts-node scripts/faucet.ts <tester-wallet> 50000   # send test SKR
 
 To rebuild the program yourself: `anchor build` (Anchor 0.31.1, Solana 2.1.21). `Cargo.lock` is pinned so it builds with Solana's Rust 1.79.
 
-Tests: `anchor test --provider.cluster localnet` (or start `solana-test-validator` and run `node scripts/run-tests.cjs` with `ANCHOR_PROVIDER_URL` and `ANCHOR_WALLET` set). 15 tests cover rounds, both SKR payout modes, sessions, gear, pools, staking and every admin control.
+Tests: `anchor test --provider.cluster localnet` (or start `solana-test-validator` and run `node scripts/run-tests.cjs` with `ANCHOR_PROVIDER_URL` and `ANCHOR_WALLET` set). 16 tests cover rounds, both SKR payout modes, the lock-then-reveal draw, sessions, gear, pools, staking (including the in-round unstake lock) and every admin control. The local validator must load the program as upgradeable (`--upgradeable-program <id> target/deploy/gali.so <wallet>`), since `init_config` checks the upgrade authority.
 
 ### 2. Android app
 

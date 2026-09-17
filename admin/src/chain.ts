@@ -14,7 +14,7 @@ export const CLUSTER = import.meta.env.VITE_CLUSTER ?? 'devnet';
 export const connection = new Connection(RPC_URL, 'confirmed');
 export const PROGRAM_ID = new PublicKey(idlJson.address);
 
-const readOnly = { publicKey: Keypair.generate().publicKey, signTransaction: async <T,>(t: T) => t, signAllTransactions: async <T,>(t: T[]) => t };
+const readOnly = { publicKey: Keypair.generate().publicKey, signTransaction: async <T>(t: T) => t, signAllTransactions: async <T>(t: T[]) => t };
 export const programFor = (wallet?: AnchorWallet | null) =>
   new Program(idlJson as Idl, new AnchorProvider(connection, (wallet ?? readOnly) as AnchorWallet, { commitment: 'confirmed' }));
 const reader = programFor();
@@ -38,6 +38,7 @@ export const pda = {
   potVault: find(enc('pot_vault')),
   round: (r: number) => find(enc('round'), u64le(r)),
   pot: (r: number) => find(enc('pot'), u64le(r)),
+  draw: (r: number) => find(enc('draw'), u64le(r)),
 };
 
 /* ---------- reads ---------- */
@@ -205,7 +206,7 @@ export interface ConfigChange {
 
 export async function updateConfig(wallet: AnchorWallet, cfg: Config, ch: ConfigChange) {
   const d = cfg.decimals;
-  const opt = <T,>(v: T | undefined) => (v === undefined ? null : v);
+  const opt = <T>(v: T | undefined) => (v === undefined ? null : v);
   const bps = (pct?: number) => (pct === undefined ? null : Math.round(pct * 100));
   return programFor(wallet)
     .methods.updateConfig({
@@ -240,7 +241,14 @@ export async function withdrawTreasury(wallet: AnchorWallet, cfg: Config, owner:
   const pre: TransactionInstruction[] = [createAssociatedTokenAccountIdempotentInstruction(wallet.publicKey, dest, owner, cfg.skrMint)];
   return programFor(wallet)
     .methods.withdrawTreasury(raw(amount, cfg.decimals))
-    .accountsStrict({ authority: wallet.publicKey, config: pda.config, skrMint: cfg.skrMint, treasury: pda.treasury, destination: dest, tokenProgram: TOKEN_PROGRAM_ID })
+    .accountsStrict({
+      authority: wallet.publicKey,
+      config: pda.config,
+      skrMint: cfg.skrMint,
+      treasury: pda.treasury,
+      destination: dest,
+      tokenProgram: TOKEN_PROGRAM_ID,
+    })
     .preInstructions(pre)
     .rpc();
 }
@@ -251,26 +259,39 @@ export async function fundPool(wallet: AnchorWallet, cfg: Config, pool: 'rewards
   const p = programFor(wallet);
   const common = { funder: wallet.publicKey, config: pda.config, skrMint: cfg.skrMint, funderAta, tokenProgram: TOKEN_PROGRAM_ID };
   return pool === 'rewards'
-    ? p.methods.fundRewards(raw(amount, cfg.decimals)).accountsStrict({ ...common, rewards: pda.rewards }).rpc()
-    : p.methods.fundMotherlode(raw(amount, cfg.decimals)).accountsStrict({ ...common, motherlode: pda.motherlode }).rpc();
+    ? p.methods
+        .fundRewards(raw(amount, cfg.decimals))
+        .accountsStrict({ ...common, rewards: pda.rewards })
+        .rpc()
+    : p.methods
+        .fundMotherlode(raw(amount, cfg.decimals))
+        .accountsStrict({ ...common, motherlode: pda.motherlode })
+        .rpc();
 }
 
 export const walletSkr = (cfg: Config, owner: PublicKey) => tokenBalance(getAssociatedTokenAddressSync(cfg.skrMint, owner));
 
-/** Reveal (if needed) and settle a finished round's pot. Anyone may do this; the SOL fee still goes to the authority. */
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Reveal (if needed) and settle a finished round's pot. Anyone may do this; the SOL fee still goes to the authority.
+ * Revealing takes two transactions: lock the round to a future slot, then reveal once that slot has passed.
+ */
 export async function revealAndSettle(wallet: AnchorWallet, cfg: Config, roundId: number) {
   const p = programFor(wallet);
-  const ixs: TransactionInstruction[] = [];
-  if (!(await roundRevealed(roundId)))
-    ixs.push(
-      await p.methods
-        .revealRound(new BN(roundId))
-        .accountsStrict({ payer: wallet.publicKey, config: pda.config, round: pda.round(roundId), slotHashes: SYSVAR_SLOT_HASHES_PUBKEY, systemProgram: SystemProgram.programId })
-        .instruction(),
-    );
-  return p.methods
-    .settlePot(new BN(roundId))
-    .accountsStrict({
+  const lock = () =>
+    p.methods
+      .lockRound(new BN(roundId))
+      .accountsStrict({
+        payer: wallet.publicKey,
+        config: pda.config,
+        draw: pda.draw(roundId),
+        round: pda.round(roundId),
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+  const settle = () =>
+    p.methods.settlePot(new BN(roundId)).accountsStrict({
       config: pda.config,
       round: pda.round(roundId),
       pot: pda.pot(roundId),
@@ -280,9 +301,32 @@ export async function revealAndSettle(wallet: AnchorWallet, cfg: Config, roundId
       motherlode: pda.motherlode,
       potVault: pda.potVault,
       tokenProgram: TOKEN_PROGRAM_ID,
+    });
+  if (await roundRevealed(roundId)) return settle().rpc();
+  if (!(await connection.getAccountInfo(pda.draw(roundId)))) await lock();
+  const reveal = await p.methods
+    .revealRound(new BN(roundId))
+    .accountsStrict({
+      payer: wallet.publicKey,
+      config: pda.config,
+      round: pda.round(roundId),
+      draw: pda.draw(roundId),
+      slotHashes: SYSVAR_SLOT_HASHES_PUBKEY,
+      systemProgram: SystemProgram.programId,
     })
-    .preInstructions(ixs)
-    .rpc();
+    .instruction();
+  let last: unknown;
+  for (let i = 0; i < 8; i++) {
+    await sleep(900); // wait for the locked slot to pass
+    if (await roundRevealed(roundId)) return settle().rpc();
+    try {
+      return await settle().preInstructions([reveal]).rpc();
+    } catch (e) {
+      last = e;
+      if (/DrawExpired/.test(String(e))) await lock();
+    }
+  }
+  throw last;
 }
 
 export const explorerTx = (sig: string) => `https://explorer.solana.com/tx/${sig}?cluster=${CLUSTER === 'mainnet-beta' ? '' : CLUSTER}`;

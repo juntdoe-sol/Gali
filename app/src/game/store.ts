@@ -197,6 +197,7 @@ interface GameState {
 }
 
 let toastId = 1;
+let lastClockSync = Date.now();
 let session: Keypair | null = null;
 const chainNow = (offset: number) => Date.now() + offset;
 const roundOf = (t: number) => Math.floor(t / 1000 / ROUND_SECS);
@@ -205,6 +206,7 @@ const errMsg = (e: unknown) => {
   const m = String((e as Error)?.message ?? e);
   if (/RoundLocked/.test(m)) return 'Round is locking. Try next round';
   if (/AlreadyOnBlock/.test(m)) return 'You already have SOL on one of those blocks this round';
+  if (/StakeInPlay/.test(m)) return 'Your staked SKR is boosting this round. Unstake after it ends';
   if (/Paused/.test(m)) return 'Gali is paused for maintenance. Try again soon';
   if (/insufficient|0x1\b/i.test(m)) return 'Not enough balance';
   if (/declined|cancel|rejected/i.test(m)) return 'Cancelled in wallet';
@@ -418,6 +420,7 @@ export const useGame = create<GameState>((set, get) => {
         updateSave((sv) => ({ ...sv, practiceSol: sv.practiceSol - total }));
       }
     } catch (e) {
+      console.warn('[gali] deploy failed', e);
       return stop(errMsg(e));
     }
     setWallet({ busy: null });
@@ -483,6 +486,14 @@ export const useGame = create<GameState>((set, get) => {
 
     tick: () => {
       const st = get();
+      // re-sync with the chain clock now and then (device clocks drift; so can the chain's)
+      if (chain.chainReady && Date.now() - lastClockSync > 30_000) {
+        lastClockSync = Date.now();
+        chain
+          .clockOffsetMs()
+          .then((o) => set({ offsetMs: o }))
+          .catch(() => undefined);
+      }
       const now = chainNow(st.offsetMs);
       const rid = roundOf(now);
       if (st.phase === 'mining' && rid > st.roundId) {

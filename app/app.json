@@ -7,18 +7,18 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
-    "backgroundColor": "#1b1426",
+    "backgroundColor": "#070d20",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#1b1426"
+      "backgroundColor": "#070d20"
     },
     "android": {
       "package": "trade.aeonian.gali",
       "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#1b1426"
+        "backgroundColor": "#070d20"
       },
       "permissions": ["VIBRATE", "POST_NOTIFICATIONS"],
       "edgeToEdgeEnabled": true,
@@ -26,7 +26,7 @@
     },
     "plugins": [
       ["expo-build-properties", { "android": { "minSdkVersion": 26, "enableProguardInReleaseBuilds": false } }],
-      ["expo-notifications", { "color": "#ffc83d" }],
+      ["expo-notifications", { "color": "#ffcf4a" }],
       "expo-font",
       "expo-audio"
     ]

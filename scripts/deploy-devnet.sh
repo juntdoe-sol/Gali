@@ -33,6 +33,15 @@ echo "Balance: $BAL SOL"
 
 if solana program show "$PROGRAM_ID" -u "$RPC" -k "$WALLET" >/dev/null 2>&1; then
   say "Program already on devnet: upgrading it"
+  # newer CLIs grow the program account by themselves; older ones need an explicit extend
+  if ! solana program deploy --help | grep -q -- --no-auto-extend; then
+    CUR=$(solana program show "$PROGRAM_ID" -u "$RPC" -k "$WALLET" | awk '/Data Length/ {print $3}')
+    NEED=$(wc -c < "$SO" | tr -d ' ')
+    if [ -n "$CUR" ] && [ "$NEED" -gt "$CUR" ]; then
+      say "Growing the program account by $((NEED - CUR)) bytes"
+      solana program extend "$PROGRAM_ID" $((NEED - CUR)) -u "$RPC" -k "$WALLET"
+    fi
+  fi
 else
   say "Deploying the program (costs about 4.2 SOL of rent, kept in the program account)"
   awk "BEGIN {exit !($BAL < 4.5)}" && die "Need about 4.5 devnet SOL. Get some at https://faucet.solana.com then run this again."
