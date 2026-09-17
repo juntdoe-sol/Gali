@@ -4,9 +4,9 @@ import { Pressable, StyleSheet, Text, View, type StyleProp, type TextStyle, type
 import { COLORS } from '../game/constants';
 import { haptic } from '../game/sfx';
 
-// Pixelify Sans for titles, numbers and buttons; Chakra Petch for everything else.
+// Jersey 15 (a pixel font with clear digits) for titles, numbers and buttons; Chakra Petch for everything else.
 export const F = {
-  display: 'PixelifySans_700Bold',
+  display: 'Jersey15_400Regular',
   body: 'ChakraPetch_500Medium',
   bold: 'ChakraPetch_600SemiBold',
   black: 'ChakraPetch_700Bold',
