@@ -21,8 +21,14 @@ async function main() {
   const short = (e: unknown) => String((e as Error).message ?? e).slice(0, 90);
 
   async function handle(r: number) {
-    const pot = await acc.pot.fetchNullable(pda.pot(r));
-    if (!pot) return; // nobody deployed
+    const info = await conn.getAccountInfo(pda.pot(r));
+    if (!info) return; // nobody deployed
+    if (info.data.length < acc.pot.size) {
+      // a round from before the payout upgrade: this program version can't settle or claim it
+      console.log('round', r, 'skip: old-format pot (finish it with the pre-upgrade crank)');
+      return;
+    }
+    const pot = gali.coder.accounts.decode('Pot', info.data);
     if (!(await conn.getAccountInfo(pda.round(r)))) {
       await lockAndReveal(gali, wallet.publicKey, r);
       console.log('revealed', r);
