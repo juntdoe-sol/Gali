@@ -28,23 +28,25 @@ export interface RoundResult {
 }
 
 export interface Preset {
-  amount: string; // SOL per round
+  amount: string; // older saves: SOL per round (no longer used)
+  perSpot?: string; // SOL on each spot, like the amount per block on other mining boards
   blocks: 'manual' | 'all' | 'smart';
   smartN: number;
   rounds: number;
 }
 const defaultPresets = (): Preset[] => [
-  { amount: '0.01', blocks: 'manual', smartN: 5, rounds: 1 },
-  { amount: '0.025', blocks: 'smart', smartN: 5, rounds: 5 },
-  { amount: '0.05', blocks: 'smart', smartN: 10, rounds: 10 },
-  { amount: '0.1', blocks: 'all', smartN: 25, rounds: 20 },
+  { amount: '', perSpot: '0.001', blocks: 'manual', smartN: 5, rounds: 1 },
+  { amount: '', perSpot: '0.001', blocks: 'smart', smartN: 5, rounds: 5 },
+  { amount: '', perSpot: '0.0005', blocks: 'smart', smartN: 10, rounds: 10 },
+  { amount: '', perSpot: '0.0002', blocks: 'all', smartN: 25, rounds: 20 },
 ];
 
 export type DockTab = 'lite' | 'pro';
 
 export interface Run {
   kind: 'lite' | 'pro';
-  perRound: number; // SOL
+  perRound: number; // SOL (LITE: spread over the spots)
+  perSpot?: number; // PRO: fixed SOL on each spot
   blocks: Preset['blocks'];
   smartN: number;
   manualMask: number;
@@ -408,7 +410,7 @@ export const useGame = create<GameState>((set, get) => {
       get().toast(msg, 'bad');
     };
     if (!idx.length) return stop('Pick spots on the map first');
-    const perBlock = Math.floor((run.perRound / idx.length) * 1e9) / 1e9;
+    const perBlock = run.perSpot ?? Math.floor((run.perRound / idx.length) * 1e9) / 1e9;
     if (perBlock < MIN_SOL_PER_BLOCK) return stop(`Minimum is ${MIN_SOL_PER_BLOCK} SOL per spot`);
     const mask = maskOf(idx);
     const total = perBlock * idx.length;

@@ -619,6 +619,50 @@
       ]
     },
     {
+      "name": "close_round",
+      "docs": [
+        "Permissionless, a day after the round ends and once every stake is claimed: closes the round's",
+        "Pot and Round accounts and returns their rent (plus any rounding dust in the pot) to whoever paid it."
+      ],
+      "discriminator": [
+        149,
+        14,
+        81,
+        88,
+        230,
+        226,
+        234,
+        37
+      ],
+      "accounts": [
+        {
+          "name": "config"
+        },
+        {
+          "name": "pot",
+          "writable": true
+        },
+        {
+          "name": "round",
+          "writable": true
+        },
+        {
+          "name": "pot_rent_payer",
+          "writable": true
+        },
+        {
+          "name": "round_rent_payer",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "round_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "fund_rewards",
       "docs": [
         "Anyone (team, sponsors, partners) can add SKR to the Rewards Pool that pays miners each round."
@@ -1235,6 +1279,19 @@
     },
     {
       "discriminator": [
+        45,
+        243,
+        28,
+        22,
+        132,
+        70,
+        175,
+        226
+      ],
+      "name": "RoundClosed"
+    },
+    {
+      "discriminator": [
         217,
         40,
         191,
@@ -1383,6 +1440,16 @@
       "code": 6021,
       "name": "NothingToClaim",
       "msg": "Nothing to claim yet"
+    },
+    {
+      "code": 6022,
+      "name": "TooEarly",
+      "msg": "Too early to close this round"
+    },
+    {
+      "code": 6023,
+      "name": "UnclaimedStakes",
+      "msg": "Some stakes in this round are not claimed yet"
     }
   ],
   "types": [
@@ -2010,6 +2077,20 @@
               "stakes on the winning spot claimed so far"
             ],
             "type": "u32"
+          },
+          {
+            "name": "rent_payer",
+            "docs": [
+              "paid this account's rent (the round's first deployer); refunded by `close_round`"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "claimed",
+            "docs": [
+              "stakes claimed so far (all of them: `claimed == miners`)"
+            ],
+            "type": "u32"
           }
         ]
       }
@@ -2228,8 +2309,27 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "rent_payer",
+            "docs": [
+              "paid this account's rent; refunded by `close_round`"
+            ],
+            "type": "pubkey"
           }
         ]
+      }
+    },
+    {
+      "name": "RoundClosed",
+      "type": {
+        "fields": [
+          {
+            "name": "round_id",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
       }
     },
     {

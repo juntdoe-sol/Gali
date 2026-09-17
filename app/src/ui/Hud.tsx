@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Image, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CAVE_IN_EVERY, COLORS, LOCK_MS, levelFromXp, xpForLevel } from '../game/constants';
@@ -84,6 +85,24 @@ function Stat({ icon, color, value, label }: { icon: string; color: string; valu
   );
 }
 
+const compact = (v: number) => (v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e4 ? `${(v / 1e3).toFixed(1)}K` : Math.floor(v).toLocaleString());
+
+function BigStat({ icon, value, label, color }: { icon?: ReactNode; value: string; label: string; color: string }) {
+  return (
+    <View style={styles.bigStat}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+        {icon}
+        <T v="display" numberOfLines={1} style={{ fontSize: 26, lineHeight: 30, color }}>
+          {value}
+        </T>
+      </View>
+      <T v="bold" numberOfLines={1} style={{ fontSize: 10, letterSpacing: 1, color: COLORS.muted }}>
+        {label}
+      </T>
+    </View>
+  );
+}
+
 export function RoundCard() {
   const insets = useSafeAreaInsets();
   const roundId = useGame((s) => s.roundId);
@@ -112,38 +131,41 @@ export function RoundCard() {
           fx.viewTop = insets.top + 104 + e.nativeEvent.layout.height + 10;
         }}
       />
-      <View style={styles.row}>
-        {phase === 'mining' ? (
-          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6, flexShrink: 1 }}>
-            <T v="display" style={{ fontSize: 26, lineHeight: 30, color: secs <= 5 ? COLORS.red : COLORS.gold }}>
-              {Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}
-            </T>
-            <T v="muted" style={{ fontSize: 12, color: locking ? COLORS.red : COLORS.muted }}>
-              {locking ? 'LOCKED' : pending ? `${covered} spot${covered > 1 ? 's' : ''} in` : 'to deploy'}
-            </T>
-          </View>
-        ) : (
-          <T v="display" style={{ fontSize: 20, lineHeight: 30, color: COLORS.gold, flexShrink: 1 }} numberOfLines={1}>
-            {phase === 'settling' ? (pending?.onChain ? 'SETTLING…' : 'MINING…') : 'STRIKE!'}
-          </T>
-        )}
-        {cave ? (
-          <Pill text={`#${(roundId % 100000).toLocaleString()} · ⚠ CAVE-IN`} color={COLORS.red} />
-        ) : (
-          <Pill text={`#${(roundId % 100000).toLocaleString()} · Cave-in in ${CAVE_IN_EVERY - (roundId % CAVE_IN_EVERY)}`} />
-        )}
+      <View style={styles.stats}>
+        <BigStat
+          icon={<T v="black" style={{ fontSize: 18, color: COLORS.sol }}>◎</T>}
+          value={live ? fmtSol(pot.total, pot.total < 1 ? 4 : 2) : '0'}
+          label="DEPLOYED"
+          color={COLORS.text}
+        />
+        <View style={styles.divider} />
+        <BigStat icon={<T v="black" style={{ fontSize: 18, color: COLORS.gold }}>◈</T>} value={compact(pool)} label="MOTHERLODE" color={COLORS.gold} />
+        <View style={styles.divider} />
+        <BigStat
+          value={
+            phase === 'mining'
+              ? `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`
+              : phase === 'settling'
+                ? pending?.onChain
+                  ? 'SETTLING'
+                  : 'MINING'
+                : 'STRIKE!'
+          }
+          label={locking ? 'LOCKED' : 'TIME'}
+          color={phase !== 'mining' ? COLORS.gold : secs <= 5 || locking ? COLORS.red : COLORS.text}
+        />
       </View>
-      <Bar pct={phase === 'mining' ? (left / 60000) * 100 : 0} height={5} />
+      <Bar pct={phase === 'mining' ? (left / 60000) * 100 : 0} height={4} />
       <View style={[styles.row, { marginTop: 4 }]}>
-        <T v="bold" style={{ fontSize: 11, color: COLORS.sol }} numberOfLines={1}>
-          ◎ {live ? fmtSol(pot.total) : '0.0'} SOL deployed · {miners} miner{miners === 1 ? '' : 's'}
+        <T v="bold" style={{ fontSize: 11, color: cave ? COLORS.red : COLORS.muted }} numberOfLines={1}>
+          #{(roundId % 100000).toLocaleString()} · {cave ? '⚠ CAVE-IN' : `Cave-in in ${CAVE_IN_EVERY - (roundId % CAVE_IN_EVERY)}`}
         </T>
-        <T v="bold" style={{ fontSize: 11, color: COLORS.teal }} numberOfLines={1}>
-          💎 Motherlode {Math.floor(pool).toLocaleString()} SKR
+        <T v="bold" style={{ fontSize: 11, color: COLORS.muted }} numberOfLines={1}>
+          {pending ? `You: ${covered} spot${covered > 1 ? 's' : ''} · ${fmtSol(pending.total)} SOL` : `${fmtSkr(reward)} SKR to mine · 1/625`}
         </T>
       </View>
       <T v="muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 1, color: run ? COLORS.teal : pending && boost > 10_000 ? COLORS.skr : COLORS.muted }} numberOfLines={1}>
-        {run ? `Autopilot ${run.total - run.left}/${run.total}` : pending ? `You: ${fmtSol(pending.total)} SOL` : `👥 ${here} on the map · ${fmtSkr(reward)} SKR to mine · motherlode 1/625`}
+        {run ? `Autopilot ${run.total - run.left}/${run.total} · ` : ''}⛏ {miners} miner{miners === 1 ? '' : 's'} this round · 👥 {here} on the map
         {pending && boost > 10_000 ? ` · ${boost / 10_000}x SKR boost` : ''}
       </T>
     </Frame>
@@ -175,6 +197,9 @@ export function Toasts() {
 const styles = StyleSheet.create({
   top: { position: 'absolute', left: 0, right: 0, paddingHorizontal: 12 },
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  stats: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
+  bigStat: { flex: 1, alignItems: 'center', gap: 1 },
+  divider: { width: 1, alignSelf: 'stretch', marginVertical: 4, backgroundColor: COLORS.line },
   logo: { width: 104, height: 46 },
   chip: {
     flexDirection: 'row',

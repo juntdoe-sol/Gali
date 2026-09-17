@@ -60,6 +60,8 @@ pub const MAX_DRIP_BPS: u16 = 100;
 pub const REFINING_FEE_BPS: u64 = 1_000;
 /// Fixed-point scale for the refinery's per-SKR accumulator.
 pub const FACTOR_SCALE: u128 = 1_000_000_000_000;
+/// Round and pot accounts can be closed (rent back to whoever paid it) this long after the round ends.
+pub const CLOSE_AFTER_SECS: i64 = SECONDS_PER_DAY;
 pub const CLAIM_SOL: u8 = 1;
 pub const CLAIM_SKR: u8 = 2;
 /// Taken from every spot, win or lose (sent to the treasury wallet).
@@ -378,6 +380,7 @@ pub mod gali {
         if pot.round_id == 0 && pot.total == 0 {
             pot.round_id = round_id;
             pot.bump = ctx.bumps.pot;
+            pot.rent_payer = signer;
         }
         let boost = boost_bps(cfg, ctx.accounts.player.staked_skr);
         let st = &mut ctx.accounts.stake;
@@ -596,6 +599,7 @@ pub mod gali {
         }
         {
             let pot = &mut ctx.accounts.pot;
+            pot.claimed = pot.claimed.saturating_add(1);
             if won {
                 pot.winners_paid = pot.winners_paid.saturating_add(1);
             }
@@ -709,6 +713,20 @@ pub mod gali {
         Ok(())
     }
 
+    /// Permissionless, a day after the round ends and once every stake is claimed: closes the round's
+    /// Pot and Round accounts and returns their rent (plus any rounding dust in the pot) to whoever paid it.
+    pub fn close_round(ctx: Context<CloseRound>, round_id: u64) -> Result<()> {
+        let cfg = &ctx.accounts.config;
+        let now = Clock::get()?.unix_timestamp;
+        let round_end = (round_id as i64 + 1) * cfg.round_secs as i64;
+        require!(now >= round_end + CLOSE_AFTER_SECS, GaliError::TooEarly);
+        let pot = &ctx.accounts.pot;
+        require!(pot.settled, GaliError::NotSettled);
+        require!(pot.claimed >= pot.miners, GaliError::UnclaimedStakes);
+        emit!(RoundClosed { round_id });
+        Ok(())
+    }
+
     /// Anyone (team, sponsors, partners) can add SKR to the Rewards Pool that pays miners each round.
     pub fn fund_rewards(ctx: Context<FundRewards>, amount: u64) -> Result<()> {
         require!(amount > 0, GaliError::BadAmount);
@@ -802,6 +820,7 @@ pub mod gali {
         r.lucky = d;
         r.revealed_at = now;
         r.bump = ctx.bumps.round;
+        r.rent_payer = ctx.accounts.payer.key();
         emit!(Revealed {
             round_id,
             winning_block: r.winning_block,
@@ -1074,6 +1093,8 @@ pub struct Round {
     pub lucky: u64,
     pub revealed_at: i64,
     pub bump: u8,
+    /// paid this account's rent; refunded by `close_round`
+    pub rent_payer: Pubkey,
 }
 
 /// A round's committed draw slot (closed by `reveal_round`).
@@ -1112,6 +1133,10 @@ pub struct Pot {
     pub winner: Pubkey,
     /// stakes on the winning spot claimed so far
     pub winners_paid: u32,
+    /// paid this account's rent (the round's first deployer); refunded by `close_round`
+    pub rent_payer: Pubkey,
+    /// stakes claimed so far (all of them: `claimed == miners`)
+    pub claimed: u32,
 }
 
 /// One per player: SOL and SKR credited by `claim_pot`, waiting for `claim_rewards`.
@@ -1334,6 +1359,29 @@ pub struct ClaimPot<'info> {
 }
 
 #[derive(Accounts)]
+#[instruction(round_id: u64)]
+pub struct CloseRound<'info> {
+    #[account(seeds = [b"config"], bump = config.bump)]
+    pub config: Box<Account<'info, Config>>,
+    #[account(
+        mut, close = pot_rent_payer,
+        seeds = [b"pot".as_ref(), round_id.to_le_bytes().as_ref()], bump = pot.bump
+    )]
+    pub pot: Box<Account<'info, Pot>>,
+    #[account(
+        mut, close = round_rent_payer,
+        seeds = [b"round".as_ref(), round_id.to_le_bytes().as_ref()], bump = round.bump
+    )]
+    pub round: Box<Account<'info, Round>>,
+    /// CHECK: rent refund destination, pinned to the pot's payer
+    #[account(mut, address = pot.rent_payer)]
+    pub pot_rent_payer: UncheckedAccount<'info>,
+    /// CHECK: rent refund destination, pinned to the round's payer
+    #[account(mut, address = round.rent_payer)]
+    pub round_rent_payer: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
 pub struct ClaimRewards<'info> {
     /// the player's wallet or their active session key (pays for the SKR account if it's missing)
     #[account(mut)]
@@ -1543,6 +1591,11 @@ pub struct PotClaimed {
 }
 
 #[event]
+pub struct RoundClosed {
+    pub round_id: u64,
+}
+
+#[event]
 pub struct BuybackMarked {
     pub lamports: u64,
     pub due: u64,
@@ -1657,4 +1710,8 @@ pub enum GaliError {
     NotUpgradeAuthority,
     #[msg("Nothing to claim yet")]
     NothingToClaim,
+    #[msg("Too early to close this round")]
+    TooEarly,
+    #[msg("Some stakes in this round are not claimed yet")]
+    UnclaimedStakes,
 }

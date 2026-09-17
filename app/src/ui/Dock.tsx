@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { chainReady, REFINING_FEE } from '../chain/client';
 import { BLOCKS, boostFor, COLORS, pointsFor, ROUND_REWARD_SKR } from '../game/constants';
 import { watchMotion } from '../game/motion';
-import { addToPot, fmtSol, maskOf, strikeRange, MIN_SOL_PER_BLOCK, OPTIMAL_ROUNDS, optimalPerRound, smartPick, soloMask } from '../game/pot';
+import { addToPot, fmtSol, maskOf, strikeRange, MIN_SOL_PER_BLOCK, OPTIMAL_ROUNDS, optimalPerSpot, smartPick, soloMask } from '../game/pot';
 import { useGame, type DockTab, type Preset } from '../game/store';
 import { fx } from '../pixel/fx';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -219,7 +219,7 @@ function BalanceRow({ onHalf, onAll }: { onHalf: () => void; onAll: () => void }
   );
 }
 
-function AmountBox({ value, onChange, hint }: { value: string; onChange: (v: string) => void; hint: string }) {
+function AmountBox({ value, onChange, hint, suffix }: { value: string; onChange: (v: string) => void; hint: string; suffix?: string }) {
   return (
     <View style={styles.amount}>
       <View style={styles.token}>
@@ -244,6 +244,11 @@ function AmountBox({ value, onChange, hint }: { value: string; onChange: (v: str
           numberOfLines={1}
         />
       </View>
+      {suffix ? (
+        <T v="bold" style={{ marginLeft: 8, fontSize: 12, color: COLORS.muted }}>
+          {suffix}
+        </T>
+      ) : null}
     </View>
   );
 }
@@ -272,22 +277,23 @@ function LitePanel({ compact }: { compact: boolean }) {
   const { balance } = useBalance();
   const startRun = useGame((s) => s.startRun);
   const [amount, setAmount] = useState('');
-  const [perRound, setPerRound] = useState<string | null>(null); // null = Optimal
+  const [perSpot, setPerSpot] = useState<string | null>(null); // null = Optimal
   const total = Number(amount) || 0;
-  const per = perRound === null ? optimalPerRound(total) : Number(perRound) || 0;
+  const spot = perSpot === null ? optimalPerSpot(total) : Number(perSpot) || 0;
+  const per = spot * BLOCKS; // SOL a round
   const rounds = total > 0 && per > 0 ? Math.floor(total / per + 1e-9) : 0;
-  const perBlockOk = per / BLOCKS >= MIN_SOL_PER_BLOCK;
+  const perBlockOk = spot >= MIN_SOL_PER_BLOCK;
   const enough = total <= balance + 1e-9;
   const ready = total > 0 && rounds > 0 && perBlockOk && enough;
   const ALL = (1 << BLOCKS) - 1;
-  const potWith = usePotWith(ALL, per / BLOCKS);
-  const range = potWith ? strikeRange(potWith, ALL, per / BLOCKS) : null;
+  const potWith = usePotWith(ALL, spot);
+  const range = potWith ? strikeRange(potWith, ALL, spot) : null;
   const label = !total
     ? 'ENTER AMOUNT'
     : !enough
       ? 'NOT ENOUGH SOL'
       : !perBlockOk
-        ? `MIN ${MIN_SOL_PER_BLOCK * BLOCKS} SOL A ROUND`
+        ? `MIN ${MIN_SOL_PER_BLOCK} SOL PER SPOT`
         : `DEPLOY ${rounds} ROUND${rounds > 1 ? 'S' : ''}`;
   return (
     <>
@@ -297,17 +303,17 @@ function LitePanel({ compact }: { compact: boolean }) {
           <AmountBox value={amount} onChange={setAmount} hint="Total SOL to deploy" />
           <Row
             icon="🪙"
-            label="Per round"
-            info={`How much SOL goes in each round, spread across all 25 spots so you are always on the gold spot and share the SKR it mines (up to ${ROUND_REWARD_SKR} a round). Optimal splits your amount over ${OPTIMAL_ROUNDS} rounds.`}
+            label="Per spot"
+            info={`SOL on each of the 25 spots every round (${fmtSol(per)} SOL a round), so you are always on the gold spot. Optimal spreads your amount over ${OPTIMAL_ROUNDS} rounds. Minimum ${MIN_SOL_PER_BLOCK} SOL a spot.`}
             right={
               <>
-                <Chip label="Optimal" on={perRound === null} onPress={() => setPerRound(null)} />
+                <Chip label="Optimal" on={perSpot === null} onPress={() => setPerSpot(null)} />
                 <TextInput
-                  value={perRound === null ? (per ? fmtSol(per) : '0') : perRound}
-                  onChangeText={(t) => setPerRound(t.replace(',', '.').replace(/[^0-9.]/g, ''))}
+                  value={perSpot === null ? (spot ? fmtSol(spot, 5) : '0') : perSpot}
+                  onChangeText={(t) => setPerSpot(t.replace(',', '.').replace(/[^0-9.]/g, ''))}
                   keyboardType="decimal-pad"
                   style={styles.small}
-                  accessibilityLabel="SOL per round"
+                  accessibilityLabel="SOL per spot"
                 />
               </>
             }
@@ -338,8 +344,8 @@ function LitePanel({ compact }: { compact: boolean }) {
       <RunButton
         ready={ready}
         label={label}
-        sub={ready ? `${fmtSol(per)} SOL a round on all 25 spots · always on the gold spot · SOL + SKR` : undefined}
-        onStart={() => void startRun({ kind: 'lite', perRound: per, blocks: 'all', smartN: BLOCKS, manualMask: 0, total: rounds })}
+        sub={ready ? `${fmtSol(spot, 5)} SOL × 25 spots = ${fmtSol(per)} SOL a round · always on the gold spot` : undefined}
+        onStart={() => void startRun({ kind: 'lite', perRound: per, perSpot: spot, blocks: 'all', smartN: BLOCKS, manualMask: 0, total: rounds })}
       />
     </>
   );
@@ -357,7 +363,9 @@ function ProPanel({ compact }: { compact: boolean }) {
   const run = useGame((s) => s.run);
   const { choosePreset, editPreset, startRun, selectAll, clearSelection } = useGame.getState();
   const p: Preset = presets[idx] ?? presets[0];
-  const per = Number(p.amount) || 0;
+  // amount per spot, like other mining boards; older presets stored SOL per round
+  const perSpotStr = p.perSpot ?? '0.001';
+  const perSpotIn = Number(perSpotStr) || 0;
 
   const pickSmart = () => {
     const n = selected.length || p.smartN || 5;
@@ -370,7 +378,8 @@ function ProPanel({ compact }: { compact: boolean }) {
   };
 
   const blocks = p.blocks === 'all' ? BLOCKS : p.blocks === 'smart' ? p.smartN : selected.length;
-  const perBlock = blocks ? per / blocks : 0;
+  const perBlock = blocks ? perSpotIn : 0;
+  const per = perBlock * blocks; // SOL a round
   const need = per * p.rounds;
   const enough = need <= balance + 1e-9;
   const ready = blocks > 0 && per > 0 && perBlock >= MIN_SOL_PER_BLOCK && enough && !pending;
@@ -406,10 +415,10 @@ function ProPanel({ compact }: { compact: boolean }) {
             ))}
           </View>
           <BalanceRow
-            onHalf={() => editPreset({ amount: trim((balance - RESERVE) / 2 / Math.max(1, p.rounds)) })}
-            onAll={() => editPreset({ amount: trim((balance - RESERVE) / Math.max(1, p.rounds)) })}
+            onHalf={() => editPreset({ perSpot: trim((balance - RESERVE) / 2 / Math.max(1, p.rounds) / Math.max(1, blocks)) })}
+            onAll={() => editPreset({ perSpot: trim((balance - RESERVE) / Math.max(1, p.rounds) / Math.max(1, blocks)) })}
           />
-          <AmountBox value={p.amount} onChange={(v) => editPreset({ amount: v })} hint="SOL per round" />
+          <AmountBox value={perSpotStr} onChange={(v) => editPreset({ perSpot: v })} hint="SOL per spot" suffix="per spot" />
           <Row
             icon="▦"
             label="Spots"
@@ -460,11 +469,12 @@ function ProPanel({ compact }: { compact: boolean }) {
       <RunButton
         ready={ready}
         label={label}
-        sub={ready ? `${fmtSol(perBlock, 5)} SOL a spot · if one strikes: ${fmtRange(proRange)} SOL` : undefined}
+        sub={ready ? `${fmtSol(perBlock, 5)} SOL × ${blocks} spot${blocks > 1 ? 's' : ''} · if one strikes: ${fmtRange(proRange)} SOL` : undefined}
         onStart={() =>
           void startRun({
             kind: 'pro',
             perRound: per,
+            perSpot: perBlock,
             blocks: p.blocks,
             smartN: p.smartN,
             manualMask: maskOf(selected),
