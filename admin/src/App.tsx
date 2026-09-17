@@ -22,25 +22,56 @@ export interface Notice {
 const TABS = ['Overview', 'Money', 'Settings', 'Rounds', 'Players', 'Chat'] as const;
 type Tab = (typeof TABS)[number];
 
+const EMPTY_BAL: Balances = { treasury: 0, rewards: 0, motherlode: 0, potEscrow: 0, staked: 0, authoritySol: 0 };
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Retry reads the public RPC rejects with 429, backing off 1 s, 2 s, 4 s. */
+async function retry<T>(f: () => Promise<T>): Promise<T> {
+  for (let i = 0; ; i++) {
+    try {
+      return await f();
+    } catch (e) {
+      if (i >= 3 || !/429|rate limit/i.test(String((e as Error).message ?? e))) throw e;
+      await pause(1000 * 2 ** i);
+    }
+  }
+}
+
 export function App() {
   const wallet = useAnchorWallet();
   const { publicKey } = useWallet();
   const [tab, setTab] = useState<Tab>(() => (TABS.find((t) => `#${t.toLowerCase()}` === location.hash) ?? 'Overview'));
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [warn, setWarn] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const cfg = await fetchConfig();
+      // settings first, so the page works even when the public RPC rate-limits the heavier reads
+      const cfg = await retry(fetchConfig);
       if (!cfg) throw new Error('Gali is not set up on this cluster yet. Run npm run setup:devnet first.');
-      const [bal, pots, players] = await Promise.all([fetchBalances(cfg.authority), fetchPots(cfg.decimals), fetchPlayers(cfg.decimals)]);
-      setData({ cfg, bal, pots, players, loadedAt: Date.now() });
+      setData((d) => (d ? { ...d, cfg } : { cfg, bal: EMPTY_BAL, pots: [], players: [], loadedAt: Date.now() }));
       setError(null);
+      const bal = await retry(() => fetchBalances(cfg.authority));
+      setData((d) => d && { ...d, bal });
+      const pots = await retry(() => fetchPots(cfg.decimals));
+      setData((d) => d && { ...d, pots });
+      const players = await retry(() => fetchPlayers(cfg.decimals));
+      setData((d) => d && { ...d, players, loadedAt: Date.now() });
+      setWarn(null);
     } catch (e) {
-      setError(String((e as Error).message ?? e));
+      const msg = String((e as Error).message ?? e);
+      const limited = /429|rate limit/i.test(msg);
+      const text = limited
+        ? `The public devnet RPC is rate-limiting this page, so some numbers may be missing or old. Use your own RPC: stop the page and run  VITE_RPC_URL=<your devnet RPC URL> npm run dev`
+        : msg;
+      setData((d) => {
+        if (!d) setError(text);
+        else setWarn(text);
+        return d;
+      });
     } finally {
       setLoading(false);
     }
@@ -48,7 +79,9 @@ export function App() {
 
   useEffect(() => {
     void load();
-    const id = setInterval(() => void load(), 30_000);
+    const id = setInterval(() => {
+      if (document.visibilityState === 'visible') void load();
+    }, 60_000);
     return () => clearInterval(id);
   }, [load]);
 
@@ -135,6 +168,7 @@ export function App() {
 
       <main>
         {error ? <div className="card err">{error}</div> : null}
+        {warn ? <div className="card warn">{warn}</div> : null}
         {!data && !error ? <div className="card">Loading Gali from {CLUSTER}…</div> : null}
         {data ? (
           <>
@@ -147,7 +181,7 @@ export function App() {
           </>
         ) : null}
       </main>
-      <footer>Updated {data ? new Date(data.loadedAt).toLocaleTimeString() : '…'} · refreshes every 30 s</footer>
+      <footer>Updated {data ? new Date(data.loadedAt).toLocaleTimeString() : '…'} · refreshes every 60 s</footer>
     </div>
   );
 }
