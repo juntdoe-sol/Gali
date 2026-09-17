@@ -4,7 +4,7 @@ import { CAVE_IN_EVERY, COLORS, ROUND_REWARD_SKR, LOCK_MS, levelFromXp, xpForLev
 import { chainReady } from '../chain/client';
 import { roundEnd, useGame, useLevelXp, usePoints } from '../game/store';
 import { short } from '../chain/client';
-import { fmtSol } from '../game/pot';
+import { fmtSol, practiceMotherlode } from '../game/pot';
 import { Bar, F, Frame, Pill, T } from './kit';
 import { fx } from '../pixel/fx';
 import { useMinersHere } from './World';
@@ -90,7 +90,7 @@ export function RoundCard() {
   const phase = useGame((s) => s.phase);
   const pending = useGame((s) => s.pending);
   const boost = useGame((s) => s.pending?.boostBps ?? 10_000);
-  const pool = useGame((s) => s.wallet.pool);
+  const pool = useGame((s) => (s.wallet.owner && chainReady ? s.wallet.pool : practiceMotherlode(s.roundId)));
   const pot = useGame((s) => s.pot);
   const run = useGame((s) => s.run);
   const here = useMinersHere();
@@ -135,7 +135,7 @@ export function RoundCard() {
           ◎ {pot.roundId === roundId ? fmtSol(pot.total) : '0.0'} SOL · {pot.roundId === roundId ? pot.miners : 0} miners
         </T>
         <T v="bold" style={{ fontSize: 11, color: COLORS.teal }} numberOfLines={1}>
-          💎 {pool > 0 ? `${pool.toLocaleString()} SKR` : 'Motherlode'} · 1/625
+          💎 {pool > 0 ? `${Math.floor(pool).toLocaleString()} SKR` : 'Motherlode'} · 1/625
         </T>
       </View>
       <T v="muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 1, color: run ? COLORS.teal : pending && boost > 10_000 ? COLORS.skr : COLORS.muted }} numberOfLines={1}>

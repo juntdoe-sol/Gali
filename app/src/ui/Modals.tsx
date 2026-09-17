@@ -66,12 +66,12 @@ export function ResultPop() {
                   Dry rock…
                 </T>
                 {res.solIn ? (
-                  <T v="display" style={{ fontSize: 22, color: COLORS.red }}>
-                    −{fmtSol(res.solIn)} SOL
+                  <T v="display" style={{ fontSize: 22, color: COLORS.text }}>
+                    {fmtSol(res.solOut)} of {fmtSol(res.solIn)} SOL back
                   </T>
                 ) : null}
                 <T v="bold" style={{ color: COLORS.muted }}>
-                  Gold was at row {row}, col {col}. Next round!
+                  No SKR this time: gold was at row {row}, col {col}.
                 </T>
               </>
             )}
@@ -88,20 +88,20 @@ function SolLine({ res, dark, big }: { res: RoundResult; dark: boolean; big?: bo
   return (
     <View style={{ alignItems: 'center' }}>
       <T v="display" style={{ fontSize: big ? 40 : 26, lineHeight: big ? 46 : 30, color: dark ? '#0b5a3a' : '#c8ffe6' }}>
-        +{fmtSol(res.solOut)} SOL
+        {fmtSol(res.solOut)} SOL back
       </T>
       {res.skrMined ? (
         <T v="display" style={{ fontSize: big ? 24 : 18, color: dark ? '#3d5a00' : '#eaffc4' }}>
-          {res.lucky ? '🍀 ' : ''}+{res.skrMined.toLocaleString(undefined, { maximumFractionDigits: 2 })} SKR {res.lucky ? 'lucky winner!' : 'mined'}
+          {res.lucky ? '★ ' : ''}+{res.skrMined.toLocaleString(undefined, { maximumFractionDigits: 2 })} SKR {res.lucky ? 'solo winner!' : 'mined'}
         </T>
       ) : res.won && res.split === false ? (
         <T v="bold" style={{ fontSize: 12, color: dark ? '#3d5a00' : '#eaffc4' }}>
-          Lucky draw round: another miner took the SKR
+          ★ Solo spot: another miner took the SKR
         </T>
       ) : null}
       <T v="bold" style={{ fontSize: 12, color: dark ? '#6b3a00' : '#fff' }}>
-        in {fmtSol(res.solIn)} · net {net >= 0 ? '+' : '−'}
-        {fmtSol(Math.abs(net))} SOL
+        in {fmtSol(res.solIn)} · fees {net >= 0 ? '+' : '−'}
+        {fmtSol(Math.abs(net))} SOL · added to Unclaimed
       </T>
     </View>
   );

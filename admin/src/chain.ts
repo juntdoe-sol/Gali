@@ -132,6 +132,8 @@ export interface PotRow {
   settled: boolean;
   motherlode: boolean;
   splitReward: boolean;
+  motherlodePaid: number;
+  winner: string | null;
 }
 export async function fetchPots(decimals: number): Promise<PotRow[]> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -141,12 +143,14 @@ export async function fetchPots(decimals: number): Promise<PotRow[]> {
       roundId: num(p.roundId),
       totalSol: sol(p.total),
       poolSol: sol(p.pool),
-      feeSol: p.settled ? sol(p.total) - sol(p.pool) : 0,
+      feeSol: p.settled ? sol(p.adminFee) + sol(p.protocolFee) : 0,
       skrReward: num(p.skrReward) / 10 ** decimals,
       miners: p.miners,
       settled: p.settled,
       motherlode: p.motherlode,
       splitReward: p.splitReward,
+      motherlodePaid: num(p.motherlodeSkr) / 10 ** decimals,
+      winner: p.winner.equals(PublicKey.default) ? null : p.winner.toBase58(),
     }))
     .sort((a, b) => b.roundId - a.roundId);
 }

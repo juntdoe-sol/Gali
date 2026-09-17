@@ -54,12 +54,12 @@ async function main() {
         boostTier2: skr(50_000), // ~$900 staked: 1.5x points
         // item ids match app/src/game/constants.ts GEAR ids
         gearPrices: GEAR_PRICES.map(skr),
-        motherlodeSkr: skr(5_000), // ~$90 per motherlode winner
+        motherlodeSkr: skr(40), // moved from the Rewards Pool to the Motherlode Pool every settled round
         motherlodePoolBps: 3_000, // gear sales: 30% Motherlode Pool
         rewardsPoolBps: 4_000, //              40% Rewards Pool, 30% treasury
-        potFeeBps: 1_000, // 10% of each SOL pot goes to the treasury wallet
+        potFeeBps: 1_000, // 10% of each losing spot (after the fixed 1% admin fee) goes to the treasury wallet
         minDeploy: new anchor.BN(100_000), // 0.0001 SOL per block
-        roundRewardSkr: skr(200), // SKR mined per round: split, or all to one lucky winner
+        roundRewardSkr: skr(200), // SKR mined per round by the gold spot: split, or all to one miner on a solo spot
       })
       .accountsStrict({
         authority: wallet.publicKey, // must be the program's upgrade authority
@@ -77,9 +77,9 @@ async function main() {
       })
       .rpc();
     console.log('config initialised', sig);
-    // seed the pools with test SKR so the first rounds and motherlodes pay out
+    // seed the Rewards Pool with test SKR; the Motherlode Pool starts empty and grows 40 SKR a round (MOTHERLODE_SEED to prefill)
     const funderAta = await getOrCreateAssociatedTokenAccount(conn, wallet.payer, mint, wallet.publicKey);
-    const mSeed = Number(process.env.MOTHERLODE_SEED ?? 250_000);
+    const mSeed = Number(process.env.MOTHERLODE_SEED ?? 0);
     if (mSeed > 0) {
       await gali.methods
         .fundMotherlode(skr(mSeed))
@@ -93,9 +93,22 @@ async function main() {
         .fundRewards(skr(rSeed))
         .accountsStrict({ funder: wallet.publicKey, config: pda.config(), skrMint: mint, funderAta: funderAta.address, rewards: pda.rewards(), tokenProgram: TOKEN_PROGRAM_ID })
         .rpc();
-      console.log(`Rewards Pool seeded with ${rSeed} SKR (${Math.floor(rSeed / 200 / 1440)} days at 200 SKR a round)`);
+      console.log(`Rewards Pool seeded with ${rSeed} SKR (${Math.floor(rSeed / 240 / 1440)} days at 240 SKR a round)`);
     }
-  } else console.log('config already exists');
+  } else {
+    console.log('config already exists');
+    // motherlode_skr used to be the payout per hit; it is now the per-round top-up of the Motherlode Pool
+    const cfg = await (gali.account as any).config.fetch(pda.config());
+    const accrual = skr(40);
+    if (cfg.motherlodeSkr.gt(accrual) && cfg.authority.equals(wallet.publicKey)) {
+      const empty = { basePoints: null, motherlodePoints: null, boostTier1: null, boostTier2: null, gearPrices: null, motherlodePoolBps: null, rewardsPoolBps: null, potFeeBps: null, minDeploy: null, roundRewardSkr: null };
+      await gali.methods
+        .updateConfig({ ...empty, motherlodeSkr: accrual })
+        .accountsStrict({ authority: wallet.publicKey, config: pda.config() })
+        .rpc();
+      console.log('Motherlode top-up set to 40 SKR a round');
+    }
+  }
 
   const out = path.join(__dirname, '../app/src/chain/deployment.json');
   fs.writeFileSync(

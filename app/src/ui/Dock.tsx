@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { chainReady } from '../chain/client';
 import { BLOCKS, boostFor, COLORS, pointsFor, ROUND_REWARD_SKR } from '../game/constants';
 import { watchMotion } from '../game/motion';
-import { fmtSol, maskOf, MIN_SOL_PER_BLOCK, OPTIMAL_ROUNDS, optimalPerRound, smartPick } from '../game/pot';
+import { AVG_RETURN, fmtSol, maskOf, MIN_SOL_PER_BLOCK, OPTIMAL_ROUNDS, optimalPerRound, smartPick, soloMask } from '../game/pot';
 import { useGame, type DockTab, type Preset } from '../game/store';
 import { fx } from '../pixel/fx';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -94,12 +94,48 @@ export function Dock() {
           </T>
         </Pressable>
       </View>
+      <UnclaimedRow />
       {tab === 'lite' ? <LitePanel compact={compact} /> : <ProPanel compact={compact} />}
     </View>
   );
 }
 
 /* ---------------- shared bits ---------------- */
+const RETURN_INFO =
+  'SOL is never taken from other miners. Every spot keeps 1% as a fee, and every spot except the gold one keeps another 10% of the rest. Everything else comes back to you. So covering all 25 spots gets back about 89.5% of your SOL on average: the reward for mining is SKR.';
+
+/** Unclaimed SOL and SKR from finished rounds, with a Claim button. */
+export function UnclaimedRow() {
+  const owner = useGame((s) => s.wallet.owner);
+  const onChain = Boolean(owner && chainReady);
+  const sol = useGame((s) => (onChain ? s.wallet.unclaimed.sol : (s.save.practiceUnclaimedSol ?? 0)));
+  const skr = useGame((s) => (onChain ? s.wallet.unclaimed.skr : (s.save.practiceUnclaimedSkr ?? 0)));
+  const busy = useGame((s) => s.wallet.busy);
+  const claim = useGame((s) => s.claimRewards);
+  const has = sol > 0 || skr > 0;
+  return (
+    <View style={styles.unclaimed} accessibilityLabel={`Unclaimed ${sol.toFixed(4)} SOL and ${Math.floor(skr)} SKR`}>
+      <T style={{ fontSize: 13 }}>🎁</T>
+      <T v="label" style={{ color: COLORS.muted }}>
+        Unclaimed
+      </T>
+      <Info text={`Finished rounds credit your returned SOL and mined SKR here${onChain ? ' (held by the program for your wallet)' : ''}. Claim sends it all to your ${onChain ? 'wallet' : 'practice wallet'} in one go.`} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <T v="black" numberOfLines={1} style={{ fontSize: 13, textAlign: 'right' }}>
+          <T v="black" style={{ fontSize: 13, color: COLORS.sol }}>
+            {fmtSol(sol)} SOL
+          </T>
+          {'  ·  '}
+          <T v="black" style={{ fontSize: 13, color: COLORS.skr }}>
+            {Math.floor(skr).toLocaleString()} SKR
+          </T>
+        </T>
+      </View>
+      <Chip label="CLAIM" on={has} disabled={!has || Boolean(busy)} onPress={() => void claim()} />
+    </View>
+  );
+}
+
 function useBalance() {
   const owner = useGame((s) => s.wallet.owner);
   const sol = useGame((s) => s.wallet.sol + s.wallet.sessionSol);
@@ -242,7 +278,7 @@ function LitePanel({ compact }: { compact: boolean }) {
           <Row
             icon="🪙"
             label="Per round"
-            info={`How much SOL goes in each round, spread across all 25 spots so you always share the strike and get a shot at the ${ROUND_REWARD_SKR} SKR it mines. Optimal splits your amount over ${OPTIMAL_ROUNDS} rounds.`}
+            info={`How much SOL goes in each round, spread across all 25 spots so you are always on the gold spot and share the ${ROUND_REWARD_SKR} SKR it mines. Optimal splits your amount over ${OPTIMAL_ROUNDS} rounds.`}
             right={
               <>
                 <Chip label="Optimal" on={perRound === null} onPress={() => setPerRound(null)} />
@@ -254,6 +290,16 @@ function LitePanel({ compact }: { compact: boolean }) {
                   accessibilityLabel="SOL per round"
                 />
               </>
+            }
+          />
+          <Row
+            icon="↩"
+            label="SOL back"
+            info={RETURN_INFO}
+            right={
+              <T v="black" style={{ fontSize: 13, color: per ? COLORS.sol : COLORS.muted }}>
+                {per ? `≈ ${fmtSol(per * AVG_RETURN)} a round` : '—'}
+              </T>
             }
           />
           <Row
@@ -272,7 +318,7 @@ function LitePanel({ compact }: { compact: boolean }) {
       <RunButton
         ready={ready}
         label={label}
-        sub={ready ? `${fmtSol(per)} SOL a round on all 25 spots · winners split the pot · ${ROUND_REWARD_SKR} SKR draw` : undefined}
+        sub={ready ? `${fmtSol(per)} SOL a round on all 25 spots · ~${fmtSol(per * AVG_RETURN)} back + SKR` : undefined}
         onStart={() => void startRun({ kind: 'lite', perRound: per, blocks: 'all', smartN: BLOCKS, manualMask: 0, total: rounds })}
       />
     </>
@@ -319,6 +365,10 @@ function ProPanel({ compact }: { compact: boolean }) {
           : pending
             ? 'WAIT FOR THIS ROUND'
             : `DEPLOY ${fmtSol(per)} SOL${p.rounds > 1 ? ` × ${p.rounds}` : ''}`;
+  const roundId = useGame((s) => s.roundId);
+  const solo = soloMask(roundId);
+  const picked = p.blocks === 'manual' || p.blocks === 'smart' ? selected : [...Array(BLOCKS).keys()];
+  const soloCount = picked.filter((i) => solo & (1 << i)).length;
   const onWin = selected.length ? Math.min(...selected.map((i) => pot.perBlock[i] ?? 0)) : 0;
   const bestShare = perBlock > 0 ? perBlock / (onWin + perBlock) : 0;
 
@@ -374,11 +424,11 @@ function ProPanel({ compact }: { compact: boolean }) {
           <Row
             icon="🏆"
             label="If it strikes"
-            info={`The gold spot's miners share 90% of the SOL pot by their SOL there. The ${ROUND_REWARD_SKR} SKR mined is split the same way half the time; otherwise one lucky miner takes it all, with odds equal to their share. Points: 40 x 25 / blocks covered. A 1-in-625 motherlode adds 5,000 SKR and 10,000 points.`}
+            info={`Only the gold spot mines SKR. Its ${ROUND_REWARD_SKR} SKR is split by SOL there, unless it is one of this round's 10 solo spots (★ on the map): then one miner takes it all, with odds equal to their share. A 1-in-625 motherlode pays out the whole Motherlode Pool, split by SOL on the gold spot, plus 10,000 points. Points: 40 x 25 / spots covered. ${RETURN_INFO}`}
             last
             right={
               <T v="black" style={{ fontSize: 13, color: COLORS.gold }}>
-                {blocks ? `+${pointsFor(blocks, false, boostFor(staked))} pts · ${Math.round((blocks / BLOCKS) * 100)}% odds` : '—'}
+                {blocks ? `+${pointsFor(blocks, false, boostFor(staked))} pts · ${Math.round((blocks / BLOCKS) * 100)}% odds · ${soloCount} ★` : '—'}
               </T>
             }
           />
@@ -387,7 +437,7 @@ function ProPanel({ compact }: { compact: boolean }) {
       <RunButton
         ready={ready}
         label={label}
-        sub={ready ? `${fmtSol(perBlock, 5)} SOL a spot · up to ${Math.round(bestShare * 100)}% of a strike right now` : undefined}
+        sub={ready ? `${fmtSol(perBlock, 5)} SOL a spot · up to ${Math.round(bestShare * 100)}% of the gold spot · ~${fmtSol(per * AVG_RETURN)} SOL back` : undefined}
         onStart={() =>
           void startRun({
             kind: 'pro',
@@ -482,6 +532,18 @@ const styles = StyleSheet.create({
     borderRadius: 7,
     backgroundColor: '#020614aa',
     ...WEB_NO_OUTLINE,
+  },
+  unclaimed: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    marginBottom: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.line,
+    backgroundColor: '#02061488',
   },
   tag: { borderWidth: 1, borderColor: COLORS.line, borderRadius: 5, paddingHorizontal: 7, paddingVertical: 2 },
   check: { width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: COLORS.line, alignItems: 'center', justifyContent: 'center' },

@@ -87,7 +87,7 @@ export function OverviewTab({ d }: { d: Data }) {
           sub={Number.isFinite(daysLeft) ? `lasts ${fmt(daysLeft, 1)} days at ${fmt(cfg.roundRewardSkr)} SKR/round` : 'round reward is off'}
           tone={daysLeft < 7 ? 'bad' : 'skr'}
         />
-        <Stat label="Motherlode Pool" value={`${fmt(bal.motherlode)} SKR`} sub={`${fmt(cfg.motherlodeSkr)} SKR per motherlode (1 in ${MOTHERLODE_ODDS})`} tone="skr" />
+        <Stat label="Motherlode Pool" value={`${fmt(bal.motherlode)} SKR`} sub={`+${fmt(cfg.motherlodeSkr)} SKR a round · whole pool paid on a hit (1 in ${MOTHERLODE_ODDS})`} tone="skr" />
         <Stat label="Unclaimed SKR (escrow)" value={`${fmt(bal.potEscrow)} SKR`} sub="won, waiting for claims" />
         <Stat label="Staked by players" value={`${fmt(bal.staked)} SKR`} sub="players can always unstake" />
       </div>
@@ -182,9 +182,9 @@ export function MoneyTab({ d, wallet, isAdmin, run }: { d: Data; wallet?: Anchor
         <table>
           <tbody>
             <tr>
-              <td>SOL pot fee</td>
-              <td className="num">{cfg.potFeeBps / 100}%</td>
-              <td>paid straight to the admin wallet when a round settles</td>
+              <td>SOL fees</td>
+              <td className="num">1% + {cfg.potFeeBps / 100}%</td>
+              <td>1% of every spot, plus {cfg.potFeeBps / 100}% of the rest on each losing spot, paid to the admin wallet when a round settles (about 10.5% of volume)</td>
             </tr>
             <tr>
               <td>Gear sales → Motherlode</td>
@@ -223,9 +223,9 @@ const toForm = (c: Config): Form => ({
   boostTier2Skr: String(c.boostTier2Skr),
 });
 const FIELDS: { key: keyof Form; label: string; unit: string; hint: string }[] = [
-  { key: 'potFeePct', label: 'SOL pot fee', unit: '%', hint: 'Max 20%. Applies when a round settles.' },
+  { key: 'potFeePct', label: 'Losing-spot fee', unit: '%', hint: 'Max 20%. Taken from each losing spot (after the fixed 1%) when a round settles.' },
   { key: 'roundRewardSkr', label: 'SKR mined per round', unit: 'SKR', hint: 'Each round: 50/50 split by SOL on the gold block, or all to one lucky winner.' },
-  { key: 'motherlodeSkr', label: 'Motherlode payout', unit: 'SKR', hint: 'Shared the same way on a 1-in-625 round.' },
+  { key: 'motherlodeSkr', label: 'Motherlode top-up', unit: 'SKR', hint: 'Moved from the Rewards Pool into the Motherlode Pool each settled round. A 1-in-625 hit pays out the whole pool.' },
   { key: 'minDeploySol', label: 'Minimum per block', unit: 'SOL', hint: 'Smallest deploy allowed on one block.' },
   { key: 'motherlodePoolPct', label: 'Gear sales to Motherlode', unit: '%', hint: 'Motherlode + Rewards can be at most 100%.' },
   { key: 'rewardsPoolPct', label: 'Gear sales to Rewards', unit: '%', hint: 'The rest of each sale goes to the treasury.' },
@@ -482,9 +482,9 @@ export function RoundsTab({ d, wallet, run }: { d: Data; wallet?: AnchorWallet; 
                 <td className="num">{p.settled ? fmt(p.feeSol, 4) : '—'}</td>
                 <td className="num">{p.settled ? fmt(p.poolSol, 4) : '—'}</td>
                 <td className="num">{p.settled ? fmt(p.skrReward) : '—'}</td>
-                <td>{p.settled && p.skrReward > 0 ? (p.splitReward ? 'split' : 'one lucky winner') : '—'}</td>
+                <td>{p.settled && p.skrReward > 0 ? (p.splitReward ? 'split' : p.winner ? `solo: ${p.winner.slice(0, 4)}…${p.winner.slice(-4)}` : 'solo (unclaimed)') : '—'}{p.motherlodePaid > 0 ? ` · 💎 ${fmt(p.motherlodePaid)}` : ''}</td>
                 <td>
-                  {p.roundId >= current ? <span className="tag live">live</span> : p.settled ? (p.poolSol === 0 ? <span className="tag">no winner</span> : <span className="tag ok">settled</span>) : <span className="tag bad">waiting</span>}
+                  {p.roundId >= current ? <span className="tag live">live</span> : p.settled ? (p.skrReward === 0 ? <span className="tag">no winner</span> : <span className="tag ok">settled</span>) : <span className="tag bad">waiting</span>}
                   {p.motherlode ? <span className="tag gold">motherlode</span> : null}
                 </td>
               </tr>
