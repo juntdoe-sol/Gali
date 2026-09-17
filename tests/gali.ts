@@ -474,6 +474,16 @@ describe('gali', () => {
       expect(credited[0]).to.eq(pool);
       expect(credited[0]).to.be.greaterThan(25_000_000); // more than the rival put in
     }
+    // every stake is claimed, but the round's accounts stay for a day (history), then anyone can close them
+    const p2 = await acc.pot.fetch(pot);
+    expect(p2.claimed).to.eq(2);
+    expect(p2.rentPayer.equals(rival.publicKey)).to.eq(true); // first deployer paid the pot's rent
+    expect((await acc.round.fetch(roundOf(round))).rentPayer.equals(provider.wallet.publicKey)).to.eq(true);
+    const close = program.methods
+      .closeRound(new anchor.BN(round))
+      .accountsStrict({ config, pot, round: roundOf(round), potRentPayer: rival.publicKey, roundRentPayer: provider.wallet.publicKey })
+      .rpc();
+    expect(await errOf(close)).to.contain('TooEarly');
   });
 
   const session = Keypair.generate();

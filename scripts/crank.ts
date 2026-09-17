@@ -79,6 +79,33 @@ async function main() {
     }
   }
 
+  // a day after a round, give the pot and round rent back to whoever paid it (once every stake is claimed)
+  let lastSweep = 0;
+  async function sweep() {
+    if (Date.now() - lastSweep < 10 * 60_000) return;
+    lastSweep = Date.now();
+    const pots: { account: any }[] = await acc.pot.all([{ dataSize: acc.pot.size }]);
+    const cutoff = Math.floor(Date.now() / 1000) - 86_400;
+    for (const { account: p } of pots) {
+      const r = Number(p.roundId);
+      if (!p.settled || p.claimed < p.miners || (r + 1) * secs > cutoff) continue;
+      const info = await conn.getAccountInfo(pda.round(r));
+      if (!info) continue;
+      let round: any;
+      try {
+        round = gali.coder.accounts.decode('round', info.data);
+      } catch {
+        continue; // a round from before rent tracking
+      }
+      await gali.methods
+        .closeRound(new BN(r))
+        .accountsStrict({ config: pda.config(), pot: pda.pot(r), round: pda.round(r), potRentPayer: p.rentPayer, roundRentPayer: round.rentPayer })
+        .rpc()
+        .then(() => console.log('closed', r, '(rent refunded)'))
+        .catch((e: unknown) => console.log('close skip', r, short(e)));
+    }
+  }
+
   for (;;) {
     const current = Math.floor(Date.now() / 1000 / secs);
     for (let r = current - LOOKBACK; r < current; r++) {
@@ -88,6 +115,7 @@ async function main() {
         console.log('round', r, 'skip:', short(e));
       }
     }
+    await sweep().catch((e) => console.log('sweep skip', short(e)));
     await new Promise((res) => setTimeout(res, Math.max(3000, ((current + 1) * secs - Date.now() / 1000) * 1000 + 2000)));
   }
 }

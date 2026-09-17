@@ -136,9 +136,8 @@ export function strikeRange(pot: PotView, mask: number, perBlock: number) {
   return hi > 0 ? { lo, hi } : null;
 }
 
-export const optimalPerRound = (amount: number) => {
-  const floor = MIN_SOL_PER_BLOCK * BLOCKS;
-  return Math.max(floor, Math.floor((amount / OPTIMAL_ROUNDS) * 1e4) / 1e4);
-};
+/** SOL per spot that spreads `amount` over OPTIMAL_ROUNDS rounds on all 25 spots (at least the minimum). */
+export const optimalPerSpot = (amount: number) =>
+  Math.max(MIN_SOL_PER_BLOCK, Math.floor((amount / OPTIMAL_ROUNDS / BLOCKS) * 1e5) / 1e5);
 
 export const fmtSol = (v: number, dp = 4) => (v >= 100 ? v.toFixed(1) : v.toFixed(dp).replace(/0+$/, '').replace(/\.$/, '.0'));
