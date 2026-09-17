@@ -1,5 +1,5 @@
-import { LilitaOne_400Regular } from '@expo-google-fonts/lilita-one';
-import { Nunito_700Bold, Nunito_800ExtraBold, Nunito_900Black } from '@expo-google-fonts/nunito';
+import { ChakraPetch_500Medium, ChakraPetch_600SemiBold, ChakraPetch_700Bold } from '@expo-google-fonts/chakra-petch';
+import { RussoOne_400Regular } from '@expo-google-fonts/russo-one';
 import { useFonts } from 'expo-font';
 import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
@@ -37,7 +37,7 @@ async function scheduleDailyReminder() {
 }
 
 export default function App() {
-  const [fontsLoaded] = useFonts({ LilitaOne_400Regular, Nunito_700Bold, Nunito_800ExtraBold, Nunito_900Black });
+  const [fontsLoaded] = useFonts({ RussoOne_400Regular, ChakraPetch_500Medium, ChakraPetch_600SemiBold, ChakraPetch_700Bold });
   const [menu, setMenu] = useState(false);
   const tilt = useRef({ x: 0, y: 0 }).current;
   const onboarded = useGame((s) => s.save.onboarded);
