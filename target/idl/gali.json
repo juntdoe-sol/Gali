@@ -116,6 +116,38 @@
       ]
     },
     {
+      "name": "mark_buyback",
+      "docs": [
+        "Record SOL from `buyback_due` that the admin has spent buying SKR for the Rewards Pool."
+      ],
+      "discriminator": [
+        237,
+        104,
+        48,
+        198,
+        23,
+        112,
+        247,
+        168
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "lamports",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "set_paused",
       "docs": [
         "Stop (or restart) new deploys and gear sales. Settling, claiming and unstaking always work."
@@ -410,7 +442,8 @@
       ],
       "accounts": [
         {
-          "name": "config"
+          "name": "config",
+          "writable": true
         },
         {
           "name": "round"
@@ -500,6 +533,10 @@
           "writable": true
         },
         {
+          "name": "refinery",
+          "writable": true
+        },
+        {
           "name": "system_program"
         }
       ],
@@ -550,6 +587,10 @@
           "writable": true
         },
         {
+          "name": "refinery",
+          "writable": true
+        },
+        {
           "name": "skr_mint"
         },
         {
@@ -570,7 +611,12 @@
           "name": "system_program"
         }
       ],
-      "args": []
+      "args": [
+        {
+          "name": "what",
+          "type": "u8"
+        }
+      ]
     },
     {
       "name": "fund_rewards",
@@ -965,6 +1011,19 @@
       ]
     },
     {
+      "name": "Refinery",
+      "discriminator": [
+        254,
+        181,
+        80,
+        146,
+        232,
+        250,
+        1,
+        110
+      ]
+    },
+    {
       "name": "Round",
       "discriminator": [
         87,
@@ -1030,6 +1089,19 @@
         89
       ],
       "name": "AuthorityProposed"
+    },
+    {
+      "discriminator": [
+        96,
+        250,
+        38,
+        69,
+        137,
+        30,
+        106,
+        181
+      ],
+      "name": "BuybackMarked"
     },
     {
       "discriminator": [
@@ -1347,6 +1419,22 @@
       }
     },
     {
+      "name": "BuybackMarked",
+      "type": {
+        "fields": [
+          {
+            "name": "lamports",
+            "type": "u64"
+          },
+          {
+            "name": "due",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
       "name": "Config",
       "type": {
         "kind": "struct",
@@ -1450,6 +1538,27 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "reward_drip_bps",
+            "docs": [
+              "max share of the Rewards Pool one round can pay out (round reward + Motherlode top-up), in bps; 0 = no limit"
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "buyback_bps",
+            "docs": [
+              "share of each round's SOL fees owed to SKR buybacks for the Rewards Pool, in bps"
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "buyback_due",
+            "docs": [
+              "lamports of fees owed to buybacks and not yet marked as spent"
+            ],
+            "type": "u64"
           }
         ]
       }
@@ -1508,6 +1617,14 @@
           {
             "name": "round_reward_skr",
             "type": "u64"
+          },
+          {
+            "name": "reward_drip_bps",
+            "type": "u16"
+          },
+          {
+            "name": "buyback_bps",
+            "type": "u16"
           }
         ]
       }
@@ -1583,6 +1700,18 @@
             "name": "round_reward_skr",
             "type": {
               "option": "u64"
+            }
+          },
+          {
+            "name": "reward_drip_bps",
+            "type": {
+              "option": "u16"
+            }
+          },
+          {
+            "name": "buyback_bps",
+            "type": {
+              "option": "u16"
             }
           }
         ]
@@ -1965,6 +2094,36 @@
       }
     },
     {
+      "name": "Refinery",
+      "docs": [
+        "Global refining-fee accumulator (one account)."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "factor",
+            "docs": [
+              "refined SKR per unrefined SKR, times FACTOR_SCALE, summed over all refining fees"
+            ],
+            "type": "u128"
+          },
+          {
+            "name": "total_unrefined",
+            "type": "u64"
+          },
+          {
+            "name": "total_refined",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
       "name": "Revealed",
       "type": {
         "fields": [
@@ -2001,7 +2160,14 @@
             "type": "u64"
           },
           {
+            "docs": [
+              "SKR paid out (after the refining fee)"
+            ],
             "name": "skr",
+            "type": "u64"
+          },
+          {
+            "name": "refining_fee",
             "type": "u64"
           }
         ],
@@ -2195,11 +2361,31 @@
           },
           {
             "name": "sol",
+            "docs": [
+              "lamports waiting to be claimed"
+            ],
             "type": "u64"
           },
           {
             "name": "skr",
+            "docs": [
+              "unrefined SKR (mined in rounds); claiming it costs the refining fee"
+            ],
             "type": "u64"
+          },
+          {
+            "name": "refined",
+            "docs": [
+              "refined SKR (a share of other players' refining fees); claimed without a fee"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "factor",
+            "docs": [
+              "refinery accumulator at the last sync"
+            ],
+            "type": "u128"
           },
           {
             "name": "claimed_sol",

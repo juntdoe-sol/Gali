@@ -28,7 +28,7 @@ async function main() {
       console.log('round', r, 'skip: old-format pot (finish it with the pre-upgrade crank)');
       return;
     }
-    const pot = gali.coder.accounts.decode('Pot', info.data);
+    const pot = gali.coder.accounts.decode('pot', info.data);
     if (!(await conn.getAccountInfo(pda.round(r)))) {
       await lockAndReveal(gali, wallet.publicKey, r);
       console.log('revealed', r);
@@ -68,6 +68,7 @@ async function main() {
             pot: pda.pot(r),
             stake: publicKey,
             unclaimed: pda.unclaimed(owner),
+            refinery: pda.refinery(),
             systemProgram: SystemProgram.programId,
           })
           .rpc();

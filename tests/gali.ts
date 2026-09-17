@@ -114,6 +114,8 @@ describe('gali', () => {
           potFeeBps: 0,
           minDeploy: new anchor.BN(1),
           roundRewardSkr: new anchor.BN(0),
+          rewardDripBps: 0,
+          buybackBps: 0,
         })
         .accountsStrict({
           authority: rando.publicKey,
@@ -150,6 +152,8 @@ describe('gali', () => {
         potFeeBps: 1_000,
         minDeploy: new anchor.BN(1_000_000),
         roundRewardSkr: new anchor.BN(25_000_000),
+        rewardDripBps: 0, // fixed payouts here; the drip is tested in the admin section
+        buybackBps: 5_000,
       })
       .accountsStrict({
         authority: provider.wallet.publicKey,
@@ -284,6 +288,9 @@ describe('gali', () => {
     }
 
     const unclaimedOf = (o: PublicKey) => find(Buffer.from('unclaimed'), o.toBuffer());
+    const refinery = find(Buffer.from('refinery'));
+    // half of the 78.78M lamports of fees is owed to SKR buybacks
+    expect((await acc.config.fetch(config)).buybackDue.toNumber()).to.eq(39_390_000);
     const got: { sol: number; skr: number; rent: number }[] = [];
     for (const [kp, pda] of [
       [player, playerPda],
@@ -303,6 +310,7 @@ describe('gali', () => {
           pot,
           stake: stakeOf(kp.publicKey),
           unclaimed: unclaimedOf(kp.publicKey),
+          refinery,
           systemProgram: SystemProgram.programId,
         })
         .rpc();
@@ -334,15 +342,16 @@ describe('gali', () => {
     }
 
     // claim_rewards: only the owner (or their session) can pay out, and only once
-    const claimRewards = (signer: Keypair, owner: PublicKey, pda: PublicKey) =>
+    const claimRewards = (signer: Keypair, owner: PublicKey, pda: PublicKey, what = 3) =>
       program.methods
-        .claimRewards()
+        .claimRewards(what)
         .accountsStrict({
           signer: signer.publicKey,
           owner,
           config,
           player: pda,
           unclaimed: unclaimedOf(owner),
+          refinery,
           skrMint: mint,
           potVault,
           ownerAta: PublicKey.findProgramAddressSync([owner.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.toBuffer()], ASSOCIATED_TOKEN_PROGRAM_ID)[0],
@@ -353,19 +362,37 @@ describe('gali', () => {
         .signers([signer])
         .rpc();
     expect(await errOf(claimRewards(rival, player.publicKey, playerPda))).to.contain('NotAuthorised');
+    // SOL and SKR can be claimed separately
     const sol0 = await conn.getBalance(player.publicKey);
     const skr0 = await skrOf(userAta);
-    await claimRewards(player, player.publicKey, playerPda);
+    await claimRewards(player, player.publicKey, playerPda, 1);
     expect((await conn.getBalance(player.publicKey)) - sol0).to.eq(got[0].sol); // the provider pays the tx fee
-    expect((await skrOf(userAta)) - skr0).to.eq(got[0].skr);
+    expect(await skrOf(userAta)).to.eq(skr0);
     const u0 = await acc.unclaimed.fetch(unclaimedOf(player.publicKey));
     expect(u0.sol.toNumber()).to.eq(0);
+    expect(u0.skr.toNumber()).to.eq(got[0].skr);
     expect(u0.claimedSol.toNumber()).to.eq(got[0].sol);
+    // claiming unrefined SKR costs 10%, shared with the rival who still holds theirs
+    const fee0 = Math.floor(got[0].skr / 10);
+    const feeTaken = fee0 > 0 && got[1].skr >= fee0 ? fee0 : 0;
+    if (got[0].skr > 0) {
+      await claimRewards(player, player.publicKey, playerPda, 2);
+      expect((await skrOf(userAta)) - skr0).to.eq(got[0].skr - feeTaken);
+    }
+    console.log(`      refining: player unrefined ${got[0].skr}, fee ${feeTaken}, rival unrefined ${got[1].skr}`);
     expect(await errOf(claimRewards(player, player.publicKey, playerPda))).to.contain('NothingToClaim');
-    // the rival has no SKR account yet: claim_rewards creates it
+    const perSkr = feeTaken ? (BigInt(feeTaken) * 1_000_000_000_000n) / BigInt(got[1].skr) : 0n;
+    const gain = Number((perSkr * BigInt(got[1].skr)) / 1_000_000_000_000n);
+    const rf = await acc.refinery.fetch(refinery);
+    expect(rf.totalUnrefined.toNumber()).to.eq(got[1].skr);
+    expect(rf.totalRefined.toNumber()).to.eq(feeTaken);
+    // the rival (last holder, so no fee) gets their SKR plus the refined share; no SKR account yet, so claim creates it
     await claimRewards(rival, rival.publicKey, rivalPda);
     const rivalAta = PublicKey.findProgramAddressSync([rival.publicKey.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.toBuffer()], ASSOCIATED_TOKEN_PROGRAM_ID)[0];
-    expect(await skrOf(rivalAta)).to.eq(got[1].skr);
+    expect(await skrOf(rivalAta)).to.eq(got[1].skr + gain);
+    expect(gain).to.be.closeTo(feeTaken, 1);
+    const rf2 = await acc.refinery.fetch(refinery);
+    expect(rf2.totalUnrefined.toNumber()).to.eq(0);
 
     // points: 40 x 25 / blocks covered, x1.25 for the player's staked SKR (+10,000 base on a motherlode)
     const p = await acc.player.fetch(playerPda);
@@ -504,6 +531,8 @@ describe('gali', () => {
       potFeeBps: null,
       minDeploy: null,
       roundRewardSkr: null,
+      rewardDripBps: null,
+      buybackBps: null,
       ...u,
     });
     const fails = async (p: Promise<unknown>, msg: string) => {
@@ -530,6 +559,13 @@ describe('gali', () => {
       expect(c.roundRewardSkr.toNumber()).to.eq(30_000_000);
       expect(c.minDeploy.toNumber()).to.eq(1_000_000); // untouched
       await fails(program.methods.updateConfig(upd({ potFeeBps: 5_000 })).accountsStrict({ authority: admin, config }).rpc(), 'BadConfig');
+      await fails(program.methods.updateConfig(upd({ rewardDripBps: 101 })).accountsStrict({ authority: admin, config }).rpc(), 'BadConfig');
+      await fails(program.methods.updateConfig(upd({ buybackBps: 10_001 })).accountsStrict({ authority: admin, config }).rpc(), 'BadConfig');
+      // buybacks: the admin marks SOL spent on SKR for the Rewards Pool
+      const due = (await acc.config.fetch(config)).buybackDue.toNumber();
+      await program.methods.markBuyback(new anchor.BN(1_000)).accountsStrict({ authority: admin, config }).rpc();
+      expect((await acc.config.fetch(config)).buybackDue.toNumber()).to.eq(due - 1_000);
+      await fails(program.methods.markBuyback(new anchor.BN(1)).accountsStrict({ authority: rando.publicKey, config }).signers([rando]).rpc(), 'ConstraintHasOne');
       await fails(
         program.methods.updateConfig(upd({ motherlodePoolBps: 6_000, rewardsPoolBps: 6_000 })).accountsStrict({ authority: admin, config }).rpc(),
         'BadConfig',
@@ -542,6 +578,35 @@ describe('gali', () => {
         'ConstraintHasOne',
       );
       await fails(program.methods.setPaused(true).accountsStrict({ authority: rando.publicKey, config }).signers([rando]).rpc(), 'ConstraintHasOne');
+    });
+
+    it('drip: a round pays at most a slice of the Rewards Pool', async () => {
+      await program.methods.updateConfig(upd({ rewardDripBps: 100 })).accountsStrict({ authority: admin, config }).rpc();
+      const c = await acc.config.fetch(config);
+      const round = await deployAs(player, 1_000_000, (1 << 25) - 1);
+      await afterRound(round);
+      await lockRound(round);
+      for (let i = 0; !(await provider.connection.getAccountInfo(roundOf(round))); i++) {
+        const e = await errOf(revealRound(round));
+        if (e && (i > 20 || !e.includes('NoEntropy'))) throw new Error(e);
+        if (e) await sleep(300);
+      }
+      const pot = find(Buffer.from('pot'), u64le(round));
+      const bal = await skrOf(rewards);
+      const mlBefore = await skrOf(motherlode);
+      await program.methods
+        .settlePot(new anchor.BN(round))
+        .accountsStrict({ config, round: roundOf(round), pot, feeTo: admin, skrMint: mint, rewards, motherlode, potVault, tokenProgram: TOKEN_PROGRAM_ID })
+        .rpc();
+      const cap = c.roundRewardSkr.toNumber() + c.motherlodeSkr.toNumber();
+      const budget = Math.min(cap, Math.floor(bal / 100));
+      const reward = Math.floor((budget * c.roundRewardSkr.toNumber()) / cap);
+      const settled = await acc.pot.fetch(pot);
+      expect(budget).to.be.lessThan(cap);
+      expect(settled.skrReward.toNumber()).to.eq(reward);
+      expect(bal - (await skrOf(rewards))).to.eq(budget);
+      if (!settled.motherlode) expect((await skrOf(motherlode)) - mlBefore).to.eq(budget - reward);
+      await program.methods.updateConfig(upd({ rewardDripBps: 0 })).accountsStrict({ authority: admin, config }).rpc();
     });
 
     it('pause stops deploys and gear sales, then resumes', async () => {

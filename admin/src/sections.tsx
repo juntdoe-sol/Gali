@@ -14,6 +14,7 @@ import {
   updateConfig,
   walletSkr,
   withdrawTreasury,
+  markBuyback,
   type Config,
   type ConfigChange,
 } from './chain';
@@ -70,7 +71,11 @@ export function OverviewTab({ d }: { d: Data }) {
       motherlodes: pots.filter((p) => p.motherlode).length,
     };
   }, [cfg, pots, players]);
-  const daysLeft = cfg.roundRewardSkr > 0 ? bal.rewards / (cfg.roundRewardSkr * (86_400 / cfg.roundSecs)) : Infinity;
+  const perRound = (() => {
+    const cap = cfg.roundRewardSkr + cfg.motherlodeSkr;
+    return cfg.dripBps > 0 ? Math.min(cap, (bal.rewards * cfg.dripBps) / 10_000) : cap;
+  })();
+  const daysLeft = cfg.dripBps > 0 ? Infinity : perRound > 0 ? bal.rewards / (perRound * (86_400 / cfg.roundSecs)) : Infinity;
 
   return (
     <>
@@ -84,10 +89,17 @@ export function OverviewTab({ d }: { d: Data }) {
         <Stat
           label="Rewards Pool"
           value={`${fmt(bal.rewards)} SKR`}
-          sub={Number.isFinite(daysLeft) ? `lasts ${fmt(daysLeft, 1)} days at ${fmt(cfg.roundRewardSkr)} SKR/round` : 'round reward is off'}
+          sub={
+            cfg.dripBps > 0
+              ? `pays ${fmt(perRound, 1)} SKR/round now (max ${cfg.dripBps / 100}% of the pool) · never runs dry`
+              : Number.isFinite(daysLeft)
+                ? `lasts ${fmt(daysLeft, 1)} days at ${fmt(perRound)} SKR/round`
+                : 'round reward is off'
+          }
           tone={daysLeft < 7 ? 'bad' : 'skr'}
         />
         <Stat label="Motherlode Pool" value={`${fmt(bal.motherlode)} SKR`} sub={`+${fmt(cfg.motherlodeSkr)} SKR a round · whole pool paid on a hit (1 in ${MOTHERLODE_ODDS})`} tone="skr" />
+        <Stat label="Owed to SKR buybacks" value={`${fmt(cfg.buybackDueSol, 4)} SOL`} sub={`${cfg.buybackBps / 100}% of fees · buy SKR, add it to Rewards, mark it in Money`} tone="sol" />
         <Stat label="Unclaimed SKR (escrow)" value={`${fmt(bal.potEscrow)} SKR`} sub="won, waiting for claims" />
         <Stat label="Staked by players" value={`${fmt(bal.staked)} SKR`} sub="players can always unstake" />
       </div>
@@ -108,6 +120,35 @@ export function OverviewTab({ d }: { d: Data }) {
 }
 
 /* ---------------- Money ---------------- */
+function BuybackCard({ d, wallet, isAdmin, run }: { d: Data; wallet?: AnchorWallet; isAdmin: boolean; run: Run }) {
+  const { cfg } = d;
+  const [spent, setSpent] = useState('');
+  const v = Number(spent);
+  return (
+    <Card
+      title="SKR buybacks"
+      hint={`${cfg.buybackBps / 100}% of every round's SOL fees is set aside to buy SKR for the Rewards Pool, so the SKR players mine is paid for by fees. Swap the SOL for SKR (e.g. on Jupiter), add the SKR to the Rewards Pool below, then record the SOL spent here.`}
+    >
+      <p className="big sol">{fmt(cfg.buybackDueSol, 4)} SOL owed</p>
+      <label>
+        SOL spent on SKR
+        <div className="row">
+          <input inputMode="decimal" value={spent} onChange={(e) => setSpent(e.target.value)} placeholder="0" />
+          <button className="ghost" onClick={() => setSpent(String(cfg.buybackDueSol))}>
+            All
+          </button>
+        </div>
+      </label>
+      <button disabled={!isAdmin || !wallet || !(v > 0)} onClick={() => void run(`Record ${fmt(v, 4)} SOL of buybacks`, () => markBuyback(wallet!, v)).then((ok) => ok && setSpent(''))}>
+        Record buyback
+      </button>
+      <p className="hint">
+        Round budget: at most {cfg.dripBps / 100}% of the Rewards Pool per round{cfg.dripBps === 0 ? ' (off: fixed payouts)' : ''}, capped at {fmt(cfg.roundRewardSkr)} + {fmt(cfg.motherlodeSkr)} SKR. Payouts follow what you add.
+      </p>
+    </Card>
+  );
+}
+
 export function MoneyTab({ d, wallet, isAdmin, run }: { d: Data; wallet?: AnchorWallet; isAdmin: boolean; run: Run }) {
   const { cfg, bal } = d;
   const [amount, setAmount] = useState('');
@@ -155,6 +196,8 @@ export function MoneyTab({ d, wallet, isAdmin, run }: { d: Data; wallet?: Anchor
         {!isAdmin ? <p className="hint">Connect the admin wallet to withdraw.</p> : null}
       </Card>
 
+      <BuybackCard d={d} wallet={wallet} isAdmin={isAdmin} run={run} />
+
       <Card title="Top up a pool" hint="Anyone can add SKR. The Rewards Pool pays the per-round SKR; the Motherlode Pool pays motherlodes.">
         <div className="seg">
           {(['rewards', 'motherlode'] as const).map((p) => (
@@ -194,7 +237,7 @@ export function MoneyTab({ d, wallet, isAdmin, run }: { d: Data; wallet?: Anchor
             <tr>
               <td>Gear sales → Rewards</td>
               <td className="num">{cfg.rewardsPoolBps / 100}%</td>
-              <td>pays {fmt(cfg.roundRewardSkr)} SKR a round to winners</td>
+              <td>pays up to {fmt(cfg.roundRewardSkr)} SKR a round to the gold spot{cfg.dripBps > 0 ? `, at most ${cfg.dripBps / 100}% of the pool` : ''}</td>
             </tr>
             <tr>
               <td>Gear sales → Treasury</td>
@@ -217,6 +260,8 @@ const toForm = (c: Config): Form => ({
   minDeploySol: String(c.minDeploySol),
   roundRewardSkr: String(c.roundRewardSkr),
   motherlodeSkr: String(c.motherlodeSkr),
+  dripPct: String(c.dripBps / 100),
+  buybackPct: String(c.buybackBps / 100),
   basePoints: String(c.basePoints),
   motherlodePoints: String(c.motherlodePoints),
   boostTier1Skr: String(c.boostTier1Skr),
@@ -224,8 +269,10 @@ const toForm = (c: Config): Form => ({
 });
 const FIELDS: { key: keyof Form; label: string; unit: string; hint: string }[] = [
   { key: 'potFeePct', label: 'Losing-spot fee', unit: '%', hint: 'Max 20%. Taken from each losing spot (after the fixed 1%) when a round settles.' },
-  { key: 'roundRewardSkr', label: 'SKR mined per round', unit: 'SKR', hint: 'Each round: 50/50 split by SOL on the gold block, or all to one lucky winner.' },
-  { key: 'motherlodeSkr', label: 'Motherlode top-up', unit: 'SKR', hint: 'Moved from the Rewards Pool into the Motherlode Pool each settled round. A 1-in-625 hit pays out the whole pool.' },
+  { key: 'roundRewardSkr', label: 'Max SKR mined per round', unit: 'SKR', hint: 'Cap for the gold spot: split by SOL, or all to one miner on a solo spot.' },
+  { key: 'motherlodeSkr', label: 'Max Motherlode top-up', unit: 'SKR', hint: 'Cap moved from the Rewards Pool into the Motherlode Pool each settled round. A 1-in-625 hit pays out the whole pool.' },
+  { key: 'dripPct', label: 'Round budget', unit: '% of Rewards Pool', hint: 'Max 1%. A round pays at most this share of the Rewards Pool (split between the two caps above), so payouts follow what flows in. 0 = fixed caps.' },
+  { key: 'buybackPct', label: 'Fees for SKR buybacks', unit: '%', hint: 'Share of SOL fees counted as owed to buying SKR for the Rewards Pool.' },
   { key: 'minDeploySol', label: 'Minimum per block', unit: 'SOL', hint: 'Smallest deploy allowed on one block.' },
   { key: 'motherlodePoolPct', label: 'Gear sales to Motherlode', unit: '%', hint: 'Motherlode + Rewards can be at most 100%.' },
   { key: 'rewardsPoolPct', label: 'Gear sales to Rewards', unit: '%', hint: 'The rest of each sale goes to the treasury.' },
@@ -266,7 +313,9 @@ export function SettingsTab({ d, wallet, isAdmin, isPending, run }: { d: Data; w
     else change.gearPricesSkr = nums;
   }
   const fee = Number(form.potFeePct);
-  if (fee > 20) errors.push('SOL pot fee can be at most 20%');
+  if (fee > 20) errors.push('Losing-spot fee can be at most 20%');
+  if (Number(form.dripPct) > 1) errors.push('Round budget can be at most 1% of the pool');
+  if (Number(form.buybackPct) > 100) errors.push('Buyback share can be at most 100%');
   if (Number(form.motherlodePoolPct) + Number(form.rewardsPoolPct) > 100) errors.push('Motherlode + Rewards shares can be at most 100%');
   if (Number(form.minDeploySol) <= 0) errors.push('Minimum per block must be above 0');
   if (Number(form.boostTier2Skr) > 0 && Number(form.boostTier2Skr) < Number(form.boostTier1Skr)) errors.push('The 1.5x level must be at least the 1.25x level');

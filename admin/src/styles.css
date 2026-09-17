@@ -460,3 +460,4 @@ footer {
     grid-template-columns: 1fr;
   }
 }
+.big.sol { color: var(--sol, #14f195); }

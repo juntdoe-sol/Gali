@@ -1,8 +1,9 @@
 import { Image, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CAVE_IN_EVERY, COLORS, ROUND_REWARD_SKR, LOCK_MS, levelFromXp, xpForLevel } from '../game/constants';
+import { CAVE_IN_EVERY, COLORS, LOCK_MS, levelFromXp, xpForLevel } from '../game/constants';
 import { chainReady } from '../chain/client';
-import { roundEnd, useGame, useLevelXp, usePoints } from '../game/store';
+import { roundEnd, useGame, useLevelXp, usePoints, useRoundReward } from '../game/store';
+const fmtSkr = (v: number) => (v >= 10 ? Math.floor(v).toLocaleString() : v.toFixed(1));
 import { short } from '../chain/client';
 import { fmtSol, practiceMotherlode } from '../game/pot';
 import { Bar, F, Frame, Pill, T } from './kit';
@@ -94,6 +95,9 @@ export function RoundCard() {
   const pot = useGame((s) => s.pot);
   const run = useGame((s) => s.run);
   const here = useMinersHere();
+  const reward = useRoundReward();
+  const live = pot.roundId === roundId;
+  const miners = live ? pot.miners : 0;
   const left = Math.max(0, roundEnd(roundId) - now);
   const secs = Math.ceil(left / 1000);
   const cave = roundId % CAVE_IN_EVERY === 0;
@@ -132,14 +136,14 @@ export function RoundCard() {
       <Bar pct={phase === 'mining' ? (left / 60000) * 100 : 0} height={5} />
       <View style={[styles.row, { marginTop: 4 }]}>
         <T v="bold" style={{ fontSize: 11, color: COLORS.sol }} numberOfLines={1}>
-          ◎ {pot.roundId === roundId ? fmtSol(pot.total) : '0.0'} SOL · {pot.roundId === roundId ? pot.miners : 0} miners
+          ◎ {live ? fmtSol(pot.total) : '0.0'} SOL deployed · {miners} miner{miners === 1 ? '' : 's'}
         </T>
         <T v="bold" style={{ fontSize: 11, color: COLORS.teal }} numberOfLines={1}>
-          💎 {pool > 0 ? `${Math.floor(pool).toLocaleString()} SKR` : 'Motherlode'} · 1/625
+          💎 Motherlode {Math.floor(pool).toLocaleString()} SKR
         </T>
       </View>
       <T v="muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 1, color: run ? COLORS.teal : pending && boost > 10_000 ? COLORS.skr : COLORS.muted }} numberOfLines={1}>
-        {run ? `Autopilot ${run.total - run.left}/${run.total}` : pending ? `You: ${fmtSol(pending.total)} SOL` : `👥 ${here} on the map · ${ROUND_REWARD_SKR} SKR to mine`}
+        {run ? `Autopilot ${run.total - run.left}/${run.total}` : pending ? `You: ${fmtSol(pending.total)} SOL` : `👥 ${here} on the map · ${fmtSkr(reward)} SKR to mine · motherlode 1/625`}
         {pending && boost > 10_000 ? ` · ${boost / 10_000}x SKR boost` : ''}
       </T>
     </Frame>

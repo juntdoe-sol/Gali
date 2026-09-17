@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { chainReady } from '../chain/client';
+import { chainReady, REFINING_FEE } from '../chain/client';
 import { BLOCKS, boostFor, COLORS, pointsFor, ROUND_REWARD_SKR } from '../game/constants';
 import { watchMotion } from '../game/motion';
 import { AVG_RETURN, fmtSol, maskOf, MIN_SOL_PER_BLOCK, OPTIMAL_ROUNDS, optimalPerRound, smartPick, soloMask } from '../game/pot';
@@ -104,34 +104,41 @@ export function Dock() {
 const RETURN_INFO =
   'SOL is never taken from other miners. Every spot keeps 1% as a fee, and every spot except the gold one keeps another 10% of the rest. Everything else comes back to you. So covering all 25 spots gets back about 89.5% of your SOL on average: the reward for mining is SKR.';
 
-/** Unclaimed SOL and SKR from finished rounds, with a Claim button. */
+/** Unclaimed SOL and SKR from finished rounds, each with its own Claim button. */
 export function UnclaimedRow() {
   const owner = useGame((s) => s.wallet.owner);
   const onChain = Boolean(owner && chainReady);
   const sol = useGame((s) => (onChain ? s.wallet.unclaimed.sol : (s.save.practiceUnclaimedSol ?? 0)));
-  const skr = useGame((s) => (onChain ? s.wallet.unclaimed.skr : (s.save.practiceUnclaimedSkr ?? 0)));
+  const unrefined = useGame((s) => (onChain ? s.wallet.unclaimed.unrefined : (s.save.practiceUnclaimedSkr ?? 0)));
+  const refined = useGame((s) => (onChain ? s.wallet.unclaimed.refined : (s.save.practiceRefinedSkr ?? 0)));
   const busy = useGame((s) => s.wallet.busy);
   const claim = useGame((s) => s.claimRewards);
-  const has = sol > 0 || skr > 0;
+  const fee = useGame((s) => (onChain ? s.wallet.unclaimed.fee : (s.save.practiceUnclaimedSkr ?? 0) * REFINING_FEE));
   return (
-    <View style={styles.unclaimed} accessibilityLabel={`Unclaimed ${sol.toFixed(4)} SOL and ${Math.floor(skr)} SKR`}>
-      <T style={{ fontSize: 13 }}>🎁</T>
-      <T v="label" style={{ color: COLORS.muted }}>
-        Unclaimed
-      </T>
-      <Info text={`Finished rounds credit your returned SOL and mined SKR here${onChain ? ' (held by the program for your wallet)' : ''}. Claim sends it all to your ${onChain ? 'wallet' : 'practice wallet'} in one go.`} />
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <T v="black" numberOfLines={1} style={{ fontSize: 13, textAlign: 'right' }}>
-          <T v="black" style={{ fontSize: 13, color: COLORS.sol }}>
-            {fmtSol(sol)} SOL
-          </T>
-          {'  ·  '}
-          <T v="black" style={{ fontSize: 13, color: COLORS.skr }}>
-            {Math.floor(skr).toLocaleString()} SKR
-          </T>
+    <View style={styles.unclaimed} accessibilityLabel={`Unclaimed ${sol.toFixed(4)} SOL, ${Math.floor(unrefined)} unrefined SKR, ${Math.floor(refined)} refined SKR`}>
+      <View style={styles.uRow}>
+        <T style={{ fontSize: 13 }}>🎁</T>
+        <T v="label" style={{ color: COLORS.muted }}>
+          Unclaimed
         </T>
+        <Info
+          text={`Finished rounds credit your SOL and mined SKR here${onChain ? ' (held by the program for your wallet)' : ''}. SOL claims are free. Mined (unrefined) SKR pays a 10% refining fee when you claim it, and that fee is shared with everyone still holding theirs, as refined SKR you can claim with no fee. The longer you hold, the more refined SKR you collect.`}
+        />
+        <T v="black" numberOfLines={1} style={{ flex: 1, fontSize: 13, color: COLORS.sol, textAlign: 'right' }}>
+          {fmtSol(sol)} SOL
+        </T>
+        <Chip label="CLAIM" on={sol > 0} disabled={!(sol > 0) || Boolean(busy)} onPress={() => void claim('sol')} />
       </View>
-      <Chip label="CLAIM" on={has} disabled={!has || Boolean(busy)} onPress={() => void claim()} />
+      <View style={styles.uRow}>
+        <T v="muted" numberOfLines={1} style={{ flex: 1, fontSize: 11 }}>
+          {Math.floor(unrefined).toLocaleString()} unrefined · +{refined < 10 ? refined.toFixed(2) : Math.floor(refined).toLocaleString()} refined
+          {fee >= 1 ? ` · fee ${Math.floor(fee).toLocaleString()}` : ''}
+        </T>
+        <T v="black" numberOfLines={1} style={{ fontSize: 13, color: COLORS.skr }}>
+          {Math.floor(unrefined - fee + refined).toLocaleString()} SKR
+        </T>
+        <Chip label="CLAIM" on={unrefined + refined > 0} disabled={!(unrefined + refined > 0) || Boolean(busy)} onPress={() => void claim('skr')} />
+      </View>
     </View>
   );
 }
@@ -278,7 +285,7 @@ function LitePanel({ compact }: { compact: boolean }) {
           <Row
             icon="🪙"
             label="Per round"
-            info={`How much SOL goes in each round, spread across all 25 spots so you are always on the gold spot and share the ${ROUND_REWARD_SKR} SKR it mines. Optimal splits your amount over ${OPTIMAL_ROUNDS} rounds.`}
+            info={`How much SOL goes in each round, spread across all 25 spots so you are always on the gold spot and share the SKR it mines (up to ${ROUND_REWARD_SKR} a round). Optimal splits your amount over ${OPTIMAL_ROUNDS} rounds.`}
             right={
               <>
                 <Chip label="Optimal" on={perRound === null} onPress={() => setPerRound(null)} />
@@ -424,7 +431,7 @@ function ProPanel({ compact }: { compact: boolean }) {
           <Row
             icon="🏆"
             label="If it strikes"
-            info={`Only the gold spot mines SKR. Its ${ROUND_REWARD_SKR} SKR is split by SOL there, unless it is one of this round's 10 solo spots (★ on the map): then one miner takes it all, with odds equal to their share. A 1-in-625 motherlode pays out the whole Motherlode Pool, split by SOL on the gold spot, plus 10,000 points. Points: 40 x 25 / spots covered. ${RETURN_INFO}`}
+            info={`Only the gold spot mines SKR. Its SKR (up to ${ROUND_REWARD_SKR} a round, paid from the Rewards Pool) is split by SOL there, unless it is one of this round's 10 solo spots (★ on the map): then one miner takes it all, with odds equal to their share. A 1-in-625 motherlode pays out the whole Motherlode Pool, split by SOL on the gold spot, plus 10,000 points. Points: 40 x 25 / spots covered. ${RETURN_INFO}`}
             last
             right={
               <T v="black" style={{ fontSize: 13, color: COLORS.gold }}>
@@ -533,10 +540,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#020614aa',
     ...WEB_NO_OUTLINE,
   },
+  uRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   unclaimed: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+    gap: 4,
     paddingHorizontal: 10,
     paddingVertical: 5,
     marginBottom: 6,

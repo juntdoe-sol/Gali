@@ -15,8 +15,15 @@
 //! * Motherlode: every settled round adds `motherlode_skr` from the Rewards Pool to the Motherlode Pool
 //!   (gear sales add more). On a hit, the whole pool, as it stands before that round's top-up, is split
 //!   pro rata between the miners on the winning spot. An early hit pays less.
-//! * `claim_pot` credits each stake's SOL and SKR to the player's `Unclaimed` balance (plus points
-//!   scaled by 25 / spots covered, boosted by staked SKR). `claim_rewards` pays that balance out.
+//! * Budget: the SKR paid each round is capped by what the Rewards Pool can sustain. With
+//!   `reward_drip_bps` set, a round pays at most `reward_drip_bps` of the pool's balance (split between
+//!   the round reward and the Motherlode top-up in the ratio of their caps), so payouts follow what
+//!   flows in: gear sales plus SKR bought back with `buyback_bps` of the SOL fees. `buyback_due`
+//!   tracks the SOL owed to buybacks; the admin swaps it for SKR, funds the pool and calls `mark_buyback`.
+//! * `claim_pot` credits each stake's SOL and mined ("unrefined") SKR to the player's `Unclaimed`
+//!   balance (plus points scaled by 25 / spots covered, boosted by staked SKR). `claim_rewards` pays
+//!   it out: SOL in full; unrefined SKR less a 10% refining fee, which is shared pro rata between
+//!   everyone still holding unrefined SKR as "refined" SKR (claimed without a fee). Holding pays.
 //! * SKR can't be minted by the game: gear sales (bought with SKR) and top-ups fill the Motherlode
 //!   and Rewards Pools.
 //!
@@ -46,6 +53,14 @@ pub const MAX_SESSION_SECS: i64 = 7 * SECONDS_PER_DAY;
 pub const MAX_SESSION_FUND: u64 = 1_000_000_000; // 1 SOL
 pub const MAX_GEAR: usize = 32;
 pub const MAX_POT_FEE_BPS: u16 = 2_000;
+/// A round can take at most 1% of the Rewards Pool.
+pub const MAX_DRIP_BPS: u16 = 100;
+/// Fee on claimed unrefined SKR, shared with the players who keep theirs unclaimed.
+pub const REFINING_FEE_BPS: u64 = 1_000;
+/// Fixed-point scale for the refinery's per-SKR accumulator.
+pub const FACTOR_SCALE: u128 = 1_000_000_000_000;
+pub const CLAIM_SOL: u8 = 1;
+pub const CLAIM_SKR: u8 = 2;
 /// Taken from every spot, win or lose (sent to the treasury wallet).
 pub const ADMIN_FEE_BPS: u64 = 100;
 /// Spots per round where the winner takes the whole SKR reward.
@@ -95,6 +110,18 @@ pub fn returned_sol(stake: &[u64; 25], pot: &[u64; 25], win: usize, fee_bps: u16
     out as u64
 }
 
+/// Adds the refined SKR this balance has earned since it last synced with the refinery.
+fn sync_refined(u: &mut Unclaimed, rf: &Refinery) {
+    if rf.factor > u.factor {
+        let gain = (rf.factor - u.factor)
+            .checked_mul(u.skr as u128)
+            .map(|v| v / FACTOR_SCALE)
+            .unwrap_or(0) as u64;
+        u.refined = u.refined.saturating_add(gain);
+    }
+    u.factor = rf.factor;
+}
+
 fn check_config(cfg: &Config) -> Result<()> {
     require!(cfg.round_secs >= 15, GaliError::BadConfig);
     require!(cfg.gear_prices.len() <= MAX_GEAR, GaliError::BadConfig);
@@ -104,6 +131,8 @@ fn check_config(cfg: &Config) -> Result<()> {
         GaliError::BadConfig
     );
     require!(cfg.min_deploy > 0, GaliError::BadConfig);
+    require!(cfg.reward_drip_bps <= MAX_DRIP_BPS, GaliError::BadConfig);
+    require!(cfg.buyback_bps as u64 <= BPS, GaliError::BadConfig);
     require!(
         cfg.boost_tier2 == 0 || cfg.boost_tier2 >= cfg.boost_tier1,
         GaliError::BadConfig
@@ -132,6 +161,9 @@ pub mod gali {
         c.pot_fee_bps = args.pot_fee_bps;
         c.min_deploy = args.min_deploy;
         c.round_reward_skr = args.round_reward_skr;
+        c.reward_drip_bps = args.reward_drip_bps;
+        c.buyback_bps = args.buyback_bps;
+        c.buyback_due = 0;
         c.paused = false;
         c.pending_authority = Pubkey::default();
         c.bump = ctx.bumps.config;
@@ -177,9 +209,26 @@ pub mod gali {
         if let Some(v) = u.round_reward_skr {
             c.round_reward_skr = v;
         }
+        if let Some(v) = u.reward_drip_bps {
+            c.reward_drip_bps = v;
+        }
+        if let Some(v) = u.buyback_bps {
+            c.buyback_bps = v;
+        }
         check_config(c)?;
         emit!(ConfigUpdated {
             authority: c.authority
+        });
+        Ok(())
+    }
+
+    /// Record SOL from `buyback_due` that the admin has spent buying SKR for the Rewards Pool.
+    pub fn mark_buyback(ctx: Context<AdminConfig>, lamports: u64) -> Result<()> {
+        let c = &mut ctx.accounts.config;
+        c.buyback_due = c.buyback_due.saturating_sub(lamports);
+        emit!(BuybackMarked {
+            lamports,
+            due: c.buyback_due
         });
         Ok(())
     }
@@ -422,9 +471,22 @@ pub mod gali {
         let signer: &[&[&[u8]]] = &[&[b"config", &[bump]]];
         let decimals = ctx.accounts.skr_mint.decimals;
         let rewards_bal = ctx.accounts.rewards.amount;
+        // this round's SKR budget: the caps, limited to a slice of the Rewards Pool when the drip is on
+        let cap = cfg.round_reward_skr.saturating_add(cfg.motherlode_skr);
+        let budget = if cfg.reward_drip_bps > 0 {
+            cap.min((rewards_bal as u128 * cfg.reward_drip_bps as u128 / BPS as u128) as u64)
+        } else {
+            cap
+        };
+        let (reward_part, accrual_part) = if cap == 0 {
+            (0, 0)
+        } else {
+            let r = (budget as u128 * cfg.round_reward_skr as u128 / cap as u128) as u64;
+            (r, budget - r)
+        };
         // SKR mined this round, and the whole Motherlode Pool on a hit (only if someone is on the winning spot)
         let from_rewards = if has_winners {
-            cfg.round_reward_skr.min(rewards_bal)
+            reward_part.min(rewards_bal)
         } else {
             0
         };
@@ -434,7 +496,8 @@ pub mod gali {
             0
         };
         // then this round's top-up of the Motherlode Pool (after the payout, so it goes to future rounds)
-        let accrual = cfg.motherlode_skr.min(rewards_bal - from_rewards);
+        let accrual = accrual_part.min(rewards_bal - from_rewards);
+        let owed = (fee as u128 * cfg.buyback_bps as u128 / BPS as u128) as u64;
         for (amount, src, dst) in [
             (from_rewards, ctx.accounts.rewards.to_account_info(), ctx.accounts.pot_vault.to_account_info()),
             (from_motherlode, ctx.accounts.motherlode.to_account_info(), ctx.accounts.pot_vault.to_account_info()),
@@ -459,6 +522,7 @@ pub mod gali {
             )?;
         }
 
+        ctx.accounts.config.buyback_due = ctx.accounts.config.buyback_due.saturating_add(owed);
         let pot = &mut ctx.accounts.pot;
         pot.pool = total - fee;
         pot.admin_fee = admin_fee;
@@ -544,13 +608,20 @@ pub mod gali {
                 pot.winner = owner;
             }
         }
+        let rf = &mut ctx.accounts.refinery;
+        if rf.bump == 0 {
+            rf.bump = ctx.bumps.refinery;
+        }
         let u = &mut ctx.accounts.unclaimed;
         if u.owner == Pubkey::default() {
             u.owner = owner;
             u.bump = ctx.bumps.unclaimed;
+            u.factor = rf.factor; // no share of fees paid before this balance existed
         }
+        sync_refined(u, rf);
         u.sol = u.sol.saturating_add(sol);
         u.skr = u.skr.saturating_add(skr);
+        rf.total_unrefined = rf.total_unrefined.saturating_add(skr);
         let p = &mut ctx.accounts.player;
         p.sol_won = p.sol_won.saturating_add(sol);
         if won {
@@ -574,7 +645,7 @@ pub mod gali {
 
     /// Pay out the player's Unclaimed SOL (to their wallet) and SKR (to their SKR account).
     /// Signed by the owner or their active session key.
-    pub fn claim_rewards(ctx: Context<ClaimRewards>) -> Result<()> {
+    pub fn claim_rewards(ctx: Context<ClaimRewards>, what: u8) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
         let signer = ctx.accounts.signer.key();
         {
@@ -584,8 +655,34 @@ pub mod gali {
                 signer == p.session && p.session != Pubkey::default() && now < p.session_expires;
             require!(is_owner || is_session, GaliError::NotAuthorised);
         }
-        let (sol, skr) = (ctx.accounts.unclaimed.sol, ctx.accounts.unclaimed.skr);
-        require!(sol > 0 || skr > 0, GaliError::NothingToClaim);
+        require!(what & (CLAIM_SOL | CLAIM_SKR) != 0, GaliError::BadAmount);
+        let rf = &mut ctx.accounts.refinery;
+        let u = &mut ctx.accounts.unclaimed;
+        sync_refined(u, rf);
+        let sol = if what & CLAIM_SOL != 0 { u.sol } else { 0 };
+        let (unrefined, refined) = if what & CLAIM_SKR != 0 {
+            (u.skr, u.refined)
+        } else {
+            (0, 0)
+        };
+        require!(sol > 0 || unrefined > 0 || refined > 0, GaliError::NothingToClaim);
+        u.sol -= sol;
+        u.skr -= unrefined;
+        u.refined -= refined;
+        rf.total_unrefined = rf.total_unrefined.saturating_sub(unrefined);
+        rf.total_refined = rf.total_refined.saturating_sub(refined);
+        // 10% of the unrefined part goes to whoever still holds unrefined SKR
+        let mut fee = (unrefined as u128 * REFINING_FEE_BPS as u128 / BPS as u128) as u64;
+        if fee > 0 && rf.total_unrefined >= fee {
+            rf.factor += fee as u128 * FACTOR_SCALE / rf.total_unrefined as u128;
+            rf.total_refined = rf.total_refined.saturating_add(fee);
+        } else {
+            fee = 0; // nobody (or almost nobody) left to share it with
+        }
+        let skr = unrefined - fee + refined;
+        u.claimed_sol = u.claimed_sol.saturating_add(sol);
+        u.claimed_skr = u.claimed_skr.saturating_add(skr);
+        let owner = u.owner;
         if sol > 0 {
             **ctx.accounts.unclaimed.to_account_info().try_borrow_mut_lamports()? -= sol;
             **ctx.accounts.owner.to_account_info().try_borrow_mut_lamports()? += sol;
@@ -608,15 +705,11 @@ pub mod gali {
                 ctx.accounts.skr_mint.decimals,
             )?;
         }
-        let u = &mut ctx.accounts.unclaimed;
-        u.sol = 0;
-        u.skr = 0;
-        u.claimed_sol = u.claimed_sol.saturating_add(sol);
-        u.claimed_skr = u.claimed_skr.saturating_add(skr);
         emit!(RewardsClaimed {
-            owner: u.owner,
+            owner,
             sol,
-            skr
+            skr,
+            refining_fee: fee,
         });
         Ok(())
     }
@@ -904,6 +997,14 @@ pub struct Config {
     /// set by `propose_authority`, cleared by `accept_authority`
     pub pending_authority: Pubkey,
     pub bump: u8,
+    // Added with the fee-funded rewards. They sit in the old config's unused gear-price space and read as 0
+    // there (0 = the old fixed payouts), so existing configs keep working after an upgrade.
+    /// max share of the Rewards Pool one round can pay out (round reward + Motherlode top-up), in bps; 0 = no limit
+    pub reward_drip_bps: u16,
+    /// share of each round's SOL fees owed to SKR buybacks for the Rewards Pool, in bps
+    pub buyback_bps: u16,
+    /// lamports of fees owed to buybacks and not yet marked as spent
+    pub buyback_due: u64,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Default)]
@@ -919,6 +1020,8 @@ pub struct ConfigUpdate {
     pub pot_fee_bps: Option<u16>,
     pub min_deploy: Option<u64>,
     pub round_reward_skr: Option<u64>,
+    pub reward_drip_bps: Option<u16>,
+    pub buyback_bps: Option<u16>,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
@@ -935,6 +1038,8 @@ pub struct ConfigArgs {
     pub pot_fee_bps: u16,
     pub min_deploy: u64,
     pub round_reward_skr: u64,
+    pub reward_drip_bps: u16,
+    pub buyback_bps: u16,
 }
 
 #[account]
@@ -1020,10 +1125,27 @@ pub struct Pot {
 #[derive(InitSpace)]
 pub struct Unclaimed {
     pub owner: Pubkey,
+    /// lamports waiting to be claimed
     pub sol: u64,
+    /// unrefined SKR (mined in rounds); claiming it costs the refining fee
     pub skr: u64,
+    /// refined SKR (a share of other players' refining fees); claimed without a fee
+    pub refined: u64,
+    /// refinery accumulator at the last sync
+    pub factor: u128,
     pub claimed_sol: u64,
     pub claimed_skr: u64,
+    pub bump: u8,
+}
+
+/// Global refining-fee accumulator (one account).
+#[account]
+#[derive(InitSpace)]
+pub struct Refinery {
+    /// refined SKR per unrefined SKR, times FACTOR_SCALE, summed over all refining fees
+    pub factor: u128,
+    pub total_unrefined: u64,
+    pub total_refined: u64,
     pub bump: u8,
 }
 
@@ -1160,7 +1282,7 @@ pub struct Deploy<'info> {
 #[derive(Accounts)]
 #[instruction(round_id: u64)]
 pub struct SettlePot<'info> {
-    #[account(seeds = [b"config"], bump = config.bump, has_one = skr_mint)]
+    #[account(mut, seeds = [b"config"], bump = config.bump, has_one = skr_mint)]
     pub config: Box<Account<'info, Config>>,
     #[account(seeds = [b"round".as_ref(), round_id.to_le_bytes().as_ref()], bump = round.bump)]
     pub round: Box<Account<'info, Round>>,
@@ -1208,6 +1330,11 @@ pub struct ClaimPot<'info> {
         seeds = [b"unclaimed", owner.key().as_ref()], bump
     )]
     pub unclaimed: Box<Account<'info, Unclaimed>>,
+    #[account(
+        init_if_needed, payer = cranker, space = 8 + Refinery::INIT_SPACE,
+        seeds = [b"refinery"], bump
+    )]
+    pub refinery: Box<Account<'info, Refinery>>,
     pub system_program: Program<'info, System>,
 }
 
@@ -1225,6 +1352,8 @@ pub struct ClaimRewards<'info> {
     pub player: Box<Account<'info, Player>>,
     #[account(mut, seeds = [b"unclaimed", owner.key().as_ref()], bump = unclaimed.bump, has_one = owner)]
     pub unclaimed: Box<Account<'info, Unclaimed>>,
+    #[account(mut, seeds = [b"refinery"], bump = refinery.bump)]
+    pub refinery: Box<Account<'info, Refinery>>,
     pub skr_mint: Box<InterfaceAccount<'info, Mint>>,
     #[account(mut, seeds = [b"pot_vault"], bump)]
     pub pot_vault: Box<InterfaceAccount<'info, TokenAccount>>,
@@ -1419,10 +1548,18 @@ pub struct PotClaimed {
 }
 
 #[event]
+pub struct BuybackMarked {
+    pub lamports: u64,
+    pub due: u64,
+}
+
+#[event]
 pub struct RewardsClaimed {
     pub owner: Pubkey,
     pub sol: u64,
+    /// SKR paid out (after the refining fee)
     pub skr: u64,
+    pub refining_fee: u64,
 }
 
 #[event]
