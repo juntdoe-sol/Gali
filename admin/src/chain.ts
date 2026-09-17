@@ -11,7 +11,7 @@ import idlJson from '../../target/idl/gali.json';
 
 export const RPC_URL = import.meta.env.VITE_RPC_URL ?? 'https://api.devnet.solana.com';
 export const CLUSTER = import.meta.env.VITE_CLUSTER ?? 'devnet';
-export const connection = new Connection(RPC_URL, 'confirmed');
+export const connection = new Connection(RPC_URL, { commitment: 'confirmed', disableRetryOnRateLimit: true });
 export const PROGRAM_ID = new PublicKey(idlJson.address);
 
 const readOnly = { publicKey: Keypair.generate().publicKey, signTransaction: async <T>(t: T) => t, signAllTransactions: async <T>(t: T[]) => t };
@@ -143,7 +143,8 @@ export interface PotRow {
 }
 export async function fetchPots(decimals: number): Promise<PotRow[]> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const all: { account: any }[] = await accounts.pot.all();
+  // only current-layout pots (older rounds have a shorter account and can't be decoded)
+  const all: { account: any }[] = await accounts.pot.all([{ dataSize: accounts.pot.size }]);
   return all
     .map(({ account: p }) => ({
       roundId: num(p.roundId),
@@ -176,7 +177,7 @@ export interface PlayerRow {
 }
 export async function fetchPlayers(decimals: number): Promise<PlayerRow[]> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const all: { account: any }[] = await accounts.player.all();
+  const all: { account: any }[] = await accounts.player.all([{ dataSize: accounts.player.size }]);
   const skr = (v: BN) => num(v) / 10 ** decimals;
   return all
     .map(({ account: p }) => ({
