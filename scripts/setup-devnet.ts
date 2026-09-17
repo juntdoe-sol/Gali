@@ -59,7 +59,9 @@ async function main() {
         rewardsPoolBps: 4_000, //              40% Rewards Pool, 30% treasury
         potFeeBps: 1_000, // 10% of each losing spot (after the fixed 1% admin fee) goes to the treasury wallet
         minDeploy: new anchor.BN(100_000), // 0.0001 SOL per block
-        roundRewardSkr: skr(200), // SKR mined per round by the gold spot: split, or all to one miner on a solo spot
+        roundRewardSkr: skr(200), // max SKR mined per round by the gold spot: split, or all to one miner on a solo spot
+        rewardDripBps: 5, // a round pays at most 0.05% of the Rewards Pool, so payouts follow what flows in
+        buybackBps: 5_000, // half of the SOL fees is owed to buying SKR for the Rewards Pool
       })
       .accountsStrict({
         authority: wallet.publicKey, // must be the program's upgrade authority
@@ -97,16 +99,27 @@ async function main() {
     }
   } else {
     console.log('config already exists');
-    // motherlode_skr used to be the payout per hit; it is now the per-round top-up of the Motherlode Pool
+    // bring older configs up to the current economics (motherlode_skr is now the per-round top-up;
+    // the drip and buyback share didn't exist and read as 0)
     const cfg = await (gali.account as any).config.fetch(pda.config());
-    const accrual = skr(40);
-    if (cfg.motherlodeSkr.gt(accrual) && cfg.authority.equals(wallet.publicKey)) {
-      const empty = { basePoints: null, motherlodePoints: null, boostTier1: null, boostTier2: null, gearPrices: null, motherlodePoolBps: null, rewardsPoolBps: null, potFeeBps: null, minDeploy: null, roundRewardSkr: null };
-      await gali.methods
-        .updateConfig({ ...empty, motherlodeSkr: accrual })
-        .accountsStrict({ authority: wallet.publicKey, config: pda.config() })
-        .rpc();
-      console.log('Motherlode top-up set to 40 SKR a round');
+    const change: Record<string, unknown> = {};
+    if (cfg.motherlodeSkr.gt(skr(40))) change.motherlodeSkr = skr(40);
+    if (cfg.rewardDripBps === 0) change.rewardDripBps = 5;
+    if (cfg.buybackBps === 0) change.buybackBps = 5_000;
+    if (Object.keys(change).length) {
+      if (!cfg.authority.equals(wallet.publicKey)) {
+        console.log("\nACTION NEEDED in the admin page (Settings), since this wallet isn't the admin:");
+        if (change.motherlodeSkr) console.log('  Motherlode top-up = 40 SKR');
+        if (change.rewardDripBps) console.log('  Round budget (% of Rewards Pool) = 0.05');
+        if (change.buybackBps) console.log('  Fees for SKR buybacks = 50%');
+      } else {
+        const empty = { basePoints: null, motherlodePoints: null, boostTier1: null, boostTier2: null, gearPrices: null, motherlodeSkr: null, motherlodePoolBps: null, rewardsPoolBps: null, potFeeBps: null, minDeploy: null, roundRewardSkr: null, rewardDripBps: null, buybackBps: null };
+        await gali.methods
+          .updateConfig({ ...empty, ...change })
+          .accountsStrict({ authority: wallet.publicKey, config: pda.config() })
+          .rpc();
+        console.log('config updated:', Object.keys(change).join(', '));
+      }
     }
   }
 

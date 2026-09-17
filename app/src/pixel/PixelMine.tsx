@@ -27,6 +27,15 @@ const SOLO_STAR = {
   textShadowOffset: { width: 1, height: 1 },
   textShadowRadius: 0,
 };
+const SPOT_AMT = {
+  position: 'absolute' as const,
+  alignItems: 'center' as const,
+  backgroundColor: '#070d20cc',
+  borderWidth: 1,
+  borderRadius: 3,
+};
+/** Compact SOL amount for a spot label: 0, .004, 0.12, 1.2, 12 */
+const fmtSpot = (v: number) => (v <= 0 ? '0' : v < 0.001 ? '<.001' : v < 0.01 ? `.${Math.round(v * 1000).toString().padStart(3, '0')}` : v < 1 ? v.toFixed(2) : v < 10 ? v.toFixed(1) : Math.round(v).toString());
 const spotXY = (i: number): [number, number] => [GX + (i % 5) * STEP, GY + Math.floor(i / 5) * STEP];
 const seeded = (n: number) => {
   const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
@@ -402,6 +411,28 @@ export default function PixelMine() {
     }
   }
 
+  // ---- SOL on each spot this round ----
+  const potNow = st.pot.roundId === st.roundId ? st.pot : null;
+  const fs = Math.max(8, 6.2 * s);
+  const amounts: ReactNode[] = [];
+  if (el < 0 || el < 2500)
+    for (let i = 0; i < BLOCKS; i++) {
+      const v = potNow?.perBlock[i] ?? 0;
+      const [x, y] = spotXY(i);
+      const mine = Boolean(pendMask & (1 << i));
+      amounts.push(
+        <View
+          key={`amt${i}`}
+          pointerEvents="none"
+          style={[SPOT_AMT, { left: (x + 1) * s, top: (y + SH - 7) * s, width: 26 * s, borderColor: mine ? '#ffd84a' : '#2a4480' }]}
+        >
+          <Text numberOfLines={1} style={{ color: v > 0 ? (mine ? '#ffd84a' : '#bfe9ff') : '#6f82b0', fontFamily: F.display, fontSize: fs, lineHeight: fs * 1.15 }}>
+            {fmtSpot(v)}
+          </Text>
+        </View>,
+      );
+    }
+
   // ---- taps ----
   const taps: ReactNode[] = [
     <Pressable
@@ -470,6 +501,7 @@ export default function PixelMine() {
       <View style={{ position: 'absolute', left: left + shake * s, top: topPx, width: MW * s, height: MH * s }}>
         <Image source={SPRITES.map} style={{ position: 'absolute', left: 0, top: 0, width: MW * s, height: MH * s }} fadeDuration={0} />
         {items.map((it) => it.node)}
+        {amounts}
         {top_}
         {taps}
       </View>

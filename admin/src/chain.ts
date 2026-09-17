@@ -63,6 +63,9 @@ export interface Config {
   boostTier1Skr: number;
   boostTier2Skr: number;
   gearPricesSkr: number[];
+  dripBps: number;
+  buybackBps: number;
+  buybackDueSol: number;
 }
 
 export async function fetchConfig(): Promise<Config | null> {
@@ -91,6 +94,9 @@ export async function fetchConfig(): Promise<Config | null> {
     boostTier1Skr: skr(c.boostTier1),
     boostTier2Skr: skr(c.boostTier2),
     gearPricesSkr: c.gearPrices.map(skr),
+    dripBps: c.rewardDripBps,
+    buybackBps: c.buybackBps,
+    buybackDueSol: sol(c.buybackDue),
   };
 }
 
@@ -206,6 +212,8 @@ export interface ConfigChange {
   boostTier1Skr?: number;
   boostTier2Skr?: number;
   gearPricesSkr?: number[];
+  dripPct?: number;
+  buybackPct?: number;
 }
 
 export async function updateConfig(wallet: AnchorWallet, cfg: Config, ch: ConfigChange) {
@@ -225,10 +233,19 @@ export async function updateConfig(wallet: AnchorWallet, cfg: Config, ch: Config
       potFeeBps: bps(ch.potFeePct),
       minDeploy: opt(ch.minDeploySol === undefined ? undefined : new BN(Math.round(ch.minDeploySol * LAMPORTS_PER_SOL))),
       roundRewardSkr: opt(ch.roundRewardSkr === undefined ? undefined : raw(ch.roundRewardSkr, d)),
+      rewardDripBps: bps(ch.dripPct),
+      buybackBps: bps(ch.buybackPct),
     })
     .accountsStrict({ authority: wallet.publicKey, config: pda.config })
     .rpc();
 }
+
+/** Record SOL (from the fees owed to buybacks) that has been spent buying SKR for the Rewards Pool. */
+export const markBuyback = (wallet: AnchorWallet, solSpent: number) =>
+  programFor(wallet)
+    .methods.markBuyback(new BN(Math.round(solSpent * LAMPORTS_PER_SOL)))
+    .accountsStrict({ authority: wallet.publicKey, config: pda.config })
+    .rpc();
 
 export const setPaused = (wallet: AnchorWallet, paused: boolean) =>
   programFor(wallet).methods.setPaused(paused).accountsStrict({ authority: wallet.publicKey, config: pda.config }).rpc();

@@ -3,7 +3,7 @@ import { PublicKey, type Keypair } from '@solana/web3.js';
 import * as chain from '../chain/client';
 import {
   ACHIEVEMENTS, BLOCKS, boostFor, FREE_GEAR_MASK, GEAR, LOCK_MS, localDay, levelFromXp, MOTHERLODE_ODDS,
-  pointsFor, QUESTS, REVEAL_MIN_MS, ROUND_SECS,
+  pointsFor, QUESTS, REVEAL_MIN_MS, ROUND_REWARD_SKR, ROUND_SECS,
 } from './constants';
 import { addToPot, emptyPot, idxOf, maskOf, MIN_SOL_PER_BLOCK, payoutFor, practiceMotherlode, PRACTICE_SOL, simPot, smartPick, soloMask, type PotView } from './pot';
 import { haptic, play, setMuted } from './sfx';
@@ -91,7 +91,8 @@ export interface Save {
   practiceSol: number;
   practiceSkr: number; // SKR "mined" in practice mode (not real)
   practiceUnclaimedSol: number;
-  practiceUnclaimedSkr: number;
+  practiceUnclaimedSkr: number; // unrefined
+  practiceRefinedSkr: number;
   presets: Preset[];
   preset: number;
   muted: boolean;
@@ -123,6 +124,7 @@ const freshSave = (): Save => ({
   practiceSkr: 0,
   practiceUnclaimedSol: 0,
   practiceUnclaimedSkr: 0,
+  practiceRefinedSkr: 0,
   presets: defaultPresets(),
   preset: 0,
   muted: false,
@@ -138,6 +140,7 @@ interface Wallet {
   pool: number; // SKR in the Motherlode Pool
   rewards: number; // SKR in the Rewards Pool
   unclaimed: chain.Unclaimed;
+  economy: chain.Economy | null;
   busy: string | null;
 }
 
@@ -181,7 +184,7 @@ interface GameState {
   buyGear: (key: string) => Promise<void>;
   stake: (amount: number) => Promise<void>;
   unstake: (amount: number) => Promise<void>;
-  claimRewards: () => Promise<void>;
+  claimRewards: (what: 'sol' | 'skr') => Promise<void>;
   connect: (webWallet?: string) => Promise<void>;
   closeWalletPicker: () => void;
   disconnect: () => Promise<void>;
@@ -203,7 +206,9 @@ interface GameState {
 }
 
 let toastId = 1;
-const NO_UNCLAIMED: chain.Unclaimed = { sol: 0, skr: 0, claimedSol: 0, claimedSkr: 0 };
+const NO_UNCLAIMED: chain.Unclaimed = { sol: 0, unrefined: 0, refined: 0, fee: 0, claimedSol: 0, claimedSkr: 0 };
+/** Practice mode: other (simulated) miners' refining fees add this share of your unrefined SKR each round. */
+const PRACTICE_REFINE_RATE = 0.003;
 let lastClockSync = Date.now();
 let session: Keypair | null = null;
 const chainNow = (offset: number) => Date.now() + offset;
@@ -345,6 +350,7 @@ export const useGame = create<GameState>((set, get) => {
           wins: pending.onChain ? s.wins : s.wins + (practiceWin ? 1 : 0),
           practiceUnclaimedSol: pending.onChain ? s.practiceUnclaimedSol : (s.practiceUnclaimedSol ?? 0) + solOut,
           practiceUnclaimedSkr: pending.onChain ? s.practiceUnclaimedSkr : (s.practiceUnclaimedSkr ?? 0) + skrMined + skr,
+          practiceRefinedSkr: pending.onChain ? s.practiceRefinedSkr : (s.practiceRefinedSkr ?? 0) + (s.practiceUnclaimedSkr ?? 0) * PRACTICE_REFINE_RATE,
           winStreak,
           bestStreak: Math.max(s.bestStreak, winStreak),
           questProgress: qp,
@@ -442,7 +448,7 @@ export const useGame = create<GameState>((set, get) => {
   return {
     loaded: false,
     save: freshSave(),
-    wallet: { owner: null, player: null, skr: 0, sol: 0, sessionSol: 0, pool: 0, rewards: 0, unclaimed: NO_UNCLAIMED, busy: null },
+    wallet: { owner: null, player: null, skr: 0, sol: 0, sessionSol: 0, pool: 0, rewards: 0, unclaimed: NO_UNCLAIMED, economy: null, busy: null },
     offsetMs: 0,
     now: Date.now(),
     roundId: roundOf(Date.now()),
@@ -473,7 +479,11 @@ export const useGame = create<GameState>((set, get) => {
         .clockOffsetMs()
         .then((o) => set({ offsetMs: o, roundId: roundOf(chainNow(o)) }))
         .catch(() => undefined);
-      if (chain.chainReady) chain.fetchMotherlodePool().then((pool) => setWallet({ pool })).catch(() => undefined);
+      if (chain.chainReady) {
+        Promise.all([chain.fetchMotherlodePool(), chain.fetchRewardsPool(), chain.fetchEconomy()])
+          .then(([pool, rewards, economy]) => setWallet({ pool, rewards, economy }))
+          .catch(() => undefined);
+      }
       if (owner.owner && chain.chainReady) {
         setWallet({ owner: owner.owner });
         get().refreshWallet();
@@ -685,29 +695,41 @@ export const useGame = create<GameState>((set, get) => {
       }
     },
 
-    claimRewards: async () => {
+    claimRewards: async (what) => {
       const st = get();
       const owner = ownerKey();
+      const fmtSkr = (v: number) => Math.floor(v).toLocaleString();
       if (!owner || !chain.chainReady) {
-        const { practiceUnclaimedSol: sol = 0, practiceUnclaimedSkr: skr = 0 } = st.save;
-        if (sol <= 0 && skr <= 0) return st.toast('Nothing to claim yet', 'info');
-        updateSave((s) => ({ ...s, practiceSol: s.practiceSol + sol, practiceSkr: s.practiceSkr + skr, practiceUnclaimedSol: 0, practiceUnclaimedSkr: 0 }));
+        const { practiceUnclaimedSol: sol = 0, practiceUnclaimedSkr: unrefined = 0, practiceRefinedSkr: refined = 0 } = st.save;
+        if (what === 'sol') {
+          if (sol <= 0) return st.toast('No SOL to claim yet', 'info');
+          updateSave((s) => ({ ...s, practiceSol: s.practiceSol + sol, practiceUnclaimedSol: 0 }));
+          play('win');
+          return st.toast(`Claimed ${sol.toFixed(4)} SOL (practice)`, 'good');
+        }
+        if (unrefined + refined <= 0) return st.toast('No SKR to claim yet', 'info');
+        const fee = unrefined * chain.REFINING_FEE;
+        updateSave((s) => ({ ...s, practiceSkr: s.practiceSkr + unrefined - fee + refined, practiceUnclaimedSkr: 0, practiceRefinedSkr: 0 }));
         play('win');
-        return st.toast(`Claimed ${sol.toFixed(4)} SOL · ${Math.floor(skr).toLocaleString()} SKR (practice)`, 'good');
+        return st.toast(`Claimed ${fmtSkr(unrefined - fee + refined)} SKR · ${fmtSkr(fee)} refining fee (practice)`, 'good');
       }
-      const { sol, skr } = st.wallet.unclaimed;
-      if (sol <= 0 && skr <= 0) return st.toast('Nothing to claim yet', 'info');
+      const u = st.wallet.unclaimed;
+      if (what === 'sol' ? u.sol <= 0 : u.unrefined + u.refined <= 0) return st.toast(`No ${what.toUpperCase()} to claim yet`, 'info');
       try {
         // the session pays the fee when it can (no pop-up); otherwise the wallet signs
         const p = st.wallet.player;
         const sessionOk =
           session && p && p.session === session.publicKey.toBase58() && p.sessionExpires * 1000 > Date.now() + 60_000 && st.wallet.sessionSol > 0.003;
-        setWallet({ busy: sessionOk ? 'Claiming…' : 'Approve: claim your SOL and SKR' });
-        await chain.claimRewards(owner, sessionOk ? session : null);
+        setWallet({ busy: sessionOk ? 'Claiming…' : `Approve: claim your ${what.toUpperCase()}` });
+        await chain.claimRewards(owner, what === 'sol' ? chain.CLAIM_SOL : chain.CLAIM_SKR, sessionOk ? session : null);
         await get().refreshWallet();
         play('win');
         haptic.win();
-        get().toast(`Claimed ${sol.toFixed(4)} SOL · ${Math.floor(skr).toLocaleString()} SKR`, 'good');
+        if (what === 'sol') get().toast(`Claimed ${u.sol.toFixed(4)} SOL`, 'good');
+        else {
+          const fee = u.fee;
+          get().toast(`Claimed ${fmtSkr(u.unrefined - fee + u.refined)} SKR · ${fmtSkr(fee)} refining fee`, 'good');
+        }
       } catch (e) {
         get().toast(`Claim failed: ${errMsg(e)}`, 'bad');
       } finally {
@@ -721,7 +743,7 @@ export const useGame = create<GameState>((set, get) => {
       await chain.disconnectWallet();
       saveJson('gali-owner', { owner: null }, 0);
       session = null;
-      set({ run: null, wallet: { owner: null, player: null, skr: 0, sol: 0, sessionSol: 0, pool: 0, rewards: 0, unclaimed: NO_UNCLAIMED, busy: null } });
+      set({ run: null, wallet: { owner: null, player: null, skr: 0, sol: 0, sessionSol: 0, pool: 0, rewards: 0, unclaimed: NO_UNCLAIMED, economy: null, busy: null } });
     },
 
     refreshWallet: async () => {
@@ -729,7 +751,7 @@ export const useGame = create<GameState>((set, get) => {
       if (!owner) return;
       try {
         session = session ?? (await chain.loadSession(owner));
-        const [player, skr, sol, sessionSol, pool, rewards, unclaimed] = await Promise.all([
+        const [player, skr, sol, sessionSol, pool, rewards, unclaimed, economy] = await Promise.all([
           chain.fetchPlayer(owner),
           chain.fetchSkrBalance(owner),
           chain.fetchSolBalance(owner),
@@ -737,8 +759,9 @@ export const useGame = create<GameState>((set, get) => {
           chain.fetchMotherlodePool(),
           chain.fetchRewardsPool(),
           chain.fetchUnclaimed(owner).catch(() => NO_UNCLAIMED),
+          chain.fetchEconomy().catch(() => null),
         ]);
-        setWallet({ player, skr, sol, sessionSol, pool, rewards, unclaimed });
+        setWallet({ player, skr, sol, sessionSol, pool, rewards, unclaimed, economy });
       } catch {
         /* offline */
       }
@@ -822,3 +845,7 @@ export const useLevelXp = () =>
   useGame((s) => (s.wallet.player ? s.wallet.player.xp + s.save.bonusXp : s.save.xp));
 export const usePoints = () => useGame((s) => (s.wallet.player ? s.wallet.player.points : s.save.points));
 export const useOwnedMask = () => useGame((s) => (s.wallet.player?.gearMask ?? 0) | FREE_GEAR_MASK);
+
+/** SKR the gold spot mines this round: the on-chain budget when connected, the fixed cap in practice. */
+export const useRoundReward = () =>
+  useGame((s) => (s.wallet.owner && chain.chainReady && s.wallet.economy ? chain.roundRewardNow(s.wallet.economy, s.wallet.rewards) : ROUND_REWARD_SKR));

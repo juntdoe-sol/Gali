@@ -62,6 +62,7 @@ export const pda = {
   stake: (o: PublicKey, r: number) => find(Buffer.from('stake'), o.toBuffer(), u64le(r)),
   draw: (r: number) => find(Buffer.from('draw'), u64le(r)),
   unclaimed: (o: PublicKey) => find(Buffer.from('unclaimed'), o.toBuffer()),
+  refinery: find(Buffer.from('refinery')),
 };
 export const ata = (owner: PublicKey, mint = SKR_MINT) =>
   PublicKey.findProgramAddressSync([owner.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.toBuffer()], ASSOCIATED_TOKEN_PROGRAM_ID)[0];
@@ -144,7 +145,7 @@ const potView = (p: any): ChainPot => ({
 export async function fetchPot(roundId: number): Promise<ChainPot | null> {
   const a = await connection.getAccountInfo(pda.pot(roundId));
   if (!a || a.data.length < accounts.pot.size) return null; // none, or an old-format pot
-  return potView(program.coder.accounts.decode('Pot', a.data));
+  return potView(program.coder.accounts.decode('pot', a.data));
 }
 
 export interface PastRound {
@@ -163,7 +164,7 @@ export async function fetchPastRounds(beforeRound: number, limit = 12, scan = 60
   const pots = potInfos.map((a) => {
     if (!a || a.data.length < accounts.pot.size) return null;
     try {
-      return program.coder.accounts.decode('Pot', a.data);
+      return program.coder.accounts.decode('pot', a.data);
     } catch {
       return null;
     }
@@ -177,31 +178,71 @@ export async function fetchPastRounds(beforeRound: number, limit = 12, scan = 60
 
 export interface Unclaimed {
   sol: number;
-  skr: number;
+  unrefined: number; // mined SKR: claiming it costs the refining fee
+  refined: number; // share of other players' refining fees (incl. not yet synced): no fee
+  fee: number; // refining fee if the unrefined SKR were claimed now (0 when nobody else holds any)
   claimedSol: number;
   claimedSkr: number;
 }
+export const REFINING_FEE = 0.1;
+const FACTOR_SCALE = 1_000_000_000_000n;
+const big = (v: BN) => BigInt(v.toString());
 /** SOL and SKR credited to the player by finished rounds and not yet paid out. */
 export async function fetchUnclaimed(owner: PublicKey): Promise<Unclaimed> {
-  const u = await accounts.unclaimed.fetchNullable(pda.unclaimed(owner));
-  if (!u) return { sol: 0, skr: 0, claimedSol: 0, claimedSkr: 0 };
+  const [u, rf] = await Promise.all([accounts.unclaimed.fetchNullable(pda.unclaimed(owner)), accounts.refinery.fetchNullable(pda.refinery)]);
+  if (!u) return { sol: 0, unrefined: 0, refined: 0, fee: 0, claimedSol: 0, claimedSkr: 0 };
+  // refined SKR earned since the last sync, as the program's sync_refined computes it
+  const pending = rf && big(rf.factor) > big(u.factor) ? ((big(rf.factor) - big(u.factor)) * big(u.skr)) / FACTOR_SCALE : 0n;
+  // claim_rewards only charges the fee when the other holders' unrefined SKR covers it
+  const feeRaw = big(u.skr) / 10n;
+  const others = rf ? big(rf.totalUnrefined) - big(u.skr) : 0n;
   return {
     sol: toNum(u.sol) / LAMPORTS_PER_SOL,
-    skr: fromRaw(u.skr),
+    unrefined: fromRaw(u.skr),
+    fee: feeRaw > 0n && others >= feeRaw ? Number(feeRaw) / 10 ** SKR_DECIMALS : 0,
+    refined: (Number(big(u.refined) + pending)) / 10 ** SKR_DECIMALS,
     claimedSol: toNum(u.claimedSol) / LAMPORTS_PER_SOL,
     claimedSkr: fromRaw(u.claimedSkr),
   };
 }
 
-const claimRewardsIx = (signer: PublicKey, owner: PublicKey) =>
+export interface Economy {
+  roundReward: number; // whole SKR cap
+  motherlodeTopUp: number; // whole SKR cap
+  dripBps: number;
+  buybackBps: number;
+  potFeeBps: number;
+}
+export async function fetchEconomy(): Promise<Economy> {
+  const c = await accounts.config.fetch(pda.config);
+  return {
+    roundReward: fromRaw(c.roundRewardSkr),
+    motherlodeTopUp: fromRaw(c.motherlodeSkr),
+    dripBps: c.rewardDripBps,
+    buybackBps: c.buybackBps,
+    potFeeBps: c.potFeeBps,
+  };
+}
+/** SKR the next round mines, given the Rewards Pool balance (settle_pot's budget). */
+export function roundRewardNow(e: Economy, rewardsPool: number) {
+  const cap = e.roundReward + e.motherlodeTopUp;
+  if (cap <= 0) return 0;
+  const budget = e.dripBps > 0 ? Math.min(cap, (rewardsPool * e.dripBps) / 10_000) : cap;
+  return Math.min(rewardsPool, (budget * e.roundReward) / cap);
+}
+
+export const CLAIM_SOL = 1;
+export const CLAIM_SKR = 2;
+const claimRewardsIx = (signer: PublicKey, owner: PublicKey, what: number) =>
   program.methods
-    .claimRewards()
+    .claimRewards(what)
     .accountsStrict({
       signer,
       owner,
       config: pda.config,
       player: pda.player(owner),
       unclaimed: pda.unclaimed(owner),
+      refinery: pda.refinery,
       skrMint: SKR_MINT,
       potVault: pda.potVault,
       ownerAta: ata(owner),
@@ -211,10 +252,10 @@ const claimRewardsIx = (signer: PublicKey, owner: PublicKey) =>
     })
     .instruction();
 
-/** Pay out the Unclaimed balance: SOL to the wallet, SKR to its SKR account. The session signs if given (no pop-up). */
-export async function claimRewards(owner: PublicKey, session?: Keypair | null) {
-  if (session) return sendWithKey(session, [await claimRewardsIx(session.publicKey, owner)]);
-  return sendWithWallet(async (o) => [await claimRewardsIx(o, o)]);
+/** Pay out Unclaimed SOL (to the wallet) and/or SKR (to its SKR account, 10% refining fee on unrefined). The session signs if given. */
+export async function claimRewards(owner: PublicKey, what: number, session?: Keypair | null) {
+  if (session) return sendWithKey(session, [await claimRewardsIx(session.publicKey, owner, what)]);
+  return sendWithWallet(async (o) => [await claimRewardsIx(o, o, what)]);
 }
 
 let feeTo: PublicKey | null = null;
@@ -471,6 +512,7 @@ export async function sessionSettlePot(owner: PublicKey, session: Keypair, round
         pot: pda.pot(roundId),
         stake: pda.stake(owner, roundId),
         unclaimed: pda.unclaimed(owner),
+        refinery: pda.refinery,
         systemProgram: SystemProgram.programId,
       })
       .instruction(),
