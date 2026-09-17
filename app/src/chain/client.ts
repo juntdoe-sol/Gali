@@ -142,8 +142,9 @@ const potView = (p: any): ChainPot => ({
   settled: p.settled,
 });
 export async function fetchPot(roundId: number): Promise<ChainPot | null> {
-  const p = await accounts.pot.fetchNullable(pda.pot(roundId));
-  return p ? potView(p) : null;
+  const a = await connection.getAccountInfo(pda.pot(roundId));
+  if (!a || a.data.length < accounts.pot.size) return null; // none, or an old-format pot
+  return potView(program.coder.accounts.decode('Pot', a.data));
 }
 
 export interface PastRound {
@@ -154,10 +155,19 @@ export interface PastRound {
 /** The last `limit` played and revealed rounds before `beforeRound`, newest first (scans `scan` round ids). */
 export async function fetchPastRounds(beforeRound: number, limit = 12, scan = 60): Promise<PastRound[]> {
   const ids = [...Array(scan).keys()].map((i) => beforeRound - 1 - i).filter((r) => r >= 0);
-  const [pots, rounds] = await Promise.all([
-    accounts.pot.fetchMultiple(ids.map(pda.pot)),
+  const [potInfos, rounds] = await Promise.all([
+    connection.getMultipleAccountsInfo(ids.map(pda.pot)),
     accounts.round.fetchMultiple(ids.map(pda.round)),
   ]);
+  // pots from before the payout upgrade have an older, shorter layout: leave them out
+  const pots = potInfos.map((a) => {
+    if (!a || a.data.length < accounts.pot.size) return null;
+    try {
+      return program.coder.accounts.decode('Pot', a.data);
+    } catch {
+      return null;
+    }
+  });
   const out: PastRound[] = [];
   ids.forEach((id, i) => {
     if (out.length < limit && pots[i] && rounds[i]) out.push({ roundId: id, winning: rounds[i].winningBlock, pot: potView(pots[i]) });
