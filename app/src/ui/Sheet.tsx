@@ -353,7 +353,7 @@ function Me() {
         <T style={{ flex: 1 }}>Mute sound</T>
         <Switch id="mute" value={save.muted} onValueChange={setMute} trackColor={{ true: COLORS.teal, false: COLORS.card2 }} />
       </Card>
-      <T v="muted">How it works: each minute is a round on a 5x5 mine. Put SOL on 1 to 25 blocks. One block strikes gold, and everyone on it splits 90% of the round's SOL pot in proportion to their SOL there. The round also mines 200 SKR: half the time it is split the same way, the other half one lucky winner takes it all, with odds equal to their share. Fewer blocks also pay more points: 1,000 for a single block, 40 for all 25. A 1-in-625 motherlode adds 5,000 SKR. This is a game of chance: only play with SOL you can afford to lose.</T>
+      <T v="muted">How it works: each minute is a round on a quarry with 25 mining spots. Put SOL on 1 to 25 spots. One spot strikes gold, and everyone on it splits 90% of the round's SOL pot in proportion to their SOL there. The round also mines 200 SKR: half the time it is split the same way, the other half one lucky winner takes it all, with odds equal to their share. Fewer blocks also pay more points: 1,000 for a single block, 40 for all 25. A 1-in-625 motherlode adds 5,000 SKR. This is a game of chance: only play with SOL you can afford to lose.</T>
       <Pressable onPress={() => Linking.openURL(`https://explorer.solana.com/address/${PROGRAM_ID.toBase58()}?cluster=${CLUSTER}`)}>
         <T v="muted" style={{ textDecorationLine: 'underline' }}>
           Program {short(PROGRAM_ID.toBase58())} on Solana Explorer
@@ -386,5 +386,5 @@ const styles = StyleSheet.create({
   seg: { flexDirection: 'row', gap: 4, backgroundColor: '#00000055', borderRadius: 14, padding: 4 },
   segBtn: { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 10 },
   rank: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: COLORS.card, borderRadius: 12, borderWidth: 2, borderColor: 'transparent', padding: 10 },
-  input: { marginTop: 6, backgroundColor: '#00000055', borderColor: COLORS.line, borderWidth: 2, borderRadius: 12, color: COLORS.text, fontSize: 20, paddingHorizontal: 12, paddingVertical: 8, fontFamily: 'RussoOne_400Regular' },
+  input: { marginTop: 6, backgroundColor: '#00000055', borderColor: COLORS.line, borderWidth: 2, borderRadius: 12, color: COLORS.text, fontSize: 20, paddingHorizontal: 12, paddingVertical: 8, fontFamily: 'PixelifySans_700Bold' },
 });

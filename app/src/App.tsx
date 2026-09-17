@@ -1,25 +1,26 @@
 import { ChakraPetch_500Medium, ChakraPetch_600SemiBold, ChakraPetch_700Bold } from '@expo-google-fonts/chakra-petch';
-import { RussoOne_400Regular } from '@expo-google-fonts/russo-one';
+import { PixelifySans_700Bold } from '@expo-google-fonts/pixelify-sans';
 import { useFonts } from 'expo-font';
 import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Image, Platform, StyleSheet, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { COLORS } from './game/constants';
-import { watchMotion } from './game/motion';
 import { initAudio } from './game/sfx';
 import { useGame } from './game/store';
+import PixelMine from './pixel/PixelMine';
+import { useWorld } from './game/world';
 import { ChatButton, ChatSheet } from './ui/Chat';
 import { Dock } from './ui/Dock';
 import { RoundCard, Toasts, TopBar } from './ui/Hud';
 import { Busy, GearReveal, LevelUp, Onboarding, ResultPop, WalletPicker } from './ui/Modals';
 import { Sheet } from './ui/Sheet';
+import { PeerCard } from './ui/World';
 
-const Scene = lazy(() => import('./scene/Scene'));
 
 // lets browser tests watch the game state
-if (Platform.OS === 'web') (globalThis as { __gali?: unknown }).__gali = useGame;
+if (Platform.OS === 'web') Object.assign(globalThis, { __gali: useGame, __galiWorld: useWorld });
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({ shouldPlaySound: false, shouldSetBadge: false, shouldShowBanner: true, shouldShowList: true }),
@@ -40,24 +41,16 @@ async function scheduleDailyReminder() {
 }
 
 export default function App() {
-  const [fontsLoaded] = useFonts({ RussoOne_400Regular, ChakraPetch_500Medium, ChakraPetch_600SemiBold, ChakraPetch_700Bold });
+  const [fontsLoaded] = useFonts({ PixelifySans_700Bold, ChakraPetch_500Medium, ChakraPetch_600SemiBold, ChakraPetch_700Bold });
   const [menu, setMenu] = useState(false);
-  const tilt = useRef({ x: 0, y: 0 }).current;
   const onboarded = useGame((s) => s.save.onboarded);
 
   useEffect(() => {
     initAudio();
     void useGame.getState().boot();
     const id = setInterval(() => useGame.getState().tick(), 100);
-    const stop = watchMotion(({ x, y }) => {
-      tilt.x += (x - tilt.x) * 0.15;
-      tilt.y += (y - tilt.y) * 0.15;
-    });
-    return () => {
-      clearInterval(id);
-      stop();
-    };
-  }, [tilt]);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     if (onboarded) void scheduleDailyReminder();
@@ -75,21 +68,12 @@ export default function App() {
     <SafeAreaProvider>
       <View style={styles.root}>
         <StatusBar style="light" />
-        <Suspense
-          fallback={
-            <View style={[StyleSheet.absoluteFill, styles.center]}>
-              <Image source={require('../assets/brand/mark512.png')} style={{ width: 110, height: 110 }} />
-            </View>
-          }
-        >
-          <View style={StyleSheet.absoluteFill}>
-            <Scene tilt={tilt} />
-          </View>
-        </Suspense>
+        <PixelMine />
         <TopBar onMenu={() => setMenu(true)} />
         <RoundCard />
         <Dock />
         <ChatButton />
+        <PeerCard />
         <Toasts />
         <Busy />
         <ResultPop />

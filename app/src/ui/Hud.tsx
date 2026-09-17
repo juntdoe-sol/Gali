@@ -6,7 +6,8 @@ import { roundEnd, useGame, useLevelXp, usePoints } from '../game/store';
 import { short } from '../chain/client';
 import { fmtSol } from '../game/pot';
 import { Bar, F, Frame, Pill, T } from './kit';
-import { fx } from '../scene/fx';
+import { fx } from '../pixel/fx';
+import { useMinersHere } from './World';
 
 export function TopBar({ onMenu }: { onMenu: () => void }) {
   const insets = useSafeAreaInsets();
@@ -92,6 +93,7 @@ export function RoundCard() {
   const pool = useGame((s) => s.wallet.pool);
   const pot = useGame((s) => s.pot);
   const run = useGame((s) => s.run);
+  const here = useMinersHere();
   const left = Math.max(0, roundEnd(roundId) - now);
   const secs = Math.ceil(left / 1000);
   const cave = roundId % CAVE_IN_EVERY === 0;
@@ -113,7 +115,7 @@ export function RoundCard() {
               {Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}
             </T>
             <T v="muted" style={{ fontSize: 12, color: locking ? COLORS.red : COLORS.muted }}>
-              {locking ? 'LOCKED' : pending ? `${covered} block${covered > 1 ? 's' : ''} in` : 'to deploy'}
+              {locking ? 'LOCKED' : pending ? `${covered} spot${covered > 1 ? 's' : ''} in` : 'to deploy'}
             </T>
           </View>
         ) : (
@@ -137,7 +139,7 @@ export function RoundCard() {
         </T>
       </View>
       <T v="muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 1, color: run ? COLORS.teal : pending && boost > 10_000 ? COLORS.skr : COLORS.muted }} numberOfLines={1}>
-        {run ? `Autopilot ${run.total - run.left}/${run.total}` : pending ? `You: ${fmtSol(pending.total)} SOL` : `${ROUND_REWARD_SKR} SKR to mine`}
+        {run ? `Autopilot ${run.total - run.left}/${run.total}` : pending ? `You: ${fmtSol(pending.total)} SOL` : `👥 ${here} on the map · ${ROUND_REWARD_SKR} SKR to mine`}
         {pending && boost > 10_000 ? ` · ${boost / 10_000}x SKR boost` : ''}
       </T>
     </Frame>

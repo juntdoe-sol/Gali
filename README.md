@@ -1,6 +1,6 @@
 # Gali
 
-A cartoon 3D mining game for Solana Seeker. Every minute a round opens on a 5x5 mine. Miners deploy SOL on blocks, split the pot when their block strikes gold, mine SKR every round, chat, and tip each other SKR.
+A pixel-art mining game for Solana Seeker. Every minute a round opens on a quarry with 25 mining spots. Miners deploy SOL on spots, split the pot when their spot strikes gold, mine SKR every round, chat, and tip each other SKR.
 
 Built for **CLOCK IN**, the Solana Mobile hackathon by Radiants (submissions close 9 Oct 2026, 14:59 GMT+8).
 
@@ -10,9 +10,9 @@ Built for **CLOCK IN**, the Solana Mobile hackathon by Radiants (submissions clo
 | --- | --- |
 | `programs/gali` | Anchor program: rounds, SOL deploys, reveal, pot settlement and claims, session keys, SKR pools, staking, gear |
 | `tests/gali.ts` | Anchor tests (localnet) |
-| `scripts/` | One-command devnet deploy, devnet setup, mock-SKR faucet, crank (reveal, settle, pay out), test runner, IDL generator |
+| `scripts/` | Pixel-art generator (`pixel-art.py`), one-command devnet deploy, devnet setup, mock-SKR faucet, crank (reveal, settle, pay out), test runner, IDL generator |
 | `target/deploy/gali.so` | Pre-built program, so deploying doesn't need Rust or Anchor (the program keypair is not in git) |
-| `app/` | Expo (React Native) Android app: React Three Fiber scene, LITE/PRO deploy panel with autopilot, miners chat, SKR tips, Mobile Wallet Adapter |
+| `app/` | Expo (React Native) Android app: pixel-art quarry (plain Images, no 3D engine), LITE/PRO deploy panel with autopilot, miners chat, SKR tips, Mobile Wallet Adapter |
 | `admin/` | Admin web page (Vite + React): money, settings, pause, admin hand-over, rounds, players, chat moderation |
 | `supabase/` | Chat server: tables plus the `chat-post` and `chat-admin` edge functions |
 | `.github/workflows` | CI: build + test program, optional devnet deploy, release APK |
@@ -29,6 +29,8 @@ Built for **CLOCK IN**, the Solana Mobile hackathon by Radiants (submissions clo
 - **Session keys:** the wallet approves one `set_session` transaction that also funds a device key (up to 1 SOL). The app then deploys and settles every round without pop-ups. LITE spreads a budget over rounds; PRO has 4 presets, All/Smart block picking and a round count.
 - **SKR:** Gali never mints SKR. Gear sales (21 items, 200 to 15,000 SKR) go 30% Motherlode Pool, 40% Rewards Pool, 30% treasury. Anyone can top up with `fund_motherlode` / `fund_rewards`. Staking 5,000 / 50,000 SKR boosts points. Staked SKR can't be unstaked while it boosts the current round, so the same SKR can't boost several wallets in one round. Prices assume 1 SKR ≈ $0.018. At 200 SKR a round the Rewards Pool pays out 288,000 SKR a day, so it needs top-ups until gear sales catch up.
 - **Admin:** only the program's upgrade authority can create the config (`init_config`). The config authority can `update_config` (fee capped at 20%, pool shares at 100%), `set_paused` (blocks new deploys and gear sales; settling, claiming and unstaking keep working), `withdraw_treasury` (treasury SKR only; pools and staked SKR have no withdraw path) and hand over admin in two steps (`propose_authority`, `accept_authority`). Use a multisig as the authority before real money.
+- **Shared quarry:** everyone on the map sees each other's miners live. Tap the ground to walk, tap a miner to wave (5 emotes), open the chat or send SKR. Positions go over Supabase Realtime broadcast on the `gali-world` channel (the same project as the chat, no tables needed; public channels must be allowed). Payloads are clamped, and a wallet name only shows after the sender signs with its session key and the on-chain Player confirms that session; everyone else shows as a guest. In practice mode, four labelled bots wander the quarry.
+- **Pixel art:** all art is original and drawn by `scripts/pixel-art.py` (`python3 scripts/pixel-art.py` rewrites `app/assets/pixel/` and `app/src/pixel/sprites.ts`).
 - **Chat + tips:** messages are signed by the player's session key; the edge function checks the signature against the on-chain Player account. Tips are plain SPL transfers from the wallet, then posted to the room with the transaction signature, which the server verifies.
 - **Devnet:** uses a mock SKR mint. Real SKR mint: `SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3` (verify decimals and token program before switching).
 - **Chance:** winners split losers' SOL, so this is a game of chance. A real-money launch needs age gating and a legal review per market.
@@ -136,13 +138,13 @@ supabase functions deploy chat-post --no-verify-jwt
 supabase functions deploy chat-admin --no-verify-jwt
 ```
 
-Then put the project URL and anon key in `app/src/chain/chat.json` (the admin page reads the same file). Without them the chat shows as offline; SKR tips still work. Moderation (`chat-admin`) only accepts requests signed by the program's current admin wallet.
+Then put the project URL and anon key in `app/src/chain/chat.json` (the admin page reads the same file). The same settings turn on the shared quarry (Realtime broadcast). Without them the chat shows as offline and the map shows practice bots only; SKR tips still work. Moderation (`chat-admin`) only accepts requests signed by the program's current admin wallet.
 
 ## Hackathon checklist
 
 - [x] Android APK (Expo prebuild + Gradle, or the `android-apk` workflow)
 - [x] Solana Mobile Stack: Mobile Wallet Adapter for connect, session funding, staking, gear and SKR tips
-- [x] Built for the phone: portrait 3D scene, haptics, shake to Smart-pick, tilt parallax, daily reminder
+- [x] Built for the phone: portrait pixel-art quarry that fits between the HUD and the deploy panel, haptics, shake to Smart-pick, daily reminder
 - [x] Meaningful Solana use: every deploy, reveal, settlement and claim is a devnet transaction; on-chain leaderboard
 - [x] SKR integration: SKR mined each round, Motherlode, SKR-priced gear, staking boosts, tips
 - [ ] 3-minute demo video recorded on a device

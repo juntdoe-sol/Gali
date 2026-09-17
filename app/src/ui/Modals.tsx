@@ -56,7 +56,7 @@ export function ResultPop() {
                 </T>
                 <SolLine res={res} dark big />
                 <T v="bold" style={{ color: '#6b3a00' }}>
-                  +{res.points.toLocaleString()} pts · {res.covered === 1 ? 'single-block snipe!' : `${res.covered} blocks covered`}
+                  +{res.points.toLocaleString()} pts · {res.covered === 1 ? 'single-spot snipe!' : `${res.covered} spots covered`}
                   {res.onChain ? ' · settled on Solana' : ''}
                 </T>
               </>
@@ -226,8 +226,8 @@ export function Busy() {
 }
 
 const STEPS = [
-  { t: 'Deploy SOL. Strike gold.', b: 'Every minute a new round opens on a 5x5 mine. Put SOL on the blocks you pick. One block strikes gold, and its miners split 90% of the pot.' },
-  { t: 'Mine SKR as you go', b: 'Every round mines 200 SKR. Half the time the winners split it; the other half one lucky winner takes it all (more SOL on the block, better odds). A 1-in-625 motherlode adds 5,000 SKR. Shake your phone to Smart-pick.' },
+  { t: 'Deploy SOL. Strike gold.', b: 'Every minute a new round opens on a quarry with 25 mining spots. Put SOL on the spots you pick. One spot strikes gold, and its miners split 90% of the pot.' },
+  { t: 'Mine SKR as you go', b: 'Every round mines 200 SKR. Half the time the winners split it; the other half one lucky winner takes it all (more SOL on the spot, better odds). A 1-in-625 motherlode adds 5,000 SKR. Shake your phone to Smart-pick.' },
   { t: 'Bring your Seeker wallet', b: 'Practice first with 2 play SOL, or connect with Mobile Wallet Adapter. Fund a 24h session once and LITE or PRO autopilot deploys every round for you. It is a game of chance: only use SOL you can afford to lose.' },
 ];
 
