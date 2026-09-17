@@ -5,7 +5,7 @@ import { chainReady } from '../chain/client';
 import { roundEnd, useGame, useLevelXp, usePoints } from '../game/store';
 import { short } from '../chain/client';
 import { fmtSol } from '../game/pot';
-import { Bar, F, Pill, T } from './kit';
+import { Bar, F, Frame, Pill, T } from './kit';
 
 export function TopBar({ onMenu }: { onMenu: () => void }) {
   const insets = useSafeAreaInsets();
@@ -52,7 +52,7 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
         <Stat icon="◆" color={COLORS.gold} value={points.toLocaleString()} label="pts" />
         <View style={[styles.stat, { flex: 1.3 }]}>
           <View style={styles.lvl}>
-            <T v="black" style={{ color: '#0d3a33', fontSize: 13 }}>
+            <T v="display" style={{ color: '#062a33', fontSize: 12, transform: [{ rotate: '-45deg' }] }}>
               {lvl}
             </T>
           </View>
@@ -73,7 +73,7 @@ function Stat({ icon, color, value, label }: { icon: string; color: string; valu
       <T v="black" style={{ color, fontSize: 14 }}>
         {icon}
       </T>
-      <T v="black" style={{ fontSize: 14 }}>
+      <T v="display" style={{ fontSize: 13 }}>
         {value}
       </T>
       {label ? <T v="muted">{label}</T> : null}
@@ -97,11 +97,11 @@ export function RoundCard() {
   const locking = phase === 'mining' && left < LOCK_MS;
   const covered = pending ? pending.mask.toString(2).split('1').length - 1 : 0;
   return (
-    <View style={[styles.round, { top: insets.top + 104 }, cave && { borderColor: COLORS.red }]}>
+    <Frame style={[styles.round, { top: insets.top + 104 }]} glow={cave ? COLORS.red : undefined} radius={12}>
       <View style={styles.row}>
         {phase === 'mining' ? (
           <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 6, flexShrink: 1 }}>
-            <T v="display" style={{ fontSize: 26, lineHeight: 30, color: secs <= 5 ? COLORS.red : COLORS.text }}>
+            <T v="display" style={{ fontSize: 26, lineHeight: 30, color: secs <= 5 ? COLORS.red : COLORS.gold }}>
               {Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}
             </T>
             <T v="muted" style={{ fontSize: 12, color: locking ? COLORS.red : COLORS.muted }}>
@@ -132,7 +132,7 @@ export function RoundCard() {
         {run ? `Autopilot ${run.total - run.left}/${run.total}` : pending ? `You: ${fmtSol(pending.total)} SOL` : `${ROUND_REWARD_SKR} SKR to mine`}
         {pending && boost > 10_000 ? ` · ${boost / 10_000}x SKR boost` : ''}
       </T>
-    </View>
+    </Frame>
   );
 }
 
@@ -166,40 +166,56 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: COLORS.card,
-    borderColor: COLORS.line,
-    borderWidth: 2,
-    borderRadius: 999,
+    backgroundColor: '#0a1636ee',
+    borderColor: COLORS.trim,
+    borderWidth: 1.5,
+    borderRadius: 10,
     paddingHorizontal: 12,
     height: 38,
   },
-  dot: { width: 10, height: 10, borderRadius: 5 },
-  menu: { width: 38, height: 38, borderRadius: 12, backgroundColor: COLORS.card2, borderColor: COLORS.line, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  dot: { width: 9, height: 9, borderRadius: 2, transform: [{ rotate: '45deg' }] },
+  menu: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: '#132a5aee',
+    borderColor: COLORS.trim,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   stat: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    backgroundColor: COLORS.card,
+    gap: 6,
+    backgroundColor: '#0a1636e6',
     borderColor: COLORS.line,
-    borderWidth: 2,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    height: 34,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 9,
+    height: 32,
   },
-  lvl: { width: 22, height: 22, borderRadius: 7, backgroundColor: COLORS.teal, alignItems: 'center', justifyContent: 'center' },
+  lvl: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    backgroundColor: COLORS.teal,
+    borderWidth: 1,
+    borderColor: '#d9fbff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transform: [{ rotate: '45deg' }],
+    marginHorizontal: 2,
+  },
   round: {
     position: 'absolute',
     left: 12,
     right: 12,
-    backgroundColor: 'rgba(45,34,64,0.94)',
-    borderColor: COLORS.line,
-    borderWidth: 2,
-    borderRadius: 16,
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 7,
     gap: 4,
   },
   toasts: { position: 'absolute', left: 24, right: 24, alignItems: 'center', gap: 6 },
-  toast: { backgroundColor: COLORS.card2, borderWidth: 2, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 8, fontFamily: F.bold },
+  toast: { backgroundColor: '#0f1c3ff2', borderWidth: 1.5, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, fontFamily: F.bold },
 });

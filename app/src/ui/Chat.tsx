@@ -19,7 +19,7 @@ export function ChatButton() {
       <T style={{ fontSize: 20 }}>💬</T>
       {unread > 0 ? (
         <View style={styles.badge}>
-          <T v="black" style={{ fontSize: 10, color: '#1b1426' }}>
+          <T v="black" style={{ fontSize: 10, color: '#070d20' }}>
             {unread > 9 ? '9+' : unread}
           </T>
         </View>
@@ -177,7 +177,7 @@ export function TipSheet({ initialTo, onClose }: { initialTo: string; onClose: (
   const n = Number(amount) || 0;
   return (
     <View style={StyleSheet.absoluteFill}>
-      <Pressable style={[styles.backdrop, { backgroundColor: '#0d0814cc' }]} onPress={onClose} />
+      <Pressable style={[styles.backdrop, { backgroundColor: '#040817cc' }]} onPress={onClose} />
       <View style={styles.tipCard}>
         <T v="display" style={{ fontSize: 26 }}>
           Send SKR
@@ -270,7 +270,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 4,
   },
-  backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#0d081488' },
+  backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#04081788' },
   sheet: {
     position: 'absolute',
     left: 0,

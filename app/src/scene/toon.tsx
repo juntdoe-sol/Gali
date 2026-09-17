@@ -7,7 +7,7 @@ toonRamp.minFilter = THREE.NearestFilter;
 toonRamp.magFilter = THREE.NearestFilter;
 toonRamp.needsUpdate = true;
 
-export const INK = '#1b1426';
+export const INK = '#0a1024';
 
 export function Toon({ c, e, ei = 0 }: { c: string; e?: string; ei?: number }) {
   return <meshToonMaterial color={c} gradientMap={toonRamp} emissive={e ?? '#000000'} emissiveIntensity={ei} />;

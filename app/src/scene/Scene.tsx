@@ -8,10 +8,11 @@ import { play } from '../game/sfx';
 import { blockPos, fx, isDug, revealEl } from './fx';
 import { INK, Toon, toonRamp } from './toon';
 import { MineCart, Miner, Mole } from './Characters';
+import { Site, SITE_TOPS, siteKind } from './Sites';
 
-const DIRT = ['#b0714a', '#a3683f', '#b97d52', '#9c6343', '#aa6f4b'];
+const DIRT = ['#8a5a3a', '#80532f', '#916140', '#7a5035', '#86583a'];
 const GOLD = new THREE.Color('#ffc83d');
-const DIM = new THREE.Color('#3a2a33');
+const DIM = new THREE.Color('#1c2440');
 const SELECT = new THREE.Color('#ffe08a');
 const DUG = new THREE.Color('#c7f284');
 
@@ -24,14 +25,17 @@ const nowS = () => performance.now() / 1000;
 function Block({ i }: { i: number }) {
   const ref = useRef<THREE.Group>(null);
   const mat = useRef<THREE.MeshToonMaterial>(null);
+  const side = useRef<THREE.MeshToonMaterial>(null);
   const dust = useRef<THREE.Group>(null);
   const marker = useRef<THREE.Mesh>(null);
   const selected = useGame((s) => s.selected.includes(i));
   const dug = useGame((s) => Boolean(s.pending && s.pending.mask & (1 << i)));
   const isWinner = useGame((s) => s.phase === 'reveal' && s.winning === i);
   const toggle = useGame((s) => s.toggleBlock);
-  const base = useMemo(() => new THREE.Color(DIRT[(i * 7) % DIRT.length]), [i]);
+  const base = useMemo(() => new THREE.Color(SITE_TOPS[siteKind(i) % SITE_TOPS.length]), [i]);
+  const dirt = useMemo(() => new THREE.Color(DIRT[(i * 7) % DIRT.length]), [i]);
   const tmp = useMemo(() => new THREE.Color(), []);
+  const tmpSide = useMemo(() => new THREE.Color(), []);
   const [x, , z] = blockPos(i);
   const pressAt = useRef(-10);
 
@@ -47,6 +51,8 @@ function Block({ i }: { i: number }) {
     let shakeX = 0;
     let emissive = 0;
     tmp.copy(base);
+    let dimK = 0;
+    let goldK = 0;
     const win = st.phase === 'reveal' && st.winning === i;
     if (el >= 0) {
       if (el < 1400) {
@@ -57,11 +63,13 @@ function Block({ i }: { i: number }) {
         const k = THREE.MathUtils.clamp((el - 1400 - order * 40) / 300, 0, 1);
         ty = -0.3 * k;
         tmp.lerp(DIM, k * 0.75);
+        dimK = k * 0.75;
       } else {
         const k = THREE.MathUtils.clamp((el - 2500) / 350, 0, 1);
         ty = 0.75 * k + Math.sin(t * 6) * 0.05 * k;
         rotY = k * Math.max(0, el - 2500) * 0.004;
-        tmp.lerp(GOLD, Math.max(k, ((el - 1400) / 1100) * 0.4));
+        goldK = Math.max(k, ((el - 1400) / 1100) * 0.4);
+        tmp.lerp(GOLD, goldK);
         emissive = 0.7 * k;
       }
     } else if (selected) {
@@ -82,10 +90,11 @@ function Block({ i }: { i: number }) {
     g.position.x = x + shakeX;
     g.rotation.y = win ? rotY : THREE.MathUtils.lerp(g.rotation.y, 0, 0.2);
     m.color.lerp(tmp, 0.25);
+    if (side.current) side.current.color.lerp(tmpSide.copy(dirt).lerp(DIM, dimK).lerp(GOLD, goldK * 0.6), 0.25);
     m.emissiveIntensity = THREE.MathUtils.lerp(m.emissiveIntensity, emissive + hitK * 0.3, 0.25);
     if (marker.current) {
       marker.current.rotation.y = t * 2;
-      marker.current.position.y = 0.52 + Math.sin(t * 3 + i) * 0.04;
+      marker.current.position.y = 1.0 + Math.sin(t * 3 + i) * 0.04;
     }
 
     const d = dust.current;
@@ -102,31 +111,33 @@ function Block({ i }: { i: number }) {
   });
 
   return (
-    <group ref={ref} position={[x, 0, z]}>
-      <RoundedBox
-        args={[0.94, 0.62, 0.94]}
-        radius={0.14}
-        smoothness={2}
-        castShadow
-        receiveShadow
-        onClick={(e) => {
-          e.stopPropagation();
-          if (fx.moleBlock === i) return;
-          pressAt.current = nowS();
-          toggle(i);
-        }}
-      >
-        <meshToonMaterial ref={mat} color={base} gradientMap={toonRamp} emissive="#ffb020" emissiveIntensity={0} />
-        <Outlines thickness={0.025} color={selected ? '#ffe08a' : INK} />
+    <group
+      ref={ref}
+      position={[x, 0, z]}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (fx.moleBlock === i) return;
+        pressAt.current = nowS();
+        toggle(i);
+      }}
+    >
+      <RoundedBox args={[0.94, 0.56, 0.94]} position={[0, -0.03, 0]} radius={0.1} smoothness={3} castShadow receiveShadow>
+        <meshToonMaterial ref={side} color={dirt} gradientMap={toonRamp} />
+        <Outlines thickness={0.025} color={selected ? '#3ee6ff' : INK} />
       </RoundedBox>
-      {[0, 1, 2].map((k) => (
-        <mesh key={k} position={[(seeded(i * 3 + k) - 0.5) * 0.55, 0.32, (seeded(i * 5 + k) - 0.5) * 0.55]} scale={[1, 0.5, 1]}>
-          <sphereGeometry args={[0.045 + seeded(i + k) * 0.03, 6, 5]} />
-          <Toon c="#7a4e34" />
-        </mesh>
-      ))}
+      <RoundedBox args={[0.98, 0.08, 0.98]} position={[0, 0.27, 0]} radius={0.035} smoothness={2} receiveShadow>
+        <meshToonMaterial ref={mat} color={base} gradientMap={toonRamp} emissive="#ffb020" emissiveIntensity={0} />
+      </RoundedBox>
+      <mesh position={[0, 0.1, 0.472]}>
+        <boxGeometry args={[0.8, 0.03, 0.01]} />
+        <Toon c="#5c3a26" />
+      </mesh>
+      <group position={[0, 0.31, 0]}>
+        <Site i={i} />
+      </group>
+      {selected ? <SelectRing /> : null}
       {dug && (
-        <mesh ref={marker} position={[0, 0.52, 0]} scale={[1, 1.6, 1]}>
+        <mesh ref={marker} position={[0, 1.0, 0]} scale={[1, 1.6, 1]}>
           <octahedronGeometry args={[0.12, 0]} />
           <Toon c="#c7f284" e="#c7f284" ei={0.7} />
           <Outlines thickness={0.012} color={INK} />
@@ -141,7 +152,44 @@ function Block({ i }: { i: number }) {
         ))}
       </group>
       {isWinner && <Burst />}
+      {isWinner && <Beam />}
     </group>
+  );
+}
+
+function SelectRing() {
+  const ref = useRef<THREE.Mesh>(null);
+  useFrame((state) => {
+    const m = ref.current;
+    if (!m) return;
+    const k = 1 + Math.sin(state.clock.elapsedTime * 5) * 0.06;
+    m.scale.set(k, k, 1);
+    (m.material as THREE.MeshBasicMaterial).opacity = 0.55 + Math.sin(state.clock.elapsedTime * 5) * 0.2;
+  });
+  return (
+    <mesh ref={ref} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.28, 0]}>
+      <ringGeometry args={[0.52, 0.64, 32]} />
+      <meshBasicMaterial color="#3ee6ff" transparent opacity={0.6} blending={THREE.AdditiveBlending} depthWrite={false} />
+    </mesh>
+  );
+}
+
+function Beam() {
+  const ref = useRef<THREE.Mesh>(null);
+  useFrame((state) => {
+    const m = ref.current;
+    if (!m) return;
+    const el = revealEl();
+    const k = el < 2500 ? 0 : Math.min(1, (el - 2500) / 300);
+    m.visible = k > 0;
+    m.scale.set(k * (1 + Math.sin(state.clock.elapsedTime * 12) * 0.05), 1, k);
+    (m.material as THREE.MeshBasicMaterial).opacity = 0.45 * k;
+  });
+  return (
+    <mesh ref={ref} position={[0, 4, 0]} visible={false}>
+      <cylinderGeometry args={[0.35, 0.55, 8, 20, 1, true]} />
+      <meshBasicMaterial color="#ffd86b" transparent opacity={0} blending={THREE.AdditiveBlending} depthWrite={false} side={THREE.DoubleSide} />
+    </mesh>
   );
 }
 
@@ -193,7 +241,7 @@ function Cave() {
       Array.from({ length: 22 }, (_, k) => {
         const a = (k / 22) * Math.PI * 2;
         const r = 5.4 + seeded(k) * 1.6;
-        return { p: [Math.cos(a) * r, -0.1 + seeded(k + 3) * 0.5, Math.sin(a) * r] as [number, number, number], s: 0.6 + seeded(k + 9) * 0.9, c: ['#5b4059', '#4c3550', '#634661'][k % 3] };
+        return { p: [Math.cos(a) * r, -0.1 + seeded(k + 3) * 0.5, Math.sin(a) * r] as [number, number, number], s: 0.6 + seeded(k + 9) * 0.9, c: ['#2c3b6b', '#243259', '#35467c'][k % 3] };
       }),
     [],
   );
@@ -202,7 +250,7 @@ function Cave() {
       Array.from({ length: 12 }, (_, k) => {
         const a = (k / 12) * Math.PI * 2 + 0.3;
         const r = 4.1 + (k % 3) * 0.4;
-        return { p: [Math.cos(a) * r, 0.2, Math.sin(a) * r] as [number, number, number], c: ['#ff6b9a', '#3de0c8', '#b86bff'][k % 3], s: 0.22 + (k % 4) * 0.07 };
+        return { p: [Math.cos(a) * r, 0.2, Math.sin(a) * r] as [number, number, number], c: ['#ff5fa2', '#3ee6ff', '#b98bff'][k % 3], s: 0.22 + (k % 4) * 0.07 };
       }),
     [],
   );
@@ -212,13 +260,28 @@ function Cave() {
   });
   return (
     <>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.32, 0]} receiveShadow>
-        <circleGeometry args={[10, 40]} />
-        <Toon c="#3b2638" />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.62, 0]} receiveShadow>
+        <circleGeometry args={[14, 48]} />
+        <Toon c="#0d1a3a" />
       </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.31, 0]} receiveShadow>
-        <circleGeometry args={[3.7, 40]} />
-        <Toon c="#4d3242" />
+      {/* octagon arena: stone plinth, gold rim, glowing rune ring */}
+      <mesh position={[0, -0.47, 0]} rotation={[0, Math.PI / 8, 0]} receiveShadow>
+        <cylinderGeometry args={[4.35, 4.6, 0.3, 8]} />
+        <Toon c="#34457a" />
+        <Outlines thickness={0.03} color={INK} />
+      </mesh>
+      <mesh position={[0, -0.315, 0]} rotation={[-Math.PI / 2, 0, Math.PI / 8]} receiveShadow>
+        <circleGeometry args={[4.25, 8]} />
+        <Toon c="#2a3866" />
+      </mesh>
+      <mesh position={[0, -0.3, 0]} rotation={[-Math.PI / 2, 0, Math.PI / 8]}>
+        <ringGeometry args={[4.05, 4.25, 8]} />
+        <Toon c="#c9a24e" e="#ffcf4a" ei={0.25} />
+      </mesh>
+      <RuneRing />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.305, 0]} receiveShadow>
+        <circleGeometry args={[3.2, 40]} />
+        <Toon c="#24305a" />
       </mesh>
       {[-0.18, 0.18].map((o) => (
         <mesh key={o} position={[3.2, -0.29, -0.55 + o]} rotation={[0, -0.5, 0]}>
@@ -244,22 +307,79 @@ function Cave() {
       {[-1, 1].map((sd) => (
         <group key={sd} position={[sd * 3.4, -0.3, -3.3]}>
           <mesh position={[0, 1.3, 0]}>
-            <boxGeometry args={[0.25, 2.6, 0.25]} />
-            <Toon c="#6b4a32" />
+            <cylinderGeometry args={[0.2, 0.26, 2.6, 8]} />
+            <Toon c="#3a4d86" />
             <Outlines thickness={0.02} color={INK} />
           </mesh>
-          <mesh position={[0, 1.6, 0.22]}>
-            <sphereGeometry args={[0.12, 10, 8]} />
-            <Toon c="#ffb86b" e="#ffb86b" ei={1.5} />
+          <mesh position={[0, 2.62, 0]}>
+            <cylinderGeometry args={[0.34, 0.2, 0.22, 8]} />
+            <Toon c="#c9a24e" e="#ffcf4a" ei={0.2} />
+            <Outlines thickness={0.015} color={INK} />
           </mesh>
+          <Flame position={[0, 2.95, 0]} />
         </group>
       ))}
-      <mesh position={[0, 2.5, -3.3]}>
-        <boxGeometry args={[7.2, 0.3, 0.25]} />
-        <Toon c="#6b4a32" />
+      <mesh position={[0, 2.35, -3.6]}>
+        <boxGeometry args={[6.4, 0.32, 0.3]} />
+        <Toon c="#2f4178" />
         <Outlines thickness={0.02} color={INK} />
       </mesh>
+      <mesh position={[0, 2.35, -3.43]}>
+        <boxGeometry args={[6.4, 0.06, 0.02]} />
+        <Toon c="#c9a24e" e="#ffcf4a" ei={0.4} />
+      </mesh>
+      <mesh position={[0, 2.35, -3.42]} rotation={[0, 0, Math.PI / 4]}>
+        <boxGeometry args={[0.36, 0.36, 0.05]} />
+        <Toon c="#3ee6ff" e="#3ee6ff" ei={0.9} />
+        <Outlines thickness={0.015} color={INK} />
+      </mesh>
     </>
+  );
+}
+
+function RuneRing() {
+  const ref = useRef<THREE.Mesh>(null);
+  useFrame((state) => {
+    const m = ref.current;
+    if (!m) return;
+    const t = state.clock.elapsedTime;
+    m.rotation.z = t * 0.15;
+    const cave = useGame.getState().roundId % CAVE_IN_EVERY === 0;
+    const mat = m.material as THREE.MeshBasicMaterial;
+    mat.color.set(cave ? '#ff4d5e' : '#3ee6ff');
+    mat.opacity = 0.35 + Math.sin(t * 2) * 0.12;
+  });
+  return (
+    <mesh ref={ref} position={[0, -0.298, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+      <ringGeometry args={[3.35, 3.5, 64, 1, 0, Math.PI * 1.85]} />
+      <meshBasicMaterial color="#3ee6ff" transparent opacity={0.4} blending={THREE.AdditiveBlending} depthWrite={false} />
+    </mesh>
+  );
+}
+
+function Flame({ position }: { position: [number, number, number] }) {
+  const outer = useRef<THREE.Mesh>(null);
+  const inner = useRef<THREE.Mesh>(null);
+  const seed = useMemo(() => Math.random() * 10, []);
+  useFrame((state) => {
+    const t = state.clock.elapsedTime + seed;
+    const f = 1 + Math.sin(t * 13) * 0.08 + Math.sin(t * 7.3) * 0.06;
+    outer.current?.scale.set(1, f, 1);
+    inner.current?.scale.set(1, f * 1.05, 1);
+    if (outer.current) outer.current.rotation.y = t * 2;
+  });
+  return (
+    <group position={position}>
+      <mesh ref={outer}>
+        <coneGeometry args={[0.2, 0.55, 7]} />
+        <meshBasicMaterial color="#ff8a2a" transparent opacity={0.9} />
+      </mesh>
+      <mesh ref={inner} position={[0, -0.05, 0]}>
+        <coneGeometry args={[0.1, 0.35, 6]} />
+        <meshBasicMaterial color="#fff2b8" />
+      </mesh>
+      <pointLight intensity={2.2} distance={4.5} color="#ffa64d" />
+    </group>
   );
 }
 
@@ -330,11 +450,11 @@ function Lights() {
   const tint = useMemo(() => new THREE.Color(), []);
   useFrame(() => {
     const cave = useGame.getState().roundId % CAVE_IN_EVERY === 0;
-    if (light.current) light.current.color.lerp(tint.set(cave ? '#ff9a8a' : '#d9c8ff'), 0.05);
+    if (light.current) light.current.color.lerp(tint.set(cave ? '#ff9a8a' : '#c9d8ff'), 0.05);
   });
   return (
     <>
-      <hemisphereLight ref={light} args={['#d9c8ff', '#3b2638', 1.25]} />
+      <hemisphereLight ref={light} args={['#c9d8ff', '#1a2244', 1.2]} />
       <directionalLight
         position={[4, 9, 5]}
         intensity={2.3}
@@ -345,7 +465,8 @@ function Lights() {
         shadow-camera-top={6}
         shadow-camera-bottom={-6}
       />
-      <pointLight position={[0, 2.5, 0]} intensity={4} distance={8} color="#ffb86b" />
+      <directionalLight position={[-5, 4, -7]} intensity={1.6} color="#3ee6ff" />
+      <pointLight position={[0, 2.5, 0]} intensity={3.2} distance={8} color="#ffc98a" />
     </>
   );
 }
@@ -369,8 +490,8 @@ export default function Scene({ tilt }: { tilt: { x: number; y: number } }) {
       camera={{ fov: 40, position: [0, 18, 10] }}
       onCreated={() => setReady(true)}
     >
-      <color attach="background" args={['#1b1426']} />
-      <fog attach="fog" args={['#1b1426', 18, 34]} />
+      <color attach="background" args={['#070d20']} />
+      <fog attach="fog" args={['#070d20', 20, 36]} />
       <Lights />
       <Rig tilt={tilt} />
       <RevealSounds />
@@ -382,7 +503,8 @@ export default function Scene({ tilt }: { tilt: { x: number; y: number } }) {
       <Mole />
       <MineCart />
       <FallingRocks />
-      <Sparkles count={50} scale={[10, 4, 10]} position={[0, 1.5, 0]} size={3} speed={0.3} color="#ffd98a" opacity={0.6} />
+      <Sparkles count={40} scale={[10, 4, 10]} position={[0, 1.5, 0]} size={3} speed={0.3} color="#ffd98a" opacity={0.6} />
+      <Sparkles count={30} scale={[12, 5, 12]} position={[0, 2, -1]} size={2.5} speed={0.2} color="#3ee6ff" opacity={0.5} />
     </Canvas>
   );
 }

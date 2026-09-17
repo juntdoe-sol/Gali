@@ -1,12 +1,13 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { chainReady } from '../chain/client';
 import { BLOCKS, boostFor, COLORS, pointsFor, ROUND_REWARD_SKR } from '../game/constants';
 import { watchMotion } from '../game/motion';
 import { fmtSol, maskOf, MIN_SOL_PER_BLOCK, OPTIMAL_ROUNDS, optimalPerRound, smartPick } from '../game/pot';
 import { useGame, type DockTab, type Preset } from '../game/store';
-import { Btn, F, T } from './kit';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Btn, F, Gem, T } from './kit';
 
 const SHAKE_G = 2.1;
 const TABS: { id: DockTab; label: string }[] = [
@@ -35,29 +36,57 @@ export function Dock() {
   }, []);
 
   return (
-    <View style={[styles.dock, { paddingBottom: insets.bottom + 10 }]}>
-      <View style={styles.seg}>
-        {TABS.map((t) => (
-          <Pressable
-            key={t.id}
-            onPress={() => {
-              if (t.id === tab) setFolded(!compact);
-              else {
-                setTab(t.id);
-                setFolded(null);
-              }
-            }}
-            style={[styles.segBtn, tab === t.id && styles.segOn]}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: tab === t.id }}
-          >
-            <T v="black" style={{ fontSize: 12, letterSpacing: 2, color: tab === t.id ? COLORS.text : COLORS.muted }}>
-              {t.label}
-              {run?.kind === t.id ? ' ●' : ''}
-              {t.id === tab ? (compact ? ' ▴' : ' ▾') : ''}
-            </T>
-          </Pressable>
-        ))}
+    <View style={[styles.dock, { paddingBottom: insets.bottom + (compact ? 8 : 10) }]}>
+      <LinearGradient colors={['#15285a', '#0c1838', '#070d20']} style={[StyleSheet.absoluteFill, styles.dockBg]} />
+      <View pointerEvents="none" style={styles.dockLit} />
+      <Gem size={10} style={styles.dockGem} />
+      <Pressable
+        onPress={() => setFolded(!compact)}
+        hitSlop={8}
+        style={styles.handle}
+        accessibilityRole="button"
+        accessibilityLabel={compact ? 'Expand deploy panel' : 'Minimize deploy panel'}
+      >
+        <View style={styles.handleBar} />
+      </Pressable>
+      <View style={styles.head}>
+        <View style={styles.seg}>
+          {TABS.map((t) => {
+            const on = tab === t.id;
+            return (
+              <Pressable
+                key={t.id}
+                onPress={() => {
+                  if (on) setFolded(!compact);
+                  else {
+                    setTab(t.id);
+                    setFolded(null);
+                  }
+                }}
+                style={[styles.segBtn, on && styles.segOn]}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: on }}
+              >
+                {on ? <LinearGradient colors={['#2c56a8', '#173069']} style={[StyleSheet.absoluteFill, { borderRadius: 8 }]} /> : null}
+                <T v="display" style={{ fontSize: 13, letterSpacing: 2, color: on ? COLORS.gold : COLORS.muted }}>
+                  {t.label}
+                  {run?.kind === t.id ? ' ●' : ''}
+                </T>
+                {on ? <View style={styles.segUnder} /> : null}
+              </Pressable>
+            );
+          })}
+        </View>
+        <Pressable
+          onPress={() => setFolded(!compact)}
+          style={styles.fold}
+          accessibilityRole="button"
+          accessibilityLabel={compact ? 'Expand panel' : 'Minimize panel'}
+        >
+          <T v="display" style={{ fontSize: 14, color: COLORS.gold, transform: [{ rotate: compact ? '180deg' : '0deg' }] }}>
+            ▾
+          </T>
+        </Pressable>
       </View>
       {tab === 'lite' ? <LitePanel compact={compact} /> : <ProPanel compact={compact} />}
     </View>
@@ -99,10 +128,10 @@ function Row({ icon, label, info, right, last }: { icon: string; label: string; 
   );
 }
 
-function Chip({ label, on, onPress, disabled }: { label: string; on?: boolean; onPress: () => void; disabled?: boolean }) {
+function Chip({ label, on, onPress, disabled, grow }: { label: string; on?: boolean; onPress: () => void; disabled?: boolean; grow?: boolean }) {
   return (
-    <Pressable onPress={onPress} disabled={disabled} style={[styles.chip, on && styles.chipOn, disabled && { opacity: 0.4 }]}>
-      <T v="bold" style={{ fontSize: 12, color: on ? COLORS.gold : COLORS.muted }}>
+    <Pressable onPress={onPress} disabled={disabled} style={[styles.chip, on && styles.chipOn, grow && styles.chipGrow, disabled && { opacity: 0.4 }]}>
+      <T v="black" numberOfLines={1} style={{ fontSize: 12, color: on ? COLORS.gold : COLORS.muted, textAlign: 'center' }}>
         {label}
       </T>
     </Pressable>
@@ -136,7 +165,7 @@ function AmountBox({ value, onChange, hint }: { value: string; onChange: (v: str
     <View style={styles.amount}>
       <View style={styles.token}>
         <View style={styles.solMark}>
-          <T v="black" style={{ fontSize: 12, color: '#0d0814' }}>
+          <T v="black" style={{ fontSize: 12, color: '#040817' }}>
             ◎
           </T>
         </View>
@@ -144,15 +173,18 @@ function AmountBox({ value, onChange, hint }: { value: string; onChange: (v: str
           SOL
         </T>
       </View>
-      <TextInput
-        value={value}
-        onChangeText={(t) => onChange(t.replace(',', '.').replace(/[^0-9.]/g, ''))}
-        keyboardType="decimal-pad"
-        placeholder="0"
-        placeholderTextColor={COLORS.line}
-        style={styles.input}
-        accessibilityLabel={hint}
-      />
+      <View style={styles.inputWrap}>
+        <TextInput
+          value={value}
+          onChangeText={(t) => onChange(t.replace(',', '.').replace(/[^0-9.]/g, ''))}
+          keyboardType="decimal-pad"
+          placeholder="0"
+          placeholderTextColor={COLORS.line}
+          style={styles.input}
+          accessibilityLabel={hint}
+          numberOfLines={1}
+        />
+      </View>
     </View>
   );
 }
@@ -289,9 +321,9 @@ function ProPanel({ compact }: { compact: boolean }) {
       {compact ? null : (
         <>
           <Row icon="🔖" label="Presets" info="Four saved setups. Changes save to the selected preset." right={null} />
-          <View style={[styles.lineRight, { justifyContent: 'space-between', marginTop: 2 }]}>
+          <View style={[styles.lineRight, { marginTop: 2 }]}>
             {[0, 1, 2, 3].map((i) => (
-              <Chip key={i} label={`Preset ${i + 1}`} on={i === idx} onPress={() => choosePreset(i)} disabled={Boolean(run)} />
+              <Chip key={i} grow label={`Preset ${i + 1}`} on={i === idx} onPress={() => choosePreset(i)} disabled={Boolean(run)} />
             ))}
           </View>
           <BalanceRow
@@ -365,6 +397,9 @@ function ProPanel({ compact }: { compact: boolean }) {
   );
 }
 
+// browsers draw a focus box around inputs; the field frame already shows focus
+const WEB_NO_OUTLINE = (Platform.OS === 'web' ? { outlineStyle: 'none' } : {}) as object;
+
 const styles = StyleSheet.create({
   dock: {
     position: 'absolute',
@@ -372,51 +407,77 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     paddingHorizontal: 12,
-    paddingTop: 10,
-    backgroundColor: 'rgba(37,27,53,0.97)',
-    borderTopLeftRadius: 26,
-    borderTopRightRadius: 26,
-    borderColor: COLORS.line,
-    borderWidth: 2,
+    paddingTop: 14,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    borderColor: COLORS.trim,
+    borderWidth: 1.5,
     borderBottomWidth: 0,
+    shadowColor: '#000',
+    shadowOpacity: 0.6,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: -6 },
+    elevation: 12,
   },
-  seg: { flexDirection: 'row', backgroundColor: '#00000055', borderRadius: 14, padding: 3, marginBottom: 10 },
-  segBtn: { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 11 },
-  segOn: { backgroundColor: COLORS.card2, borderWidth: 1, borderColor: COLORS.line },
+  dockBg: { borderTopLeftRadius: 21, borderTopRightRadius: 21 },
+  dockLit: { position: 'absolute', top: 0, left: 40, right: 40, height: 1, backgroundColor: COLORS.trimHi, opacity: 0.8 },
+  dockGem: { position: 'absolute', top: -6, alignSelf: 'center' },
+  handle: { position: 'absolute', top: 4, alignSelf: 'center', paddingHorizontal: 24, paddingVertical: 2 },
+  handleBar: { width: 38, height: 4, borderRadius: 2, backgroundColor: COLORS.line },
+  head: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  seg: { flex: 1, flexDirection: 'row', backgroundColor: '#02061499', borderRadius: 10, padding: 3, borderWidth: 1, borderColor: COLORS.line },
+  segBtn: { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 8, overflow: 'hidden' },
+  segOn: { borderWidth: 1, borderColor: '#5d8ae0' },
+  segUnder: { position: 'absolute', bottom: 0, left: '30%', right: '30%', height: 2, backgroundColor: COLORS.gold, borderRadius: 1 },
+  fold: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.trim,
+    backgroundColor: '#02061499',
+  },
   row: { flexDirection: 'row', gap: 6, justifyContent: 'space-between' },
-  line: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderColor: COLORS.line, minHeight: 42 },
-  lineLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  lineRight: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
+  line: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingVertical: 7, borderBottomWidth: 1, borderColor: '#2a448055', minHeight: 42 },
+  lineLeft: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
+  lineRight: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1, minWidth: 0 },
   info: { width: 16, height: 16, borderRadius: 8, borderWidth: 1, borderColor: COLORS.muted, alignItems: 'center', justifyContent: 'center' },
-  chip: { borderWidth: 1, borderColor: COLORS.line, borderRadius: 8, paddingHorizontal: 9, paddingVertical: 5, backgroundColor: '#00000033' },
-  chipOn: { borderColor: COLORS.gold, backgroundColor: '#ffc83d22' },
+  chip: { borderWidth: 1, borderColor: COLORS.line, borderRadius: 7, paddingHorizontal: 9, paddingVertical: 5, backgroundColor: '#0a1636' },
+  chipOn: { borderColor: COLORS.gold, backgroundColor: '#ffcf4a1f' },
+  chipGrow: { flex: 1, minWidth: 0, paddingHorizontal: 4 },
   amount: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: COLORS.line,
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    height: 56,
+    borderWidth: 1.5,
+    borderColor: COLORS.trim,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 54,
     marginTop: 8,
-    backgroundColor: '#00000044',
+    backgroundColor: '#020614cc',
+    overflow: 'hidden',
   },
-  token: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 12, borderRightWidth: 1, borderColor: COLORS.line },
+  token: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 12, borderRightWidth: 1, borderColor: COLORS.line, flexShrink: 0 },
   solMark: { width: 22, height: 22, borderRadius: 6, backgroundColor: COLORS.sol, alignItems: 'center', justifyContent: 'center' },
-  input: { flex: 1, textAlign: 'right', color: COLORS.text, fontFamily: F.display, fontSize: 24, paddingVertical: 0 },
+  inputWrap: { flex: 1, minWidth: 0, marginLeft: 10 },
+  input: { width: '100%', minWidth: 0, textAlign: 'right', color: COLORS.gold, fontFamily: F.display, fontSize: 24, paddingVertical: 0, paddingHorizontal: 0, ...WEB_NO_OUTLINE },
   small: {
     width: 72,
     textAlign: 'right',
     color: COLORS.text,
-    fontFamily: F.bold,
+    fontFamily: F.display,
     fontSize: 14,
-    paddingVertical: 2,
+    paddingVertical: 3,
     paddingHorizontal: 6,
     borderWidth: 1,
     borderColor: COLORS.line,
-    borderRadius: 8,
+    borderRadius: 7,
+    backgroundColor: '#020614aa',
+    ...WEB_NO_OUTLINE,
   },
-  tag: { borderWidth: 1, borderColor: COLORS.line, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 2 },
+  tag: { borderWidth: 1, borderColor: COLORS.line, borderRadius: 5, paddingHorizontal: 7, paddingVertical: 2 },
   check: { width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: COLORS.line, alignItems: 'center', justifyContent: 'center' },
   checkOn: { backgroundColor: COLORS.gold, borderColor: COLORS.gold },
 });
