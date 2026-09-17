@@ -458,6 +458,23 @@ export function signWithSession(session: Keypair, message: string) {
   return Buffer.from(sig).toString('base64');
 }
 
+/**
+ * Check that `wallet` really controls `session` right now (its on-chain Player names that key and it
+ * hasn't expired) and that `sig` is the session key's signature of `message`. Player reads are cached.
+ */
+const playerCache = new Map<string, { at: number; p: ChainPlayer | null }>();
+export async function verifySessionClaim(wallet: string, session: string, message: string, sigB64: string): Promise<boolean> {
+  try {
+    const hit = playerCache.get(wallet);
+    const p = hit && Date.now() - hit.at < 60_000 ? hit.p : await fetchPlayer(new PublicKey(wallet));
+    if (!hit || hit.p !== p) playerCache.set(wallet, { at: Date.now(), p });
+    if (!p || p.session !== session || p.sessionExpires * 1000 < Date.now()) return false;
+    return ed25519.verify(Buffer.from(sigB64, 'base64'), new TextEncoder().encode(message), new PublicKey(session).toBytes());
+  } catch {
+    return false;
+  }
+}
+
 /* ---------- SKR actions (wallet approval each) ---------- */
 const raw = (whole: number) => new BN(Math.round(whole * 10 ** SKR_DECIMALS).toString());
 

@@ -4,9 +4,9 @@ import { Pressable, StyleSheet, Text, View, type StyleProp, type TextStyle, type
 import { COLORS } from '../game/constants';
 import { haptic } from '../game/sfx';
 
-// Russo One for titles, numbers and buttons; Chakra Petch for everything else.
+// Pixelify Sans for titles, numbers and buttons; Chakra Petch for everything else.
 export const F = {
-  display: 'RussoOne_400Regular',
+  display: 'PixelifySans_700Bold',
   body: 'ChakraPetch_500Medium',
   bold: 'ChakraPetch_600SemiBold',
   black: 'ChakraPetch_700Bold',

@@ -1,0 +1,67 @@
+{
+ "scale": 4,
+ "map": [
+  360,
+  440
+ ],
+ "spot": [
+  28,
+  36,
+  10
+ ],
+ "grid": [
+  102,
+  132,
+  32,
+  156,
+  164
+ ],
+ "miner": [
+  18,
+  24
+ ],
+ "kinds": [
+  "coal",
+  "boulder",
+  "gold",
+  "crystal-blue",
+  "crystal-purple",
+  "shaft",
+  "drill",
+  "cart",
+  "pit",
+  "sluice"
+ ],
+ "layout": [
+  0,
+  6,
+  1,
+  7,
+  3,
+  5,
+  2,
+  8,
+  0,
+  9,
+  1,
+  4,
+  6,
+  5,
+  2,
+  7,
+  0,
+  9,
+  3,
+  8,
+  3,
+  8,
+  2,
+  1,
+  6
+ ],
+ "poses": {
+  "idle": 2,
+  "walk": 4,
+  "swing": 3
+ }
+}

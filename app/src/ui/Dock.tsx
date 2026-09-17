@@ -6,7 +6,7 @@ import { BLOCKS, boostFor, COLORS, pointsFor, ROUND_REWARD_SKR } from '../game/c
 import { watchMotion } from '../game/motion';
 import { fmtSol, maskOf, MIN_SOL_PER_BLOCK, OPTIMAL_ROUNDS, optimalPerRound, smartPick } from '../game/pot';
 import { useGame, type DockTab, type Preset } from '../game/store';
-import { fx } from '../scene/fx';
+import { fx } from '../pixel/fx';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Btn, F, Gem, T } from './kit';
 
@@ -242,7 +242,7 @@ function LitePanel({ compact }: { compact: boolean }) {
           <Row
             icon="🪙"
             label="Per round"
-            info={`How much SOL goes in each round, spread across all 25 blocks so you always share the strike and get a shot at the ${ROUND_REWARD_SKR} SKR it mines. Optimal splits your amount over ${OPTIMAL_ROUNDS} rounds.`}
+            info={`How much SOL goes in each round, spread across all 25 spots so you always share the strike and get a shot at the ${ROUND_REWARD_SKR} SKR it mines. Optimal splits your amount over ${OPTIMAL_ROUNDS} rounds.`}
             right={
               <>
                 <Chip label="Optimal" on={perRound === null} onPress={() => setPerRound(null)} />
@@ -272,7 +272,7 @@ function LitePanel({ compact }: { compact: boolean }) {
       <RunButton
         ready={ready}
         label={label}
-        sub={ready ? `${fmtSol(per)} SOL a round on all 25 blocks · winners split the pot · ${ROUND_REWARD_SKR} SKR draw` : undefined}
+        sub={ready ? `${fmtSol(per)} SOL a round on all 25 spots · winners split the pot · ${ROUND_REWARD_SKR} SKR draw` : undefined}
         onStart={() => void startRun({ kind: 'lite', perRound: per, blocks: 'all', smartN: BLOCKS, manualMask: 0, total: rounds })}
       />
     </>
@@ -309,11 +309,11 @@ function ProPanel({ compact }: { compact: boolean }) {
   const enough = need <= balance + 1e-9;
   const ready = blocks > 0 && per > 0 && perBlock >= MIN_SOL_PER_BLOCK && enough && !pending;
   const label = !blocks
-    ? 'NO SLOTS SELECTED'
+    ? 'NO SPOTS SELECTED'
     : !per
       ? 'ENTER AMOUNT'
       : perBlock < MIN_SOL_PER_BLOCK
-        ? `MIN ${MIN_SOL_PER_BLOCK} SOL PER BLOCK`
+        ? `MIN ${MIN_SOL_PER_BLOCK} SOL PER SPOT`
         : !enough
           ? 'NOT ENOUGH SOL'
           : pending
@@ -339,8 +339,8 @@ function ProPanel({ compact }: { compact: boolean }) {
           <AmountBox value={p.amount} onChange={(v) => editPreset({ amount: v })} hint="SOL per round" />
           <Row
             icon="▦"
-            label="Blocks"
-            info="Tap tiles on the mine, take All 25, or Smart: the least-crowded blocks, where your SOL buys the biggest share."
+            label="Spots"
+            info="Tap spots on the map, take All 25, or Smart: the least-crowded spots, where your SOL buys the biggest share."
             right={
               <>
                 <T v="black" style={{ fontSize: 15, color: blocks ? COLORS.text : COLORS.muted, marginRight: 4 }}>
@@ -374,7 +374,7 @@ function ProPanel({ compact }: { compact: boolean }) {
           <Row
             icon="🏆"
             label="If it strikes"
-            info={`The gold block's miners share 90% of the SOL pot by their SOL there. The ${ROUND_REWARD_SKR} SKR mined is split the same way half the time; otherwise one lucky miner takes it all, with odds equal to their share. Points: 40 x 25 / blocks covered. A 1-in-625 motherlode adds 5,000 SKR and 10,000 points.`}
+            info={`The gold spot's miners share 90% of the SOL pot by their SOL there. The ${ROUND_REWARD_SKR} SKR mined is split the same way half the time; otherwise one lucky miner takes it all, with odds equal to their share. Points: 40 x 25 / blocks covered. A 1-in-625 motherlode adds 5,000 SKR and 10,000 points.`}
             last
             right={
               <T v="black" style={{ fontSize: 13, color: COLORS.gold }}>
@@ -387,7 +387,7 @@ function ProPanel({ compact }: { compact: boolean }) {
       <RunButton
         ready={ready}
         label={label}
-        sub={ready ? `${fmtSol(perBlock, 5)} SOL a block · up to ${Math.round(bestShare * 100)}% of a strike right now` : undefined}
+        sub={ready ? `${fmtSol(perBlock, 5)} SOL a spot · up to ${Math.round(bestShare * 100)}% of a strike right now` : undefined}
         onStart={() =>
           void startRun({
             kind: 'pro',

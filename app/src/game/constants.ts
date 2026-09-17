@@ -96,7 +96,7 @@ export interface QuestDef {
 export const QUESTS: QuestDef[] = [
   { id: 'dig5', label: 'Play 5 rounds', target: 5, rewardXp: 60 },
   { id: 'win1', label: 'Strike gold once', target: 1, rewardXp: 80 },
-  { id: 'sharp', label: 'Win with 5 blocks or fewer', target: 1, rewardXp: 120 },
+  { id: 'sharp', label: 'Win with 5 spots or fewer', target: 1, rewardXp: 120 },
   { id: 'shake', label: 'Shake your phone to Smart-pick', target: 1, rewardXp: 40 },
   { id: 'mole3', label: 'Bonk 3 moles', target: 3, rewardXp: 50 },
 ];
@@ -110,7 +110,7 @@ export const ACHIEVEMENTS: AchDef[] = [
   { id: 'first-dig', label: 'First Swing', desc: 'Play your first round' },
   { id: 'first-win', label: 'Struck Gold', desc: 'Win your first round' },
   { id: 'wins-10', label: 'Seasoned Digger', desc: 'Win 10 rounds' },
-  { id: 'sniper', label: 'Sniper', desc: 'Win with a single block' },
+  { id: 'sniper', label: 'Sniper', desc: 'Win with a single spot' },
   { id: 'motherlode', label: 'MOTHERLODE', desc: 'Hit the motherlode' },
   { id: 'lvl-5', label: 'Foreman', desc: 'Reach level 5' },
   { id: 'hot-3', label: 'On Fire', desc: 'Win 3 rounds in a row' },
