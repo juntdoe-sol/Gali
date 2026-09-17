@@ -498,5 +498,5 @@ const styles = StyleSheet.create({
   seg: { flexDirection: 'row', gap: 4, backgroundColor: '#00000055', borderRadius: 14, padding: 4 },
   segBtn: { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 10 },
   rank: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: COLORS.card, borderRadius: 12, borderWidth: 2, borderColor: 'transparent', padding: 10 },
-  input: { marginTop: 6, backgroundColor: '#00000055', borderColor: COLORS.line, borderWidth: 2, borderRadius: 12, color: COLORS.text, fontSize: 20, paddingHorizontal: 12, paddingVertical: 8, fontFamily: 'PixelifySans_700Bold' },
+  input: { marginTop: 6, backgroundColor: '#00000055', borderColor: COLORS.line, borderWidth: 2, borderRadius: 12, color: COLORS.text, fontSize: 20, paddingHorizontal: 12, paddingVertical: 8, fontFamily: 'Jersey15_400Regular' },
 });

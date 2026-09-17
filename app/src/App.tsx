@@ -1,5 +1,5 @@
 import { ChakraPetch_500Medium, ChakraPetch_600SemiBold, ChakraPetch_700Bold } from '@expo-google-fonts/chakra-petch';
-import { PixelifySans_700Bold } from '@expo-google-fonts/pixelify-sans';
+import { Jersey15_400Regular } from '@expo-google-fonts/jersey-15';
 import { useFonts } from 'expo-font';
 import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
@@ -41,7 +41,7 @@ async function scheduleDailyReminder() {
 }
 
 export default function App() {
-  const [fontsLoaded] = useFonts({ PixelifySans_700Bold, ChakraPetch_500Medium, ChakraPetch_600SemiBold, ChakraPetch_700Bold });
+  const [fontsLoaded] = useFonts({ Jersey15_400Regular, ChakraPetch_500Medium, ChakraPetch_600SemiBold, ChakraPetch_700Bold });
   const [menu, setMenu] = useState(false);
   const onboarded = useGame((s) => s.save.onboarded);
 
