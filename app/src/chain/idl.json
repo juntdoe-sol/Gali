@@ -1940,7 +1940,7 @@
           {
             "name": "pool",
             "docs": [
-              "lamports returned to miners after fees (set by `settle_pot`)"
+              "lamports the winning spot's miners split after fees (set by `settle_pot`)"
             ],
             "type": "u64"
           },

@@ -199,11 +199,13 @@ describe('gali', () => {
     expect(Number(v.amount)).to.eq(1_000_000_000);
   });
 
-  it('mines with SOL: fees per spot, SOL returned, SKR to the winning spot, claimed later', async () => {
+  let rival: Keypair;
+  let rivalPda: PublicKey;
+  it('mines with SOL: fees per spot, winners split the pot, SKR to the winning spot, claimed later', async () => {
     const conn = provider.connection;
-    const rival = Keypair.generate();
+    rival = Keypair.generate();
     await conn.confirmTransaction(await conn.requestAirdrop(rival.publicKey, LAMPORTS_PER_SOL));
-    const rivalPda = find(Buffer.from('player'), rival.publicKey.toBuffer());
+    rivalPda = find(Buffer.from('player'), rival.publicKey.toBuffer());
     await program.methods.initPlayer().accountsStrict({ owner: rival.publicKey, player: rivalPda, systemProgram: SystemProgram.programId }).signers([rival]).rpc();
 
     const round = await freshRound(8);
@@ -325,7 +327,7 @@ describe('gali', () => {
     expect(settled.splitReward).to.eq(r.splitReward);
     expect((await acc.pot.fetch(pot)).winnersPaid).to.eq(2);
     console.log(`      round mode: ${r.splitReward ? 'split' : 'solo spot'} (spot ${r.winningBlock}, lucky index ${settled.luckyIndex.toNumber()})`);
-    // player (1/3 of each spot): 9.9M back on the winning spot + 8.91M on each of 24 losing spots, less than the 250M it put in
+    // both covered every spot, so both win: player 1/3 and rival 2/3 of the pool (their SOL minus fees, no profit)
     expect(got[0].sol).to.eq(223_740_000);
     expect(got[1].sol).to.eq(447_480_000);
     const mlShare = [Math.floor(mlPaid / 3), Math.floor((mlPaid * 2) / 3)];
@@ -405,6 +407,73 @@ describe('gali', () => {
     expect(q.wins).to.eq(1);
     expect(p.points.toNumber()).to.eq(Math.floor(((40 + ml) * 12_500) / 10_000)); // staked: 1.25x
     expect(q.points.toNumber()).to.eq(40 + ml);
+  });
+
+  it('losers get no SOL: the winning spot takes the losing spots\' SOL', async () => {
+    const conn = provider.connection;
+    const loner = Keypair.generate();
+    await conn.confirmTransaction(await conn.requestAirdrop(loner.publicKey, LAMPORTS_PER_SOL));
+    const lonerPda = find(Buffer.from('player'), loner.publicKey.toBuffer());
+    await program.methods.initPlayer().accountsStrict({ owner: loner.publicKey, player: lonerPda, systemProgram: SystemProgram.programId }).signers([loner]).rpc();
+    const round = await freshRound(8);
+    const pot = find(Buffer.from('pot'), u64le(round));
+    const stakeOf = (o: PublicKey) => find(Buffer.from('stake'), o.toBuffer(), u64le(round));
+    const dep = (kp: Keypair, pda: PublicKey, mask: number, lamports: number) =>
+      program.methods
+        .deploy(new anchor.BN(round), mask, new anchor.BN(lamports))
+        .accountsStrict({ signer: kp.publicKey, owner: kp.publicKey, config, player: pda, pot, stake: stakeOf(kp.publicKey), systemProgram: SystemProgram.programId })
+        .signers([kp])
+        .rpc();
+    await dep(rival, rivalPda, (1 << 25) - 1, 1_000_000); // 1M on every spot
+    await dep(loner, lonerPda, 0b1, 4_000_000); // 4M on spot 0 only
+    await afterRound(round);
+    await lockRound(round);
+    for (let i = 0; !(await conn.getAccountInfo(roundOf(round))); i++) {
+      const e = await errOf(revealRound(round));
+      if (e && (i > 20 || !e.includes('NoEntropy'))) throw new Error(e);
+      if (e) await sleep(300);
+    }
+    const r = await acc.round.fetch(roundOf(round));
+    await program.methods
+      .settlePot(new anchor.BN(round))
+      .accountsStrict({ config, round: roundOf(round), pot, feeTo: provider.wallet.publicKey, skrMint: mint, rewards, motherlode, potVault, tokenProgram: TOKEN_PROGRAM_ID })
+      .rpc();
+    const w = r.winningBlock;
+    const d = Array.from({ length: 25 }, (_, i) => 1_000_000 + (i === 0 ? 4_000_000 : 0));
+    const cfgNow = await acc.config.fetch(config);
+    let fees = 0;
+    d.forEach((v, i) => {
+      const admin = Math.floor(v / 100);
+      fees += admin + (i === w ? 0 : Math.floor(((v - admin) * cfgNow.potFeeBps) / 10_000));
+    });
+    const pool = 29_000_000 - fees;
+    const settled = await acc.pot.fetch(pot);
+    expect(settled.pool.toNumber()).to.eq(pool);
+    const refinery = find(Buffer.from('refinery'));
+    const credited: number[] = [];
+    for (const [kp, pda] of [
+      [rival, rivalPda],
+      [loner, lonerPda],
+    ] as const) {
+      const unclaimed = find(Buffer.from('unclaimed'), kp.publicKey.toBuffer());
+      const before = (await acc.unclaimed.fetchNullable(unclaimed))?.sol.toNumber() ?? 0;
+      await program.methods
+        .claimPot(new anchor.BN(round))
+        .accountsStrict({ cranker: provider.wallet.publicKey, owner: kp.publicKey, payer: kp.publicKey, config, player: pda, round: roundOf(round), pot, stake: stakeOf(kp.publicKey), unclaimed, refinery, systemProgram: SystemProgram.programId })
+        .rpc();
+      credited.push((await acc.unclaimed.fetch(unclaimed)).sol.toNumber() - before);
+    }
+    console.log(`      winning spot ${w}: rival +${credited[0]}, loner +${credited[1]} (pool ${pool})`);
+    if (w === 0) {
+      // spot 0 holds 5M: rival 1/5, loner 4/5 of the whole pool
+      expect(credited[0]).to.eq(Math.floor((1_000_000 * pool) / 5_000_000));
+      expect(credited[1]).to.eq(Math.floor((4_000_000 * pool) / 5_000_000));
+    } else {
+      // the loner missed: nothing back. The rival alone on the gold spot takes everything, incl. the loner's SOL
+      expect(credited[1]).to.eq(0);
+      expect(credited[0]).to.eq(pool);
+      expect(credited[0]).to.be.greaterThan(25_000_000); // more than the rival put in
+    }
   });
 
   const session = Keypair.generate();

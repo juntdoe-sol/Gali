@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { chainReady, REFINING_FEE } from '../chain/client';
 import { BLOCKS, boostFor, COLORS, pointsFor, ROUND_REWARD_SKR } from '../game/constants';
 import { watchMotion } from '../game/motion';
-import { AVG_RETURN, fmtSol, maskOf, MIN_SOL_PER_BLOCK, OPTIMAL_ROUNDS, optimalPerRound, smartPick, soloMask } from '../game/pot';
+import { addToPot, fmtSol, maskOf, strikeRange, MIN_SOL_PER_BLOCK, OPTIMAL_ROUNDS, optimalPerRound, smartPick, soloMask } from '../game/pot';
 import { useGame, type DockTab, type Preset } from '../game/store';
 import { fx } from '../pixel/fx';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -102,7 +102,17 @@ export function Dock() {
 
 /* ---------------- shared bits ---------------- */
 const RETURN_INFO =
-  'SOL is never taken from other miners. Every spot keeps 1% as a fee, and every spot except the gold one keeps another 10% of the rest. Everything else comes back to you. So covering all 25 spots gets back about 89.5% of your SOL on average: the reward for mining is SKR.';
+  "Only the gold spot gets paid. Its miners split the whole pot (their SOL plus the SOL on every other spot) by their share of the gold spot, after fees: 1% of every spot and 10% of the losing spots. SOL on the other spots is lost. Covering all 25 spots means you always hit, but you pay the losing spots' SOL to yourself and the others, so you only profit when others put less on the spot that strikes.";
+
+/** Pot as it will look with this deploy added (practice already includes a pending deploy). */
+function usePotWith(mask: number, perBlock: number) {
+  const pot = useGame((s) => s.pot);
+  const pending = useGame((s) => s.pending);
+  if (!mask || !(perBlock > 0)) return null;
+  return pending ? pot : addToPot(pot, mask, perBlock);
+}
+const fmtRange = (r: { lo: number; hi: number } | null) =>
+  !r ? '—' : Math.abs(r.hi - r.lo) < 0.00005 ? fmtSol(r.lo) : `${fmtSol(r.lo)}–${fmtSol(r.hi)}`;
 
 /** Unclaimed SOL and SKR from finished rounds, each with its own Claim button. */
 export function UnclaimedRow() {
@@ -269,6 +279,9 @@ function LitePanel({ compact }: { compact: boolean }) {
   const perBlockOk = per / BLOCKS >= MIN_SOL_PER_BLOCK;
   const enough = total <= balance + 1e-9;
   const ready = total > 0 && rounds > 0 && perBlockOk && enough;
+  const ALL = (1 << BLOCKS) - 1;
+  const potWith = usePotWith(ALL, per / BLOCKS);
+  const range = potWith ? strikeRange(potWith, ALL, per / BLOCKS) : null;
   const label = !total
     ? 'ENTER AMOUNT'
     : !enough
@@ -300,12 +313,12 @@ function LitePanel({ compact }: { compact: boolean }) {
             }
           />
           <Row
-            icon="↩"
-            label="SOL back"
+            icon="🏆"
+            label="SOL if it strikes"
             info={RETURN_INFO}
             right={
-              <T v="black" style={{ fontSize: 13, color: per ? COLORS.sol : COLORS.muted }}>
-                {per ? `≈ ${fmtSol(per * AVG_RETURN)} a round` : '—'}
+              <T v="black" numberOfLines={1} style={{ fontSize: 13, color: range ? COLORS.sol : COLORS.muted }}>
+                {range ? `${fmtRange(range)} a round` : '—'}
               </T>
             }
           />
@@ -325,7 +338,7 @@ function LitePanel({ compact }: { compact: boolean }) {
       <RunButton
         ready={ready}
         label={label}
-        sub={ready ? `${fmtSol(per)} SOL a round on all 25 spots · ~${fmtSol(per * AVG_RETURN)} back + SKR` : undefined}
+        sub={ready ? `${fmtSol(per)} SOL a round on all 25 spots · always on the gold spot · SOL + SKR` : undefined}
         onStart={() => void startRun({ kind: 'lite', perRound: per, blocks: 'all', smartN: BLOCKS, manualMask: 0, total: rounds })}
       />
     </>
@@ -376,6 +389,9 @@ function ProPanel({ compact }: { compact: boolean }) {
   const solo = soloMask(roundId);
   const picked = p.blocks === 'manual' || p.blocks === 'smart' ? selected : [...Array(BLOCKS).keys()];
   const soloCount = picked.filter((i) => solo & (1 << i)).length;
+  const proMask = p.blocks === 'all' ? (1 << BLOCKS) - 1 : maskOf(picked);
+  const proPot = usePotWith(proMask, perBlock);
+  const proRange = proPot ? strikeRange(proPot, proMask, perBlock) : null;
   const onWin = selected.length ? Math.min(...selected.map((i) => pot.perBlock[i] ?? 0)) : 0;
   const bestShare = perBlock > 0 ? perBlock / (onWin + perBlock) : 0;
 
@@ -431,7 +447,7 @@ function ProPanel({ compact }: { compact: boolean }) {
           <Row
             icon="🏆"
             label="If it strikes"
-            info={`Only the gold spot mines SKR. Its SKR (up to ${ROUND_REWARD_SKR} a round, paid from the Rewards Pool) is split by SOL there, unless it is one of this round's 10 solo spots (★ on the map): then one miner takes it all, with odds equal to their share. A 1-in-625 motherlode pays out the whole Motherlode Pool, split by SOL on the gold spot, plus 10,000 points. Points: 40 x 25 / spots covered. ${RETURN_INFO}`}
+            info={`Only the gold spot gets paid. Its SKR (up to ${ROUND_REWARD_SKR} a round, paid from the Rewards Pool) is split by SOL there, unless it is one of this round's 10 solo spots (★ on the map): then one miner takes it all, with odds equal to their share. A 1-in-625 motherlode pays out the whole Motherlode Pool, split by SOL on the gold spot, plus 10,000 points. Points: 40 x 25 / spots covered. ${RETURN_INFO}`}
             last
             right={
               <T v="black" style={{ fontSize: 13, color: COLORS.gold }}>
@@ -444,7 +460,7 @@ function ProPanel({ compact }: { compact: boolean }) {
       <RunButton
         ready={ready}
         label={label}
-        sub={ready ? `${fmtSol(perBlock, 5)} SOL a spot · up to ${Math.round(bestShare * 100)}% of the gold spot · ~${fmtSol(per * AVG_RETURN)} SOL back` : undefined}
+        sub={ready ? `${fmtSol(perBlock, 5)} SOL a spot · if one strikes: ${fmtRange(proRange)} SOL` : undefined}
         onStart={() =>
           void startRun({
             kind: 'pro',
