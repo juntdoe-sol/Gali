@@ -5,7 +5,7 @@
  * Run with any funded wallet: `npm run crank` (RPC_URL and ANCHOR_WALLET are honoured).
  */
 import { BN, utils } from '@coral-xyz/anchor';
-import { ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { PublicKey, SystemProgram } from '@solana/web3.js';
 import { lockAndReveal, pda, program, u64le } from './common';
 
@@ -61,15 +61,11 @@ async function main() {
             round: pda.round(r),
             pot: pda.pot(r),
             stake: publicKey,
-            skrMint: cfg.skrMint,
-            potVault: pda.potVault(),
-            ownerAta: getAssociatedTokenAddressSync(cfg.skrMint, owner, true),
-            tokenProgram: TOKEN_PROGRAM_ID,
-            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            unclaimed: pda.unclaimed(owner),
             systemProgram: SystemProgram.programId,
           })
           .rpc();
-        console.log('  paid', owner.toBase58().slice(0, 8), 'round', r);
+        console.log('  credited', owner.toBase58().slice(0, 8), 'round', r); // lands in their Unclaimed balance
       } catch (e) {
         console.log('  claim skip', owner.toBase58().slice(0, 8), short(e)); // the player's app may have claimed first
       }

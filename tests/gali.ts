@@ -2,12 +2,25 @@ import * as anchor from '@coral-xyz/anchor';
 import { createMint, getAccount, getOrCreateAssociatedTokenAccount, mintTo, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, SYSVAR_SLOT_HASHES_PUBKEY } from '@solana/web3.js';
 import { expect } from 'chai';
+import { createHash } from 'crypto';
 import idl from '../target/idl/gali.json';
 
 const u64le = (n: number) => {
   const b = Buffer.alloc(8);
   b.writeBigUInt64LE(BigInt(n));
   return b;
+};
+/** Mirror of the program's solo_mask: Fisher-Yates pick of 10 of 25 spots from sha256("gali-solo" || round). */
+const soloMask = (round: number) => {
+  const seed = createHash('sha256').update(Buffer.concat([Buffer.from('gali-solo'), u64le(round)])).digest();
+  const idx = Array.from({ length: 25 }, (_, i) => i);
+  let mask = 0;
+  for (let i = 0; i < 10; i++) {
+    const j = i + (seed.readUInt16LE(2 * i) % (25 - i));
+    [idx[i], idx[j]] = [idx[j], idx[i]];
+    mask |= 1 << idx[i];
+  }
+  return mask >>> 0;
 };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -131,7 +144,7 @@ describe('gali', () => {
         boostTier1: new anchor.BN(1_000_000_000),
         boostTier2: new anchor.BN(10_000_000_000),
         gearPrices: [new anchor.BN(0), new anchor.BN(50_000_000)],
-        motherlodeSkr: new anchor.BN(500_000_000),
+        motherlodeSkr: new anchor.BN(5_000_000),
         motherlodePoolBps: 3_000,
         rewardsPoolBps: 4_000,
         potFeeBps: 1_000,
@@ -182,7 +195,7 @@ describe('gali', () => {
     expect(Number(v.amount)).to.eq(1_000_000_000);
   });
 
-  it('mines with SOL: winners split the SOL pot and the round SKR reward', async () => {
+  it('mines with SOL: fees per spot, SOL returned, SKR to the winning spot, claimed later', async () => {
     const conn = provider.connection;
     const rival = Keypair.generate();
     await conn.confirmTransaction(await conn.requestAirdrop(rival.publicKey, LAMPORTS_PER_SOL));
@@ -241,26 +254,43 @@ describe('gali', () => {
     expect(await provider.connection.getAccountInfo(draw(round))).to.eq(null); // closed by the reveal
     expect(await errOf(lockRound(round))).to.contain('AlreadyRevealed');
     const r = await acc.round.fetch(roundPda);
+    // solo spots are fixed by the round id; the client mirror must agree with the program
+    expect(r.splitReward).to.eq((soloMask(round) & (1 << r.winningBlock)) === 0);
+    expect(soloMask(round).toString(2).split('1').length - 1).to.eq(10);
     const rewardsBefore = await skrOf(rewards);
+    const mlBefore = await skrOf(motherlode);
+    const feeBefore = await conn.getBalance(provider.wallet.publicKey);
     await program.methods
       .settlePot(new anchor.BN(round))
       .accountsStrict({ config, round: roundPda, pot, feeTo: provider.wallet.publicKey, skrMint: mint, rewards, motherlode, potVault, tokenProgram: TOKEN_PROGRAM_ID })
       .rpc();
     const settled = await acc.pot.fetch(pot);
     expect(settled.settled).to.eq(true);
-    expect(settled.pool.toNumber()).to.eq(675_000_000); // 10% SOL fee
-    expect(settled.skrReward.toNumber()).to.be.gte(25_000_000); // + Motherlode if it hit
-    expect(rewardsBefore - (await skrOf(rewards))).to.eq(25_000_000);
+    // 30M per spot: 1% admin (300k) on all 25, 10% of the rest (2.97M) on the 24 losing spots
+    expect(settled.adminFee.toNumber()).to.eq(7_500_000);
+    expect(settled.protocolFee.toNumber()).to.eq(71_280_000);
+    expect(settled.pool.toNumber()).to.eq(750_000_000 - 78_780_000);
+    expect(settled.feeBps).to.eq(1_000);
+    void feeBefore;
+    expect(settled.skrReward.toNumber()).to.eq(25_000_000);
+    // round reward to escrow, then 5 SKR top-up of the Motherlode Pool (after any payout)
+    expect(rewardsBefore - (await skrOf(rewards))).to.eq(30_000_000);
+    if (r.motherlode) {
+      expect(settled.motherlodeSkr.toNumber()).to.eq(mlBefore);
+      expect(await skrOf(motherlode)).to.eq(5_000_000);
+    } else {
+      expect(settled.motherlodeSkr.toNumber()).to.eq(0);
+      expect((await skrOf(motherlode)) - mlBefore).to.eq(5_000_000);
+    }
 
-    const rivalAta = (await getOrCreateAssociatedTokenAccount(conn, (provider.wallet as anchor.Wallet).payer, mint, rival.publicKey)).address;
-    const got: { sol: number; skr: number }[] = [];
-    for (const [kp, pda, ataK] of [
-      [player, playerPda, userAta],
-      [rival, rivalPda, rivalAta],
+    const unclaimedOf = (o: PublicKey) => find(Buffer.from('unclaimed'), o.toBuffer());
+    const got: { sol: number; skr: number; rent: number }[] = [];
+    for (const [kp, pda] of [
+      [player, playerPda],
+      [rival, rivalPda],
     ] as const) {
       const sol0 = await conn.getBalance(kp.publicKey);
       const rent = await conn.getBalance(stakeOf(kp.publicKey)); // refunded to the payer on close
-      const skr0 = await skrOf(ataK);
       await program.methods
         .claimPot(new anchor.BN(round))
         .accountsStrict({
@@ -272,36 +302,70 @@ describe('gali', () => {
           round: roundPda,
           pot,
           stake: stakeOf(kp.publicKey),
+          unclaimed: unclaimedOf(kp.publicKey),
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+      // nothing reaches the wallet yet except the stake rent
+      expect((await conn.getBalance(kp.publicKey)) - sol0).to.eq(rent);
+      const u = await acc.unclaimed.fetch(unclaimedOf(kp.publicKey));
+      got.push({ sol: u.sol.toNumber(), skr: u.skr.toNumber(), rent });
+      expect(await conn.getAccountInfo(stakeOf(kp.publicKey))).to.eq(null);
+    }
+    const reward = settled.skrReward.toNumber();
+    const mlPaid = settled.motherlodeSkr.toNumber();
+    expect(settled.splitReward).to.eq(r.splitReward);
+    expect((await acc.pot.fetch(pot)).winnersPaid).to.eq(2);
+    console.log(`      round mode: ${r.splitReward ? 'split' : 'solo spot'} (spot ${r.winningBlock}, lucky index ${settled.luckyIndex.toNumber()})`);
+    // player (1/3 of each spot): 9.9M back on the winning spot + 8.91M on each of 24 losing spots, less than the 250M it put in
+    expect(got[0].sol).to.eq(223_740_000);
+    expect(got[1].sol).to.eq(447_480_000);
+    const mlShare = [Math.floor(mlPaid / 3), Math.floor((mlPaid * 2) / 3)];
+    if (r.splitReward) {
+      expect(got[0].skr).to.eq(Math.floor(reward / 3) + mlShare[0]);
+      expect(got[1].skr).to.eq(Math.floor((reward * 2) / 3) + mlShare[1]);
+      expect(settled.winner.equals(PublicKey.default)).to.eq(true);
+    } else {
+      // on the winning spot, lamports 0..10M belong to the player and 10M..30M to the rival
+      const playerWins = settled.luckyIndex.toNumber() < 10_000_000;
+      expect(got[0].skr).to.eq((playerWins ? reward : 0) + mlShare[0]);
+      expect(got[1].skr).to.eq((playerWins ? 0 : reward) + mlShare[1]);
+      expect((await acc.pot.fetch(pot)).winner.equals(playerWins ? player.publicKey : rival.publicKey)).to.eq(true);
+    }
+
+    // claim_rewards: only the owner (or their session) can pay out, and only once
+    const claimRewards = (signer: Keypair, owner: PublicKey, pda: PublicKey) =>
+      program.methods
+        .claimRewards()
+        .accountsStrict({
+          signer: signer.publicKey,
+          owner,
+          config,
+          player: pda,
+          unclaimed: unclaimedOf(owner),
           skrMint: mint,
           potVault,
-          ownerAta: ataK,
+          ownerAta: PublicKey.findProgramAddressSync([owner.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.toBuffer()], ASSOCIATED_TOKEN_PROGRAM_ID)[0],
           tokenProgram: TOKEN_PROGRAM_ID,
           associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
         })
+        .signers([signer])
         .rpc();
-      got.push({ sol: (await conn.getBalance(kp.publicKey)) - sol0 - rent, skr: (await skrOf(ataK)) - skr0 });
-      expect(await conn.getAccountInfo(stakeOf(kp.publicKey))).to.eq(null);
-    }
-    const reward = settled.skrReward.toNumber();
-    const w = r.winningBlock;
-    expect(settled.splitReward).to.eq(r.splitReward);
-    console.log(`      round mode: ${r.splitReward ? 'split' : 'one lucky winner'} (block ${w}, lucky index ${settled.luckyIndex.toNumber()})`);
-    expect(got[0].sol).to.be.closeTo(225_000_000, 1);
-    expect(got[1].sol).to.be.closeTo(450_000_000, 1);
-    if (r.splitReward) {
-      expect(got[0].skr).to.be.closeTo(Math.floor(reward / 3), 1);
-      expect(got[1].skr).to.be.closeTo(Math.floor((reward * 2) / 3), 1);
-    } else {
-      // on the winning block, lamports 0..10M belong to the player and 10M..30M to the rival
-      const idx = settled.luckyIndex.toNumber();
-      expect(idx).to.be.lessThan(30_000_000);
-      const playerWins = idx < 10_000_000;
-      expect(got[0].skr).to.eq(playerWins ? reward : 0);
-      expect(got[1].skr).to.eq(playerWins ? 0 : reward);
-    }
-    expect((await acc.stake.fetchNullable(stakeOf(player.publicKey)))).to.eq(null);
-    void w;
+    expect(await errOf(claimRewards(rival, player.publicKey, playerPda))).to.contain('NotAuthorised');
+    const sol0 = await conn.getBalance(player.publicKey);
+    const skr0 = await skrOf(userAta);
+    await claimRewards(player, player.publicKey, playerPda);
+    expect((await conn.getBalance(player.publicKey)) - sol0).to.eq(got[0].sol); // the provider pays the tx fee
+    expect((await skrOf(userAta)) - skr0).to.eq(got[0].skr);
+    const u0 = await acc.unclaimed.fetch(unclaimedOf(player.publicKey));
+    expect(u0.sol.toNumber()).to.eq(0);
+    expect(u0.claimedSol.toNumber()).to.eq(got[0].sol);
+    expect(await errOf(claimRewards(player, player.publicKey, playerPda))).to.contain('NothingToClaim');
+    // the rival has no SKR account yet: claim_rewards creates it
+    await claimRewards(rival, rival.publicKey, rivalPda);
+    const rivalAta = PublicKey.findProgramAddressSync([rival.publicKey.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.toBuffer()], ASSOCIATED_TOKEN_PROGRAM_ID)[0];
+    expect(await skrOf(rivalAta)).to.eq(got[1].skr);
 
     // points: 40 x 25 / blocks covered, x1.25 for the player's staked SKR (+10,000 base on a motherlode)
     const p = await acc.player.fetch(playerPda);
@@ -371,6 +435,7 @@ describe('gali', () => {
 
   it('buys gear with SKR', async () => {
     const rewardsBefore = await skrOf(rewards);
+    const mlBefore = await skrOf(motherlode);
     await program.methods
       .buyGear(1)
       .accountsStrict({ owner: player.publicKey, config, player: playerPda, skrMint: mint, userAta, treasury, motherlode, rewards, tokenProgram: TOKEN_PROGRAM_ID })
@@ -380,7 +445,7 @@ describe('gali', () => {
     expect(p.gearMask & 2).to.eq(2);
     // 30% Motherlode Pool, 40% Rewards Pool, 30% treasury
     expect(await skrOf(treasury)).to.eq(15_000_000);
-    expect(await skrOf(motherlode)).to.eq(15_000_000);
+    expect((await skrOf(motherlode)) - mlBefore).to.eq(15_000_000);
     expect((await skrOf(rewards)) - rewardsBefore).to.eq(20_000_000);
   });
 

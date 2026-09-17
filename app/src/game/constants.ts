@@ -74,10 +74,10 @@ export const FREE_GEAR_MASK = GEAR.filter((g) => g.priceSkr === 0).reduce((m, g)
 export const gearByKey = (k: string | null | undefined) => GEAR.find((g) => g.key === k);
 // SKR economy, priced at roughly 1 SKR = $0.018 (55 SKR = $1). Keep in sync with scripts/setup-devnet.ts.
 export const SKR_USD = 0.018;
-export const MOTHERLODE_SKR = 5_000; // motherlode round: shared by the miners on the winning block (capped by the pool)
+export const MOTHERLODE_ACCRUAL_SKR = 40; // added to the Motherlode Pool by every played round; a hit pays out the whole pool
 export const MOTHERLODE_POOL_SHARE = 0.3; // share of each gear sale that feeds the Motherlode Pool
 export const REWARDS_POOL_SHARE = 0.4; // share of each gear sale that feeds the Rewards Pool
-export const ROUND_REWARD_SKR = 200; // SKR mined per round: 50/50 split pro rata, or all to one lucky winner (odds = share of SOL on the block)
+export const ROUND_REWARD_SKR = 200; // SKR mined per round: split pro rata on the winning spot, or all to one miner if a solo spot wins
 export const usd = (skr: number) => `$${(skr * SKR_USD).toLocaleString(undefined, { maximumFractionDigits: skr * SKR_USD < 10 ? 2 : 0 })}`;
 
 export const RARITY_COLOR: Record<Rarity, string> = {

@@ -3,16 +3,19 @@ import { Linking, Modal, Pressable, ScrollView, StyleSheet, Switch, TextInput, V
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ACHIEVEMENTS, BOOST_TIERS, COLORS, GEAR, GEAR_KINDS, levelFromXp, localDay, MOTHERLODE_ODDS, MOTHERLODE_POINTS,
-  MOTHERLODE_POOL_SHARE, MOTHERLODE_SKR, QUESTS, REWARDS_POOL_SHARE, ROUND_REWARD_SKR, usd, RARITY_COLOR, SEASON, type Gear, type GearKind,
+  BLOCKS, MOTHERLODE_ACCRUAL_SKR, MOTHERLODE_POOL_SHARE, QUESTS, REWARDS_POOL_SHARE, ROUND_REWARD_SKR, usd, RARITY_COLOR, SEASON, type Gear, type GearKind,
 } from '../game/constants';
 import { GEAR_ICON, ITEM_ICON } from './icons';
 import { useGame, useLevelXp, useOwnedMask, usePoints } from '../game/store';
-import { chainReady, CLUSTER, fetchLeaderboard, PROGRAM_ID, short, SKR_MINT, type LeaderRow } from '../chain/client';
+import { chainReady, CLUSTER, fetchLeaderboard, fetchPastRounds, PROGRAM_ID, short, SKR_MINT, type LeaderRow, type PastRound } from '../chain/client';
+import { emptyPot, fmtSol, practiceMotherlode, simPot, soloMask } from '../game/pot';
+import { UnclaimedRow } from './Dock';
 import { Bar, Btn, Card, Pill, T } from './kit';
 
-type Tab = 'quests' | 'gear' | 'skr' | 'ranks' | 'me';
+type Tab = 'quests' | 'rounds' | 'gear' | 'skr' | 'ranks' | 'me';
 const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'quests', label: 'Quests', icon: '📜' },
+  { id: 'rounds', label: 'Rounds', icon: '📋' },
   { id: 'gear', label: 'Gear', icon: '⛏' },
   { id: 'skr', label: 'SKR', icon: '◈' },
   { id: 'ranks', label: 'Ranks', icon: '🏆' },
@@ -39,6 +42,7 @@ export function Sheet({ open, onClose }: { open: boolean; onClose: () => void })
         </View>
         <ScrollView contentContainerStyle={{ padding: 14, gap: 10 }}>
           {tab === 'quests' && <Quests />}
+          {tab === 'rounds' && <Rounds />}
           {tab === 'gear' && <GearTab />}
           {tab === 'skr' && <SkrTab />}
           {tab === 'ranks' && <Ranks />}
@@ -166,20 +170,20 @@ function GearTab() {
 }
 
 function MotherlodeCard() {
-  const pool = useGame((s) => s.wallet.pool);
   const owner = useGame((s) => s.wallet.owner);
+  const pool = useGame((s) => (owner && chainReady ? s.wallet.pool : practiceMotherlode(s.roundId)));
   const won = useGame((s) => s.wallet.player?.skrWon ?? 0);
   return (
     <Card glow={COLORS.teal}>
       <T v="label">💎 SKR Motherlode Pool</T>
       <T v="display" style={{ fontSize: 34, color: COLORS.teal }}>
-        {chainReady ? `${pool.toLocaleString()} SKR` : 'Opens on devnet'}
+        {Math.floor(pool).toLocaleString()} SKR{owner && chainReady ? '' : ' (practice)'}
       </T>
       <T>
-        1 round in {MOTHERLODE_ODDS} is a motherlode. Miners on the winning block share {MOTHERLODE_SKR.toLocaleString()} SKR (~{usd(MOTHERLODE_SKR)}) by their SOL there, and each gets {MOTHERLODE_POINTS.toLocaleString()} bonus points. Payouts are capped by the pool.
+        1 round in {MOTHERLODE_ODDS} is a motherlode. It pays out the whole pool (~{usd(pool)} right now), split between the miners on the gold spot by their SOL there, and each gets {MOTHERLODE_POINTS.toLocaleString()} bonus points. An early hit pays less; a late one pays more.
       </T>
       <T v="muted" style={{ marginTop: 6 }}>
-        The pool fills with {Math.round(MOTHERLODE_POOL_SHARE * 100)}% of every gear sale, and anyone can top it up. Another {Math.round(REWARDS_POOL_SHARE * 100)}% fills the Rewards Pool that pays {ROUND_REWARD_SKR} SKR to SOL miners every round.{owner && won > 0 ? ` You've won ${won.toLocaleString()} SKR.` : ''}
+        Every played round adds {MOTHERLODE_ACCRUAL_SKR} SKR to it, plus {Math.round(MOTHERLODE_POOL_SHARE * 100)}% of every gear sale, and anyone can top it up. Another {Math.round(REWARDS_POOL_SHARE * 100)}% of gear sales fills the Rewards Pool that pays {ROUND_REWARD_SKR} SKR to the gold spot every round.{owner && won > 0 ? ` You've won ${won.toLocaleString()} SKR.` : ''}
       </T>
     </Card>
   );
@@ -253,6 +257,112 @@ function SkrTab() {
       <T v="muted">
         {CLUSTER === 'devnet' ? `Devnet build uses a test SKR mint (${short(SKR_MINT.toBase58())}). ` : ''}SKR is the native asset of the Solana Mobile ecosystem.
       </T>
+    </>
+  );
+}
+
+const BOT_NAMES = ['Batu', 'Emas', 'Intan', 'Perak', 'Kilat', 'Rimba', 'Sagu', 'Tembaga'];
+/** Practice mode: stand-in history built from the same simulated crowd the map shows. */
+function practiceRounds(before: number, n: number): PastRound[] {
+  return [...Array(n).keys()].map((k) => {
+    const id = before - 1 - k;
+    const h = (Math.imul(id, 2654435761) >>> 0) / 4294967296;
+    const winning = Math.floor(h * BLOCKS);
+    const pot = simPot(id, 1);
+    const split = (soloMask(id) & (1 << winning)) === 0;
+    const motherlode = Math.floor(h * 1e6) % 625 === 0;
+    return {
+      roundId: id,
+      winning,
+      pot: {
+        ...emptyPot(id),
+        ...pot,
+        pool: pot.total * 0.9,
+        fees: pot.total * 0.1,
+        skrReward: pot.perBlock[winning] > 0 ? ROUND_REWARD_SKR : 0,
+        motherlodeSkr: motherlode ? practiceMotherlode(id) : 0,
+        motherlode,
+        split,
+        winner: split ? null : `${BOT_NAMES[Math.floor(h * 97) % BOT_NAMES.length]}-bot`,
+        winnersPaid: Math.max(1, Math.round(pot.miners * 0.3)),
+        settled: true,
+      },
+    };
+  });
+}
+
+function Rounds() {
+  const owner = useGame((s) => s.wallet.owner);
+  const roundId = useGame((s) => s.roundId);
+  const onChain = Boolean(owner && chainReady);
+  const [rows, setRows] = useState<PastRound[] | null>(null);
+  const [at, setAt] = useState(0);
+  useEffect(() => {
+    let live = true;
+    setRows(null);
+    (onChain ? fetchPastRounds(roundId) : Promise.resolve(practiceRounds(roundId, 12)))
+      .then((r) => live && setRows(r))
+      .catch(() => live && setRows([]));
+    return () => {
+      live = false;
+    };
+    // refresh when a round finishes or on demand, not on every tick
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onChain, at, roundId]);
+  return (
+    <>
+      <Card>
+        <T v="label">Your rewards</T>
+        <View style={{ marginTop: 8 }}>
+          <UnclaimedRow />
+        </View>
+        <T v="muted">Each finished round credits the SOL you get back and any SKR you mined. Claim whenever you like: nothing expires.</T>
+      </Card>
+      <View style={[styles.rowCard, { justifyContent: 'space-between' }]}>
+        <T v="display" style={{ fontSize: 20 }}>
+          Past rounds{onChain ? '' : ' · practice'}
+        </T>
+        <Btn small label="Refresh" onPress={() => setAt(Date.now())} />
+      </View>
+      {rows === null ? (
+        <Card>
+          <T>Loading rounds…</T>
+        </Card>
+      ) : !rows.length ? (
+        <Card>
+          <T>No finished rounds yet. They show up here once they are settled.</T>
+        </Card>
+      ) : (
+        rows.map((r) => {
+          const p = r.pot;
+          const nobody = !(p.perBlock[r.winning] > 0);
+          const who = nobody
+            ? 'Nobody on the gold spot'
+            : p.split
+              ? `Split · ${p.winnersPaid || '…'} miner${p.winnersPaid === 1 ? '' : 's'}`
+              : p.winner
+                ? `★ Solo · ${p.winner === owner ? 'You' : p.winner.length > 20 ? short(p.winner) : p.winner}`
+                : '★ Solo · 1 wallet (claim pending)';
+          return (
+            <View key={r.roundId} style={[styles.past, p.winner && p.winner === owner && { borderColor: COLORS.gold }]}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <T v="bold">
+                  #{(r.roundId % 100000).toLocaleString()} · spot {r.winning + 1}
+                  {p.motherlode ? '  💎 MOTHERLODE' : ''}
+                </T>
+                <T v="muted" style={{ fontSize: 11 }}>
+                  {p.settled ? `${p.miners} miner${p.miners === 1 ? '' : 's'}` : 'settling'}
+                </T>
+              </View>
+              <T style={{ marginTop: 2, color: p.split || nobody ? COLORS.text : COLORS.gold }}>{who}</T>
+              <T v="muted" style={{ fontSize: 12, marginTop: 2 }}>
+                ◎ {fmtSol(p.total)} SOL in · {fmtSol(p.fees)} fees · ◈ {Math.floor(p.skrReward).toLocaleString()} SKR
+                {p.motherlodeSkr > 0 ? ` + ${Math.floor(p.motherlodeSkr).toLocaleString()} motherlode` : ''}
+              </T>
+            </View>
+          );
+        })
+      )}
     </>
   );
 }
@@ -335,7 +445,7 @@ function Me() {
       <View style={styles.grid}>
         {[
           ['Rounds played', String(w.player?.rounds ?? save.digs)],
-          ['SOL won', (w.player?.solWon ?? 0).toFixed(3)],
+          ['SOL returned', (w.player?.solWon ?? 0).toFixed(3)],
           ['SKR mined', Math.floor(w.player?.skrMined ?? save.practiceSkr).toLocaleString()],
           ['Wins', String(w.player?.wins ?? save.wins)],
           ['Day streak', String(w.player?.streak ?? save.dayStreak)],
@@ -353,7 +463,7 @@ function Me() {
         <T style={{ flex: 1 }}>Mute sound</T>
         <Switch id="mute" value={save.muted} onValueChange={setMute} trackColor={{ true: COLORS.teal, false: COLORS.card2 }} />
       </Card>
-      <T v="muted">How it works: each minute is a round on a quarry with 25 mining spots. Put SOL on 1 to 25 spots. One spot strikes gold, and everyone on it splits 90% of the round's SOL pot in proportion to their SOL there. The round also mines 200 SKR: half the time it is split the same way, the other half one lucky winner takes it all, with odds equal to their share. Fewer blocks also pay more points: 1,000 for a single block, 40 for all 25. A 1-in-625 motherlode adds 5,000 SKR. This is a game of chance: only play with SOL you can afford to lose.</T>
+      <T v="muted">How it works: each minute is a round on a quarry with 25 mining spots. Put SOL on 1 to 25 spots. You never win or lose other miners' SOL: each spot keeps a 1% fee, every spot except the gold one keeps another 10%, and the rest comes back to you, so SOL alone always comes back a little short. What you mine is SKR: the gold spot earns 200 SKR, split by SOL there, or on one of the round's 10 solo spots (★) taken whole by one miner, with odds equal to their share. Fewer spots pay more points: 1,000 for a single spot, 40 for all 25. A 1-in-625 motherlode pays out the whole Motherlode Pool. Everything lands in Unclaimed until you claim it. This is a game of chance: only play with SOL you can afford to lose.</T>
       <Pressable onPress={() => Linking.openURL(`https://explorer.solana.com/address/${PROGRAM_ID.toBase58()}?cluster=${CLUSTER}`)}>
         <T v="muted" style={{ textDecorationLine: 'underline' }}>
           Program {short(PROGRAM_ID.toBase58())} on Solana Explorer
@@ -377,6 +487,7 @@ const styles = StyleSheet.create({
   grabber: { alignSelf: 'center', width: 44, height: 5, borderRadius: 3, backgroundColor: COLORS.line, marginTop: 8 },
   tabs: { flexDirection: 'row', paddingHorizontal: 10, paddingTop: 8, gap: 4, borderBottomColor: COLORS.line, borderBottomWidth: 2, paddingBottom: 8 },
   tab: { flex: 1, alignItems: 'center', paddingVertical: 6, borderRadius: 12 },
+  past: { padding: 10, borderRadius: 12, borderWidth: 1, borderColor: COLORS.line, backgroundColor: COLORS.card },
   tabOn: { backgroundColor: COLORS.card2 },
   rowCard: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

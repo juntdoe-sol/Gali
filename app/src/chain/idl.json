@@ -395,7 +395,8 @@
     {
       "name": "settle_pot",
       "docs": [
-        "Permissionless, once per revealed round: pays the SOL fee, escrows the round's SKR reward."
+        "Permissionless, once per revealed round: sends the fees to the treasury wallet, escrows the round's",
+        "SKR (plus the whole Motherlode Pool on a hit), then tops the Motherlode Pool up for the next rounds."
       ],
       "discriminator": [
         120,
@@ -451,7 +452,7 @@
     {
       "name": "claim_pot",
       "docs": [
-        "Permissionless: pays a stake its share of the SOL pool and SKR reward (0 if it missed), then closes it."
+        "Permissionless: credits a stake's returned SOL and its SKR to the owner's Unclaimed balance, then closes it."
       ],
       "discriminator": [
         210,
@@ -470,8 +471,7 @@
           "signer": true
         },
         {
-          "name": "owner",
-          "writable": true
+          "name": "owner"
         },
         {
           "name": "payer",
@@ -496,6 +496,60 @@
           "writable": true
         },
         {
+          "name": "unclaimed",
+          "writable": true
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "_round_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "claim_rewards",
+      "docs": [
+        "Pay out the player's Unclaimed SOL (to their wallet) and SKR (to their SKR account).",
+        "Signed by the owner or their active session key."
+      ],
+      "discriminator": [
+        4,
+        144,
+        132,
+        71,
+        116,
+        23,
+        151,
+        80
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "docs": [
+            "the player's wallet or their active session key (pays for the SKR account if it's missing)"
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "owner",
+          "writable": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "player"
+        },
+        {
+          "name": "unclaimed",
+          "writable": true
+        },
+        {
           "name": "skr_mint"
         },
         {
@@ -516,12 +570,7 @@
           "name": "system_program"
         }
       ],
-      "args": [
-        {
-          "name": "_round_id",
-          "type": "u64"
-        }
-      ]
+      "args": []
     },
     {
       "name": "fund_rewards",
@@ -940,6 +989,19 @@
         112,
         149
       ]
+    },
+    {
+      "name": "Unclaimed",
+      "discriminator": [
+        207,
+        197,
+        248,
+        238,
+        244,
+        218,
+        119,
+        44
+      ]
     }
   ],
   "events": [
@@ -1075,6 +1137,19 @@
     },
     {
       "discriminator": [
+        75,
+        98,
+        88,
+        18,
+        219,
+        112,
+        88,
+        121
+      ],
+      "name": "RewardsClaimed"
+    },
+    {
+      "discriminator": [
         84,
         233,
         245,
@@ -1145,7 +1220,7 @@
     {
       "code": 6003,
       "name": "BadMask",
-      "msg": "Pick between 1 and 25 blocks"
+      "msg": "Pick between 1 and 25 spots"
     },
     {
       "code": 6004,
@@ -1200,7 +1275,7 @@
     {
       "code": 6014,
       "name": "AlreadyOnBlock",
-      "msg": "You already have SOL on that block this round"
+      "msg": "You already have SOL on that spot this round"
     },
     {
       "code": 6015,
@@ -1231,6 +1306,11 @@
       "code": 6020,
       "name": "NotUpgradeAuthority",
       "msg": "Only the program's upgrade authority can do this"
+    },
+    {
+      "code": 6021,
+      "name": "NothingToClaim",
+      "msg": "Nothing to claim yet"
     }
   ],
   "types": [
@@ -1314,7 +1394,7 @@
           {
             "name": "motherlode_skr",
             "docs": [
-              "raw SKR paid to each winner of a motherlode round (capped by the pool balance)"
+              "raw SKR moved from the Rewards Pool to the Motherlode Pool by each settled round"
             ],
             "type": "u64"
           },
@@ -1335,7 +1415,7 @@
           {
             "name": "pot_fee_bps",
             "docs": [
-              "SOL fee on each round's pot, in bps (sent to the authority / treasury wallet)"
+              "SOL fee on each losing spot (after the 1% admin fee), in bps (sent to the authority / treasury wallet)"
             ],
             "type": "u16"
           },
@@ -1731,15 +1811,14 @@
           {
             "name": "pool",
             "docs": [
-              "lamports winners split after the fee (set by `settle_pot`)"
+              "lamports returned to miners after fees (set by `settle_pot`)"
             ],
             "type": "u64"
           },
           {
             "name": "skr_reward",
             "docs": [
-              "raw SKR winners split (escrowed in `pot_vault` by `settle_pot`);",
-              "`motherlode_skr` of it came from the Motherlode Pool"
+              "raw SKR mined this round, and the Motherlode Pool paid out (both escrowed in `pot_vault`)"
             ],
             "type": "u64"
           },
@@ -1773,6 +1852,35 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "admin_fee",
+            "docs": [
+              "fees taken at settlement, and the fee rate used for losing spots"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "protocol_fee",
+            "type": "u64"
+          },
+          {
+            "name": "fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "winner",
+            "docs": [
+              "the miner who took the round's SKR on a solo spot (set when their stake is claimed)"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "winners_paid",
+            "docs": [
+              "stakes on the winning spot claimed so far"
+            ],
+            "type": "u32"
           }
         ]
       }
@@ -1843,6 +1951,14 @@
           {
             "name": "skr_reward",
             "type": "u64"
+          },
+          {
+            "name": "motherlode_skr",
+            "type": "u64"
+          },
+          {
+            "name": "motherlode_accrued",
+            "type": "u64"
           }
         ],
         "kind": "struct"
@@ -1867,6 +1983,26 @@
           {
             "name": "split_reward",
             "type": "bool"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "RewardsClaimed",
+      "type": {
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "sol",
+            "type": "u64"
+          },
+          {
+            "name": "skr",
+            "type": "u64"
           }
         ],
         "kind": "struct"
@@ -1908,7 +2044,7 @@
           {
             "name": "split_reward",
             "docs": [
-              "true: the round's SKR is split pro rata; false: one lucky winner takes it all"
+              "true: the round's SKR is split pro rata; false: a solo spot won and one miner takes it all"
             ],
             "type": "bool"
           },
@@ -2042,6 +2178,42 @@
           }
         ],
         "kind": "struct"
+      }
+    },
+    {
+      "name": "Unclaimed",
+      "docs": [
+        "One per player: SOL and SKR credited by `claim_pot`, waiting for `claim_rewards`.",
+        "The SOL sits in this account; the SKR in `pot_vault`."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "sol",
+            "type": "u64"
+          },
+          {
+            "name": "skr",
+            "type": "u64"
+          },
+          {
+            "name": "claimed_sol",
+            "type": "u64"
+          },
+          {
+            "name": "claimed_skr",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
       }
     }
   ]

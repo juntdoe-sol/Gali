@@ -3,9 +3,9 @@ import { PublicKey, type Keypair } from '@solana/web3.js';
 import * as chain from '../chain/client';
 import {
   ACHIEVEMENTS, BLOCKS, boostFor, FREE_GEAR_MASK, GEAR, LOCK_MS, localDay, levelFromXp, MOTHERLODE_ODDS,
-  MOTHERLODE_SKR, pointsFor, QUESTS, REVEAL_MIN_MS, ROUND_REWARD_SKR, ROUND_SECS,
+  pointsFor, QUESTS, REVEAL_MIN_MS, ROUND_SECS,
 } from './constants';
-import { addToPot, emptyPot, idxOf, maskOf, MIN_SOL_PER_BLOCK, payoutFor, PRACTICE_SOL, simPot, smartPick, type PotView } from './pot';
+import { addToPot, emptyPot, idxOf, maskOf, MIN_SOL_PER_BLOCK, payoutFor, practiceMotherlode, PRACTICE_SOL, simPot, smartPick, soloMask, type PotView } from './pot';
 import { haptic, play, setMuted } from './sfx';
 import { loadJson, saveJson } from './storage';
 
@@ -21,9 +21,9 @@ export interface RoundResult {
   onChain: boolean;
   skr: number; // SKR from the Motherlode Pool
   solIn: number; // SOL deployed this round
-  solOut: number; // SOL won this round
+  solOut: number; // SOL given back this round (after fees; credited to Unclaimed)
   skrMined: number; // SKR mined from the round reward
-  split?: boolean; // the round's SKR was split (false: one lucky winner took it)
+  split?: boolean; // the round's SKR was split (false: a solo spot won and one miner took it)
   lucky?: boolean; // you were the lucky winner
 }
 
@@ -90,6 +90,8 @@ export interface Save {
   pet: string | null;
   practiceSol: number;
   practiceSkr: number; // SKR "mined" in practice mode (not real)
+  practiceUnclaimedSol: number;
+  practiceUnclaimedSkr: number;
   presets: Preset[];
   preset: number;
   muted: boolean;
@@ -119,6 +121,8 @@ const freshSave = (): Save => ({
   pet: null,
   practiceSol: PRACTICE_SOL,
   practiceSkr: 0,
+  practiceUnclaimedSol: 0,
+  practiceUnclaimedSkr: 0,
   presets: defaultPresets(),
   preset: 0,
   muted: false,
@@ -133,6 +137,7 @@ interface Wallet {
   sessionSol: number;
   pool: number; // SKR in the Motherlode Pool
   rewards: number; // SKR in the Rewards Pool
+  unclaimed: chain.Unclaimed;
   busy: string | null;
 }
 
@@ -176,6 +181,7 @@ interface GameState {
   buyGear: (key: string) => Promise<void>;
   stake: (amount: number) => Promise<void>;
   unstake: (amount: number) => Promise<void>;
+  claimRewards: () => Promise<void>;
   connect: (webWallet?: string) => Promise<void>;
   closeWalletPicker: () => void;
   disconnect: () => Promise<void>;
@@ -197,6 +203,7 @@ interface GameState {
 }
 
 let toastId = 1;
+const NO_UNCLAIMED: chain.Unclaimed = { sol: 0, skr: 0, claimedSol: 0, claimedSkr: 0 };
 let lastClockSync = Date.now();
 let session: Keypair | null = null;
 const chainNow = (offset: number) => Date.now() + offset;
@@ -283,7 +290,8 @@ export const useGame = create<GameState>((set, get) => {
     let winning: number;
     let motherlode = false;
     let solOut = 0;
-    let skrTotal = 0;
+    let skrMined = 0;
+    let skr = 0; // from the Motherlode Pool
     let split = true;
     let lucky = false;
     if (pending.onChain) {
@@ -294,7 +302,8 @@ export const useGame = create<GameState>((set, get) => {
         winning = r.winning;
         motherlode = r.motherlode;
         solOut = r.payout;
-        skrTotal = r.skr;
+        skrMined = r.skr;
+        skr = r.skrMotherlode;
         split = r.split;
         lucky = r.lucky;
       } catch (e) {
@@ -306,29 +315,22 @@ export const useGame = create<GameState>((set, get) => {
       await new Promise((r) => setTimeout(r, 900));
       winning = Math.floor(Math.random() * BLOCKS);
       motherlode = Math.random() < 1 / MOTHERLODE_ODDS;
-      split = Math.random() < 0.5;
+      split = (soloMask(roundId) & (1 << winning)) === 0;
       const final = addToPot(simPot(roundId, 1), pending.mask, pending.perBlock);
-      const pay = payoutFor(final, winning, pending.perBlock, pending.mask, motherlode, split, Math.random());
+      const pay = payoutFor(final, winning, pending.perBlock, pending.mask, motherlode ? practiceMotherlode(roundId) : 0, split, Math.random());
       solOut = pay.sol;
-      skrTotal = pay.skr;
+      skrMined = pay.skr;
+      skr = pay.skrMotherlode;
       lucky = pay.lucky;
     }
     play('rumble');
     set({ phase: 'reveal', winning, revealStartAt: Date.now() });
     const covered = pending.mask.toString(2).split('1').length - 1;
-    const skrBefore = get().wallet.player?.skrWon ?? 0;
     const won = (pending.mask & (1 << winning)) !== 0;
     const points = won ? pointsFor(covered, motherlode, pending.boostBps) : 0;
     const solIn = pending.total;
     setTimeout(async () => {
       if (pending.onChain) await get().refreshWallet();
-      // split the SKR into the Motherlode part and the per-round reward
-      const skr = pending.onChain
-        ? Math.max(0, (get().wallet.player?.skrWon ?? 0) - skrBefore)
-        : motherlode && won
-          ? (skrTotal * MOTHERLODE_SKR) / (MOTHERLODE_SKR + ROUND_REWARD_SKR)
-          : 0;
-      const skrMined = Math.max(0, skrTotal - skr);
       const result: RoundResult = { roundId, winning, covered, won, points, motherlode, onChain: pending.onChain, skr, solIn, solOut, skrMined, split, lucky };
       updateSave((s) => {
         const winStreak = won ? s.winStreak + 1 : 0;
@@ -341,8 +343,8 @@ export const useGame = create<GameState>((set, get) => {
           xp: pending.onChain ? s.xp : s.xp + (practiceWin ? 50 : 0),
           points: pending.onChain ? s.points : s.points + points,
           wins: pending.onChain ? s.wins : s.wins + (practiceWin ? 1 : 0),
-          practiceSol: pending.onChain ? s.practiceSol : s.practiceSol + solOut,
-          practiceSkr: pending.onChain ? s.practiceSkr : s.practiceSkr + skrTotal,
+          practiceUnclaimedSol: pending.onChain ? s.practiceUnclaimedSol : (s.practiceUnclaimedSol ?? 0) + solOut,
+          practiceUnclaimedSkr: pending.onChain ? s.practiceUnclaimedSkr : (s.practiceUnclaimedSkr ?? 0) + skrMined + skr,
           winStreak,
           bestStreak: Math.max(s.bestStreak, winStreak),
           questProgress: qp,
@@ -440,7 +442,7 @@ export const useGame = create<GameState>((set, get) => {
   return {
     loaded: false,
     save: freshSave(),
-    wallet: { owner: null, player: null, skr: 0, sol: 0, sessionSol: 0, pool: 0, rewards: 0, busy: null },
+    wallet: { owner: null, player: null, skr: 0, sol: 0, sessionSol: 0, pool: 0, rewards: 0, unclaimed: NO_UNCLAIMED, busy: null },
     offsetMs: 0,
     now: Date.now(),
     roundId: roundOf(Date.now()),
@@ -683,13 +685,43 @@ export const useGame = create<GameState>((set, get) => {
       }
     },
 
+    claimRewards: async () => {
+      const st = get();
+      const owner = ownerKey();
+      if (!owner || !chain.chainReady) {
+        const { practiceUnclaimedSol: sol = 0, practiceUnclaimedSkr: skr = 0 } = st.save;
+        if (sol <= 0 && skr <= 0) return st.toast('Nothing to claim yet', 'info');
+        updateSave((s) => ({ ...s, practiceSol: s.practiceSol + sol, practiceSkr: s.practiceSkr + skr, practiceUnclaimedSol: 0, practiceUnclaimedSkr: 0 }));
+        play('win');
+        return st.toast(`Claimed ${sol.toFixed(4)} SOL · ${Math.floor(skr).toLocaleString()} SKR (practice)`, 'good');
+      }
+      const { sol, skr } = st.wallet.unclaimed;
+      if (sol <= 0 && skr <= 0) return st.toast('Nothing to claim yet', 'info');
+      try {
+        // the session pays the fee when it can (no pop-up); otherwise the wallet signs
+        const p = st.wallet.player;
+        const sessionOk =
+          session && p && p.session === session.publicKey.toBase58() && p.sessionExpires * 1000 > Date.now() + 60_000 && st.wallet.sessionSol > 0.003;
+        setWallet({ busy: sessionOk ? 'Claiming…' : 'Approve: claim your SOL and SKR' });
+        await chain.claimRewards(owner, sessionOk ? session : null);
+        await get().refreshWallet();
+        play('win');
+        haptic.win();
+        get().toast(`Claimed ${sol.toFixed(4)} SOL · ${Math.floor(skr).toLocaleString()} SKR`, 'good');
+      } catch (e) {
+        get().toast(`Claim failed: ${errMsg(e)}`, 'bad');
+      } finally {
+        setWallet({ busy: null });
+      }
+    },
+
     closeWalletPicker: () => set({ walletPicker: null }),
 
     disconnect: async () => {
       await chain.disconnectWallet();
       saveJson('gali-owner', { owner: null }, 0);
       session = null;
-      set({ run: null, wallet: { owner: null, player: null, skr: 0, sol: 0, sessionSol: 0, pool: 0, rewards: 0, busy: null } });
+      set({ run: null, wallet: { owner: null, player: null, skr: 0, sol: 0, sessionSol: 0, pool: 0, rewards: 0, unclaimed: NO_UNCLAIMED, busy: null } });
     },
 
     refreshWallet: async () => {
@@ -697,15 +729,16 @@ export const useGame = create<GameState>((set, get) => {
       if (!owner) return;
       try {
         session = session ?? (await chain.loadSession(owner));
-        const [player, skr, sol, sessionSol, pool, rewards] = await Promise.all([
+        const [player, skr, sol, sessionSol, pool, rewards, unclaimed] = await Promise.all([
           chain.fetchPlayer(owner),
           chain.fetchSkrBalance(owner),
           chain.fetchSolBalance(owner),
           chain.fetchSolBalance(session.publicKey),
           chain.fetchMotherlodePool(),
           chain.fetchRewardsPool(),
+          chain.fetchUnclaimed(owner).catch(() => NO_UNCLAIMED),
         ]);
-        setWallet({ player, skr, sol, sessionSol, pool, rewards });
+        setWallet({ player, skr, sol, sessionSol, pool, rewards, unclaimed });
       } catch {
         /* offline */
       }

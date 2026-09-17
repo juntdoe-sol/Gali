@@ -61,6 +61,7 @@ export const pda = {
   pot: (r: number) => find(Buffer.from('pot'), u64le(r)),
   stake: (o: PublicKey, r: number) => find(Buffer.from('stake'), o.toBuffer(), u64le(r)),
   draw: (r: number) => find(Buffer.from('draw'), u64le(r)),
+  unclaimed: (o: PublicKey) => find(Buffer.from('unclaimed'), o.toBuffer()),
 };
 export const ata = (owner: PublicKey, mint = SKR_MINT) =>
   PublicKey.findProgramAddressSync([owner.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.toBuffer()], ASSOCIATED_TOKEN_PROGRAM_ID)[0];
@@ -114,22 +115,96 @@ export async function fetchRound(roundId: number): Promise<{ winning: number; mo
 export interface ChainPot {
   perBlock: number[]; // SOL
   total: number; // SOL
-  pool: number; // SOL
-  skrReward: number; // whole SKR
+  pool: number; // SOL returned to miners after fees
+  fees: number; // SOL
+  skrReward: number; // whole SKR mined this round
+  motherlodeSkr: number; // whole SKR paid from the Motherlode Pool
+  motherlode: boolean;
+  split: boolean;
+  winner: string | null; // solo-spot winner, once their stake is claimed
+  winnersPaid: number;
   miners: number;
   settled: boolean;
 }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const potView = (p: any): ChainPot => ({
+  perBlock: p.perBlock.map((v: BN) => toNum(v) / LAMPORTS_PER_SOL),
+  total: toNum(p.total) / LAMPORTS_PER_SOL,
+  pool: toNum(p.pool) / LAMPORTS_PER_SOL,
+  fees: (toNum(p.adminFee) + toNum(p.protocolFee)) / LAMPORTS_PER_SOL,
+  skrReward: fromRaw(p.skrReward),
+  motherlodeSkr: fromRaw(p.motherlodeSkr),
+  motherlode: p.motherlode,
+  split: p.splitReward,
+  winner: p.winner.equals(PublicKey.default) ? null : p.winner.toBase58(),
+  winnersPaid: p.winnersPaid,
+  miners: p.miners,
+  settled: p.settled,
+});
 export async function fetchPot(roundId: number): Promise<ChainPot | null> {
   const p = await accounts.pot.fetchNullable(pda.pot(roundId));
-  if (!p) return null;
+  return p ? potView(p) : null;
+}
+
+export interface PastRound {
+  roundId: number;
+  winning: number;
+  pot: ChainPot;
+}
+/** The last `limit` played and revealed rounds before `beforeRound`, newest first (scans `scan` round ids). */
+export async function fetchPastRounds(beforeRound: number, limit = 12, scan = 60): Promise<PastRound[]> {
+  const ids = [...Array(scan).keys()].map((i) => beforeRound - 1 - i).filter((r) => r >= 0);
+  const [pots, rounds] = await Promise.all([
+    accounts.pot.fetchMultiple(ids.map(pda.pot)),
+    accounts.round.fetchMultiple(ids.map(pda.round)),
+  ]);
+  const out: PastRound[] = [];
+  ids.forEach((id, i) => {
+    if (out.length < limit && pots[i] && rounds[i]) out.push({ roundId: id, winning: rounds[i].winningBlock, pot: potView(pots[i]) });
+  });
+  return out;
+}
+
+export interface Unclaimed {
+  sol: number;
+  skr: number;
+  claimedSol: number;
+  claimedSkr: number;
+}
+/** SOL and SKR credited to the player by finished rounds and not yet paid out. */
+export async function fetchUnclaimed(owner: PublicKey): Promise<Unclaimed> {
+  const u = await accounts.unclaimed.fetchNullable(pda.unclaimed(owner));
+  if (!u) return { sol: 0, skr: 0, claimedSol: 0, claimedSkr: 0 };
   return {
-    perBlock: p.perBlock.map((v: BN) => toNum(v) / LAMPORTS_PER_SOL),
-    total: toNum(p.total) / LAMPORTS_PER_SOL,
-    pool: toNum(p.pool) / LAMPORTS_PER_SOL,
-    skrReward: fromRaw(p.skrReward),
-    miners: p.miners,
-    settled: p.settled,
+    sol: toNum(u.sol) / LAMPORTS_PER_SOL,
+    skr: fromRaw(u.skr),
+    claimedSol: toNum(u.claimedSol) / LAMPORTS_PER_SOL,
+    claimedSkr: fromRaw(u.claimedSkr),
   };
+}
+
+const claimRewardsIx = (signer: PublicKey, owner: PublicKey) =>
+  program.methods
+    .claimRewards()
+    .accountsStrict({
+      signer,
+      owner,
+      config: pda.config,
+      player: pda.player(owner),
+      unclaimed: pda.unclaimed(owner),
+      skrMint: SKR_MINT,
+      potVault: pda.potVault,
+      ownerAta: ata(owner),
+      tokenProgram: TOKEN_PROGRAM_ID,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+    })
+    .instruction();
+
+/** Pay out the Unclaimed balance: SOL to the wallet, SKR to its SKR account. The session signs if given (no pop-up). */
+export async function claimRewards(owner: PublicKey, session?: Keypair | null) {
+  if (session) return sendWithKey(session, [await claimRewardsIx(session.publicKey, owner)]);
+  return sendWithWallet(async (o) => [await claimRewardsIx(o, o)]);
 }
 
 let feeTo: PublicKey | null = null;
@@ -347,7 +422,7 @@ export async function lockAndReveal(payer: Keypair, roundId: number) {
   }
 }
 
-/** Reveal if needed, settle the pot if needed, then claim our stake. Returns SOL and SKR paid to the owner. */
+/** Reveal if needed, settle the pot if needed, then claim our stake. Returns the SOL and SKR credited to the owner's Unclaimed balance. */
 export async function sessionSettlePot(owner: PublicKey, session: Keypair, roundId: number) {
   await lockAndReveal(session, roundId);
   const round = await fetchRound(roundId);
@@ -372,7 +447,7 @@ export async function sessionSettlePot(owner: PublicKey, session: Keypair, round
         .instruction(),
     );
   const stake = await accounts.stake.fetchNullable(pda.stake(owner, roundId));
-  if (!stake) return { ...round, payout: 0, skr: 0, lucky: false };
+  if (!stake) return { ...round, payout: 0, skr: 0, skrMotherlode: 0, lucky: false };
   ixs.push(
     await program.methods
       .claimPot(new BN(roundId))
@@ -385,11 +460,7 @@ export async function sessionSettlePot(owner: PublicKey, session: Keypair, round
         round: pda.round(roundId),
         pot: pda.pot(roundId),
         stake: pda.stake(owner, roundId),
-        skrMint: SKR_MINT,
-        potVault: pda.potVault,
-        ownerAta: ata(owner),
-        tokenProgram: TOKEN_PROGRAM_ID,
-        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        unclaimed: pda.unclaimed(owner),
         systemProgram: SystemProgram.programId,
       })
       .instruction(),
@@ -404,16 +475,26 @@ export async function sessionSettlePot(owner: PublicKey, session: Keypair, round
   // mirror claim_pot's maths from the accounts, in lamports so the lucky draw is exact
   const potRaw = await accounts.pot.fetch(pda.pot(roundId));
   const w = round.winning;
+  const feeBps: number = potRaw.feeBps;
+  let back = 0;
+  for (let i = 0; i < 25; i++) {
+    const m = toNum(stake.perBlock[i]);
+    const d = toNum(potRaw.perBlock[i]);
+    if (!m || !d) continue;
+    const admin = Math.floor(d / 100);
+    const kept = d - admin - (i === w ? 0 : Math.floor(((d - admin) * feeBps) / 10_000));
+    back += Math.floor((m * kept) / d);
+  }
   const mine = toNum(stake.perBlock[w]);
   const start = toNum(stake.start[w]);
   const onWin = toNum(potRaw.perBlock[w]);
   const hit = mine > 0 && onWin > 0;
-  const payout = hit ? (mine * toNum(potRaw.pool)) / onWin / LAMPORTS_PER_SOL : 0;
   const reward = fromRaw(potRaw.skrReward);
   const idx = toNum(potRaw.luckyIndex);
   const lucky = hit && !potRaw.splitReward && idx >= start && idx < start + mine;
-  const skr = !hit ? 0 : potRaw.splitReward ? (mine * reward) / onWin : lucky ? reward : 0;
-  return { ...round, payout, skr, lucky };
+  const skrMined = !hit ? 0 : potRaw.splitReward ? (mine * reward) / onWin : lucky ? reward : 0;
+  const skrMotherlode = hit ? (mine * fromRaw(potRaw.motherlodeSkr)) / onWin : 0;
+  return { ...round, payout: back / LAMPORTS_PER_SOL, skr: skrMined, skrMotherlode, lucky };
 }
 
 /* ---------- SKR transfers between miners ---------- */

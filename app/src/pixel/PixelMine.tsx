@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Image, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View, type ImageStyle } from 'react-native';
 import { chainReady } from '../chain/client';
 import { BLOCKS, CAVE_IN_EVERY, GEAR, gearByKey, levelFromXp } from '../game/constants';
+import { soloMask } from '../game/pot';
 import { play } from '../game/sfx';
 import { roundEnd, useGame } from '../game/store';
 import { clearBots, ensureBots, publishMe, startWorld, stopWorld, thinkBots, useWorld, type Avatar, type Pose } from '../game/world';
@@ -18,6 +19,14 @@ const [MNW, MNH] = META.miner;
 const FPS = 12;
 const GRASS = '#6fa345';
 
+const SOLO_STAR = {
+  position: 'absolute' as const,
+  color: '#ffd84a',
+  fontFamily: F.display,
+  textShadowColor: '#3a1d00',
+  textShadowOffset: { width: 1, height: 1 },
+  textShadowRadius: 0,
+};
 const spotXY = (i: number): [number, number] => [GX + (i % 5) * STEP, GY + Math.floor(i / 5) * STEP];
 const seeded = (n: number) => {
   const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
@@ -292,6 +301,7 @@ export default function PixelMine() {
 
   // ---- build the scene, depth-sorted by feet position ----
   const items: Item[] = [];
+  const solo = soloMask(st.roundId);
   for (let i = 0; i < BLOCKS; i++) {
     const [x, y0] = spotXY(i);
     const kind = META.kinds[META.layout[i]];
@@ -318,6 +328,9 @@ export default function PixelMine() {
           <Sprite name={`spot-${kind}` as SpriteName} x={x} y={y} w={SW} h={SH} s={s} />
           {dimK > 0 ? <Sprite name="dim" x={x} y={y} w={SW} h={SH} s={s} opacity={dimK * 0.55} /> : null}
           {selected && el < 0 ? <Sprite name={`select-${flash}` as SpriteName} x={x} y={y0} w={SW} h={SH} s={s} /> : null}
+          {solo & (1 << i) && dimK === 0 ? (
+            <Text style={[SOLO_STAR, { left: (x + 1) * s, top: (y + PAD_Y - 3) * s, fontSize: 7 * s, lineHeight: 8 * s }]}>★</Text>
+          ) : null}
           {dug ? <Sprite name={`flag-${flash}` as SpriteName} x={x + 17} y={y + PAD_Y - 12} w={14} h={16} s={s} /> : null}
           {hitAge < 350 ? <Sprite name={`dust-${Math.min(2, Math.floor(hitAge / 117))}` as SpriteName} x={x + 4} y={y + PAD_Y + 8} w={20} h={12} s={s} /> : null}
           {isWin ? <Sprite name={`sparkle-${Math.floor(now / 110) % 3}` as SpriteName} x={x} y={y - 4} w={SW} h={SH} s={s} /> : null}
@@ -420,7 +433,7 @@ export default function PixelMine() {
         <Pressable
           key={`tap${i}`}
           accessibilityRole="button"
-          accessibilityLabel={isMole ? 'Bonk the mole' : `Mining spot ${i + 1}`}
+          accessibilityLabel={isMole ? 'Bonk the mole' : `Mining spot ${i + 1}${solo & (1 << i) ? ' (solo spot)' : ''}`}
           onPress={() => {
             if (isMole) {
               mo.bonkedAt = Date.now();
