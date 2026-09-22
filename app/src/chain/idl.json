@@ -39,7 +39,11 @@
           "writable": true
         },
         {
-          "name": "skr_mint"
+          "name": "skr_mint",
+          "docs": [
+            "Only a plain SPL mint: Token-2022 extensions (transfer fees, hooks, permanent delegate)",
+            "would break the escrow's accounting."
+          ]
         },
         {
           "name": "vault",
@@ -59,6 +63,10 @@
         },
         {
           "name": "pot_vault",
+          "writable": true
+        },
+        {
+          "name": "buyback",
           "writable": true
         },
         {
@@ -118,7 +126,8 @@
     {
       "name": "mark_buyback",
       "docs": [
-        "Record SOL from `buyback_due` that the admin has spent buying SKR for the Rewards Pool."
+        "Take SOL out of the buyback escrow to buy SKR for the Rewards Pool. Only the authority, and",
+        "only what the escrow holds above its rent; `buyback_due` drops by the same amount."
       ],
       "discriminator": [
         237,
@@ -137,6 +146,14 @@
         },
         {
           "name": "config",
+          "writable": true
+        },
+        {
+          "name": "buyback",
+          "writable": true
+        },
+        {
+          "name": "destination",
           "writable": true
         }
       ],
@@ -457,6 +474,10 @@
           "writable": true
         },
         {
+          "name": "buyback",
+          "writable": true
+        },
+        {
           "name": "skr_mint"
         },
         {
@@ -565,16 +586,12 @@
       ],
       "accounts": [
         {
-          "name": "signer",
+          "name": "owner",
           "docs": [
-            "the player's wallet or their active session key (pays for the SKR account if it's missing)"
+            "the player's own wallet: session keys can deploy, but never move rewards out"
           ],
           "writable": true,
           "signer": true
-        },
-        {
-          "name": "owner",
-          "writable": true
         },
         {
           "name": "config"
@@ -595,6 +612,10 @@
         },
         {
           "name": "pot_vault",
+          "writable": true
+        },
+        {
+          "name": "rewards",
           "writable": true
         },
         {
@@ -652,6 +673,62 @@
         },
         {
           "name": "round_rent_payer",
+          "writable": true
+        },
+        {
+          "name": "fee_to",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "round_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "refund_stake",
+      "docs": [
+        "If a round is still unrevealed an hour after it ended (nobody locked or revealed it), each",
+        "player can take their own SOL back. Permissionless; a refunded round can never be settled."
+      ],
+      "discriminator": [
+        185,
+        80,
+        20,
+        3,
+        110,
+        92,
+        178,
+        240
+      ],
+      "accounts": [
+        {
+          "name": "cranker",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "owner",
+          "writable": true
+        },
+        {
+          "name": "payer",
+          "writable": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "pot",
+          "writable": true
+        },
+        {
+          "name": "round"
+        },
+        {
+          "name": "stake",
           "writable": true
         }
       ],
@@ -1003,6 +1080,19 @@
   ],
   "accounts": [
     {
+      "name": "Buyback",
+      "discriminator": [
+        51,
+        184,
+        2,
+        198,
+        189,
+        166,
+        241,
+        205
+      ]
+    },
+    {
       "name": "Config",
       "discriminator": [
         155,
@@ -1305,6 +1395,19 @@
     },
     {
       "discriminator": [
+        81,
+        188,
+        224,
+        106,
+        3,
+        59,
+        199,
+        216
+      ],
+      "name": "StakeRefunded"
+    },
+    {
+      "discriminator": [
         11,
         146,
         45,
@@ -1450,6 +1553,11 @@
       "code": 6023,
       "name": "UnclaimedStakes",
       "msg": "Some stakes in this round are not claimed yet"
+    },
+    {
+      "code": 6024,
+      "name": "RoundAbandoned",
+      "msg": "This round was abandoned and refunded"
     }
   ],
   "types": [
@@ -1483,6 +1591,30 @@
           }
         ],
         "kind": "struct"
+      }
+    },
+    {
+      "name": "Buyback",
+      "docs": [
+        "Holds the share of SOL fees owed to SKR buybacks until the admin withdraws it."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
       }
     },
     {
@@ -1623,7 +1755,7 @@
           {
             "name": "buyback_due",
             "docs": [
-              "lamports of fees owed to buybacks and not yet marked as spent"
+              "lamports of fees held in the buyback escrow and not yet withdrawn to buy SKR"
             ],
             "type": "u64"
           }
@@ -1975,6 +2107,15 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
           }
         ]
       }
@@ -2091,6 +2232,36 @@
               "stakes claimed so far (all of them: `claimed == miners`)"
             ],
             "type": "u32"
+          },
+          {
+            "name": "base_points",
+            "docs": [
+              "points settings fixed when the round opened"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "motherlode_points",
+            "type": "u64"
+          },
+          {
+            "name": "refunded",
+            "docs": [
+              "stakes refunded because the round was never revealed; any refund blocks settlement"
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "reserved",
+            "docs": [
+              "room for later fields, so upgrades don't strand existing rounds"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
           }
         ]
       }
@@ -2200,6 +2371,15 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
           }
         ]
       }
@@ -2316,6 +2496,15 @@
               "paid this account's rent; refunded by `close_round`"
             ],
             "type": "pubkey"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
           }
         ]
       }
@@ -2326,6 +2515,10 @@
         "fields": [
           {
             "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "dust",
             "type": "u64"
           }
         ],
@@ -2406,8 +2599,37 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
           }
         ]
+      }
+    },
+    {
+      "name": "StakeRefunded",
+      "type": {
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "sol",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
       }
     },
     {
@@ -2498,6 +2720,15 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
           }
         ]
       }
