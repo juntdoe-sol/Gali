@@ -62,6 +62,12 @@ pub const REFINING_FEE_BPS: u64 = 1_000;
 pub const FACTOR_SCALE: u128 = 1_000_000_000_000;
 /// Round and pot accounts can be closed (rent back to whoever paid it) this long after the round ends.
 pub const CLOSE_AFTER_SECS: i64 = SECONDS_PER_DAY;
+/// If a round is still unrevealed this long after it ended, players can take their own SOL back.
+pub const ABANDON_SECS: i64 = 3_600;
+/// SlotHashes keeps this many entries; past it a locked slot can never be revealed.
+pub const SLOT_HASH_WINDOW: u64 = 512;
+/// Paid by each player's first deploy of a round and handed to whoever claims their stake.
+pub const CRANK_FEE: u64 = 20_000;
 pub const CLAIM_SOL: u8 = 1;
 pub const CLAIM_SKR: u8 = 2;
 /// Taken from every spot, win or lose (sent to the treasury wallet).
@@ -69,9 +75,10 @@ pub const ADMIN_FEE_BPS: u64 = 100;
 /// Spots per round where the winner takes the whole SKR reward.
 pub const SOLO_SPOTS: usize = 10;
 /// `lock_round` targets the slot this many slots ahead.
-pub const DRAW_DELAY_SLOTS: u64 = 2;
-/// SlotHashes keeps 512 entries; after this many slots a lock is treated as expired and can be redone.
-pub const DRAW_EXPIRY_SLOTS: u64 = 450;
+pub const DRAW_DELAY_SLOTS: u64 = 5;
+/// A lock can only be replaced once its slot has fallen out of SlotHashes, so a losing player can't
+/// withhold the reveal and re-roll: by then nobody could have revealed it either.
+pub const DRAW_EXPIRY_SLOTS: u64 = SLOT_HASH_WINDOW;
 
 /// The round's solo spots as a bitmask: a Fisher-Yates pick of 10 of 25, seeded by sha256("gali-solo" || round_id).
 /// Known before the round starts, so players can choose.
@@ -99,15 +106,24 @@ pub fn spot_fees(d: u64, fee_bps: u16) -> (u64, u64) {
 }
 
 /// Adds the refined SKR this balance has earned since it last synced with the refinery.
-fn sync_refined(u: &mut Unclaimed, rf: &Refinery) {
+fn sync_refined(u: &mut Unclaimed, rf: &Refinery) -> Result<()> {
     if rf.factor > u.factor {
         let gain = (rf.factor - u.factor)
             .checked_mul(u.skr as u128)
-            .map(|v| v / FACTOR_SCALE)
-            .unwrap_or(0) as u64;
-        u.refined = u.refined.saturating_add(gain);
+            .ok_or(GaliError::BadAmount)?
+            / FACTOR_SCALE;
+        u.refined = u.refined.saturating_add(u64::try_from(gain).map_err(|_| GaliError::BadAmount)?);
     }
     u.factor = rf.factor;
+    Ok(())
+}
+
+/// End of a round as a unix timestamp, rejecting round ids that can't exist.
+fn round_end_ts(round_id: u64, round_secs: u32) -> Result<i64> {
+    let secs = round_secs as i64;
+    let end = (round_id as i128 + 1) * secs as i128;
+    require!(end <= i64::MAX as i128, GaliError::WrongRound);
+    Ok(end as i64)
 }
 
 fn check_config(cfg: &Config) -> Result<()> {
@@ -119,7 +135,11 @@ fn check_config(cfg: &Config) -> Result<()> {
         GaliError::BadConfig
     );
     require!(cfg.min_deploy > 0, GaliError::BadConfig);
-    require!(cfg.reward_drip_bps <= MAX_DRIP_BPS, GaliError::BadConfig);
+    // the drip is what bounds a round's SKR payout to a slice of the pool, so it can't be switched off
+    require!(
+        cfg.reward_drip_bps >= 1 && cfg.reward_drip_bps <= MAX_DRIP_BPS,
+        GaliError::BadConfig
+    );
     require!(cfg.buyback_bps as u64 <= BPS, GaliError::BadConfig);
     require!(
         cfg.boost_tier2 == 0 || cfg.boost_tier2 >= cfg.boost_tier1,
@@ -155,6 +175,7 @@ pub mod gali {
         c.paused = false;
         c.pending_authority = Pubkey::default();
         c.bump = ctx.bumps.config;
+        ctx.accounts.buyback.bump = ctx.bumps.buyback;
         check_config(c)
     }
 
@@ -210,8 +231,16 @@ pub mod gali {
         Ok(())
     }
 
-    /// Record SOL from `buyback_due` that the admin has spent buying SKR for the Rewards Pool.
-    pub fn mark_buyback(ctx: Context<AdminConfig>, lamports: u64) -> Result<()> {
+    /// Take SOL out of the buyback escrow to buy SKR for the Rewards Pool. Only the authority, and
+    /// only what the escrow holds above its rent; `buyback_due` drops by the same amount.
+    pub fn mark_buyback(ctx: Context<MarkBuyback>, lamports: u64) -> Result<()> {
+        let info = ctx.accounts.buyback.to_account_info();
+        let free = info
+            .lamports()
+            .saturating_sub(Rent::get()?.minimum_balance(info.data_len()));
+        require!(lamports > 0 && lamports <= free, GaliError::BadAmount);
+        **info.try_borrow_mut_lamports()? -= lamports;
+        **ctx.accounts.destination.to_account_info().try_borrow_mut_lamports()? += lamports;
         let c = &mut ctx.accounts.config;
         c.buyback_due = c.buyback_due.saturating_sub(lamports);
         emit!(BuybackMarked {
@@ -381,6 +410,10 @@ pub mod gali {
             pot.round_id = round_id;
             pot.bump = ctx.bumps.pot;
             pot.rent_payer = signer;
+            // the round's terms are fixed by its first deploy, so later config changes can't rewrite them
+            pot.fee_bps = cfg.pot_fee_bps;
+            pot.base_points = cfg.base_points;
+            pot.motherlode_points = cfg.motherlode_points;
         }
         let boost = boost_bps(cfg, ctx.accounts.player.staked_skr);
         let st = &mut ctx.accounts.stake;
@@ -393,6 +426,7 @@ pub mod gali {
             st.bump = ctx.bumps.stake;
             pot.miners = pot.miners.saturating_add(1);
         }
+        let crank_fee = if first_in_round { CRANK_FEE } else { 0 };
         for i in 0..BLOCKS as usize {
             if mask & (1 << i) != 0 {
                 // one deposit per block per round, so each stake owns one contiguous
@@ -406,6 +440,19 @@ pub mod gali {
             }
         }
         pot.total = pot.total.checked_add(total).ok_or(GaliError::BadAmount)?;
+        if crank_fee > 0 {
+            // pays whoever claims this stake later, so cranking for other players isn't a loss
+            anchor_lang::system_program::transfer(
+                CpiContext::new(
+                    ctx.accounts.system_program.to_account_info(),
+                    anchor_lang::system_program::Transfer {
+                        from: ctx.accounts.signer.to_account_info(),
+                        to: ctx.accounts.stake.to_account_info(),
+                    },
+                ),
+                crank_fee,
+            )?;
+        }
         let p = &mut ctx.accounts.player;
         p.sol_deployed = p.sol_deployed.saturating_add(total);
         if first_in_round {
@@ -438,8 +485,10 @@ pub mod gali {
         let r = &ctx.accounts.round;
         let win = r.winning_block as usize;
         require!(!ctx.accounts.pot.settled, GaliError::AlreadySettled);
+        require!(ctx.accounts.pot.refunded == 0, GaliError::RoundAbandoned);
         let has_winners = ctx.accounts.pot.per_block[win] > 0;
-        let fee_bps = cfg.pot_fee_bps;
+        // fixed when the round opened, so a config change after the fact can't move the fee
+        let fee_bps = ctx.accounts.pot.fee_bps;
 
         let total = ctx.accounts.pot.total;
         let (mut admin_fee, mut protocol_fee) = (0u64, 0u64);
@@ -455,9 +504,12 @@ pub mod gali {
             protocol_fee = total - admin_fee;
         }
         let fee = admin_fee + protocol_fee;
+        // the buyback share is held by the program until the admin withdraws it to buy SKR
+        let owed = (fee as u128 * cfg.buyback_bps as u128 / BPS as u128) as u64;
         if fee > 0 {
             **ctx.accounts.pot.to_account_info().try_borrow_mut_lamports()? -= fee;
-            **ctx.accounts.fee_to.to_account_info().try_borrow_mut_lamports()? += fee;
+            **ctx.accounts.fee_to.to_account_info().try_borrow_mut_lamports()? += fee - owed;
+            **ctx.accounts.buyback.to_account_info().try_borrow_mut_lamports()? += owed;
         }
 
         let bump = cfg.bump;
@@ -490,7 +542,6 @@ pub mod gali {
         };
         // then this round's top-up of the Motherlode Pool (after the payout, so it goes to future rounds)
         let accrual = accrual_part.min(rewards_bal - from_rewards);
-        let owed = (fee as u128 * cfg.buyback_bps as u128 / BPS as u128) as u64;
         for (amount, src, dst) in [
             (from_rewards, ctx.accounts.rewards.to_account_info(), ctx.accounts.pot_vault.to_account_info()),
             (from_motherlode, ctx.accounts.motherlode.to_account_info(), ctx.accounts.pot_vault.to_account_info()),
@@ -520,10 +571,9 @@ pub mod gali {
         pot.pool = total - fee;
         pot.admin_fee = admin_fee;
         pot.protocol_fee = protocol_fee;
-        pot.fee_bps = fee_bps;
         pot.skr_reward = from_rewards;
         pot.motherlode_skr = from_motherlode;
-        pot.motherlode = r.motherlode;
+        pot.motherlode = r.motherlode && has_winners;
         pot.split_reward = r.split_reward;
         // the lamport on the winning spot that takes the reward on a solo spot
         pot.lucky_index = if has_winners {
@@ -581,11 +631,10 @@ pub mod gali {
         };
         let skr = mined + from_motherlode;
         let points = if won {
-            let cfg = &ctx.accounts.config;
             let covered = stake.per_block.iter().filter(|v| **v > 0).count() as u64;
-            let mut base = cfg.base_points.saturating_mul(BLOCKS as u64) / covered.max(1);
+            let mut base = pot.base_points.saturating_mul(BLOCKS as u64) / covered.max(1);
             if pot.motherlode {
-                base = base.saturating_add(cfg.motherlode_points);
+                base = base.saturating_add(pot.motherlode_points);
             }
             base.saturating_mul(stake.boost_bps as u64) / BPS
         } else {
@@ -607,6 +656,18 @@ pub mod gali {
                 pot.winner = owner;
             }
         }
+        // the crank fee this stake carries pays whoever claimed it
+        let fee_lamports = CRANK_FEE.min(
+            ctx.accounts
+                .stake
+                .to_account_info()
+                .lamports()
+                .saturating_sub(Rent::get()?.minimum_balance(8 + Stake::INIT_SPACE)),
+        );
+        if fee_lamports > 0 {
+            **ctx.accounts.stake.to_account_info().try_borrow_mut_lamports()? -= fee_lamports;
+            **ctx.accounts.cranker.to_account_info().try_borrow_mut_lamports()? += fee_lamports;
+        }
         let rf = &mut ctx.accounts.refinery;
         if rf.bump == 0 {
             rf.bump = ctx.bumps.refinery;
@@ -617,7 +678,7 @@ pub mod gali {
             u.bump = ctx.bumps.unclaimed;
             u.factor = rf.factor; // no share of fees paid before this balance existed
         }
-        sync_refined(u, rf);
+        sync_refined(u, rf)?;
         u.sol = u.sol.saturating_add(sol);
         u.skr = u.skr.saturating_add(skr);
         rf.total_unrefined = rf.total_unrefined.saturating_add(skr);
@@ -645,19 +706,10 @@ pub mod gali {
     /// Pay out the player's Unclaimed SOL (to their wallet) and SKR (to their SKR account).
     /// Signed by the owner or their active session key.
     pub fn claim_rewards(ctx: Context<ClaimRewards>, what: u8) -> Result<()> {
-        let now = Clock::get()?.unix_timestamp;
-        let signer = ctx.accounts.signer.key();
-        {
-            let p = &ctx.accounts.player;
-            let is_owner = signer == p.owner;
-            let is_session =
-                signer == p.session && p.session != Pubkey::default() && now < p.session_expires;
-            require!(is_owner || is_session, GaliError::NotAuthorised);
-        }
         require!(what & (CLAIM_SOL | CLAIM_SKR) != 0, GaliError::BadAmount);
         let rf = &mut ctx.accounts.refinery;
         let u = &mut ctx.accounts.unclaimed;
-        sync_refined(u, rf);
+        sync_refined(u, rf)?;
         let sol = if what & CLAIM_SOL != 0 { u.sol } else { 0 };
         let (unrefined, refined) = if what & CLAIM_SKR != 0 {
             (u.skr, u.refined)
@@ -670,13 +722,17 @@ pub mod gali {
         u.refined -= refined;
         rf.total_unrefined = rf.total_unrefined.saturating_sub(unrefined);
         rf.total_refined = rf.total_refined.saturating_sub(refined);
-        // 10% of the unrefined part goes to whoever still holds unrefined SKR
-        let mut fee = (unrefined as u128 * REFINING_FEE_BPS as u128 / BPS as u128) as u64;
-        if fee > 0 && rf.total_unrefined >= fee {
-            rf.factor += fee as u128 * FACTOR_SCALE / rf.total_unrefined as u128;
-            rf.total_refined = rf.total_refined.saturating_add(fee);
-        } else {
-            fee = 0; // nobody (or almost nobody) left to share it with
+        // 10% of the unrefined part always comes off; it goes to whoever still holds unrefined SKR,
+        // and back to the Rewards Pool when there is nobody left to share it with
+        let fee = (unrefined as u128 * REFINING_FEE_BPS as u128 / BPS as u128) as u64;
+        let mut to_pool = 0u64;
+        if fee > 0 {
+            if rf.total_unrefined > 0 {
+                rf.factor += fee as u128 * FACTOR_SCALE / rf.total_unrefined as u128;
+                rf.total_refined = rf.total_refined.saturating_add(fee);
+            } else {
+                to_pool = fee;
+            }
         }
         let skr = unrefined - fee + refined;
         u.claimed_sol = u.claimed_sol.saturating_add(sol);
@@ -686,21 +742,27 @@ pub mod gali {
             **ctx.accounts.unclaimed.to_account_info().try_borrow_mut_lamports()? -= sol;
             **ctx.accounts.owner.to_account_info().try_borrow_mut_lamports()? += sol;
         }
-        if skr > 0 {
-            let bump = ctx.accounts.config.bump;
-            let signer: &[&[&[u8]]] = &[&[b"config", &[bump]]];
+        let bump = ctx.accounts.config.bump;
+        let cfg_signer: &[&[&[u8]]] = &[&[b"config", &[bump]]];
+        for (amount, to) in [
+            (skr, ctx.accounts.owner_ata.to_account_info()),
+            (to_pool, ctx.accounts.rewards.to_account_info()),
+        ] {
+            if amount == 0 {
+                continue;
+            }
             token_interface::transfer_checked(
                 CpiContext::new_with_signer(
                     ctx.accounts.token_program.to_account_info(),
                     TransferChecked {
                         from: ctx.accounts.pot_vault.to_account_info(),
                         mint: ctx.accounts.skr_mint.to_account_info(),
-                        to: ctx.accounts.owner_ata.to_account_info(),
+                        to,
                         authority: ctx.accounts.config.to_account_info(),
                     },
-                    signer,
+                    cfg_signer,
                 ),
-                skr,
+                amount,
                 ctx.accounts.skr_mint.decimals,
             )?;
         }
@@ -718,12 +780,64 @@ pub mod gali {
     pub fn close_round(ctx: Context<CloseRound>, round_id: u64) -> Result<()> {
         let cfg = &ctx.accounts.config;
         let now = Clock::get()?.unix_timestamp;
-        let round_end = (round_id as i64 + 1) * cfg.round_secs as i64;
+        let round_end = round_end_ts(round_id, cfg.round_secs)?;
         require!(now >= round_end + CLOSE_AFTER_SECS, GaliError::TooEarly);
-        let pot = &ctx.accounts.pot;
-        require!(pot.settled, GaliError::NotSettled);
-        require!(pot.claimed >= pot.miners, GaliError::UnclaimedStakes);
-        emit!(RoundClosed { round_id });
+        {
+            let pot = &ctx.accounts.pot;
+            require!(pot.settled || pot.refunded > 0, GaliError::NotSettled);
+            require!(pot.claimed >= pot.miners, GaliError::UnclaimedStakes);
+        }
+        // rounding dust (and anything else sent to the pot) goes to the treasury wallet, not the first deployer
+        let info = ctx.accounts.pot.to_account_info();
+        let dust = info
+            .lamports()
+            .saturating_sub(Rent::get()?.minimum_balance(info.data_len()));
+        if dust > 0 {
+            **info.try_borrow_mut_lamports()? -= dust;
+            **ctx.accounts.fee_to.to_account_info().try_borrow_mut_lamports()? += dust;
+        }
+        emit!(RoundClosed { round_id, dust });
+        Ok(())
+    }
+
+    /// If a round is still unrevealed an hour after it ended (nobody locked or revealed it), each
+    /// player can take their own SOL back. Permissionless; a refunded round can never be settled.
+    pub fn refund_stake(ctx: Context<RefundStake>, round_id: u64) -> Result<()> {
+        let cfg = &ctx.accounts.config;
+        let now = Clock::get()?.unix_timestamp;
+        require!(
+            now >= round_end_ts(round_id, cfg.round_secs)? + ABANDON_SECS,
+            GaliError::TooEarly
+        );
+        require!(
+            ctx.accounts.round.data_is_empty(),
+            GaliError::AlreadyRevealed
+        );
+        require!(!ctx.accounts.pot.settled, GaliError::AlreadySettled);
+        let stake = &ctx.accounts.stake;
+        let mut back = 0u64;
+        for i in 0..BLOCKS as usize {
+            back = back.saturating_add(stake.per_block[i]);
+        }
+        let owner = stake.owner;
+        {
+            let pot = &mut ctx.accounts.pot;
+            for i in 0..BLOCKS as usize {
+                pot.per_block[i] = pot.per_block[i].saturating_sub(stake.per_block[i]);
+            }
+            pot.total = pot.total.saturating_sub(back);
+            pot.refunded = pot.refunded.saturating_add(1);
+            pot.claimed = pot.claimed.saturating_add(1);
+        }
+        if back > 0 {
+            **ctx.accounts.pot.to_account_info().try_borrow_mut_lamports()? -= back;
+            **ctx.accounts.owner.to_account_info().try_borrow_mut_lamports()? += back;
+        }
+        emit!(StakeRefunded {
+            owner,
+            round_id,
+            sol: back
+        });
         Ok(())
     }
 
@@ -755,7 +869,7 @@ pub mod gali {
     pub fn lock_round(ctx: Context<LockRound>, round_id: u64) -> Result<()> {
         let cfg = &ctx.accounts.config;
         let clock = Clock::get()?;
-        let round_end = (round_id as i64 + 1) * cfg.round_secs as i64;
+        let round_end = round_end_ts(round_id, cfg.round_secs)?;
         require!(clock.unix_timestamp >= round_end, GaliError::RoundNotOver);
         require!(
             ctx.accounts.round.data_is_empty(),
@@ -1017,7 +1131,7 @@ pub struct Config {
     pub reward_drip_bps: u16,
     /// share of each round's SOL fees owed to SKR buybacks for the Rewards Pool, in bps
     pub buyback_bps: u16,
-    /// lamports of fees owed to buybacks and not yet marked as spent
+    /// lamports of fees held in the buyback escrow and not yet withdrawn to buy SKR
     pub buyback_due: u64,
 }
 
@@ -1079,6 +1193,7 @@ pub struct Player {
     pub sol_won: u64,
     pub skr_mined: u64,
     pub bump: u8,
+    pub reserved: [u8; 64],
 }
 
 #[account]
@@ -1095,6 +1210,7 @@ pub struct Round {
     pub bump: u8,
     /// paid this account's rent; refunded by `close_round`
     pub rent_payer: Pubkey,
+    pub reserved: [u8; 32],
 }
 
 /// A round's committed draw slot (closed by `reveal_round`).
@@ -1137,6 +1253,13 @@ pub struct Pot {
     pub rent_payer: Pubkey,
     /// stakes claimed so far (all of them: `claimed == miners`)
     pub claimed: u32,
+    /// points settings fixed when the round opened
+    pub base_points: u64,
+    pub motherlode_points: u64,
+    /// stakes refunded because the round was never revealed; any refund blocks settlement
+    pub refunded: u32,
+    /// room for later fields, so upgrades don't strand existing rounds
+    pub reserved: [u8; 64],
 }
 
 /// One per player: SOL and SKR credited by `claim_pot`, waiting for `claim_rewards`.
@@ -1156,6 +1279,15 @@ pub struct Unclaimed {
     pub claimed_sol: u64,
     pub claimed_skr: u64,
     pub bump: u8,
+    pub reserved: [u8; 64],
+}
+
+/// Holds the share of SOL fees owed to SKR buybacks until the admin withdraws it.
+#[account]
+#[derive(InitSpace)]
+pub struct Buyback {
+    pub bump: u8,
+    pub reserved: [u8; 32],
 }
 
 /// Global refining-fee accumulator (one account).
@@ -1167,6 +1299,7 @@ pub struct Refinery {
     pub total_unrefined: u64,
     pub total_refined: u64,
     pub bump: u8,
+    pub reserved: [u8; 64],
 }
 
 /// One per player per round: their lamports on each block.
@@ -1183,6 +1316,7 @@ pub struct Stake {
     /// points boost locked in at the player's first deploy of the round
     pub boost_bps: u16,
     pub bump: u8,
+    pub reserved: [u8; 32],
 }
 
 #[derive(Accounts)]
@@ -1196,6 +1330,9 @@ pub struct InitConfig<'info> {
     pub program_data: Account<'info, ProgramData>,
     #[account(init, payer = authority, space = 8 + Config::INIT_SPACE, seeds = [b"config"], bump)]
     pub config: Box<Account<'info, Config>>,
+    /// Only a plain SPL mint: Token-2022 extensions (transfer fees, hooks, permanent delegate)
+    /// would break the escrow's accounting.
+    #[account(constraint = *skr_mint.to_account_info().owner == anchor_spl::token::ID @ GaliError::BadConfig)]
     pub skr_mint: Box<InterfaceAccount<'info, Mint>>,
     #[account(
         init, payer = authority, seeds = [b"vault"], bump,
@@ -1222,6 +1359,8 @@ pub struct InitConfig<'info> {
         token::mint = skr_mint, token::authority = config, token::token_program = token_program
     )]
     pub pot_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(init, payer = authority, space = 8 + Buyback::INIT_SPACE, seeds = [b"buyback"], bump)]
+    pub buyback: Box<Account<'info, Buyback>>,
     pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
 }
@@ -1231,6 +1370,18 @@ pub struct AdminConfig<'info> {
     pub authority: Signer<'info>,
     #[account(mut, seeds = [b"config"], bump = config.bump, has_one = authority)]
     pub config: Box<Account<'info, Config>>,
+}
+
+#[derive(Accounts)]
+pub struct MarkBuyback<'info> {
+    pub authority: Signer<'info>,
+    #[account(mut, seeds = [b"config"], bump = config.bump, has_one = authority)]
+    pub config: Box<Account<'info, Config>>,
+    #[account(mut, seeds = [b"buyback"], bump = buyback.bump)]
+    pub buyback: Box<Account<'info, Buyback>>,
+    /// CHECK: where the SOL goes to be swapped for SKR
+    #[account(mut)]
+    pub destination: UncheckedAccount<'info>,
 }
 
 #[derive(Accounts)]
@@ -1311,6 +1462,8 @@ pub struct SettlePot<'info> {
     /// CHECK: SOL fee destination, pinned to the config authority (treasury wallet)
     #[account(mut, address = config.authority)]
     pub fee_to: UncheckedAccount<'info>,
+    #[account(mut, seeds = [b"buyback"], bump = buyback.bump)]
+    pub buyback: Box<Account<'info, Buyback>>,
     pub skr_mint: Box<InterfaceAccount<'info, Mint>>,
     #[account(mut, seeds = [b"rewards"], bump)]
     pub rewards: Box<InterfaceAccount<'info, TokenAccount>>,
@@ -1379,16 +1532,41 @@ pub struct CloseRound<'info> {
     /// CHECK: rent refund destination, pinned to the round's payer
     #[account(mut, address = round.rent_payer)]
     pub round_rent_payer: UncheckedAccount<'info>,
+    /// CHECK: leftover lamports go to the treasury wallet
+    #[account(mut, address = config.authority)]
+    pub fee_to: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+#[instruction(round_id: u64)]
+pub struct RefundStake<'info> {
+    #[account(mut)]
+    pub cranker: Signer<'info>,
+    /// CHECK: gets its own SOL back; must be the stake's owner
+    #[account(mut, address = stake.owner)]
+    pub owner: UncheckedAccount<'info>,
+    /// CHECK: rent refund destination, must match the stake's payer
+    #[account(mut, address = stake.payer)]
+    pub payer: UncheckedAccount<'info>,
+    #[account(seeds = [b"config"], bump = config.bump)]
+    pub config: Box<Account<'info, Config>>,
+    #[account(mut, seeds = [b"pot".as_ref(), round_id.to_le_bytes().as_ref()], bump = pot.bump)]
+    pub pot: Box<Account<'info, Pot>>,
+    /// CHECK: must still be empty (the round was never revealed); only its data length is read.
+    #[account(seeds = [b"round".as_ref(), round_id.to_le_bytes().as_ref()], bump)]
+    pub round: UncheckedAccount<'info>,
+    #[account(
+        mut, close = payer,
+        seeds = [b"stake", owner.key().as_ref(), &round_id.to_le_bytes()], bump = stake.bump
+    )]
+    pub stake: Box<Account<'info, Stake>>,
 }
 
 #[derive(Accounts)]
 pub struct ClaimRewards<'info> {
-    /// the player's wallet or their active session key (pays for the SKR account if it's missing)
+    /// the player's own wallet: session keys can deploy, but never move rewards out
     #[account(mut)]
-    pub signer: Signer<'info>,
-    /// CHECK: receives the SOL; bound to `player` via has_one
-    #[account(mut)]
-    pub owner: UncheckedAccount<'info>,
+    pub owner: Signer<'info>,
     #[account(seeds = [b"config"], bump = config.bump, has_one = skr_mint)]
     pub config: Box<Account<'info, Config>>,
     #[account(seeds = [b"player", owner.key().as_ref()], bump = player.bump, has_one = owner)]
@@ -1400,8 +1578,10 @@ pub struct ClaimRewards<'info> {
     pub skr_mint: Box<InterfaceAccount<'info, Mint>>,
     #[account(mut, seeds = [b"pot_vault"], bump)]
     pub pot_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, seeds = [b"rewards"], bump)]
+    pub rewards: Box<InterfaceAccount<'info, TokenAccount>>,
     #[account(
-        init_if_needed, payer = signer,
+        init_if_needed, payer = owner,
         associated_token::mint = skr_mint, associated_token::authority = owner,
         associated_token::token_program = token_program
     )]
@@ -1593,6 +1773,14 @@ pub struct PotClaimed {
 #[event]
 pub struct RoundClosed {
     pub round_id: u64,
+    pub dust: u64,
+}
+
+#[event]
+pub struct StakeRefunded {
+    pub owner: Pubkey,
+    pub round_id: u64,
+    pub sol: u64,
 }
 
 #[event]
@@ -1714,4 +1902,6 @@ pub enum GaliError {
     TooEarly,
     #[msg("Some stakes in this round are not claimed yet")]
     UnclaimedStakes,
+    #[msg("This round was abandoned and refunded")]
+    RoundAbandoned,
 }
