@@ -6,8 +6,7 @@
   "build": {
     "base": {
       "env": {
-        "EXPO_PUBLIC_RPC": "https://api.devnet.solana.com",
-        "EXPO_PUBLIC_CLUSTER": "devnet"
+        "EXPO_PUBLIC_RPC_URL": "https://api.devnet.solana.com"
       },
       "android": {
         "image": "latest"
@@ -39,7 +38,6 @@
     "apk": {
       "extends": "base",
       "distribution": "internal",
-      "channel": "production",
       "android": {
         "buildType": "apk"
       }
