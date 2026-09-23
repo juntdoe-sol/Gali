@@ -15,6 +15,7 @@ import {
   automationPda,
   BOARD_ADDRESS,
   CONFIG_ADDRESS,
+  ENTROPY_PROGRAM_ID,
   minerPda,
   ORE_IX,
   ORE_MINT,
@@ -23,15 +24,6 @@ import {
   TREASURY_ADDRESS,
   VAR_ADDRESS,
 } from './consts';
-
-/**
- * entropy-api's program id. Only the deploy that starts a round touches it.
- * It is not in ore-api's consts, so scripts/ore-layout prints it and the value
- * belongs in ore-layout.json. Left unset on purpose: a made-up address here
- * would fail at signing time with a useless error, or silently target the wrong
- * program.
- */
-export const ENTROPY_PROGRAM_ID: PublicKey | null = null;
 
 const meta = (pubkey: PublicKey, isSigner: boolean, isWritable: boolean) => ({ pubkey, isSigner, isWritable });
 
@@ -49,7 +41,9 @@ const putU32 = (b: Buffer, offset: number, n: number) =>
  * player, which is how Gali runs a round with no wallet pop-up.
  *
  * Accounts: signer, authority, automation, board, config, miner, round, treasury,
- * system, ore_program, then entropy's var and program.
+ * system, ore_program, then entropy's var and program. ORE splits the list at ten,
+ * and only reads the entropy pair on the deploy that starts a round, but that deploy
+ * is the one that has to be ready, so both are always sent.
  */
 export function deployIx(args: {
   signer: PublicKey;
@@ -60,9 +54,6 @@ export function deployIx(args: {
   /** bitmask of the 25 squares */
   squares: number;
 }): TransactionInstruction {
-  if (!ENTROPY_PROGRAM_ID) {
-    throw new Error('ORE deploy needs entropy-api\'s program id. Run scripts/ore-layout and fill it into consts.');
-  }
   const data = Buffer.alloc(13);
   data.writeUInt8(ORE_IX.Deploy, 0);
   putU64(data, 1, args.amount);

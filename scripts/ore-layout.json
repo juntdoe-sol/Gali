@@ -1,0 +1,125 @@
+{
+  "note": "ORE's on-chain layout, confirmed against mainnet. Offsets are inside the struct; Steel prefixes every account with an 8-byte discriminator, so add 8 when reading raw account data. Every size marked observed was checked against a real account. Regenerate with `npx ts-node scripts/ore-probe.ts`.",
+  "checkedAt": "2026-09-23",
+  "cluster": "mainnet-beta",
+  "disc": 8,
+  "programId": "oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv",
+  "entropyProgramId": "3jSkUuYBoJzQPMEzTvkDFXCZUBksPamrVhrnHR9igu2X",
+  "mint": "oreoU2P8bN6jkk3jbaiVxYnG1dCXcYxwhwyK9jSybcp",
+  "tokenDecimals": 11,
+  "oneOre": 100000000000,
+  "sizeofNumeric": 16,
+  "protocolConfig": {
+    "roundSlots": 200,
+    "intermissionSlots": 40,
+    "adminFeeRate": 100,
+    "protocolFeeRate": 1000,
+    "adminFeeCollector": "DyB4Kv6V613gp2LWQTq1dwDYHGKuUEoDHnCouGUtxFiX",
+    "protocolFeeCollector": "45db2FSR4mcXdSVVZbKbwojU6uYDpMyhpEi7cC8nHaWG"
+  },
+  "accounts": {
+    "Board": {
+      "size": 32,
+      "observedSpace": 40,
+      "disc": 105,
+      "fields": { "round_id": 0, "start_slot": 8, "end_slot": 16, "production_cost_ema": 24 }
+    },
+    "Round": {
+      "size": 944,
+      "observedSpace": 952,
+      "disc": 109,
+      "fields": {
+        "id": 0,
+        "deployed": 8,
+        "mass": 208,
+        "count": 408,
+        "slot_hash": 608,
+        "expires_at": 640,
+        "motherlode": 648,
+        "rent_payer": 656,
+        "rewards": 688,
+        "total_vaulted": 888,
+        "total_returned_sol": 896,
+        "total_miners": 904,
+        "top_miner": 912
+      },
+      "arrays": { "deployed": 25, "mass": 25, "count": 25, "rewards": 25 }
+    },
+    "Miner": {
+      "size": 744,
+      "observedSpace": 752,
+      "fields": {
+        "authority": 0,
+        "auto_return": 32,
+        "checkpoint_id": 40,
+        "checkpoint_fee": 48,
+        "deployed": 56,
+        "mass": 256,
+        "cumulative": 456,
+        "round_id": 656,
+        "rewards_factor": 664,
+        "rewards_sol": 680,
+        "refined_ore": 688,
+        "rewards_ore": 696,
+        "last_claim_ore_at": 704,
+        "last_claim_sol_at": 712,
+        "lifetime_rewards_ore": 720,
+        "lifetime_deployed": 728,
+        "lifetime_rewards_sol": 736
+      },
+      "arrays": { "deployed": 25, "mass": 25, "cumulative": 25 }
+    },
+    "Config": {
+      "size": 224,
+      "observedSpace": 232,
+      "fields": {
+        "admin.authority": 0,
+        "admin.fee_collector": 32,
+        "admin.fee_rate": 64,
+        "protocol.authority": 72,
+        "protocol.fee_collector": 104,
+        "protocol.fee_rate": 136,
+        "protocol.intermission_slots": 144,
+        "protocol.round_slots": 152,
+        "protocol.entropy_var_address": 160,
+        "protocol.entropy_program_id": 192
+      }
+    },
+    "Treasury": {
+      "size": 40,
+      "observedSpace": 48,
+      "fields": {
+        "motherlode": 0,
+        "miner_rewards_factor": 8,
+        "total_refined": 24,
+        "total_unclaimed": 32
+      }
+    },
+    "Automation": {
+      "size": 152,
+      "observedSpace": null,
+      "computedOnly": true,
+      "fields": {
+        "amount": 0,
+        "authority": 8,
+        "balance": 40,
+        "executor": 48,
+        "fee": 80,
+        "strategy": 88,
+        "mask": 96,
+        "reload": 104,
+        "total_sol_spent": 112,
+        "total_ore_earned": 120,
+        "conditions.max_production_cost": 128,
+        "conditions.min_motherlode": 136,
+        "conditions.max_motherlode": 138,
+        "conditions.split_tiles": 140,
+        "conditions.solo_tiles": 142
+      }
+    }
+  },
+  "deadFields": {
+    "Round.mass": "Never written by the deployed program. Zero on every account checked.",
+    "Miner.mass": "Same. The solo winner is sampled from Miner.cumulative, so a deploy's weight is its SOL, not how early it landed."
+  }
+}
