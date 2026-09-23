@@ -35,6 +35,7 @@ export const VAR_ADDRESS = new PublicKey('BWCaDY96Xe4WkFq1M7UiCCRcChsJ3p51L5KrGz
 
 /** Marks a round whose reward is split between everyone on the winning square. */
 export const SPLIT_ADDRESS = new PublicKey('SpLiT11111111111111111111111111111111111112');
+export const ORE_SPLIT_ADDRESS_B58 = 'SpLiT11111111111111111111111111111111111112';
 /** Set as an automation's executor to let anyone run it. */
 export const EXECUTOR_ADDRESS = new PublicKey('executor11111111111111111111111111111111112');
 
