@@ -16,3 +16,4 @@ target/*
 !target/idl/
 !target/deploy/
 target/deploy/*.json
+scripts/ore-layout/target/
