@@ -61,9 +61,17 @@ pub const REFINING_FEE_BPS: u64 = 1_000;
 /// Fixed-point scale for the refinery's per-SKR accumulator.
 pub const FACTOR_SCALE: u128 = 1_000_000_000_000;
 /// Round and pot accounts can be closed (rent back to whoever paid it) this long after the round ends.
+#[cfg(not(feature = "fasttime"))]
 pub const CLOSE_AFTER_SECS: i64 = SECONDS_PER_DAY;
 /// If a round is still unrevealed this long after it ended, players can take their own SOL back.
+#[cfg(not(feature = "fasttime"))]
 pub const ABANDON_SECS: i64 = 3_600;
+/// Test-only waiting periods, enabled by the `fasttime` feature so the suite can exercise
+/// close_round and refund_stake without waiting a day. Never built for devnet or mainnet.
+#[cfg(feature = "fasttime")]
+pub const CLOSE_AFTER_SECS: i64 = 0;
+#[cfg(feature = "fasttime")]
+pub const ABANDON_SECS: i64 = 0;
 /// SlotHashes keeps this many entries; past it a locked slot can never be revealed.
 pub const SLOT_HASH_WINDOW: u64 = 512;
 /// Paid by each player's first deploy of a round and handed to whoever claims their stake.
