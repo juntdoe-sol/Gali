@@ -35,6 +35,7 @@ fn main() {
     let out = json!({
         "note": "Offsets are within the struct. Steel prefixes each account with an 8-byte discriminator, so add 8 when reading raw account data.",
         "programId": ore_api::ID.to_string(),
+        "entropyProgramId": entropy_api::ID.to_string(),
         "mint": MINT_ADDRESS.to_string(),
         "tokenDecimals": TOKEN_DECIMALS,
         "oneOre": ONE_ORE,
