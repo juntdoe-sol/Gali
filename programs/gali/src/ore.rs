@@ -37,6 +37,7 @@ mod round_at {
     pub const ID: usize = 0;
     pub const DEPLOYED: usize = 8;
     pub const SLOT_HASH: usize = 608;
+    pub const EXPIRES_AT: usize = 640;
     pub const MOTHERLODE: usize = 648;
     pub const TOP_MINER: usize = 912;
     pub const SIZE: usize = 944;
@@ -103,9 +104,20 @@ pub struct OreRound {
     pub split: bool,
     /// Grams of ORE paid out as ORE's own motherlode this round. Non-zero on a hit.
     pub motherlode: u64,
+    /// Slot after which ORE may close this account and its rewards are forfeit.
+    pub expires_at: u64,
 }
 
+/// ORE sets a round's expiry one day of slots past the slot mining closed.
+const ONE_DAY_SLOTS: u64 = 24 * 60 * 200;
+
 impl OreRound {
+    /// The slot at which mining closed. Derived, because the round account keeps
+    /// its expiry rather than its end, and the two differ by a fixed day.
+    pub fn end_slot(&self) -> u64 {
+        self.expires_at.saturating_sub(ONE_DAY_SLOTS)
+    }
+
     /// Reads round `round_id` from its own PDA.
     ///
     /// The account is only accepted once it has settled: an all-zero entropy
@@ -140,6 +152,7 @@ impl OreRound {
             winning_square: Some(square),
             split: top_miner == ORE_SPLIT,
             motherlode: u64_at(&data, round_at::MOTHERLODE),
+            expires_at: u64_at(&data, round_at::EXPIRES_AT),
         })
     }
 }
