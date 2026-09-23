@@ -78,6 +78,7 @@ pub const SLOT_HASH_WINDOW: u64 = 512;
 pub const CRANK_FEE: u64 = 20_000;
 pub const CLAIM_SOL: u8 = 1;
 pub const CLAIM_SKR: u8 = 2;
+pub const CLAIM_ORE: u8 = 4;
 /// Taken from every spot, win or lose (sent to the treasury wallet).
 pub const ADMIN_FEE_BPS: u64 = 100;
 /// Spots per round where the winner takes the whole SKR reward.
@@ -153,6 +154,20 @@ fn check_config(cfg: &Config) -> Result<()> {
         cfg.boost_tier2 == 0 || cfg.boost_tier2 >= cfg.boost_tier1,
         GaliError::BadConfig
     );
+    // $ORE: same shape of limits as SKR
+    require!(cfg.gear_prices_ore.len() <= MAX_GEAR, GaliError::BadConfig);
+    require!(
+        cfg.ore_motherlode_bps as u64 + cfg.ore_rewards_bps as u64 <= BPS,
+        GaliError::BadConfig
+    );
+    require!(
+        cfg.ore_drip_bps >= 1 && cfg.ore_drip_bps <= MAX_DRIP_BPS,
+        GaliError::BadConfig
+    );
+    require!(
+        cfg.ore_boost_tier2 == 0 || cfg.ore_boost_tier2 >= cfg.ore_boost_tier1,
+        GaliError::BadConfig
+    );
     Ok(())
 }
 
@@ -180,6 +195,15 @@ pub mod gali {
         c.reward_drip_bps = args.reward_drip_bps;
         c.buyback_bps = args.buyback_bps;
         c.buyback_due = 0;
+        c.ore_mint = ctx.accounts.ore_mint.key();
+        c.gear_prices_ore = args.gear_prices_ore;
+        c.ore_motherlode_bps = args.ore_motherlode_bps;
+        c.ore_rewards_bps = args.ore_rewards_bps;
+        c.ore_boost_tier1 = args.ore_boost_tier1;
+        c.ore_boost_tier2 = args.ore_boost_tier2;
+        c.round_reward_ore = args.round_reward_ore;
+        c.motherlode_ore = args.motherlode_ore;
+        c.ore_drip_bps = args.ore_drip_bps;
         c.paused = false;
         c.pending_authority = Pubkey::default();
         c.bump = ctx.bumps.config;
@@ -232,6 +256,31 @@ pub mod gali {
         if let Some(v) = u.buyback_bps {
             c.buyback_bps = v;
         }
+        if let Some(v) = u.gear_prices_ore {
+            require!(v.len() <= MAX_GEAR, GaliError::BadConfig);
+            c.gear_prices_ore = v;
+        }
+        if let Some(v) = u.ore_motherlode_bps {
+            c.ore_motherlode_bps = v;
+        }
+        if let Some(v) = u.ore_rewards_bps {
+            c.ore_rewards_bps = v;
+        }
+        if let Some(v) = u.ore_boost_tier1 {
+            c.ore_boost_tier1 = v;
+        }
+        if let Some(v) = u.ore_boost_tier2 {
+            c.ore_boost_tier2 = v;
+        }
+        if let Some(v) = u.round_reward_ore {
+            c.round_reward_ore = v;
+        }
+        if let Some(v) = u.motherlode_ore {
+            c.motherlode_ore = v;
+        }
+        if let Some(v) = u.ore_drip_bps {
+            c.ore_drip_bps = v;
+        }
         check_config(c)?;
         emit!(ConfigUpdated {
             authority: c.authority
@@ -267,6 +316,65 @@ pub mod gali {
 
     /// Move SKR from the treasury (the protocol's cut of gear sales) to any SKR account.
     /// The Motherlode Pool, Rewards Pool, pot escrow and staking vault have no withdraw path.
+    /// Anyone can top up the $ORE pools: the team, ORE themselves, a sponsor, a player.
+    /// `to_motherlode` picks which pool; false means the Rewards Pool that rounds mine from.
+    pub fn fund_ore(ctx: Context<FundOre>, amount: u64, to_motherlode: bool) -> Result<()> {
+        require!(amount > 0, GaliError::BadAmount);
+        let dest = if to_motherlode {
+            ctx.accounts.ore_motherlode.to_account_info()
+        } else {
+            ctx.accounts.ore_rewards.to_account_info()
+        };
+        token_interface::transfer_checked(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                TransferChecked {
+                    from: ctx.accounts.funder_ata.to_account_info(),
+                    mint: ctx.accounts.ore_mint.to_account_info(),
+                    to: dest,
+                    authority: ctx.accounts.funder.to_account_info(),
+                },
+            ),
+            amount,
+            ctx.accounts.ore_mint.decimals,
+        )?;
+        emit!(OreFunded {
+            funder: ctx.accounts.funder.key(),
+            amount,
+            to_motherlode
+        });
+        Ok(())
+    }
+
+    /// The authority's share of ORE gear sales. The pools have no withdraw path, same as SKR.
+    pub fn withdraw_treasury_ore(ctx: Context<WithdrawTreasuryOre>, amount: u64) -> Result<()> {
+        require!(
+            amount > 0 && amount <= ctx.accounts.ore_treasury.amount,
+            GaliError::BadAmount
+        );
+        let bump = ctx.accounts.config.bump;
+        let signer: &[&[&[u8]]] = &[&[b"config", &[bump]]];
+        token_interface::transfer_checked(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                TransferChecked {
+                    from: ctx.accounts.ore_treasury.to_account_info(),
+                    mint: ctx.accounts.ore_mint.to_account_info(),
+                    to: ctx.accounts.destination.to_account_info(),
+                    authority: ctx.accounts.config.to_account_info(),
+                },
+                signer,
+            ),
+            amount,
+            ctx.accounts.ore_mint.decimals,
+        )?;
+        emit!(TreasuryWithdrawn {
+            to: ctx.accounts.destination.key(),
+            amount
+        });
+        Ok(())
+    }
+
     pub fn withdraw_treasury(ctx: Context<WithdrawTreasury>, amount: u64) -> Result<()> {
         require!(
             amount > 0 && amount <= ctx.accounts.treasury.amount,
@@ -423,7 +531,11 @@ pub mod gali {
             pot.base_points = cfg.base_points;
             pot.motherlode_points = cfg.motherlode_points;
         }
-        let boost = boost_bps(cfg, ctx.accounts.player.staked_skr);
+        let boost = boost_bps(
+            cfg,
+            ctx.accounts.player.staked_skr,
+            ctx.accounts.player.staked_ore,
+        );
         let st = &mut ctx.accounts.stake;
         let first_in_round = st.owner == Pubkey::default();
         if first_in_round {
@@ -574,8 +686,61 @@ pub mod gali {
             )?;
         }
 
+        // $ORE: the same drip, cap and split, from the ORE pools. The ORE Rewards Pool is
+        // filled by players buying gear with ORE, so it pays what has flowed in and no more.
+        let ore_decimals = ctx.accounts.ore_mint.decimals;
+        let ore_bal = ctx.accounts.ore_rewards.amount;
+        let ore_cap = cfg.round_reward_ore.saturating_add(cfg.motherlode_ore);
+        let ore_budget = if cfg.ore_drip_bps > 0 {
+            ore_cap.min((ore_bal as u128 * cfg.ore_drip_bps as u128 / BPS as u128) as u64)
+        } else {
+            ore_cap
+        };
+        let (ore_reward_part, ore_accrual_part) = if ore_cap == 0 {
+            (0, 0)
+        } else {
+            let x = (ore_budget as u128 * cfg.round_reward_ore as u128 / ore_cap as u128) as u64;
+            (x, ore_budget - x)
+        };
+        let ore_from_rewards = if has_winners {
+            ore_reward_part.min(ore_bal)
+        } else {
+            0
+        };
+        let ore_from_motherlode = if has_winners && r.motherlode {
+            ctx.accounts.ore_motherlode.amount
+        } else {
+            0
+        };
+        let ore_accrual = ore_accrual_part.min(ore_bal - ore_from_rewards);
+        for (amount, src, dst) in [
+            (ore_from_rewards, ctx.accounts.ore_rewards.to_account_info(), ctx.accounts.ore_pot_vault.to_account_info()),
+            (ore_from_motherlode, ctx.accounts.ore_motherlode.to_account_info(), ctx.accounts.ore_pot_vault.to_account_info()),
+            (ore_accrual, ctx.accounts.ore_rewards.to_account_info(), ctx.accounts.ore_motherlode.to_account_info()),
+        ] {
+            if amount == 0 {
+                continue;
+            }
+            token_interface::transfer_checked(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.to_account_info(),
+                    TransferChecked {
+                        from: src,
+                        mint: ctx.accounts.ore_mint.to_account_info(),
+                        to: dst,
+                        authority: ctx.accounts.config.to_account_info(),
+                    },
+                    signer,
+                ),
+                amount,
+                ore_decimals,
+            )?;
+        }
+
         ctx.accounts.config.buyback_due = ctx.accounts.config.buyback_due.saturating_add(owed);
         let pot = &mut ctx.accounts.pot;
+        pot.ore_reward = ore_from_rewards;
+        pot.motherlode_ore = ore_from_motherlode;
         pot.pool = total - fee;
         pot.admin_fee = admin_fee;
         pot.protocol_fee = protocol_fee;
@@ -638,6 +803,22 @@ pub mod gali {
             }
         };
         let skr = mined + from_motherlode;
+        // $ORE follows the same split. On a solo round the same miner takes both assets.
+        let ore_from_motherlode = if won {
+            (mine * pot.motherlode_ore as u128 / on_win) as u64
+        } else {
+            0
+        };
+        let ore_mined = if !won {
+            0
+        } else if pot.split_reward {
+            (mine * pot.ore_reward as u128 / on_win) as u64
+        } else if lucky {
+            pot.ore_reward
+        } else {
+            0
+        };
+        let ore = ore_mined + ore_from_motherlode;
         let points = if won {
             let covered = stake.per_block.iter().filter(|v| **v > 0).count() as u64;
             let mut base = pot.base_points.saturating_mul(BLOCKS as u64) / covered.max(1);
@@ -689,10 +870,12 @@ pub mod gali {
         sync_refined(u, rf)?;
         u.sol = u.sol.saturating_add(sol);
         u.skr = u.skr.saturating_add(skr);
+        u.ore = u.ore.saturating_add(ore);
         rf.total_unrefined = rf.total_unrefined.saturating_add(skr);
         let p = &mut ctx.accounts.player;
         p.sol_won = p.sol_won.saturating_add(sol);
         if won {
+            p.ore_mined = p.ore_mined.saturating_add(ore_mined);
             p.skr_mined = p.skr_mined.saturating_add(mined);
             p.skr_won = p.skr_won.saturating_add(from_motherlode);
             p.points = p.points.saturating_add(points);
@@ -714,7 +897,10 @@ pub mod gali {
     /// Pay out the player's Unclaimed SOL (to their wallet) and SKR (to their SKR account).
     /// Signed by the owner or their active session key.
     pub fn claim_rewards(ctx: Context<ClaimRewards>, what: u8) -> Result<()> {
-        require!(what & (CLAIM_SOL | CLAIM_SKR) != 0, GaliError::BadAmount);
+        require!(
+            what & (CLAIM_SOL | CLAIM_SKR | CLAIM_ORE) != 0,
+            GaliError::BadAmount
+        );
         let rf = &mut ctx.accounts.refinery;
         let u = &mut ctx.accounts.unclaimed;
         sync_refined(u, rf)?;
@@ -724,10 +910,16 @@ pub mod gali {
         } else {
             (0, 0)
         };
-        require!(sol > 0 || unrefined > 0 || refined > 0, GaliError::NothingToClaim);
+        let ore = if what & CLAIM_ORE != 0 { u.ore } else { 0 };
+        require!(
+            sol > 0 || unrefined > 0 || refined > 0 || ore > 0,
+            GaliError::NothingToClaim
+        );
         u.sol -= sol;
         u.skr -= unrefined;
         u.refined -= refined;
+        u.ore -= ore;
+        u.claimed_ore = u.claimed_ore.saturating_add(ore);
         rf.total_unrefined = rf.total_unrefined.saturating_sub(unrefined);
         rf.total_refined = rf.total_refined.saturating_sub(refined);
         // 10% of the unrefined part always comes off; it goes to whoever still holds unrefined SKR,
@@ -774,11 +966,29 @@ pub mod gali {
                 ctx.accounts.skr_mint.decimals,
             )?;
         }
+        // $ORE is paid in full: no refining fee on someone else's token
+        if ore > 0 {
+            token_interface::transfer_checked(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.to_account_info(),
+                    TransferChecked {
+                        from: ctx.accounts.ore_pot_vault.to_account_info(),
+                        mint: ctx.accounts.ore_mint.to_account_info(),
+                        to: ctx.accounts.owner_ore_ata.to_account_info(),
+                        authority: ctx.accounts.config.to_account_info(),
+                    },
+                    cfg_signer,
+                ),
+                ore,
+                ctx.accounts.ore_mint.decimals,
+            )?;
+        }
         emit!(RewardsClaimed {
             owner,
             sol,
             skr,
             refining_fee: fee,
+            ore,
         });
         Ok(())
     }
@@ -975,6 +1185,125 @@ pub mod gali {
         Ok(())
     }
 
+    /// Buy a gear item with $ORE instead of SKR. Same items, same one-per-player rule,
+    /// separate price list. The ORE splits into the ORE Motherlode and ORE Rewards Pools
+    /// and the treasury, so ORE spent on cosmetics comes back to miners as mined ORE.
+    pub fn buy_gear_ore(ctx: Context<BuyGearOre>, item: u8) -> Result<()> {
+        let cfg = &ctx.accounts.config;
+        require!(!cfg.paused, GaliError::Paused);
+        require!((item as usize) < MAX_GEAR, GaliError::UnknownItem);
+        let price = *cfg
+            .gear_prices_ore
+            .get(item as usize)
+            .ok_or(GaliError::UnknownItem)?;
+        // 0 means this item is SKR-only
+        require!(price > 0, GaliError::UnknownItem);
+        let p = &mut ctx.accounts.player;
+        require!(p.gear_mask & (1u32 << item) == 0, GaliError::AlreadyOwned);
+        let to_motherlode = price.saturating_mul(cfg.ore_motherlode_bps as u64) / BPS;
+        let to_rewards = price.saturating_mul(cfg.ore_rewards_bps as u64) / BPS;
+        let to_treasury = price - to_motherlode - to_rewards;
+        let decimals = ctx.accounts.ore_mint.decimals;
+        for (amount, dest) in [
+            (to_motherlode, ctx.accounts.ore_motherlode.to_account_info()),
+            (to_rewards, ctx.accounts.ore_rewards.to_account_info()),
+            (to_treasury, ctx.accounts.ore_treasury.to_account_info()),
+        ] {
+            if amount == 0 {
+                continue;
+            }
+            token_interface::transfer_checked(
+                CpiContext::new(
+                    ctx.accounts.token_program.to_account_info(),
+                    TransferChecked {
+                        from: ctx.accounts.user_ata.to_account_info(),
+                        mint: ctx.accounts.ore_mint.to_account_info(),
+                        to: dest,
+                        authority: ctx.accounts.owner.to_account_info(),
+                    },
+                ),
+                amount,
+                decimals,
+            )?;
+        }
+        p.gear_mask |= 1u32 << item;
+        emit!(GearBoughtOre {
+            owner: p.owner,
+            item,
+            price
+        });
+        Ok(())
+    }
+
+    /// Stake $ORE in the Gali vault for a points boost. The better of the SKR and ORE
+    /// boosts applies, so staking both does not stack.
+    pub fn stake_ore(ctx: Context<StakeOre>, amount: u64) -> Result<()> {
+        require!(amount > 0, GaliError::BadAmount);
+        token_interface::transfer_checked(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                TransferChecked {
+                    from: ctx.accounts.user_ata.to_account_info(),
+                    mint: ctx.accounts.ore_mint.to_account_info(),
+                    to: ctx.accounts.ore_vault.to_account_info(),
+                    authority: ctx.accounts.owner.to_account_info(),
+                },
+            ),
+            amount,
+            ctx.accounts.ore_mint.decimals,
+        )?;
+        let p = &mut ctx.accounts.player;
+        p.staked_ore = p
+            .staked_ore
+            .checked_add(amount)
+            .ok_or(GaliError::BadAmount)?;
+        emit!(StakedOre {
+            owner: p.owner,
+            amount,
+            total: p.staked_ore
+        });
+        Ok(())
+    }
+
+    /// Take staked $ORE back. Locked for the round it is boosting, same rule as SKR,
+    /// so the same ORE can't boost two wallets in one round.
+    pub fn unstake_ore(ctx: Context<UnstakeOre>, round_id: u64, amount: u64) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        require!(
+            round_id == (now / ctx.accounts.config.round_secs as i64) as u64,
+            GaliError::WrongRound
+        );
+        require!(
+            ctx.accounts.current_stake.data_is_empty(),
+            GaliError::StakeInPlay
+        );
+        let p = &mut ctx.accounts.player;
+        require!(amount > 0 && amount <= p.staked_ore, GaliError::BadAmount);
+        p.staked_ore -= amount;
+        let bump = ctx.accounts.config.bump;
+        let signer: &[&[&[u8]]] = &[&[b"config", &[bump]]];
+        token_interface::transfer_checked(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                TransferChecked {
+                    from: ctx.accounts.ore_vault.to_account_info(),
+                    mint: ctx.accounts.ore_mint.to_account_info(),
+                    to: ctx.accounts.user_ata.to_account_info(),
+                    authority: ctx.accounts.config.to_account_info(),
+                },
+                signer,
+            ),
+            amount,
+            ctx.accounts.ore_mint.decimals,
+        )?;
+        emit!(StakedOre {
+            owner: p.owner,
+            amount: 0,
+            total: p.staked_ore
+        });
+        Ok(())
+    }
+
     pub fn stake_skr(ctx: Context<StakeSkr>, amount: u64) -> Result<()> {
         require!(amount > 0, GaliError::BadAmount);
         token_interface::transfer_checked(
@@ -1090,14 +1419,23 @@ pub mod gali {
     }
 }
 
-fn boost_bps(cfg: &Config, staked: u64) -> u16 {
-    if cfg.boost_tier2 > 0 && staked >= cfg.boost_tier2 {
-        15_000
-    } else if cfg.boost_tier1 > 0 && staked >= cfg.boost_tier1 {
-        12_500
-    } else {
-        10_000
-    }
+/// The better of the two staking boosts applies; they do not stack, so a player
+/// can't multiply a round by staking both assets.
+fn boost_bps(cfg: &Config, staked_skr: u64, staked_ore: u64) -> u16 {
+    let tier = |t2: u64, t1: u64, staked: u64| -> u16 {
+        if t2 > 0 && staked >= t2 {
+            15_000
+        } else if t1 > 0 && staked >= t1 {
+            12_500
+        } else {
+            10_000
+        }
+    };
+    tier(cfg.boost_tier2, cfg.boost_tier1, staked_skr).max(tier(
+        cfg.ore_boost_tier2,
+        cfg.ore_boost_tier1,
+        staked_ore,
+    ))
 }
 
 /* ---------------- accounts ---------------- */
@@ -1141,6 +1479,24 @@ pub struct Config {
     pub buyback_bps: u16,
     /// lamports of fees held in the buyback escrow and not yet withdrawn to buy SKR
     pub buyback_due: u64,
+    // --- $ORE: the second asset. Gali never mints it either; every ORE paid out was spent
+    // on gear by a player or funded by someone. ---
+    pub ore_mint: Pubkey,
+    /// raw ORE price per gear item, index = item id. Empty or 0 = that item cannot be bought with ORE.
+    #[max_len(32)]
+    pub gear_prices_ore: Vec<u64>,
+    /// share of every ORE gear sale routed to the ORE Motherlode Pool, in bps
+    pub ore_motherlode_bps: u16,
+    /// share of every ORE gear sale routed to the ORE Rewards Pool, in bps (the rest goes to the treasury)
+    pub ore_rewards_bps: u16,
+    /// raw ORE staked for the 1.25x and 1.5x boosts; the better of the SKR and ORE boosts applies
+    pub ore_boost_tier1: u64,
+    pub ore_boost_tier2: u64,
+    /// raw ORE mined per round by the winning spot, and moved into the ORE Motherlode Pool each round
+    pub round_reward_ore: u64,
+    pub motherlode_ore: u64,
+    /// max share of the ORE Rewards Pool one round can pay out, in bps
+    pub ore_drip_bps: u16,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Default)]
@@ -1158,6 +1514,14 @@ pub struct ConfigUpdate {
     pub round_reward_skr: Option<u64>,
     pub reward_drip_bps: Option<u16>,
     pub buyback_bps: Option<u16>,
+    pub gear_prices_ore: Option<Vec<u64>>,
+    pub ore_motherlode_bps: Option<u16>,
+    pub ore_rewards_bps: Option<u16>,
+    pub ore_boost_tier1: Option<u64>,
+    pub ore_boost_tier2: Option<u64>,
+    pub round_reward_ore: Option<u64>,
+    pub motherlode_ore: Option<u64>,
+    pub ore_drip_bps: Option<u16>,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
@@ -1176,6 +1540,14 @@ pub struct ConfigArgs {
     pub round_reward_skr: u64,
     pub reward_drip_bps: u16,
     pub buyback_bps: u16,
+    pub gear_prices_ore: Vec<u64>,
+    pub ore_motherlode_bps: u16,
+    pub ore_rewards_bps: u16,
+    pub ore_boost_tier1: u64,
+    pub ore_boost_tier2: u64,
+    pub round_reward_ore: u64,
+    pub motherlode_ore: u64,
+    pub ore_drip_bps: u16,
 }
 
 #[account]
@@ -1201,7 +1573,11 @@ pub struct Player {
     pub sol_won: u64,
     pub skr_mined: u64,
     pub bump: u8,
-    pub reserved: [u8; 64],
+    /// raw ORE staked in the Gali vault; boosts points like staked SKR
+    pub staked_ore: u64,
+    /// lifetime raw ORE mined from rounds
+    pub ore_mined: u64,
+    pub reserved: [u8; 48],
 }
 
 #[account]
@@ -1266,8 +1642,11 @@ pub struct Pot {
     pub motherlode_points: u64,
     /// stakes refunded because the round was never revealed; any refund blocks settlement
     pub refunded: u32,
+    /// raw ORE mined this round and the ORE Motherlode paid out (both escrowed in `ore_pot_vault`)
+    pub ore_reward: u64,
+    pub motherlode_ore: u64,
     /// room for later fields, so upgrades don't strand existing rounds
-    pub reserved: [u8; 64],
+    pub reserved: [u8; 48],
 }
 
 /// One per player: SOL and SKR credited by `claim_pot`, waiting for `claim_rewards`.
@@ -1287,7 +1666,10 @@ pub struct Unclaimed {
     pub claimed_sol: u64,
     pub claimed_skr: u64,
     pub bump: u8,
-    pub reserved: [u8; 64],
+    /// mined $ORE waiting to be claimed. No refining fee: ORE is not Gali's token to tax.
+    pub ore: u64,
+    pub claimed_ore: u64,
+    pub reserved: [u8; 48],
 }
 
 /// Holds the share of SOL fees owed to SKR buybacks until the admin withdraws it.
@@ -1369,6 +1751,34 @@ pub struct InitConfig<'info> {
     pub pot_vault: Box<InterfaceAccount<'info, TokenAccount>>,
     #[account(init, payer = authority, space = 8 + Buyback::INIT_SPACE, seeds = [b"buyback"], bump)]
     pub buyback: Box<Account<'info, Buyback>>,
+    /// $ORE, the second asset. Same rule as SKR: a plain SPL mint only.
+    #[account(constraint = *ore_mint.to_account_info().owner == anchor_spl::token::ID @ GaliError::BadConfig)]
+    pub ore_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(
+        init, payer = authority, seeds = [b"ore_vault"], bump,
+        token::mint = ore_mint, token::authority = config, token::token_program = token_program
+    )]
+    pub ore_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(
+        init, payer = authority, seeds = [b"ore_treasury"], bump,
+        token::mint = ore_mint, token::authority = config, token::token_program = token_program
+    )]
+    pub ore_treasury: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(
+        init, payer = authority, seeds = [b"ore_motherlode"], bump,
+        token::mint = ore_mint, token::authority = config, token::token_program = token_program
+    )]
+    pub ore_motherlode: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(
+        init, payer = authority, seeds = [b"ore_rewards"], bump,
+        token::mint = ore_mint, token::authority = config, token::token_program = token_program
+    )]
+    pub ore_rewards: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(
+        init, payer = authority, seeds = [b"ore_pot_vault"], bump,
+        token::mint = ore_mint, token::authority = config, token::token_program = token_program
+    )]
+    pub ore_pot_vault: Box<InterfaceAccount<'info, TokenAccount>>,
     pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
 }
@@ -1397,6 +1807,34 @@ pub struct AcceptAuthority<'info> {
     pub new_authority: Signer<'info>,
     #[account(mut, seeds = [b"config"], bump = config.bump)]
     pub config: Box<Account<'info, Config>>,
+}
+
+#[derive(Accounts)]
+pub struct FundOre<'info> {
+    pub funder: Signer<'info>,
+    #[account(seeds = [b"config"], bump = config.bump, has_one = ore_mint)]
+    pub config: Box<Account<'info, Config>>,
+    pub ore_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(mut, token::mint = ore_mint, token::authority = funder, token::token_program = token_program)]
+    pub funder_ata: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, seeds = [b"ore_rewards"], bump)]
+    pub ore_rewards: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, seeds = [b"ore_motherlode"], bump)]
+    pub ore_motherlode: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub token_program: Interface<'info, TokenInterface>,
+}
+
+#[derive(Accounts)]
+pub struct WithdrawTreasuryOre<'info> {
+    pub authority: Signer<'info>,
+    #[account(seeds = [b"config"], bump = config.bump, has_one = authority, has_one = ore_mint)]
+    pub config: Box<Account<'info, Config>>,
+    pub ore_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(mut, seeds = [b"ore_treasury"], bump)]
+    pub ore_treasury: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, token::mint = ore_mint, token::token_program = token_program)]
+    pub destination: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub token_program: Interface<'info, TokenInterface>,
 }
 
 #[derive(Accounts)]
@@ -1479,6 +1917,14 @@ pub struct SettlePot<'info> {
     pub motherlode: Box<InterfaceAccount<'info, TokenAccount>>,
     #[account(mut, seeds = [b"pot_vault"], bump)]
     pub pot_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(address = config.ore_mint @ GaliError::BadConfig)]
+    pub ore_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(mut, seeds = [b"ore_rewards"], bump)]
+    pub ore_rewards: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, seeds = [b"ore_motherlode"], bump)]
+    pub ore_motherlode: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, seeds = [b"ore_pot_vault"], bump)]
+    pub ore_pot_vault: Box<InterfaceAccount<'info, TokenAccount>>,
     pub token_program: Interface<'info, TokenInterface>,
 }
 
@@ -1594,6 +2040,16 @@ pub struct ClaimRewards<'info> {
         associated_token::token_program = token_program
     )]
     pub owner_ata: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(address = config.ore_mint @ GaliError::BadConfig)]
+    pub ore_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(mut, seeds = [b"ore_pot_vault"], bump)]
+    pub ore_pot_vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(
+        init_if_needed, payer = owner,
+        associated_token::mint = ore_mint, associated_token::authority = owner,
+        associated_token::token_program = token_program
+    )]
+    pub owner_ore_ata: Box<InterfaceAccount<'info, TokenAccount>>,
     pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
@@ -1664,6 +2120,68 @@ pub struct FundMotherlode<'info> {
     #[account(mut, seeds = [b"motherlode"], bump)]
     pub motherlode: Box<InterfaceAccount<'info, TokenAccount>>,
     pub token_program: Interface<'info, TokenInterface>,
+}
+
+#[derive(Accounts)]
+pub struct BuyGearOre<'info> {
+    #[account(mut)]
+    pub owner: Signer<'info>,
+    #[account(seeds = [b"config"], bump = config.bump, has_one = ore_mint)]
+    pub config: Account<'info, Config>,
+    #[account(mut, seeds = [b"player", owner.key().as_ref()], bump = player.bump, has_one = owner)]
+    pub player: Account<'info, Player>,
+    pub ore_mint: InterfaceAccount<'info, Mint>,
+    #[account(mut, token::mint = ore_mint, token::authority = owner, token::token_program = token_program)]
+    pub user_ata: InterfaceAccount<'info, TokenAccount>,
+    #[account(mut, seeds = [b"ore_treasury"], bump)]
+    pub ore_treasury: InterfaceAccount<'info, TokenAccount>,
+    #[account(mut, seeds = [b"ore_motherlode"], bump)]
+    pub ore_motherlode: InterfaceAccount<'info, TokenAccount>,
+    #[account(mut, seeds = [b"ore_rewards"], bump)]
+    pub ore_rewards: InterfaceAccount<'info, TokenAccount>,
+    pub token_program: Interface<'info, TokenInterface>,
+}
+
+#[derive(Accounts)]
+pub struct StakeOre<'info> {
+    #[account(mut)]
+    pub owner: Signer<'info>,
+    #[account(seeds = [b"config"], bump = config.bump, has_one = ore_mint)]
+    pub config: Account<'info, Config>,
+    #[account(mut, seeds = [b"player", owner.key().as_ref()], bump = player.bump, has_one = owner)]
+    pub player: Account<'info, Player>,
+    pub ore_mint: InterfaceAccount<'info, Mint>,
+    #[account(mut, token::mint = ore_mint, token::authority = owner, token::token_program = token_program)]
+    pub user_ata: InterfaceAccount<'info, TokenAccount>,
+    #[account(mut, seeds = [b"ore_vault"], bump)]
+    pub ore_vault: InterfaceAccount<'info, TokenAccount>,
+    pub token_program: Interface<'info, TokenInterface>,
+}
+
+#[derive(Accounts)]
+#[instruction(round_id: u64)]
+pub struct UnstakeOre<'info> {
+    #[account(mut)]
+    pub owner: Signer<'info>,
+    #[account(seeds = [b"config"], bump = config.bump, has_one = ore_mint)]
+    pub config: Account<'info, Config>,
+    #[account(mut, seeds = [b"player", owner.key().as_ref()], bump = player.bump, has_one = owner)]
+    pub player: Account<'info, Player>,
+    /// CHECK: the owner's stake for the current round; must not exist. Only its data length is read.
+    #[account(seeds = [b"stake", owner.key().as_ref(), &round_id.to_le_bytes()], bump)]
+    pub current_stake: UncheckedAccount<'info>,
+    pub ore_mint: InterfaceAccount<'info, Mint>,
+    #[account(
+        init_if_needed, payer = owner,
+        associated_token::mint = ore_mint, associated_token::authority = owner,
+        associated_token::token_program = token_program
+    )]
+    pub user_ata: InterfaceAccount<'info, TokenAccount>,
+    #[account(mut, seeds = [b"ore_vault"], bump)]
+    pub ore_vault: InterfaceAccount<'info, TokenAccount>,
+    pub token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
@@ -1804,6 +2322,8 @@ pub struct RewardsClaimed {
     /// SKR paid out (after the refining fee)
     pub skr: u64,
     pub refining_fee: u64,
+    /// ORE paid out, in full
+    pub ore: u64,
 }
 
 #[event]
@@ -1858,6 +2378,27 @@ pub struct GearBought {
     pub owner: Pubkey,
     pub item: u8,
     pub price: u64,
+}
+
+#[event]
+pub struct OreFunded {
+    pub funder: Pubkey,
+    pub amount: u64,
+    pub to_motherlode: bool,
+}
+
+#[event]
+pub struct GearBoughtOre {
+    pub owner: Pubkey,
+    pub item: u8,
+    pub price: u64,
+}
+
+#[event]
+pub struct StakedOre {
+    pub owner: Pubkey,
+    pub amount: u64,
+    pub total: u64,
 }
 
 #[error_code]

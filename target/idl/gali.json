@@ -70,6 +70,32 @@
           "writable": true
         },
         {
+          "name": "ore_mint",
+          "docs": [
+            "$ORE, the second asset. Same rule as SKR: a plain SPL mint only."
+          ]
+        },
+        {
+          "name": "ore_vault",
+          "writable": true
+        },
+        {
+          "name": "ore_treasury",
+          "writable": true
+        },
+        {
+          "name": "ore_motherlode",
+          "writable": true
+        },
+        {
+          "name": "ore_rewards",
+          "writable": true
+        },
+        {
+          "name": "ore_pot_vault",
+          "writable": true
+        },
+        {
           "name": "token_program"
         },
         {
@@ -197,11 +223,108 @@
       ]
     },
     {
-      "name": "withdraw_treasury",
+      "name": "fund_ore",
       "docs": [
         "Move SKR from the treasury (the protocol's cut of gear sales) to any SKR account.",
-        "The Motherlode Pool, Rewards Pool, pot escrow and staking vault have no withdraw path."
+        "The Motherlode Pool, Rewards Pool, pot escrow and staking vault have no withdraw path.",
+        "Anyone can top up the $ORE pools: the team, ORE themselves, a sponsor, a player.",
+        "`to_motherlode` picks which pool; false means the Rewards Pool that rounds mine from."
       ],
+      "discriminator": [
+        124,
+        127,
+        96,
+        93,
+        252,
+        172,
+        200,
+        6
+      ],
+      "accounts": [
+        {
+          "name": "funder",
+          "signer": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "ore_mint"
+        },
+        {
+          "name": "funder_ata",
+          "writable": true
+        },
+        {
+          "name": "ore_rewards",
+          "writable": true
+        },
+        {
+          "name": "ore_motherlode",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "to_motherlode",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "withdraw_treasury_ore",
+      "docs": [
+        "The authority's share of ORE gear sales. The pools have no withdraw path, same as SKR."
+      ],
+      "discriminator": [
+        55,
+        154,
+        153,
+        98,
+        225,
+        122,
+        125,
+        172
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "ore_mint"
+        },
+        {
+          "name": "ore_treasury",
+          "writable": true
+        },
+        {
+          "name": "destination",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "withdraw_treasury",
       "discriminator": [
         40,
         63,
@@ -493,6 +616,21 @@
           "writable": true
         },
         {
+          "name": "ore_mint"
+        },
+        {
+          "name": "ore_rewards",
+          "writable": true
+        },
+        {
+          "name": "ore_motherlode",
+          "writable": true
+        },
+        {
+          "name": "ore_pot_vault",
+          "writable": true
+        },
+        {
           "name": "token_program"
         }
       ],
@@ -620,6 +758,17 @@
         },
         {
           "name": "owner_ata",
+          "writable": true
+        },
+        {
+          "name": "ore_mint"
+        },
+        {
+          "name": "ore_pot_vault",
+          "writable": true
+        },
+        {
+          "name": "owner_ore_ata",
           "writable": true
         },
         {
@@ -909,6 +1058,181 @@
         }
       ],
       "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "buy_gear_ore",
+      "docs": [
+        "Buy a gear item with $ORE instead of SKR. Same items, same one-per-player rule,",
+        "separate price list. The ORE splits into the ORE Motherlode and ORE Rewards Pools",
+        "and the treasury, so ORE spent on cosmetics comes back to miners as mined ORE."
+      ],
+      "discriminator": [
+        48,
+        48,
+        241,
+        192,
+        47,
+        251,
+        76,
+        78
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "player",
+          "writable": true
+        },
+        {
+          "name": "ore_mint"
+        },
+        {
+          "name": "user_ata",
+          "writable": true
+        },
+        {
+          "name": "ore_treasury",
+          "writable": true
+        },
+        {
+          "name": "ore_motherlode",
+          "writable": true
+        },
+        {
+          "name": "ore_rewards",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "item",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "stake_ore",
+      "docs": [
+        "Stake $ORE in the Gali vault for a points boost. The better of the SKR and ORE",
+        "boosts applies, so staking both does not stack."
+      ],
+      "discriminator": [
+        186,
+        41,
+        1,
+        50,
+        201,
+        143,
+        68,
+        197
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "player",
+          "writable": true
+        },
+        {
+          "name": "ore_mint"
+        },
+        {
+          "name": "user_ata",
+          "writable": true
+        },
+        {
+          "name": "ore_vault",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "unstake_ore",
+      "docs": [
+        "Take staked $ORE back. Locked for the round it is boosting, same rule as SKR,",
+        "so the same ORE can't boost two wallets in one round."
+      ],
+      "discriminator": [
+        37,
+        45,
+        93,
+        61,
+        157,
+        28,
+        129,
+        98
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config"
+        },
+        {
+          "name": "player",
+          "writable": true
+        },
+        {
+          "name": "current_stake"
+        },
+        {
+          "name": "ore_mint"
+        },
+        {
+          "name": "user_ata",
+          "writable": true
+        },
+        {
+          "name": "ore_vault",
+          "writable": true
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "associated_token_program"
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "round_id",
+          "type": "u64"
+        },
         {
           "name": "amount",
           "type": "u64"
@@ -1278,6 +1602,19 @@
     },
     {
       "discriminator": [
+        50,
+        68,
+        168,
+        117,
+        103,
+        155,
+        12,
+        131
+      ],
+      "name": "GearBoughtOre"
+    },
+    {
+      "discriminator": [
         186,
         11,
         24,
@@ -1288,6 +1625,19 @@
         72
       ],
       "name": "MotherlodeFunded"
+    },
+    {
+      "discriminator": [
+        59,
+        153,
+        189,
+        57,
+        78,
+        122,
+        240,
+        36
+      ],
+      "name": "OreFunded"
     },
     {
       "discriminator": [
@@ -1418,6 +1768,19 @@
         240
       ],
       "name": "Staked"
+    },
+    {
+      "discriminator": [
+        120,
+        49,
+        225,
+        129,
+        146,
+        17,
+        135,
+        69
+      ],
+      "name": "StakedOre"
     },
     {
       "discriminator": [
@@ -1758,6 +2121,62 @@
               "lamports of fees held in the buyback escrow and not yet withdrawn to buy SKR"
             ],
             "type": "u64"
+          },
+          {
+            "name": "ore_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "gear_prices_ore",
+            "docs": [
+              "raw ORE price per gear item, index = item id. Empty or 0 = that item cannot be bought with ORE."
+            ],
+            "type": {
+              "vec": "u64"
+            }
+          },
+          {
+            "name": "ore_motherlode_bps",
+            "docs": [
+              "share of every ORE gear sale routed to the ORE Motherlode Pool, in bps"
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "ore_rewards_bps",
+            "docs": [
+              "share of every ORE gear sale routed to the ORE Rewards Pool, in bps (the rest goes to the treasury)"
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "ore_boost_tier1",
+            "docs": [
+              "raw ORE staked for the 1.25x and 1.5x boosts; the better of the SKR and ORE boosts applies"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "ore_boost_tier2",
+            "type": "u64"
+          },
+          {
+            "name": "round_reward_ore",
+            "docs": [
+              "raw ORE mined per round by the winning spot, and moved into the ORE Motherlode Pool each round"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "motherlode_ore",
+            "type": "u64"
+          },
+          {
+            "name": "ore_drip_bps",
+            "docs": [
+              "max share of the ORE Rewards Pool one round can pay out, in bps"
+            ],
+            "type": "u16"
           }
         ]
       }
@@ -1823,6 +2242,40 @@
           },
           {
             "name": "buyback_bps",
+            "type": "u16"
+          },
+          {
+            "name": "gear_prices_ore",
+            "type": {
+              "vec": "u64"
+            }
+          },
+          {
+            "name": "ore_motherlode_bps",
+            "type": "u16"
+          },
+          {
+            "name": "ore_rewards_bps",
+            "type": "u16"
+          },
+          {
+            "name": "ore_boost_tier1",
+            "type": "u64"
+          },
+          {
+            "name": "ore_boost_tier2",
+            "type": "u64"
+          },
+          {
+            "name": "round_reward_ore",
+            "type": "u64"
+          },
+          {
+            "name": "motherlode_ore",
+            "type": "u64"
+          },
+          {
+            "name": "ore_drip_bps",
             "type": "u16"
           }
         ]
@@ -1909,6 +2362,56 @@
           },
           {
             "name": "buyback_bps",
+            "type": {
+              "option": "u16"
+            }
+          },
+          {
+            "name": "gear_prices_ore",
+            "type": {
+              "option": {
+                "vec": "u64"
+              }
+            }
+          },
+          {
+            "name": "ore_motherlode_bps",
+            "type": {
+              "option": "u16"
+            }
+          },
+          {
+            "name": "ore_rewards_bps",
+            "type": {
+              "option": "u16"
+            }
+          },
+          {
+            "name": "ore_boost_tier1",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "ore_boost_tier2",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "round_reward_ore",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "motherlode_ore",
+            "type": {
+              "option": "u64"
+            }
+          },
+          {
+            "name": "ore_drip_bps",
             "type": {
               "option": "u16"
             }
@@ -2000,6 +2503,26 @@
       }
     },
     {
+      "name": "GearBoughtOre",
+      "type": {
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "item",
+            "type": "u8"
+          },
+          {
+            "name": "price",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
       "name": "MotherlodeFunded",
       "type": {
         "fields": [
@@ -2010,6 +2533,26 @@
           {
             "name": "amount",
             "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "OreFunded",
+      "type": {
+        "fields": [
+          {
+            "name": "funder",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "to_motherlode",
+            "type": "bool"
           }
         ],
         "kind": "struct"
@@ -2109,11 +2652,25 @@
             "type": "u8"
           },
           {
+            "name": "staked_ore",
+            "docs": [
+              "raw ORE staked in the Gali vault; boosts points like staked SKR"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "ore_mined",
+            "docs": [
+              "lifetime raw ORE mined from rounds"
+            ],
+            "type": "u64"
+          },
+          {
             "name": "reserved",
             "type": {
               "array": [
                 "u8",
-                64
+                48
               ]
             }
           }
@@ -2252,6 +2809,17 @@
             "type": "u32"
           },
           {
+            "name": "ore_reward",
+            "docs": [
+              "raw ORE mined this round and the ORE Motherlode paid out (both escrowed in `ore_pot_vault`)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "motherlode_ore",
+            "type": "u64"
+          },
+          {
             "name": "reserved",
             "docs": [
               "room for later fields, so upgrades don't strand existing rounds"
@@ -2259,7 +2827,7 @@
             "type": {
               "array": [
                 "u8",
-                64
+                48
               ]
             }
           }
@@ -2429,6 +2997,13 @@
           },
           {
             "name": "refining_fee",
+            "type": "u64"
+          },
+          {
+            "docs": [
+              "ORE paid out, in full"
+            ],
+            "name": "ore",
             "type": "u64"
           }
         ],
@@ -2653,6 +3228,26 @@
       }
     },
     {
+      "name": "StakedOre",
+      "type": {
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "total",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
       "name": "TreasuryWithdrawn",
       "type": {
         "fields": [
@@ -2722,11 +3317,22 @@
             "type": "u8"
           },
           {
+            "name": "ore",
+            "docs": [
+              "mined $ORE waiting to be claimed. No refining fee: ORE is not Gali's token to tax."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "claimed_ore",
+            "type": "u64"
+          },
+          {
             "name": "reserved",
             "type": {
               "array": [
                 "u8",
-                64
+                48
               ]
             }
           }
