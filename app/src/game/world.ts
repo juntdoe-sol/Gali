@@ -88,6 +88,7 @@ export const useWorld = create<WorldState>((set, get) => ({
 let client: RealtimeClient | null = null;
 let channel: RealtimeChannel | null = null;
 let pruneTimer: ReturnType<typeof setInterval> | null = null;
+const MAX_PEERS = 60;
 const verified = new Map<string, string | null>(); // `${id}:${wallet}:${session}` -> wallet or null (pending/failed)
 
 export function startWorld() {
@@ -105,19 +106,28 @@ export function startWorld() {
     })
     .on('broadcast', { event: 'bye' }, ({ payload }) => {
       const id = payload?.id;
-      if (typeof id === 'string')
-        useWorld.setState((s) => {
-          const peers = { ...s.peers };
-          delete peers[id];
-          return { peers };
-        });
+      if (typeof id !== 'string') return;
+      useWorld.setState((s) => {
+        // a verified miner only leaves by going stale, so a spoofed "bye" can't remove them
+        if (!s.peers[id] || s.peers[id].wallet) return s;
+        const peers = { ...s.peers };
+        delete peers[id];
+        return { peers };
+      });
     })
     .subscribe((status) => useWorld.setState({ status: status === 'SUBSCRIBED' ? 'online' : 'connecting' }));
   if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') window.addEventListener('pagehide', sayBye);
   pruneTimer = setInterval(() => {
     const now = Date.now();
     const { peers } = useWorld.getState();
-    const alive = Object.fromEntries(Object.entries(peers).filter(([, p]) => p.bot || now - p.seen < STALE_MS));
+    const alive = Object.fromEntries(
+      Object.entries(peers)
+        .filter(([, p]) => p.bot || now - p.seen < STALE_MS)
+        .sort((a, b) => b[1].seen - a[1].seen)
+        .slice(0, MAX_PEERS), // one sender can't fill the map with invented miners
+    );
+    useWorld.setState((s) => ({ emotes: Object.fromEntries(Object.entries(s.emotes).filter(([id, e]) => now - e.at < 4000 && (alive[id] || id === useWorld.getState().me))) }));
+    for (const key of [...verified.keys()]) if (verified.size > 200) verified.delete(key);
     if (Object.keys(alive).length !== Object.keys(peers).length) useWorld.setState({ peers: alive });
   }, 2000);
 }

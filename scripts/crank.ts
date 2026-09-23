@@ -42,6 +42,7 @@ async function main() {
           round: pda.round(r),
           pot: pda.pot(r),
           feeTo: authority,
+          buyback: pda.buyback(),
           skrMint: cfg.skrMint,
           rewards: pda.rewards(),
           motherlode: pda.motherlode(),
@@ -85,10 +86,26 @@ async function main() {
     if (Date.now() - lastSweep < 10 * 60_000) return;
     lastSweep = Date.now();
     const pots: { account: any }[] = await acc.pot.all([{ dataSize: acc.pot.size }]);
-    const cutoff = Math.floor(Date.now() / 1000) - 86_400;
+    const nowSecs = Math.floor(Date.now() / 1000);
+    const cutoff = nowSecs - 86_400;
+    // rounds nobody ever revealed: give every player their own SOL back
     for (const { account: p } of pots) {
       const r = Number(p.roundId);
-      if (!p.settled || p.claimed < p.miners || (r + 1) * secs > cutoff) continue;
+      if (p.settled || (r + 1) * secs > nowSecs - 3_600) continue;
+      if (await conn.getAccountInfo(pda.round(r))) continue;
+      const stakes = await acc.stake.all([{ memcmp: { offset: STAKE_ROUND_OFFSET, bytes: utils.bytes.bs58.encode(u64le(r)) } }]);
+      for (const { publicKey, account: st } of stakes) {
+        await gali.methods
+          .refundStake(new BN(r))
+          .accountsStrict({ cranker: wallet.publicKey, owner: st.owner, payer: st.payer, config: pda.config(), pot: pda.pot(r), round: pda.round(r), stake: publicKey })
+          .rpc()
+          .then(() => console.log('refunded', r, st.owner.toBase58().slice(0, 8)))
+          .catch((e: unknown) => console.log('refund skip', r, short(e)));
+      }
+    }
+    for (const { account: p } of pots) {
+      const r = Number(p.roundId);
+      if ((!p.settled && p.refunded === 0) || p.claimed < p.miners || (r + 1) * secs > cutoff) continue;
       const info = await conn.getAccountInfo(pda.round(r));
       if (!info) continue;
       let round: any;
@@ -99,7 +116,14 @@ async function main() {
       }
       await gali.methods
         .closeRound(new BN(r))
-        .accountsStrict({ config: pda.config(), pot: pda.pot(r), round: pda.round(r), potRentPayer: p.rentPayer, roundRentPayer: round.rentPayer })
+        .accountsStrict({
+          config: pda.config(),
+          pot: pda.pot(r),
+          round: pda.round(r),
+          potRentPayer: p.rentPayer,
+          roundRentPayer: round.rentPayer,
+          feeTo: (await acc.config.fetch(pda.config())).authority,
+        })
         .rpc()
         .then(() => console.log('closed', r, '(rent refunded)'))
         .catch((e: unknown) => console.log('close skip', r, short(e)));

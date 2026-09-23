@@ -95,7 +95,8 @@ export const useChat = create<ChatState>((set, get) => ({
         void useGame.getState().refreshWallet();
       }
       set((s) => ({
-        msgs: [...s.msgs.filter((m) => !m.local), ...fresh].slice(-200),
+        // two polls can overlap, so drop anything already in the list at commit time
+        msgs: [...s.msgs.filter((m) => !m.local), ...fresh.filter((m) => !s.msgs.some((x) => x.id === m.id))].slice(-200),
         lastId: Math.max(s.lastId, ...rows.map((m) => m.id)),
         unread: s.open || !lastId ? 0 : s.unread + fresh.filter((m) => m.wallet !== me).length,
         error: null,

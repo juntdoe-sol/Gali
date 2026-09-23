@@ -1,4 +1,4 @@
-import { AnchorProvider, BN, Program, type Idl } from '@coral-xyz/anchor';
+import { AnchorProvider, BN, Program, utils, type Idl } from '@coral-xyz/anchor';
 import { transact, type Web3MobileWallet } from '@solana-mobile/mobile-wallet-adapter-protocol-web3js';
 import {
   Connection,
@@ -31,7 +31,21 @@ export const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey('ATokenGPvbdGVxr1b2hvZb
 export const APP_IDENTITY = { name: 'Gali', uri: 'https://gali.bounded.page', icon: 'favicon.png' };
 export const chainReady = deployment.skrMint !== '11111111111111111111111111111111';
 
-export const connection = new Connection(RPC_URL, 'confirmed');
+/** True when an RPC turned us away for asking too often (public endpoints do this a lot). */
+export const isRateLimited = (e: unknown) => /\b429\b|rate limit|too many requests/i.test(String((e as Error)?.message ?? e));
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Retries 429s with a growing pause, so a busy RPC slows the app down instead of breaking it. */
+const retryingFetch: typeof fetch = async (input, init) => {
+  let last: Response | undefined;
+  for (let i = 0; i < 4; i++) {
+    const res = await fetch(input as RequestInfo, init as RequestInit);
+    if (res.status !== 429) return res;
+    last = res;
+    await wait(400 * 2 ** i);
+  }
+  return last as Response;
+};
+export const connection = new Connection(RPC_URL, { commitment: 'confirmed', fetch: retryingFetch, disableRetryOnRateLimit: true });
 const readOnlyWallet = {
   publicKey: Keypair.generate().publicKey,
   signTransaction: async <T,>(t: T) => t,
@@ -63,6 +77,7 @@ export const pda = {
   draw: (r: number) => find(Buffer.from('draw'), u64le(r)),
   unclaimed: (o: PublicKey) => find(Buffer.from('unclaimed'), o.toBuffer()),
   refinery: find(Buffer.from('refinery')),
+  buyback: find(Buffer.from('buyback')),
 };
 export const ata = (owner: PublicKey, mint = SKR_MINT) =>
   PublicKey.findProgramAddressSync([owner.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.toBuffer()], ASSOCIATED_TOKEN_PROGRAM_ID)[0];
@@ -193,13 +208,12 @@ export async function fetchUnclaimed(owner: PublicKey): Promise<Unclaimed> {
   if (!u) return { sol: 0, unrefined: 0, refined: 0, fee: 0, claimedSol: 0, claimedSkr: 0 };
   // refined SKR earned since the last sync, as the program's sync_refined computes it
   const pending = rf && big(rf.factor) > big(u.factor) ? ((big(rf.factor) - big(u.factor)) * big(u.skr)) / FACTOR_SCALE : 0n;
-  // claim_rewards only charges the fee when the other holders' unrefined SKR covers it
+  // claim_rewards always takes the refining fee off mined SKR
   const feeRaw = big(u.skr) / 10n;
-  const others = rf ? big(rf.totalUnrefined) - big(u.skr) : 0n;
   return {
     sol: toNum(u.sol) / LAMPORTS_PER_SOL,
     unrefined: fromRaw(u.skr),
-    fee: feeRaw > 0n && others >= feeRaw ? Number(feeRaw) / 10 ** SKR_DECIMALS : 0,
+    fee: Number(feeRaw) / 10 ** SKR_DECIMALS,
     refined: (Number(big(u.refined) + pending)) / 10 ** SKR_DECIMALS,
     claimedSol: toNum(u.claimedSol) / LAMPORTS_PER_SOL,
     claimedSkr: fromRaw(u.claimedSkr),
@@ -233,11 +247,10 @@ export function roundRewardNow(e: Economy, rewardsPool: number) {
 
 export const CLAIM_SOL = 1;
 export const CLAIM_SKR = 2;
-const claimRewardsIx = (signer: PublicKey, owner: PublicKey, what: number) =>
+const claimRewardsIx = (owner: PublicKey, what: number) =>
   program.methods
     .claimRewards(what)
     .accountsStrict({
-      signer,
       owner,
       config: pda.config,
       player: pda.player(owner),
@@ -245,6 +258,7 @@ const claimRewardsIx = (signer: PublicKey, owner: PublicKey, what: number) =>
       refinery: pda.refinery,
       skrMint: SKR_MINT,
       potVault: pda.potVault,
+      rewards: pda.rewards,
       ownerAta: ata(owner),
       tokenProgram: TOKEN_PROGRAM_ID,
       associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -253,15 +267,43 @@ const claimRewardsIx = (signer: PublicKey, owner: PublicKey, what: number) =>
     .instruction();
 
 /** Pay out Unclaimed SOL (to the wallet) and/or SKR (to its SKR account, 10% refining fee on unrefined). The session signs if given. */
-export async function claimRewards(owner: PublicKey, what: number, session?: Keypair | null) {
-  if (session) return sendWithKey(session, [await claimRewardsIx(session.publicKey, owner, what)]);
-  return sendWithWallet(async (o) => [await claimRewardsIx(o, o, what)]);
+export async function claimRewards(_owner: PublicKey, what: number) {
+  return sendWithWallet(async (o) => [await claimRewardsIx(o, what)]);
 }
 
-let feeTo: PublicKey | null = null;
+/** Send the leftover SOL on the session key back to the wallet (keeps enough for one fee). */
+export async function sweepSession(owner: PublicKey, session: Keypair) {
+  const balance = await connection.getBalance(session.publicKey);
+  const amount = balance - 5_000;
+  if (amount <= 0) throw new Error('the session key is already empty');
+  await sendWithKey(session, [SystemProgram.transfer({ fromPubkey: session.publicKey, toPubkey: owner, lamports: amount })]);
+  return amount / LAMPORTS_PER_SOL;
+}
+
+/** Take our SOL back from a round nobody ever revealed (allowed an hour after it ended). */
+export async function refundStake(owner: PublicKey, payer: Keypair, roundId: number) {
+  const stake = await accounts.stake.fetchNullable(pda.stake(owner, roundId));
+  if (!stake) return 0;
+  const ix = await program.methods
+    .refundStake(new BN(roundId))
+    .accountsStrict({
+      cranker: payer.publicKey,
+      owner,
+      payer: stake.payer,
+      config: pda.config,
+      pot: pda.pot(roundId),
+      round: pda.round(roundId),
+      stake: pda.stake(owner, roundId),
+    })
+    .instruction();
+  await sendWithKey(payer, [ix]);
+  return (stake.perBlock as BN[]).reduce((sum: number, v: BN) => sum + toNum(v), 0) / LAMPORTS_PER_SOL;
+}
+
+let feeTo: { at: number; key: PublicKey } | null = null;
 async function configAuthority() {
-  feeTo = feeTo ?? (await accounts.config.fetch(pda.config)).authority;
-  return feeTo!;
+  if (!feeTo || Date.now() - feeTo.at > 60_000) feeTo = { at: Date.now(), key: (await accounts.config.fetch(pda.config)).authority };
+  return feeTo.key;
 }
 
 export async function fetchSkrBalance(owner: PublicKey): Promise<number> {
@@ -301,15 +343,32 @@ export interface LeaderRow {
   wins: number;
   level: number;
 }
+let board: { at: number; rows: LeaderRow[] } | null = null;
+/** Top 25 by points. Reads only the first 60 bytes of each Player account and caches for a minute. */
 export async function fetchLeaderboard(): Promise<LeaderRow[]> {
-  const all = await accounts.player.all();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return all
-    .map((a: any) => ({ owner: a.account.owner.toBase58(), points: toNum(a.account.points), wins: a.account.wins, xp: toNum(a.account.xp) }))
-    .sort((a: { points: number }, b: { points: number }) => b.points - a.points)
+  if (board && Date.now() - board.at < 60_000) return board.rows;
+  const raw = await connection.getProgramAccounts(PROGRAM_ID, {
+    dataSlice: { offset: 0, length: 60 }, // discriminator | owner | points | xp | wins
+    filters: [{ memcmp: { offset: 0, bytes: utils.bytes.bs58.encode(Buffer.from(playerDisc)) } }],
+  });
+  const rows = raw
+    .map(({ account }) => {
+      const d = account.data;
+      const v = new DataView(d.buffer, d.byteOffset, d.length);
+      return {
+        owner: new PublicKey(d.subarray(8, 40)).toBase58(),
+        points: Number(v.getBigUint64(40, true)),
+        xp: Number(v.getBigUint64(48, true)),
+        wins: v.getUint32(56, true),
+      };
+    })
+    .sort((a, b) => b.points - a.points)
     .slice(0, 25)
-    .map((r: { owner: string; points: number; wins: number; xp: number }) => ({ ...r, level: levelOf(r.xp) }));
+    .map((r) => ({ owner: r.owner, points: r.points, wins: r.wins, level: levelOf(r.xp) }));
+  board = { at: Date.now(), rows };
+  return rows;
 }
+const playerDisc: number[] = (idlJson as { accounts: { name: string; discriminator: number[] }[] }).accounts.find((a) => a.name === 'Player')!.discriminator;
 const levelOf = (xp: number) => {
   let l = 1;
   while (xp >= (100 * l * (l + 1)) / 2) l++;
@@ -489,6 +548,7 @@ export async function sessionSettlePot(owner: PublicKey, session: Keypair, round
           round: pda.round(roundId),
           pot: pda.pot(roundId),
           feeTo: await configAuthority(),
+          buyback: pda.buyback,
           skrMint: SKR_MINT,
           rewards: pda.rewards,
           motherlode: pda.motherlode,
@@ -591,8 +651,12 @@ const playerCache = new Map<string, { at: number; p: ChainPlayer | null }>();
 export async function verifySessionClaim(wallet: string, session: string, message: string, sigB64: string): Promise<boolean> {
   try {
     const hit = playerCache.get(wallet);
-    const p = hit && Date.now() - hit.at < 60_000 ? hit.p : await fetchPlayer(new PublicKey(wallet));
-    if (!hit || hit.p !== p) playerCache.set(wallet, { at: Date.now(), p });
+    const fresh = hit && Date.now() - hit.at < 60_000;
+    const p = fresh ? hit!.p : await fetchPlayer(new PublicKey(wallet));
+    if (!fresh) {
+      if (playerCache.size > 200) playerCache.clear(); // peers can't grow this without bound
+      playerCache.set(wallet, { at: Date.now(), p });
+    }
     if (!p || p.session !== session || p.sessionExpires * 1000 < Date.now()) return false;
     return ed25519.verify(Buffer.from(sigB64, 'base64'), new TextEncoder().encode(message), new PublicKey(session).toBytes());
   } catch {

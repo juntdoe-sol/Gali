@@ -1,9 +1,16 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { BLOCKS, MOTHERLODE_ACCRUAL_SKR, MOTHERLODE_ODDS, ROUND_REWARD_SKR } from './constants';
 
-/** Mirrors the program: 1% of every spot, plus 10% of the rest on each losing spot (config pot_fee_bps). */
+/** Mirrors the program: 1% of every spot, plus the config's pot_fee_bps of the rest on each losing spot. */
 export const ADMIN_FEE = 0.01;
-export const POT_FEE = 0.1;
+/** Default losing-spot fee; the live value comes from the chain (see `setPotFee`). */
+export const DEFAULT_POT_FEE = 0.1;
+let potFee = DEFAULT_POT_FEE;
+/** Keeps the client's maths in step with the program's `pot_fee_bps`. */
+export const setPotFee = (bps: number) => {
+  if (bps >= 0 && bps <= 2_000) potFee = bps / 10_000;
+};
+export const potFee_ = () => potFee;
 export const SOLO_SPOTS = 10;
 export const MIN_SOL_PER_BLOCK = 0.0001;
 export const PRACTICE_SOL = 2;
@@ -103,7 +110,7 @@ export function poolFor(pot: PotView, win: number) {
   for (let i = 0; i < BLOCKS; i++) {
     const d = pot.perBlock[i];
     if (!d) continue;
-    fees += d * ADMIN_FEE + (i === win ? 0 : d * (1 - ADMIN_FEE) * POT_FEE);
+    fees += d * ADMIN_FEE + (i === win ? 0 : d * (1 - ADMIN_FEE) * potFee);
   }
   return pot.perBlock[win] > 0 ? pot.total - fees : 0;
 }
