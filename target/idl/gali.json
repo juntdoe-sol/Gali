@@ -66,10 +66,6 @@
           "writable": true
         },
         {
-          "name": "buyback",
-          "writable": true
-        },
-        {
           "name": "ore_mint",
           "docs": [
             "$ORE, the second asset. Same rule as SKR: a plain SPL mint only."
@@ -146,47 +142,6 @@
               "name": "ConfigUpdate"
             }
           }
-        }
-      ]
-    },
-    {
-      "name": "mark_buyback",
-      "docs": [
-        "Take SOL out of the buyback escrow to buy SKR for the Rewards Pool. Only the authority, and",
-        "only what the escrow holds above its rent; `buyback_due` drops by the same amount."
-      ],
-      "discriminator": [
-        237,
-        104,
-        48,
-        198,
-        23,
-        112,
-        247,
-        168
-      ],
-      "accounts": [
-        {
-          "name": "authority",
-          "signer": true
-        },
-        {
-          "name": "config",
-          "writable": true
-        },
-        {
-          "name": "buyback",
-          "writable": true
-        },
-        {
-          "name": "destination",
-          "writable": true
-        }
-      ],
-      "args": [
-        {
-          "name": "lamports",
-          "type": "u64"
         }
       ]
     },
@@ -503,32 +458,41 @@
       ]
     },
     {
-      "name": "deploy",
+      "name": "record_ore_round",
       "docs": [
-        "Put `lamports_per_block` SOL on every block in `mask` for the current round.",
-        "Signed by the owner or their active session key (the SOL comes from the signer)."
+        "Credit a player for a round they played on ORE's board.",
+        "",
+        "Gali does not run the round any more, so this is how the game layer learns",
+        "what happened: it reads ORE's own Round and Miner accounts and awards points,",
+        "wins, streaks and XP from them. Nothing here can be asserted by the caller.",
+        "Every number comes out of accounts owned by ORE's program.",
+        "",
+        "Permissionless on purpose. Anyone may crank it for anyone, the same way ORE",
+        "lets anyone checkpoint a miner, so a player who closes the app still gets",
+        "their points. It pays no crank fee, because it moves no value: the SKR",
+        "motherlode bonus is claimed separately by the player who earned it.",
+        "",
+        "Call it after ORE has checkpointed the miner and before they deploy again,",
+        "which is the window in which ORE's miner account still holds that round."
       ],
       "discriminator": [
-        67,
-        36,
-        143,
-        118,
-        36,
-        164,
-        92,
-        217
+        140,
+        42,
+        13,
+        189,
+        81,
+        102,
+        255,
+        51
       ],
       "accounts": [
         {
-          "name": "signer",
+          "name": "cranker",
           "docs": [
-            "the player's wallet or their active session key; the SOL and rent come from here"
+            "Anyone. Cranking for another player is allowed and moves no value."
           ],
           "writable": true,
           "signer": true
-        },
-        {
-          "name": "owner"
         },
         {
           "name": "config"
@@ -538,136 +502,60 @@
           "writable": true
         },
         {
-          "name": "pot",
-          "writable": true
+          "name": "ore_board",
+          "docs": [
+            "ORE's board, checked by address and owner inside `ore::board_round_id`."
+          ]
         },
         {
-          "name": "stake",
-          "writable": true
+          "name": "ore_round",
+          "docs": [
+            "ORE's round account for `round_id`, checked by PDA and owner inside `OreRound::load`."
+          ]
         },
         {
-          "name": "system_program"
+          "name": "ore_miner",
+          "docs": [
+            "The player's ORE miner account, checked by PDA and owner inside `OreMiner::load`."
+          ]
         }
       ],
       "args": [
         {
           "name": "round_id",
           "type": "u64"
-        },
-        {
-          "name": "mask",
-          "type": "u32"
-        },
-        {
-          "name": "lamports_per_block",
-          "type": "u64"
         }
       ]
     },
     {
-      "name": "settle_pot",
+      "name": "claim_skr_jackpot",
       "docs": [
-        "Permissionless, once per revealed round: sends the fees to the treasury wallet, escrows the round's",
-        "SKR (plus the whole Motherlode Pool on a hit), then tops the Motherlode Pool up for the next rounds."
+        "Take this player's share of Gali's SKR jackpot for an ORE round that hit",
+        "ORE's motherlode.",
+        "",
+        "ORE pays its own motherlode in ORE, split across the winning square by each",
+        "miner's slice of it. Gali pays SKR on top of that same event, to the same",
+        "people, in the same proportions. One hit, two assets, and Gali mints nothing:",
+        "the pool is what players put in buying gear.",
+        "",
+        "Signed by the player, because it moves value to them. Everything it decides",
+        "comes out of ORE-owned accounts."
       ],
       "discriminator": [
-        120,
-        181,
-        232,
-        100,
-        60,
-        57,
-        32,
-        238
+        127,
+        31,
+        144,
+        176,
+        254,
+        138,
+        2,
+        43
       ],
       "accounts": [
         {
-          "name": "config",
-          "writable": true
-        },
-        {
-          "name": "round"
-        },
-        {
-          "name": "pot",
-          "writable": true
-        },
-        {
-          "name": "fee_to",
-          "writable": true
-        },
-        {
-          "name": "buyback",
-          "writable": true
-        },
-        {
-          "name": "skr_mint"
-        },
-        {
-          "name": "rewards",
-          "writable": true
-        },
-        {
-          "name": "motherlode",
-          "writable": true
-        },
-        {
-          "name": "pot_vault",
-          "writable": true
-        },
-        {
-          "name": "ore_mint"
-        },
-        {
-          "name": "ore_rewards",
-          "writable": true
-        },
-        {
-          "name": "ore_motherlode",
-          "writable": true
-        },
-        {
-          "name": "ore_pot_vault",
-          "writable": true
-        },
-        {
-          "name": "token_program"
-        }
-      ],
-      "args": [
-        {
-          "name": "_round_id",
-          "type": "u64"
-        }
-      ]
-    },
-    {
-      "name": "claim_pot",
-      "docs": [
-        "Permissionless: credits a stake's returned SOL and its SKR to the owner's Unclaimed balance, then closes it."
-      ],
-      "discriminator": [
-        210,
-        85,
-        35,
-        217,
-        204,
-        65,
-        38,
-        17
-      ],
-      "accounts": [
-        {
-          "name": "cranker",
+          "name": "owner",
           "writable": true,
           "signer": true
-        },
-        {
-          "name": "owner"
-        },
-        {
-          "name": "payer",
-          "writable": true
         },
         {
           "name": "config"
@@ -677,83 +565,14 @@
           "writable": true
         },
         {
-          "name": "round"
-        },
-        {
-          "name": "pot",
-          "writable": true
-        },
-        {
-          "name": "stake",
-          "writable": true
-        },
-        {
-          "name": "unclaimed",
-          "writable": true
-        },
-        {
-          "name": "refinery",
-          "writable": true
-        },
-        {
-          "name": "system_program"
-        }
-      ],
-      "args": [
-        {
-          "name": "_round_id",
-          "type": "u64"
-        }
-      ]
-    },
-    {
-      "name": "claim_rewards",
-      "docs": [
-        "Pay out the player's Unclaimed SOL (to their wallet) and SKR (to their SKR account).",
-        "Signed by the owner or their active session key."
-      ],
-      "discriminator": [
-        4,
-        144,
-        132,
-        71,
-        116,
-        23,
-        151,
-        80
-      ],
-      "accounts": [
-        {
-          "name": "owner",
-          "docs": [
-            "the player's own wallet: session keys can deploy, but never move rewards out"
-          ],
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "config"
-        },
-        {
-          "name": "player"
-        },
-        {
-          "name": "unclaimed",
-          "writable": true
-        },
-        {
-          "name": "refinery",
+          "name": "jackpot",
           "writable": true
         },
         {
           "name": "skr_mint"
         },
         {
-          "name": "pot_vault",
-          "writable": true
-        },
-        {
-          "name": "rewards",
+          "name": "motherlode",
           "writable": true
         },
         {
@@ -761,252 +580,16 @@
           "writable": true
         },
         {
-          "name": "ore_mint"
+          "name": "ore_board"
         },
         {
-          "name": "ore_pot_vault",
-          "writable": true
+          "name": "ore_round"
         },
         {
-          "name": "owner_ore_ata",
-          "writable": true
-        },
-        {
-          "name": "token_program"
-        },
-        {
-          "name": "associated_token_program"
-        },
-        {
-          "name": "system_program"
-        }
-      ],
-      "args": [
-        {
-          "name": "what",
-          "type": "u8"
-        }
-      ]
-    },
-    {
-      "name": "close_round",
-      "docs": [
-        "Permissionless, a day after the round ends and once every stake is claimed: closes the round's",
-        "Pot and Round accounts and returns their rent (plus any rounding dust in the pot) to whoever paid it."
-      ],
-      "discriminator": [
-        149,
-        14,
-        81,
-        88,
-        230,
-        226,
-        234,
-        37
-      ],
-      "accounts": [
-        {
-          "name": "config"
-        },
-        {
-          "name": "pot",
-          "writable": true
-        },
-        {
-          "name": "round",
-          "writable": true
-        },
-        {
-          "name": "pot_rent_payer",
-          "writable": true
-        },
-        {
-          "name": "round_rent_payer",
-          "writable": true
-        },
-        {
-          "name": "fee_to",
-          "writable": true
-        }
-      ],
-      "args": [
-        {
-          "name": "round_id",
-          "type": "u64"
-        }
-      ]
-    },
-    {
-      "name": "refund_stake",
-      "docs": [
-        "If a round is still unrevealed an hour after it ended (nobody locked or revealed it), each",
-        "player can take their own SOL back. Permissionless; a refunded round can never be settled."
-      ],
-      "discriminator": [
-        185,
-        80,
-        20,
-        3,
-        110,
-        92,
-        178,
-        240
-      ],
-      "accounts": [
-        {
-          "name": "cranker",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "owner",
-          "writable": true
-        },
-        {
-          "name": "payer",
-          "writable": true
-        },
-        {
-          "name": "config"
-        },
-        {
-          "name": "pot",
-          "writable": true
-        },
-        {
-          "name": "round"
-        },
-        {
-          "name": "stake",
-          "writable": true
-        }
-      ],
-      "args": [
-        {
-          "name": "round_id",
-          "type": "u64"
-        }
-      ]
-    },
-    {
-      "name": "fund_rewards",
-      "docs": [
-        "Anyone (team, sponsors, partners) can add SKR to the Rewards Pool that pays miners each round."
-      ],
-      "discriminator": [
-        114,
-        64,
-        163,
-        112,
-        175,
-        167,
-        19,
-        121
-      ],
-      "accounts": [
-        {
-          "name": "funder",
-          "signer": true
-        },
-        {
-          "name": "config"
-        },
-        {
-          "name": "skr_mint"
-        },
-        {
-          "name": "funder_ata",
-          "writable": true
-        },
-        {
-          "name": "rewards",
-          "writable": true
+          "name": "ore_miner"
         },
         {
           "name": "token_program"
-        }
-      ],
-      "args": [
-        {
-          "name": "amount",
-          "type": "u64"
-        }
-      ]
-    },
-    {
-      "name": "lock_round",
-      "docs": [
-        "Commit a round's draw to a slot that hasn't happened yet. Anyone may call it once the round ends.",
-        "It can be called again only if the target slot has fallen out of SlotHashes without a reveal."
-      ],
-      "discriminator": [
-        68,
-        124,
-        43,
-        230,
-        30,
-        44,
-        248,
-        227
-      ],
-      "accounts": [
-        {
-          "name": "payer",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "config"
-        },
-        {
-          "name": "draw",
-          "writable": true
-        },
-        {
-          "name": "round"
-        },
-        {
-          "name": "system_program"
-        }
-      ],
-      "args": [
-        {
-          "name": "round_id",
-          "type": "u64"
-        }
-      ]
-    },
-    {
-      "name": "reveal_round",
-      "discriminator": [
-        146,
-        249,
-        2,
-        210,
-        169,
-        145,
-        120,
-        6
-      ],
-      "accounts": [
-        {
-          "name": "payer",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "config"
-        },
-        {
-          "name": "round",
-          "writable": true
-        },
-        {
-          "name": "draw",
-          "writable": true
-        },
-        {
-          "name": "slot_hashes"
         },
         {
           "name": "system_program"
@@ -1205,9 +788,6 @@
           "writable": true
         },
         {
-          "name": "current_stake"
-        },
-        {
           "name": "ore_mint"
         },
         {
@@ -1229,10 +809,6 @@
         }
       ],
       "args": [
-        {
-          "name": "round_id",
-          "type": "u64"
-        },
         {
           "name": "amount",
           "type": "u64"
@@ -1312,9 +888,6 @@
           "writable": true
         },
         {
-          "name": "current_stake"
-        },
-        {
           "name": "skr_mint"
         },
         {
@@ -1336,10 +909,6 @@
         }
       ],
       "args": [
-        {
-          "name": "round_id",
-          "type": "u64"
-        },
         {
           "name": "amount",
           "type": "u64"
@@ -1404,19 +973,6 @@
   ],
   "accounts": [
     {
-      "name": "Buyback",
-      "discriminator": [
-        51,
-        184,
-        2,
-        198,
-        189,
-        166,
-        241,
-        205
-      ]
-    },
-    {
       "name": "Config",
       "discriminator": [
         155,
@@ -1427,19 +983,6 @@
         250,
         204,
         130
-      ]
-    },
-    {
-      "name": "Draw",
-      "discriminator": [
-        225,
-        131,
-        41,
-        222,
-        122,
-        20,
-        146,
-        202
       ]
     },
     {
@@ -1456,68 +999,16 @@
       ]
     },
     {
-      "name": "Pot",
+      "name": "SkrJackpot",
       "discriminator": [
-        238,
-        118,
-        60,
-        175,
-        178,
-        191,
-        59,
-        58
-      ]
-    },
-    {
-      "name": "Refinery",
-      "discriminator": [
-        254,
-        181,
-        80,
-        146,
-        232,
-        250,
-        1,
-        110
-      ]
-    },
-    {
-      "name": "Round",
-      "discriminator": [
-        87,
-        127,
-        165,
-        51,
-        73,
-        78,
-        116,
-        174
-      ]
-    },
-    {
-      "name": "Stake",
-      "discriminator": [
-        150,
-        197,
-        176,
-        29,
-        55,
-        132,
-        112,
-        149
-      ]
-    },
-    {
-      "name": "Unclaimed",
-      "discriminator": [
-        207,
-        197,
-        248,
-        238,
-        244,
-        218,
-        119,
-        44
+        229,
+        98,
+        11,
+        134,
+        174,
+        167,
+        138,
+        216
       ]
     }
   ],
@@ -1550,19 +1041,6 @@
     },
     {
       "discriminator": [
-        96,
-        250,
-        38,
-        69,
-        137,
-        30,
-        106,
-        181
-      ],
-      "name": "BuybackMarked"
-    },
-    {
-      "discriminator": [
         40,
         241,
         230,
@@ -1573,19 +1051,6 @@
         194
       ],
       "name": "ConfigUpdated"
-    },
-    {
-      "discriminator": [
-        50,
-        145,
-        94,
-        59,
-        169,
-        255,
-        159,
-        186
-      ],
-      "name": "Deployed"
     },
     {
       "discriminator": [
@@ -1641,6 +1106,19 @@
     },
     {
       "discriminator": [
+        241,
+        96,
+        173,
+        214,
+        181,
+        27,
+        219,
+        123
+      ],
+      "name": "OreRoundRecorded"
+    },
+    {
+      "discriminator": [
         171,
         125,
         127,
@@ -1651,84 +1129,6 @@
         66
       ],
       "name": "PausedSet"
-    },
-    {
-      "discriminator": [
-        145,
-        213,
-        49,
-        17,
-        203,
-        255,
-        31,
-        72
-      ],
-      "name": "PotClaimed"
-    },
-    {
-      "discriminator": [
-        124,
-        98,
-        181,
-        97,
-        181,
-        97,
-        101,
-        89
-      ],
-      "name": "PotSettled"
-    },
-    {
-      "discriminator": [
-        180,
-        7,
-        199,
-        88,
-        154,
-        19,
-        181,
-        154
-      ],
-      "name": "Revealed"
-    },
-    {
-      "discriminator": [
-        75,
-        98,
-        88,
-        18,
-        219,
-        112,
-        88,
-        121
-      ],
-      "name": "RewardsClaimed"
-    },
-    {
-      "discriminator": [
-        84,
-        233,
-        245,
-        203,
-        228,
-        147,
-        165,
-        92
-      ],
-      "name": "RewardsFunded"
-    },
-    {
-      "discriminator": [
-        45,
-        243,
-        28,
-        22,
-        132,
-        70,
-        175,
-        226
-      ],
-      "name": "RoundClosed"
     },
     {
       "discriminator": [
@@ -1745,16 +1145,16 @@
     },
     {
       "discriminator": [
-        81,
-        188,
-        224,
-        106,
-        3,
+        230,
+        252,
+        134,
         59,
-        199,
-        216
+        235,
+        124,
+        215,
+        173
       ],
-      "name": "StakeRefunded"
+      "name": "SkrJackpotClaimed"
     },
     {
       "discriminator": [
@@ -1921,6 +1321,46 @@
       "code": 6024,
       "name": "RoundAbandoned",
       "msg": "This round was abandoned and refunded"
+    },
+    {
+      "code": 6025,
+      "name": "BadOreAccount",
+      "msg": "That is not the ORE account it claims to be"
+    },
+    {
+      "code": 6026,
+      "name": "BadOreLayout",
+      "msg": "ORE's account layout has changed; Gali needs updating before it can read it"
+    },
+    {
+      "code": 6027,
+      "name": "OreRoundUnsettled",
+      "msg": "That ORE round has not been drawn yet"
+    },
+    {
+      "code": 6028,
+      "name": "OreRoundMismatch",
+      "msg": "Your ORE miner account is on a different round"
+    },
+    {
+      "code": 6029,
+      "name": "OreNotCheckpointed",
+      "msg": "Checkpoint your ORE miner for this round first"
+    },
+    {
+      "code": 6030,
+      "name": "OreRoundAlreadyRecorded",
+      "msg": "This ORE round is already recorded"
+    },
+    {
+      "code": 6031,
+      "name": "OreRoundStillLive",
+      "msg": "That ORE round is still live"
+    },
+    {
+      "code": 6032,
+      "name": "NotOnWinningSquare",
+      "msg": "You were not on the winning square"
     }
   ],
   "types": [
@@ -1951,46 +1391,6 @@
           {
             "name": "proposed",
             "type": "pubkey"
-          }
-        ],
-        "kind": "struct"
-      }
-    },
-    {
-      "name": "Buyback",
-      "docs": [
-        "Holds the share of SOL fees owed to SKR buybacks until the admin withdraws it."
-      ],
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "bump",
-            "type": "u8"
-          },
-          {
-            "name": "reserved",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "name": "BuybackMarked",
-      "type": {
-        "fields": [
-          {
-            "name": "lamports",
-            "type": "u64"
-          },
-          {
-            "name": "due",
-            "type": "u64"
           }
         ],
         "kind": "struct"
@@ -2432,57 +1832,6 @@
       }
     },
     {
-      "name": "Deployed",
-      "type": {
-        "fields": [
-          {
-            "name": "owner",
-            "type": "pubkey"
-          },
-          {
-            "name": "round_id",
-            "type": "u64"
-          },
-          {
-            "name": "mask",
-            "type": "u32"
-          },
-          {
-            "name": "lamports_per_block",
-            "type": "u64"
-          },
-          {
-            "name": "pot_total",
-            "type": "u64"
-          }
-        ],
-        "kind": "struct"
-      }
-    },
-    {
-      "name": "Draw",
-      "docs": [
-        "A round's committed draw slot (closed by `reveal_round`)."
-      ],
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "round_id",
-            "type": "u64"
-          },
-          {
-            "name": "target_slot",
-            "type": "u64"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          }
-        ]
-      }
-    },
-    {
       "name": "GearBought",
       "type": {
         "fields": [
@@ -2553,6 +1902,46 @@
           {
             "name": "to_motherlode",
             "type": "bool"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "OreRoundRecorded",
+      "type": {
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "winning_square",
+            "type": "u8"
+          },
+          {
+            "name": "won",
+            "type": "bool"
+          },
+          {
+            "name": "split",
+            "type": "bool"
+          },
+          {
+            "name": "motherlode",
+            "type": "bool"
+          },
+          {
+            "name": "covered",
+            "type": "u8"
+          },
+          {
+            "name": "points",
+            "type": "u64"
           }
         ],
         "kind": "struct"
@@ -2666,438 +2055,39 @@
             "type": "u64"
           },
           {
-            "name": "reserved",
-            "type": {
-              "array": [
-                "u8",
-                48
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "name": "Pot",
-      "docs": [
-        "One per round: SOL on each block (the lamports sit in this account)."
-      ],
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "round_id",
-            "type": "u64"
-          },
-          {
-            "name": "per_block",
-            "type": {
-              "array": [
-                "u64",
-                25
-              ]
-            }
-          },
-          {
-            "name": "total",
-            "type": "u64"
-          },
-          {
-            "name": "pool",
+            "name": "last_ore_round",
             "docs": [
-              "lamports the winning spot's miners split after fees (set by `settle_pot`)"
+              "highest ORE round already recorded by `record_ore_round`, so a round pays points once.",
+              "Reads as 0 on accounts created before the ORE board move, which is the correct start."
             ],
             "type": "u64"
           },
           {
-            "name": "skr_reward",
+            "name": "jackpot_round",
             "docs": [
-              "raw SKR mined this round, and the Motherlode Pool paid out (both escrowed in `pot_vault`)"
+              "highest ORE round whose SKR jackpot this player has taken, so it pays once"
             ],
             "type": "u64"
           },
           {
-            "name": "motherlode_skr",
-            "type": "u64"
-          },
-          {
-            "name": "motherlode",
-            "type": "bool"
-          },
-          {
-            "name": "split_reward",
+            "name": "stake_slot",
             "docs": [
-              "copied from the round at settlement"
-            ],
-            "type": "bool"
-          },
-          {
-            "name": "lucky_index",
-            "type": "u64"
-          },
-          {
-            "name": "miners",
-            "type": "u32"
-          },
-          {
-            "name": "settled",
-            "type": "bool"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          },
-          {
-            "name": "admin_fee",
-            "docs": [
-              "fees taken at settlement, and the fee rate used for losing spots"
+              "slot at which staked SKR or ORE last went up. A round only pays the boost if",
+              "the stake predates that round, so the same tokens cannot be staked, used to",
+              "boost a finished round, unstaked and passed straight to the next wallet."
             ],
             "type": "u64"
-          },
-          {
-            "name": "protocol_fee",
-            "type": "u64"
-          },
-          {
-            "name": "fee_bps",
-            "type": "u16"
-          },
-          {
-            "name": "winner",
-            "docs": [
-              "the miner who took the round's SKR on a solo spot (set when their stake is claimed)"
-            ],
-            "type": "pubkey"
-          },
-          {
-            "name": "winners_paid",
-            "docs": [
-              "stakes on the winning spot claimed so far"
-            ],
-            "type": "u32"
-          },
-          {
-            "name": "rent_payer",
-            "docs": [
-              "paid this account's rent (the round's first deployer); refunded by `close_round`"
-            ],
-            "type": "pubkey"
-          },
-          {
-            "name": "claimed",
-            "docs": [
-              "stakes claimed so far (all of them: `claimed == miners`)"
-            ],
-            "type": "u32"
-          },
-          {
-            "name": "base_points",
-            "docs": [
-              "points settings fixed when the round opened"
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "motherlode_points",
-            "type": "u64"
-          },
-          {
-            "name": "refunded",
-            "docs": [
-              "stakes refunded because the round was never revealed; any refund blocks settlement"
-            ],
-            "type": "u32"
-          },
-          {
-            "name": "ore_reward",
-            "docs": [
-              "raw ORE mined this round and the ORE Motherlode paid out (both escrowed in `ore_pot_vault`)"
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "motherlode_ore",
-            "type": "u64"
-          },
-          {
-            "name": "reserved",
-            "docs": [
-              "room for later fields, so upgrades don't strand existing rounds"
-            ],
-            "type": {
-              "array": [
-                "u8",
-                48
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "name": "PotClaimed",
-      "type": {
-        "fields": [
-          {
-            "name": "owner",
-            "type": "pubkey"
-          },
-          {
-            "name": "round_id",
-            "type": "u64"
-          },
-          {
-            "name": "won",
-            "type": "bool"
-          },
-          {
-            "docs": [
-              "took the whole SKR reward in a single-winner round"
-            ],
-            "name": "lucky",
-            "type": "bool"
-          },
-          {
-            "name": "sol",
-            "type": "u64"
-          },
-          {
-            "name": "skr",
-            "type": "u64"
-          },
-          {
-            "name": "points",
-            "type": "u64"
-          }
-        ],
-        "kind": "struct"
-      }
-    },
-    {
-      "name": "PotSettled",
-      "type": {
-        "fields": [
-          {
-            "name": "round_id",
-            "type": "u64"
-          },
-          {
-            "name": "winning_block",
-            "type": "u8"
-          },
-          {
-            "name": "total",
-            "type": "u64"
-          },
-          {
-            "name": "fee",
-            "type": "u64"
-          },
-          {
-            "name": "pool",
-            "type": "u64"
-          },
-          {
-            "name": "skr_reward",
-            "type": "u64"
-          },
-          {
-            "name": "motherlode_skr",
-            "type": "u64"
-          },
-          {
-            "name": "motherlode_accrued",
-            "type": "u64"
-          }
-        ],
-        "kind": "struct"
-      }
-    },
-    {
-      "name": "Refinery",
-      "docs": [
-        "Global refining-fee accumulator (one account)."
-      ],
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "factor",
-            "docs": [
-              "refined SKR per unrefined SKR, times FACTOR_SCALE, summed over all refining fees"
-            ],
-            "type": "u128"
-          },
-          {
-            "name": "total_unrefined",
-            "type": "u64"
-          },
-          {
-            "name": "total_refined",
-            "type": "u64"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
           },
           {
             "name": "reserved",
             "type": {
               "array": [
                 "u8",
-                64
+                24
               ]
             }
           }
         ]
-      }
-    },
-    {
-      "name": "Revealed",
-      "type": {
-        "fields": [
-          {
-            "name": "round_id",
-            "type": "u64"
-          },
-          {
-            "name": "winning_block",
-            "type": "u8"
-          },
-          {
-            "name": "motherlode",
-            "type": "bool"
-          },
-          {
-            "name": "split_reward",
-            "type": "bool"
-          }
-        ],
-        "kind": "struct"
-      }
-    },
-    {
-      "name": "RewardsClaimed",
-      "type": {
-        "fields": [
-          {
-            "name": "owner",
-            "type": "pubkey"
-          },
-          {
-            "name": "sol",
-            "type": "u64"
-          },
-          {
-            "docs": [
-              "SKR paid out (after the refining fee)"
-            ],
-            "name": "skr",
-            "type": "u64"
-          },
-          {
-            "name": "refining_fee",
-            "type": "u64"
-          },
-          {
-            "docs": [
-              "ORE paid out, in full"
-            ],
-            "name": "ore",
-            "type": "u64"
-          }
-        ],
-        "kind": "struct"
-      }
-    },
-    {
-      "name": "RewardsFunded",
-      "type": {
-        "fields": [
-          {
-            "name": "funder",
-            "type": "pubkey"
-          },
-          {
-            "name": "amount",
-            "type": "u64"
-          }
-        ],
-        "kind": "struct"
-      }
-    },
-    {
-      "name": "Round",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "round_id",
-            "type": "u64"
-          },
-          {
-            "name": "winning_block",
-            "type": "u8"
-          },
-          {
-            "name": "motherlode",
-            "type": "bool"
-          },
-          {
-            "name": "split_reward",
-            "docs": [
-              "true: the round's SKR is split pro rata; false: a solo spot won and one miner takes it all"
-            ],
-            "type": "bool"
-          },
-          {
-            "name": "lucky",
-            "docs": [
-              "random number used to draw the lucky winner"
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "revealed_at",
-            "type": "i64"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          },
-          {
-            "name": "rent_payer",
-            "docs": [
-              "paid this account's rent; refunded by `close_round`"
-            ],
-            "type": "pubkey"
-          },
-          {
-            "name": "reserved",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "name": "RoundClosed",
-      "type": {
-        "fields": [
-          {
-            "name": "round_id",
-            "type": "u64"
-          },
-          {
-            "name": "dust",
-            "type": "u64"
-          }
-        ],
-        "kind": "struct"
       }
     },
     {
@@ -3121,55 +2111,35 @@
       }
     },
     {
-      "name": "Stake",
+      "name": "SkrJackpot",
       "docs": [
-        "One per player per round: their lamports on each block."
+        "One per ORE round in which ORE's motherlode hit: Gali's SKR bonus for that round.",
+        "",
+        "The snapshot is the point. Winners claim their share over minutes, and the pool",
+        "keeps growing from gear sales the whole time. Paying a share of the live balance",
+        "would hand the first claimer more than the last for the same slice of the square.",
+        "The first claim freezes the number everyone is then paid out of."
       ],
       "type": {
         "kind": "struct",
         "fields": [
           {
-            "name": "owner",
-            "type": "pubkey"
-          },
-          {
-            "name": "payer",
-            "docs": [
-              "who paid rent for this account; refunded on claim"
-            ],
-            "type": "pubkey"
-          },
-          {
             "name": "round_id",
             "type": "u64"
           },
           {
-            "name": "per_block",
-            "type": {
-              "array": [
-                "u64",
-                25
-              ]
-            }
+            "name": "snapshot",
+            "docs": [
+              "raw SKR in the Motherlode Pool when the first winner claimed"
+            ],
+            "type": "u64"
           },
           {
-            "name": "start",
+            "name": "bps_paid",
             "docs": [
-              "where this stake's lamports start on each block (the pot's total there before it deposited)"
+              "basis points of the winning square already paid out; never exceeds 10,000"
             ],
-            "type": {
-              "array": [
-                "u64",
-                25
-              ]
-            }
-          },
-          {
-            "name": "boost_bps",
-            "docs": [
-              "points boost locked in at the player's first deploy of the round"
-            ],
-            "type": "u16"
+            "type": "u64"
           },
           {
             "name": "bump",
@@ -3188,7 +2158,7 @@
       }
     },
     {
-      "name": "StakeRefunded",
+      "name": "SkrJackpotClaimed",
       "type": {
         "fields": [
           {
@@ -3200,7 +2170,11 @@
             "type": "u64"
           },
           {
-            "name": "sol",
+            "name": "share_bps",
+            "type": "u64"
+          },
+          {
+            "name": "amount",
             "type": "u64"
           }
         ],
@@ -3261,82 +2235,6 @@
           }
         ],
         "kind": "struct"
-      }
-    },
-    {
-      "name": "Unclaimed",
-      "docs": [
-        "One per player: SOL and SKR credited by `claim_pot`, waiting for `claim_rewards`.",
-        "The SOL sits in this account; the SKR in `pot_vault`."
-      ],
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "owner",
-            "type": "pubkey"
-          },
-          {
-            "name": "sol",
-            "docs": [
-              "lamports waiting to be claimed"
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "skr",
-            "docs": [
-              "unrefined SKR (mined in rounds); claiming it costs the refining fee"
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "refined",
-            "docs": [
-              "refined SKR (a share of other players' refining fees); claimed without a fee"
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "factor",
-            "docs": [
-              "refinery accumulator at the last sync"
-            ],
-            "type": "u128"
-          },
-          {
-            "name": "claimed_sol",
-            "type": "u64"
-          },
-          {
-            "name": "claimed_skr",
-            "type": "u64"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          },
-          {
-            "name": "ore",
-            "docs": [
-              "mined $ORE waiting to be claimed. No refining fee: ORE is not Gali's token to tax."
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "claimed_ore",
-            "type": "u64"
-          },
-          {
-            "name": "reserved",
-            "type": {
-              "array": [
-                "u8",
-                48
-              ]
-            }
-          }
-        ]
       }
     }
   ]
