@@ -88,6 +88,7 @@ pub const DRAW_EXPIRY_SLOTS: u64 = SLOT_HASH_WINDOW;
 fn check_config(cfg: &Config) -> Result<()> {
     require!(cfg.gear_prices_usd.len() <= MAX_GEAR, GaliError::BadConfig);
     require!(cfg.motherlode_pool_bps as u64 <= BPS, GaliError::BadConfig);
+    require!(cfg.ore_motherlode_bps as u64 <= BPS, GaliError::BadConfig);
     require!(
         cfg.boost_tier2 == 0 || cfg.boost_tier2 >= cfg.boost_tier1,
         GaliError::BadConfig
@@ -151,6 +152,7 @@ pub mod gali {
         c.price_updated_at = Clock::get()?.unix_timestamp;
         c.price_max_age_secs = args.price_max_age_secs;
         c.motherlode_pool_bps = args.motherlode_pool_bps;
+        c.ore_motherlode_bps = args.ore_motherlode_bps;
         c.paused = false;
         c.pending_authority = Pubkey::default();
         c.bump = ctx.bumps.config;
@@ -216,6 +218,9 @@ pub mod gali {
         }
         if let Some(v) = u.motherlode_pool_bps {
             c.motherlode_pool_bps = v;
+        }
+        if let Some(v) = u.ore_motherlode_bps {
+            c.ore_motherlode_bps = v;
         }
         check_config(c)?;
         emit!(ConfigUpdated {
@@ -468,17 +473,21 @@ pub mod gali {
         Ok(())
     }
 
-    /// Take this player's share of Gali's SKR jackpot for an ORE round that hit
-    /// ORE's motherlode.
+    /// Take this player's share of Gali's jackpot for an ORE round that hit ORE's
+    /// motherlode.
     ///
     /// ORE pays its own motherlode in ORE, split across the winning square by each
-    /// miner's slice of it. Gali pays SKR on top of that same event, to the same
-    /// people, in the same proportions. One hit, two assets, and Gali mints nothing:
-    /// the pool is what players put in buying gear.
+    /// miner's slice of it. Gali pays both its pools on top of that same event, to
+    /// the same people, in the same proportions. One hit, three assets in the
+    /// wallet, and Gali mints none of them: the pools are what players put in
+    /// buying gear.
+    ///
+    /// Both pools are paid in one call rather than two, so a winner cannot take the
+    /// SKR and leave the ORE behind for someone else's share to grow into.
     ///
     /// Signed by the player, because it moves value to them. Everything it decides
     /// comes out of ORE-owned accounts.
-    pub fn claim_skr_jackpot(ctx: Context<ClaimSkrJackpot>, round_id: u64) -> Result<()> {
+    pub fn claim_jackpot(ctx: Context<ClaimJackpot>, round_id: u64) -> Result<()> {
         require!(!ctx.accounts.config.paused, GaliError::Paused);
 
         let current = ore::board_round_id(&ctx.accounts.ore_board)?;
@@ -488,7 +497,7 @@ pub mod gali {
         let round = ore::OreRound::load(&ctx.accounts.ore_round, round_id)?;
         let miner = ore::OreMiner::load(&ctx.accounts.ore_miner, &owner, round_id)?;
 
-        // Only rounds where ORE's own motherlode paid out carry a Gali bonus.
+        // Only rounds where ORE's own motherlode paid out carry a Gali jackpot.
         require!(round.motherlode > 0, GaliError::NothingToClaim);
 
         let bps = ore::winning_share_bps(&round, &miner);
@@ -500,48 +509,75 @@ pub mod gali {
             p.jackpot_round = round_id;
         }
 
-        let pool = ctx.accounts.motherlode.amount;
+        let skr_pool = ctx.accounts.motherlode.amount;
+        let ore_pool = ctx.accounts.ore_motherlode.amount;
         let jackpot = &mut ctx.accounts.jackpot;
         if jackpot.bump == 0 {
             jackpot.bump = ctx.bumps.jackpot;
             jackpot.round_id = round_id;
-            jackpot.snapshot = pool;
+            jackpot.skr_snapshot = skr_pool;
+            jackpot.ore_snapshot = ore_pool;
         }
         require!(jackpot.round_id == round_id, GaliError::WrongRound);
 
-        // Rounding always favours the pool, so the last claimer cannot overdraw it.
+        // Rounding always favours the pools, so the last claimer cannot overdraw them.
         let remaining_bps = BPS.saturating_sub(jackpot.bps_paid);
         let pay_bps = bps.min(remaining_bps);
-        let amount = ((jackpot.snapshot as u128 * pay_bps as u128) / BPS as u128) as u64;
-        let amount = amount.min(pool);
-        require!(amount > 0, GaliError::NothingToClaim);
+        let share = |snapshot: u64, pool: u64| -> u64 {
+            (((snapshot as u128 * pay_bps as u128) / BPS as u128) as u64).min(pool)
+        };
+        let skr = share(jackpot.skr_snapshot, skr_pool);
+        let ore_amount = share(jackpot.ore_snapshot, ore_pool);
+        require!(skr > 0 || ore_amount > 0, GaliError::NothingToClaim);
         jackpot.bps_paid = jackpot.bps_paid.saturating_add(pay_bps);
 
         let bump = ctx.accounts.config.bump;
         let cfg_signer: &[&[&[u8]]] = &[&[b"config", &[bump]]];
-        token_interface::transfer_checked(
-            CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
-                TransferChecked {
-                    from: ctx.accounts.motherlode.to_account_info(),
-                    mint: ctx.accounts.skr_mint.to_account_info(),
-                    to: ctx.accounts.owner_ata.to_account_info(),
-                    authority: ctx.accounts.config.to_account_info(),
-                },
-                cfg_signer,
+        for (amount, from, mint, to, decimals) in [
+            (
+                skr,
+                ctx.accounts.motherlode.to_account_info(),
+                ctx.accounts.skr_mint.to_account_info(),
+                ctx.accounts.owner_skr.to_account_info(),
+                ctx.accounts.skr_mint.decimals,
             ),
-            amount,
-            ctx.accounts.skr_mint.decimals,
-        )?;
+            (
+                ore_amount,
+                ctx.accounts.ore_motherlode.to_account_info(),
+                ctx.accounts.ore_mint.to_account_info(),
+                ctx.accounts.owner_ore.to_account_info(),
+                ctx.accounts.ore_mint.decimals,
+            ),
+        ] {
+            if amount == 0 {
+                continue;
+            }
+            token_interface::transfer_checked(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.to_account_info(),
+                    TransferChecked {
+                        from,
+                        mint,
+                        to,
+                        authority: ctx.accounts.config.to_account_info(),
+                    },
+                    cfg_signer,
+                ),
+                amount,
+                decimals,
+            )?;
+        }
 
         let p = &mut ctx.accounts.player;
-        p.skr_won = p.skr_won.saturating_add(amount);
+        p.skr_won = p.skr_won.saturating_add(skr);
+        p.ore_mined = p.ore_mined.saturating_add(ore_amount);
 
-        emit!(SkrJackpotClaimed {
+        emit!(JackpotClaimed {
             owner,
             round_id,
             share_bps: pay_bps,
-            amount,
+            skr,
+            ore: ore_amount,
         });
         Ok(())
     }
@@ -589,7 +625,7 @@ pub mod gali {
         let p = &mut ctx.accounts.player;
         require!(p.gear_mask & (1u32 << item) == 0, GaliError::AlreadyOwned);
 
-        let to_motherlode = price.saturating_mul(cfg.motherlode_pool_bps as u64) / BPS;
+        let to_motherlode = price.saturating_mul(cfg.ore_motherlode_bps as u64) / BPS;
         let to_treasury = price - to_motherlode;
         for (amount, dest) in [
             (to_motherlode, ctx.accounts.ore_motherlode.to_account_info()),
@@ -848,8 +884,12 @@ pub struct Config {
     /// which is only reasonable on a test validator.
     pub price_max_age_secs: u32,
 
-    /// share of every gear sale routed to the Motherlode Pool, in bps; the rest is treasury
+    /// share of every SKR gear sale routed to the SKR jackpot, in bps; the rest is treasury
     pub motherlode_pool_bps: u16,
+    /// the same for ORE gear sales. Kept separate because the two assets are not
+    /// interchangeable to us: one is the jackpot players chase, the other is what
+    /// the platform can actually spend.
+    pub ore_motherlode_bps: u16,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Default)]
@@ -863,6 +903,7 @@ pub struct ConfigUpdate {
     pub gear_prices_usd: Option<Vec<u64>>,
     pub price_max_age_secs: Option<u32>,
     pub motherlode_pool_bps: Option<u16>,
+    pub ore_motherlode_bps: Option<u16>,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
@@ -878,6 +919,7 @@ pub struct ConfigArgs {
     pub ore_price_micro: u64,
     pub price_max_age_secs: u32,
     pub motherlode_pool_bps: u16,
+    pub ore_motherlode_bps: u16,
 }
 
 #[account]
@@ -919,19 +961,20 @@ pub struct Player {
     pub reserved: [u8; 24],
 }
 
-/// One per ORE round in which ORE's motherlode hit: Gali's SKR bonus for that round.
+/// One per ORE round in which ORE's motherlode hit: Gali's jackpot for that round.
 ///
-/// The snapshot is the point. Winners claim their share over minutes, and the pool
-/// keeps growing from gear sales the whole time. Paying a share of the live balance
-/// would hand the first claimer more than the last for the same slice of the square.
-/// The first claim freezes the number everyone is then paid out of.
+/// The snapshots are the point. Winners claim over minutes, and both pools keep
+/// growing from gear sales the whole time. Paying a share of the live balance would
+/// hand the first claimer more than the last for the same slice of the square. The
+/// first claim freezes the numbers everyone is then paid out of.
 #[account]
 #[derive(InitSpace)]
-pub struct SkrJackpot {
+pub struct Jackpot {
     pub round_id: u64,
-    /// raw SKR in the Motherlode Pool when the first winner claimed
-    pub snapshot: u64,
-    /// basis points of the winning square already paid out; never exceeds 10,000
+    /// raw SKR and raw ORE in the pools when the first winner claimed
+    pub skr_snapshot: u64,
+    pub ore_snapshot: u64,
+    /// basis points of the winning square already paid; never exceeds 10,000
     pub bps_paid: u64,
     pub bump: u8,
     pub reserved: [u8; 32],
@@ -1096,7 +1139,7 @@ pub struct BuyGearOre<'info> {
 
 #[derive(Accounts)]
 #[instruction(round_id: u64)]
-pub struct ClaimSkrJackpot<'info> {
+pub struct ClaimJackpot<'info> {
     #[account(mut)]
     pub owner: Signer<'info>,
     #[account(seeds = [b"config"], bump = config.bump)]
@@ -1106,16 +1149,22 @@ pub struct ClaimSkrJackpot<'info> {
     pub player: Box<Account<'info, Player>>,
     #[account(
         init_if_needed, payer = owner,
-        seeds = [b"skr_jackpot", round_id.to_le_bytes().as_ref()], bump,
-        space = 8 + SkrJackpot::INIT_SPACE
+        seeds = [b"jackpot", round_id.to_le_bytes().as_ref()], bump,
+        space = 8 + Jackpot::INIT_SPACE
     )]
-    pub jackpot: Box<Account<'info, SkrJackpot>>,
+    pub jackpot: Box<Account<'info, Jackpot>>,
     #[account(address = config.skr_mint @ GaliError::BadConfig)]
     pub skr_mint: Box<InterfaceAccount<'info, Mint>>,
+    #[account(address = config.ore_mint @ GaliError::BadConfig)]
+    pub ore_mint: Box<InterfaceAccount<'info, Mint>>,
     #[account(mut, seeds = [b"motherlode"], bump)]
     pub motherlode: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, seeds = [b"ore_motherlode"], bump)]
+    pub ore_motherlode: Box<InterfaceAccount<'info, TokenAccount>>,
     #[account(mut, token::mint = skr_mint, token::authority = owner, token::token_program = token_program)]
-    pub owner_ata: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub owner_skr: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, token::mint = ore_mint, token::authority = owner, token::token_program = token_program)]
+    pub owner_ore: Box<InterfaceAccount<'info, TokenAccount>>,
     /// CHECK: validated as an ORE-owned account of the right size and address.
     pub ore_board: UncheckedAccount<'info>,
     /// CHECK: validated as an ORE-owned account of the right size and derivation.
@@ -1322,11 +1371,12 @@ pub struct GearBoughtOre {
 }
 
 #[event]
-pub struct SkrJackpotClaimed {
+pub struct JackpotClaimed {
     pub owner: Pubkey,
     pub round_id: u64,
     pub share_bps: u64,
-    pub amount: u64,
+    pub skr: u64,
+    pub ore: u64,
 }
 
 #[event]

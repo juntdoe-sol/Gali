@@ -86,38 +86,63 @@ export async function oreClaimSol(): Promise<string> {
   return sendWithWallet(async (owner) => [claimSolIx({ authority: owner })]);
 }
 
-/** What one round of a given automation costs, before ORE's executor fee. */
-export const automationRoundCost = (lamportsPerSquare: bigint, squares: number) =>
-  lamportsPerSquare * BigInt(squares);
+/**
+ * What Gali charges to run a player's automation, in basis points of what they
+ * deploy that round. 100 is 1%.
+ *
+ * This is the platform's recurring revenue, and it is deliberately a share of
+ * volume rather than a flat amount per round: a player putting 0.05 SOL on the
+ * board costs us the same transaction as one putting 5 SOL, but the second is
+ * worth far more to run well. ORE pays it to whoever signed the deploy, out of the
+ * automation balance, once per round.
+ *
+ * For scale, ORE's own take is 1% of every square plus 10% of every losing one, so
+ * 1% on top is a small part of what a round costs a player. The player sets it, so
+ * it can be undercut, which is the honest shape for a fee we charge rather than a
+ * rake we impose.
+ */
+export const EXECUTOR_FEE_BPS = 100n;
+
+/** What one round of a given automation costs, including Gali's fee. */
+export const automationRoundCost = (lamportsPerSquare: bigint, squares: number) => {
+  const deployed = lamportsPerSquare * BigInt(squares);
+  return deployed + (deployed * EXECUTOR_FEE_BPS) / 10_000n;
+};
 
 /**
  * Hand the session key the right to deploy for this player, and fund it.
  *
  * `rounds` is how many rounds of play to top the automation up for, which is the
- * number a player actually thinks in. `feePerDeploy` is what the executor earns
- * from ORE for each deploy it runs; it is set by the player, so Gali can be
- * undercut on it, which is the right shape for a fee we charge.
+ * number a player actually thinks in.
+ *
+ * The strategy is DiscretionaryBps, which is the one where the executor supplies
+ * the squares. That matches what Gali already does for a player who taps Smart
+ * pick, and it is the only strategy where the fee is a share of the deploy rather
+ * than a flat amount.
  */
 export async function startOreAutomation(args: {
   session: Keypair;
   squares: number[];
   lamportsPerSquare: bigint;
   rounds: number;
-  feePerDeploy: bigint;
+  /** Basis points of each round's deploy. Defaults to Gali's rate. */
+  feeBps?: bigint;
   /** Let any bot run it instead of Gali's key. */
   openExecutor?: boolean;
 }): Promise<string> {
   const mask = squaresToMask(args.squares);
-  const perRound = automationRoundCost(args.lamportsPerSquare, args.squares.length) + args.feePerDeploy;
+  const feeBps = args.feeBps ?? EXECUTOR_FEE_BPS;
+  const deployed = args.lamportsPerSquare * BigInt(args.squares.length);
+  const perRound = deployed + (deployed * feeBps) / 10_000n;
   const deposit = perRound * BigInt(Math.max(1, args.rounds));
   return sendWithWallet(async (owner) => [
     automateIx({
       authority: owner,
       amount: args.lamportsPerSquare,
       deposit,
-      fee: args.feePerDeploy,
+      fee: feeBps,
       mask,
-      strategy: AUTOMATION_STRATEGY.Preferred,
+      strategy: AUTOMATION_STRATEGY.DiscretionaryBps,
       reload: false,
       executor: args.openExecutor ? EXECUTOR_ADDRESS : args.session.publicKey,
     }),
@@ -138,7 +163,7 @@ export async function stopOreAutomation(session: Keypair): Promise<string> {
       deposit: 0n,
       fee: 0n,
       mask: 0,
-      strategy: AUTOMATION_STRATEGY.Preferred,
+      strategy: AUTOMATION_STRATEGY.DiscretionaryBps,
       reload: false,
       executor: session.publicKey,
     }),

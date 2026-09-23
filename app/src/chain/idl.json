@@ -544,28 +544,32 @@
       ]
     },
     {
-      "name": "claim_skr_jackpot",
+      "name": "claim_jackpot",
       "docs": [
-        "Take this player's share of Gali's SKR jackpot for an ORE round that hit",
-        "ORE's motherlode.",
+        "Take this player's share of Gali's jackpot for an ORE round that hit ORE's",
+        "motherlode.",
         "",
         "ORE pays its own motherlode in ORE, split across the winning square by each",
-        "miner's slice of it. Gali pays SKR on top of that same event, to the same",
-        "people, in the same proportions. One hit, two assets, and Gali mints nothing:",
-        "the pool is what players put in buying gear.",
+        "miner's slice of it. Gali pays both its pools on top of that same event, to",
+        "the same people, in the same proportions. One hit, three assets in the",
+        "wallet, and Gali mints none of them: the pools are what players put in",
+        "buying gear.",
+        "",
+        "Both pools are paid in one call rather than two, so a winner cannot take the",
+        "SKR and leave the ORE behind for someone else's share to grow into.",
         "",
         "Signed by the player, because it moves value to them. Everything it decides",
         "comes out of ORE-owned accounts."
       ],
       "discriminator": [
-        127,
-        31,
-        144,
-        176,
-        254,
-        138,
-        2,
-        43
+        28,
+        214,
+        134,
+        248,
+        249,
+        81,
+        206,
+        198
       ],
       "accounts": [
         {
@@ -588,11 +592,22 @@
           "name": "skr_mint"
         },
         {
+          "name": "ore_mint"
+        },
+        {
           "name": "motherlode",
           "writable": true
         },
         {
-          "name": "owner_ata",
+          "name": "ore_motherlode",
+          "writable": true
+        },
+        {
+          "name": "owner_skr",
+          "writable": true
+        },
+        {
+          "name": "owner_ore",
           "writable": true
         },
         {
@@ -994,6 +1009,19 @@
       ]
     },
     {
+      "name": "Jackpot",
+      "discriminator": [
+        140,
+        46,
+        88,
+        182,
+        39,
+        85,
+        23,
+        131
+      ]
+    },
+    {
       "name": "Player",
       "discriminator": [
         205,
@@ -1004,19 +1032,6 @@
         155,
         206,
         218
-      ]
-    },
-    {
-      "name": "SkrJackpot",
-      "discriminator": [
-        229,
-        98,
-        11,
-        134,
-        174,
-        167,
-        138,
-        216
       ]
     }
   ],
@@ -1088,6 +1103,19 @@
     },
     {
       "discriminator": [
+        141,
+        206,
+        247,
+        184,
+        235,
+        71,
+        241,
+        231
+      ],
+      "name": "JackpotClaimed"
+    },
+    {
+      "discriminator": [
         186,
         11,
         24,
@@ -1150,19 +1178,6 @@
         144
       ],
       "name": "SessionSet"
-    },
-    {
-      "discriminator": [
-        230,
-        252,
-        134,
-        59,
-        235,
-        124,
-        215,
-        173
-      ],
-      "name": "SkrJackpotClaimed"
     },
     {
       "discriminator": [
@@ -1537,7 +1552,16 @@
           {
             "name": "motherlode_pool_bps",
             "docs": [
-              "share of every gear sale routed to the Motherlode Pool, in bps; the rest is treasury"
+              "share of every SKR gear sale routed to the SKR jackpot, in bps; the rest is treasury"
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "ore_motherlode_bps",
+            "docs": [
+              "the same for ORE gear sales. Kept separate because the two assets are not",
+              "interchangeable to us: one is the jackpot players chase, the other is what",
+              "the platform can actually spend."
             ],
             "type": "u16"
           }
@@ -1593,6 +1617,10 @@
           },
           {
             "name": "motherlode_pool_bps",
+            "type": "u16"
+          },
+          {
+            "name": "ore_motherlode_bps",
             "type": "u16"
           }
         ]
@@ -1658,6 +1686,12 @@
             "type": {
               "option": "u16"
             }
+          },
+          {
+            "name": "ore_motherlode_bps",
+            "type": {
+              "option": "u16"
+            }
           }
         ]
       }
@@ -1708,6 +1742,85 @@
           },
           {
             "name": "price",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "name": "Jackpot",
+      "docs": [
+        "One per ORE round in which ORE's motherlode hit: Gali's jackpot for that round.",
+        "",
+        "The snapshots are the point. Winners claim over minutes, and both pools keep",
+        "growing from gear sales the whole time. Paying a share of the live balance would",
+        "hand the first claimer more than the last for the same slice of the square. The",
+        "first claim freezes the numbers everyone is then paid out of."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "skr_snapshot",
+            "docs": [
+              "raw SKR and raw ORE in the pools when the first winner claimed"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "ore_snapshot",
+            "type": "u64"
+          },
+          {
+            "name": "bps_paid",
+            "docs": [
+              "basis points of the winning square already paid; never exceeds 10,000"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "reserved",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "JackpotClaimed",
+      "type": {
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "share_bps",
+            "type": "u64"
+          },
+          {
+            "name": "skr",
+            "type": "u64"
+          },
+          {
+            "name": "ore",
             "type": "u64"
           }
         ],
@@ -1948,77 +2061,6 @@
           {
             "name": "expires_at",
             "type": "i64"
-          }
-        ],
-        "kind": "struct"
-      }
-    },
-    {
-      "name": "SkrJackpot",
-      "docs": [
-        "One per ORE round in which ORE's motherlode hit: Gali's SKR bonus for that round.",
-        "",
-        "The snapshot is the point. Winners claim their share over minutes, and the pool",
-        "keeps growing from gear sales the whole time. Paying a share of the live balance",
-        "would hand the first claimer more than the last for the same slice of the square.",
-        "The first claim freezes the number everyone is then paid out of."
-      ],
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "round_id",
-            "type": "u64"
-          },
-          {
-            "name": "snapshot",
-            "docs": [
-              "raw SKR in the Motherlode Pool when the first winner claimed"
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "bps_paid",
-            "docs": [
-              "basis points of the winning square already paid out; never exceeds 10,000"
-            ],
-            "type": "u64"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
-          },
-          {
-            "name": "reserved",
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
-          }
-        ]
-      }
-    },
-    {
-      "name": "SkrJackpotClaimed",
-      "type": {
-        "fields": [
-          {
-            "name": "owner",
-            "type": "pubkey"
-          },
-          {
-            "name": "round_id",
-            "type": "u64"
-          },
-          {
-            "name": "share_bps",
-            "type": "u64"
-          },
-          {
-            "name": "amount",
-            "type": "u64"
           }
         ],
         "kind": "struct"

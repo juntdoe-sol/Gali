@@ -62,7 +62,7 @@ describe('gali on ORE', () => {
   const jackpotPda = (roundId: number) => {
     const b = Buffer.alloc(8);
     b.writeBigUInt64LE(BigInt(roundId));
-    return find(Buffer.from('skr_jackpot'), b);
+    return find(Buffer.from('jackpot'), b);
   };
   const acc = program.account as any;
 
@@ -88,6 +88,7 @@ describe('gali on ORE', () => {
     gearPricesUsd: null,
     priceMaxAgeSecs: null,
     motherlodePoolBps: null,
+    oreMotherlodeBps: null,
     ...patch,
   });
 
@@ -187,6 +188,7 @@ describe('gali on ORE', () => {
         orePriceMicro: new BN(ORE_MICRO),
         priceMaxAgeSecs: 0,
         motherlodePoolBps: 7_000,
+        oreMotherlodeBps: 5_000,
       })
       .accountsStrict({
         authority: admin.publicKey,
@@ -248,6 +250,9 @@ describe('gali on ORE', () => {
       const spent = before - (await balance(oreAta));
       const expected = (BigInt(GEAR_USD[1]) * 10n ** BigInt(ORE_DECIMALS)) / BigInt(ORE_MICRO);
       expect(spent).to.equal(expected);
+      // ORE splits on its own knob: half the jackpot, half the platform.
+      expect(await balance(oreMotherlode)).to.equal(expected / 2n);
+      expect(await balance(oreTreasury)).to.equal(expected - expected / 2n);
       // The same $36, so neither token is the cheap way in.
       const asUsd = (Number(spent) / 10 ** ORE_DECIMALS) * (ORE_MICRO / 1_000_000);
       expect(asUsd).to.be.closeTo(36, 0.0001);
@@ -449,17 +454,20 @@ describe('gali on ORE', () => {
         .rpc();
     };
 
-    const claim = (owner: Keypair, ata: PublicKey, roundId: number) =>
+    const claim = (owner: Keypair, skrAta: PublicKey, oreAta: PublicKey, roundId: number) =>
       program.methods
-        .claimSkrJackpot(new BN(roundId))
+        .claimJackpot(new BN(roundId))
         .accountsStrict({
           owner: owner.publicKey,
           config,
           player: playerPda(owner.publicKey),
           jackpot: jackpotPda(roundId),
           skrMint,
+          oreMint,
           motherlode,
-          ownerAta: ata,
+          oreMotherlode,
+          ownerSkr: skrAta,
+          ownerOre: oreAta,
           oreBoard: oreBoardPda(),
           oreRound: oreRoundPda(roundId),
           oreMiner: oreMinerPda(owner.publicKey),
@@ -491,19 +499,24 @@ describe('gali on ORE', () => {
       await setMiner({ authority: small.kp.publicKey, roundId, deployed: b });
 
       const poolBefore = await balance(motherlode);
+      const orePoolBefore = await balance(oreMotherlode);
       const bigBefore = await balance(big.skrAta);
       const smallBefore = await balance(small.skrAta);
+      const bigOreBefore = await balance(big.oreAta);
 
-      await claim(big.kp, big.skrAta, roundId);
+      await claim(big.kp, big.skrAta, big.oreAta, roundId);
       // Gear sales between the two claims must not change what the second is paid.
       await fundJackpot(1_000);
-      await claim(small.kp, small.skrAta, roundId);
+      await claim(small.kp, small.skrAta, small.oreAta, roundId);
 
       const bigGot = (await balance(big.skrAta)) - bigBefore;
       const smallGot = (await balance(small.skrAta)) - smallBefore;
       expect(bigGot).to.equal((poolBefore * 7_500n) / 10_000n);
       expect(smallGot).to.equal((poolBefore * 2_500n) / 10_000n);
       expect(bigGot).to.equal(smallGot * 3n);
+      // One hit, both assets, the same share of the square.
+      const bigOreGot = (await balance(big.oreAta)) - bigOreBefore;
+      expect(bigOreGot).to.equal((orePoolBefore * 7_500n) / 10_000n);
     });
 
     it('pays nothing on a round where ORE did not hit its motherlode', async () => {
@@ -518,7 +531,7 @@ describe('gali on ORE', () => {
       await setMiner({ authority: p.kp.publicKey, roundId, deployed: mine });
 
       try {
-        await claim(p.kp, p.skrAta, roundId);
+        await claim(p.kp, p.skrAta, p.oreAta, roundId);
         expect.fail('there is no Gali jackpot without an ORE motherlode');
       } catch (e) {
         expect(String(e)).to.match(/NothingToClaim/);
@@ -544,7 +557,7 @@ describe('gali on ORE', () => {
       await setMiner({ authority: p.kp.publicKey, roundId, deployed: mine });
 
       try {
-        await claim(p.kp, p.skrAta, roundId);
+        await claim(p.kp, p.skrAta, p.oreAta, roundId);
         expect.fail('the jackpot follows the winning square');
       } catch (e) {
         expect(String(e)).to.match(/NotOnWinningSquare/);
@@ -568,9 +581,9 @@ describe('gali on ORE', () => {
       mine[14] = LAMPORTS_PER_SOL;
       await setMiner({ authority: p.kp.publicKey, roundId, deployed: mine });
 
-      await claim(p.kp, p.skrAta, roundId);
+      await claim(p.kp, p.skrAta, p.oreAta, roundId);
       try {
-        await claim(p.kp, p.skrAta, roundId);
+        await claim(p.kp, p.skrAta, p.oreAta, roundId);
         expect.fail('the jackpot should pay a player once per round');
       } catch (e) {
         expect(String(e)).to.match(/OreRoundAlreadyRecorded/);
