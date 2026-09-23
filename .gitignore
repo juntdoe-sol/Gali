@@ -17,3 +17,4 @@ target/*
 !target/deploy/
 target/deploy/*.json
 scripts/ore-layout/target/
+scripts/ore-layout.json.checked
