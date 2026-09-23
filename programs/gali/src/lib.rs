@@ -42,6 +42,8 @@ use anchor_lang::solana_program::{hash::hashv, sysvar::slot_hashes};
 use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token_interface::{self, Mint, TokenAccount, TokenInterface, TransferChecked};
 
+pub mod ore;
+
 declare_id!("GamTh2wWNNGU6CB5G3aF7Xeu1m7fQEtd9caRGtgPcMmV");
 
 pub const BLOCKS: u32 = 25;
@@ -894,6 +896,84 @@ pub mod gali {
         Ok(())
     }
 
+    /// Credit a player for a round they played on ORE's board.
+    ///
+    /// Gali does not run the round any more, so this is how the game layer learns
+    /// what happened: it reads ORE's own Round and Miner accounts and awards points,
+    /// wins, streaks and XP from them. Nothing here can be asserted by the caller.
+    /// Every number comes out of accounts owned by ORE's program.
+    ///
+    /// Permissionless on purpose. Anyone may crank it for anyone, the same way ORE
+    /// lets anyone checkpoint a miner, so a player who closes the app still gets
+    /// their points. It pays no crank fee, because it moves no value: the SKR
+    /// motherlode bonus is claimed separately by the player who earned it.
+    ///
+    /// Call it after ORE has checkpointed the miner and before they deploy again,
+    /// which is the window in which ORE's miner account still holds that round.
+    pub fn record_ore_round(ctx: Context<RecordOreRound>, round_id: u64) -> Result<()> {
+        let cfg = &ctx.accounts.config;
+        require!(!cfg.paused, GaliError::Paused);
+
+        // Refuse the live round: its result is not fixed until ORE moves on.
+        let current = ore::board_round_id(&ctx.accounts.ore_board)?;
+        require!(round_id < current, GaliError::OreRoundStillLive);
+
+        let player_key = ctx.accounts.player.owner;
+        let round = ore::OreRound::load(&ctx.accounts.ore_round, round_id)?;
+        let miner = ore::OreMiner::load(&ctx.accounts.ore_miner, &player_key, round_id)?;
+
+        let p = &mut ctx.accounts.player;
+        require!(round_id > p.last_ore_round, GaliError::OreRoundAlreadyRecorded);
+
+        let square = round.winning_square.unwrap_or(0);
+        let covered = miner.deployed.iter().filter(|v| **v > 0).count() as u64;
+        require!(covered > 0, GaliError::NothingToClaim);
+        let won = miner.deployed[square] > 0;
+
+        let boost = boost_bps(cfg, p.staked_skr, p.staked_ore);
+        let points = if won {
+            let mut base = cfg.base_points.saturating_mul(BLOCKS as u64) / covered.max(1);
+            if round.motherlode > 0 {
+                base = base.saturating_add(cfg.motherlode_points);
+            }
+            base.saturating_mul(boost as u64) / BPS
+        } else {
+            0
+        };
+
+        // Day streak, on the chain's clock rather than the device's.
+        let day = (Clock::get()?.unix_timestamp / 86_400) as u32;
+        if day != p.day {
+            p.streak = if day == p.day.saturating_add(1) {
+                p.streak.saturating_add(1)
+            } else {
+                1
+            };
+            p.day = day;
+        }
+
+        p.last_ore_round = round_id;
+        p.rounds = p.rounds.saturating_add(1);
+        p.sol_deployed = p.sol_deployed.saturating_add(miner.total_deployed());
+        if won {
+            p.points = p.points.saturating_add(points);
+            p.wins = p.wins.saturating_add(1);
+            p.xp = p.xp.saturating_add(50);
+        }
+
+        emit!(OreRoundRecorded {
+            owner: player_key,
+            round_id,
+            winning_square: square as u8,
+            won,
+            split: round.split,
+            motherlode: round.motherlode > 0,
+            covered: covered as u8,
+            points,
+        });
+        Ok(())
+    }
+
     /// Pay out the player's Unclaimed SOL (to their wallet) and SKR (to their SKR account).
     /// Signed by the owner or their active session key.
     pub fn claim_rewards(ctx: Context<ClaimRewards>, what: u8) -> Result<()> {
@@ -1577,7 +1657,10 @@ pub struct Player {
     pub staked_ore: u64,
     /// lifetime raw ORE mined from rounds
     pub ore_mined: u64,
-    pub reserved: [u8; 48],
+    /// highest ORE round already recorded by `record_ore_round`, so a round pays points once.
+    /// Reads as 0 on accounts created before the ORE board move, which is the correct start.
+    pub last_ore_round: u64,
+    pub reserved: [u8; 40],
 }
 
 #[account]
@@ -2143,6 +2226,27 @@ pub struct BuyGearOre<'info> {
 }
 
 #[derive(Accounts)]
+#[instruction(round_id: u64)]
+pub struct RecordOreRound<'info> {
+    /// Anyone. Cranking for another player is allowed and moves no value.
+    #[account(mut)]
+    pub cranker: Signer<'info>,
+    #[account(seeds = [b"config"], bump = config.bump)]
+    pub config: Account<'info, Config>,
+    #[account(mut, seeds = [b"player", player.owner.as_ref()], bump = player.bump)]
+    pub player: Account<'info, Player>,
+    /// ORE's board, checked by address and owner inside `ore::board_round_id`.
+    /// CHECK: validated as an ORE-owned account of the right size and address.
+    pub ore_board: UncheckedAccount<'info>,
+    /// ORE's round account for `round_id`, checked by PDA and owner inside `OreRound::load`.
+    /// CHECK: validated as an ORE-owned account of the right size and derivation.
+    pub ore_round: UncheckedAccount<'info>,
+    /// The player's ORE miner account, checked by PDA and owner inside `OreMiner::load`.
+    /// CHECK: validated as an ORE-owned account of the right size and derivation.
+    pub ore_miner: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
 pub struct StakeOre<'info> {
     #[account(mut)]
     pub owner: Signer<'info>,
@@ -2395,6 +2499,18 @@ pub struct GearBoughtOre {
 }
 
 #[event]
+pub struct OreRoundRecorded {
+    pub owner: Pubkey,
+    pub round_id: u64,
+    pub winning_square: u8,
+    pub won: bool,
+    pub split: bool,
+    pub motherlode: bool,
+    pub covered: u8,
+    pub points: u64,
+}
+
+#[event]
 pub struct StakedOre {
     pub owner: Pubkey,
     pub amount: u64,
@@ -2453,4 +2569,20 @@ pub enum GaliError {
     UnclaimedStakes,
     #[msg("This round was abandoned and refunded")]
     RoundAbandoned,
+    #[msg("That is not the ORE account it claims to be")]
+    BadOreAccount,
+    #[msg("ORE's account layout has changed; Gali needs updating before it can read it")]
+    BadOreLayout,
+    #[msg("That ORE round has not been drawn yet")]
+    OreRoundUnsettled,
+    #[msg("Your ORE miner account is on a different round")]
+    OreRoundMismatch,
+    #[msg("Checkpoint your ORE miner for this round first")]
+    OreNotCheckpointed,
+    #[msg("This ORE round is already recorded")]
+    OreRoundAlreadyRecorded,
+    #[msg("That ORE round is still live")]
+    OreRoundStillLive,
+    #[msg("You were not on the winning square")]
+    NotOnWinningSquare,
 }
