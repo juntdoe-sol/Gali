@@ -23,6 +23,9 @@ const soloMask = (round: number) => {
   return mask >>> 0;
 };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Set when the program was built with the `fasttime` feature (CLOSE_AFTER_SECS and ABANDON_SECS are 0),
+ *  which is the only way to exercise close_round and refund_stake without waiting a day. */
+const FAST = process.env.GALI_FASTTIME === '1';
 
 describe('gali', () => {
   const provider = anchor.AnchorProvider.env();
@@ -555,11 +558,102 @@ describe('gali', () => {
     expect(p2.claimed).to.eq(2);
     expect(p2.rentPayer.equals(rival.publicKey)).to.eq(true); // first deployer paid the pot's rent
     expect((await acc.round.fetch(roundOf(round))).rentPayer.equals(provider.wallet.publicKey)).to.eq(true);
-    const close = program.methods
-      .closeRound(new anchor.BN(round))
-      .accountsStrict({ config, pot, round: roundOf(round), potRentPayer: rival.publicKey, roundRentPayer: provider.wallet.publicKey, feeTo: provider.wallet.publicKey })
-      .rpc();
-    expect(await errOf(close)).to.contain('TooEarly');
+    const closeRound = () =>
+      program.methods
+        .closeRound(new anchor.BN(round))
+        .accountsStrict({ config, pot, round: roundOf(round), potRentPayer: rival.publicKey, roundRentPayer: provider.wallet.publicKey, feeTo: provider.wallet.publicKey })
+        .rpc();
+    if (!FAST) {
+      expect(await errOf(closeRound())).to.contain('TooEarly');
+      return;
+    }
+    // fasttime build: the wait is 0, so close it here and check the rent comes back
+    const potLamports = await conn.getBalance(pot);
+    const potRent = await conn.getMinimumBalanceForRentExemption((await conn.getAccountInfo(pot))!.data.length);
+    const dust = potLamports - potRent;
+    const rivalBefore = await conn.getBalance(rival.publicKey);
+    const feeToBefore = await conn.getBalance(provider.wallet.publicKey);
+    await closeRound();
+    expect(await conn.getAccountInfo(pot)).to.eq(null);
+    expect(await conn.getAccountInfo(roundOf(round))).to.eq(null);
+    // the first deployer paid the pot's rent and gets all of it back
+    expect((await conn.getBalance(rival.publicKey)) - rivalBefore).to.eq(potRent);
+    // rounding dust plus the round account's rent go to the treasury wallet (which also paid the tx fee)
+    expect((await conn.getBalance(provider.wallet.publicKey)) - feeToBefore).to.be.greaterThan(dust);
+    console.log(`      close_round: pot rent ${potRent} back to the first deployer, dust ${dust} to the treasury`);
+  });
+
+  it('refunds each player their own SOL when a round is never revealed', async function () {
+    if (!FAST) return this.skip(); // needs ABANDON_SECS = 0 (the fasttime build)
+    const conn = provider.connection;
+    const a = Keypair.generate();
+    const b = Keypair.generate();
+    for (const kp of [a, b]) {
+      await conn.confirmTransaction(await conn.requestAirdrop(kp.publicKey, LAMPORTS_PER_SOL));
+      await program.methods
+        .initPlayer()
+        .accountsStrict({ owner: kp.publicKey, player: find(Buffer.from('player'), kp.publicKey.toBuffer()), systemProgram: SystemProgram.programId })
+        .signers([kp])
+        .rpc();
+    }
+    const round = await freshRound(8);
+    const pot = find(Buffer.from('pot'), u64le(round));
+    const stakeOf = (o: PublicKey) => find(Buffer.from('stake'), o.toBuffer(), u64le(round));
+    const spend = { [a.publicKey.toBase58()]: 0, [b.publicKey.toBase58()]: 0 };
+    for (const [kp, mask, per] of [
+      [a, 0b111, 2_000_000],
+      [b, 0b11000, 3_000_000],
+    ] as const) {
+      await program.methods
+        .deploy(new anchor.BN(round), mask, new anchor.BN(per))
+        .accountsStrict({
+          signer: kp.publicKey,
+          owner: kp.publicKey,
+          config,
+          player: find(Buffer.from('player'), kp.publicKey.toBuffer()),
+          pot,
+          stake: stakeOf(kp.publicKey),
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([kp])
+        .rpc();
+      // 3 spots for a, 2 for b
+      spend[kp.publicKey.toBase58()] = per * (mask === 0b111 ? 3 : 2);
+    }
+    // nobody locks or reveals: the round is abandoned
+    await afterRound(round);
+    const refund = (kp: Keypair) =>
+      program.methods
+        .refundStake(new anchor.BN(round))
+        .accountsStrict({ cranker: provider.wallet.publicKey, owner: kp.publicKey, payer: kp.publicKey, config, pot, round: roundOf(round), stake: stakeOf(kp.publicKey) })
+        .rpc();
+    for (const kp of [a, b]) {
+      const before = await conn.getBalance(kp.publicKey);
+      const rent = await conn.getMinimumBalanceForRentExemption((await conn.getAccountInfo(stakeOf(kp.publicKey)))!.data.length);
+      await refund(kp);
+      // own SOL back, plus the stake's rent and the 20,000 crank fee it was carrying
+      // (the cranker, not the player, pays the tx fee)
+      expect((await conn.getBalance(kp.publicKey)) - before).to.eq(spend[kp.publicKey.toBase58()] + rent + 20_000);
+    }
+    const p = await acc.pot.fetch(pot);
+    expect(p.refunded).to.eq(2);
+    expect(p.total.toNumber()).to.eq(0);
+    p.perBlock.forEach((v: anchor.BN) => expect(v.toNumber()).to.eq(0));
+    // a refunded round can never be settled
+    await lockRound(round);
+    for (let i = 0; !(await conn.getAccountInfo(roundOf(round))); i++) {
+      const e = await errOf(revealRound(round));
+      if (e && (i > 40 || !e.includes('NoEntropy'))) throw new Error(e);
+      if (e) await sleep(300);
+    }
+    expect(
+      await errOf(
+        program.methods
+          .settlePot(new anchor.BN(round))
+          .accountsStrict({ config, round: roundOf(round), pot, feeTo: provider.wallet.publicKey, buyback, skrMint: mint, rewards, motherlode, potVault, tokenProgram: TOKEN_PROGRAM_ID })
+          .rpc(),
+      ),
+    ).to.contain('RoundAbandoned');
   });
 
   const session = Keypair.generate();
@@ -613,6 +707,26 @@ describe('gali', () => {
     expect(before - (await provider.connection.getBalance(session.publicKey))).to.be.gte(4_000_000);
     const p = await acc.player.fetch(playerPda);
     expect(p.rounds).to.eq(2);
+  });
+
+  it('stops honouring a session key once it has expired, and takes a fresh one', async () => {
+    const setSession = (expires: number, fund: number) =>
+      program.methods
+        .setSession(session.publicKey, new anchor.BN(expires), new anchor.BN(fund))
+        .accountsStrict({ owner: player.publicKey, player: playerPda, session: session.publicKey, systemProgram: SystemProgram.programId })
+        .signers([player])
+        .rpc();
+    const now = await chainSecs();
+    // expiry in the past: the key stays on the player account but can no longer deploy
+    await setSession(now - 1, 0);
+    expect((await acc.player.fetch(playerPda)).sessionExpires.toNumber()).to.eq(now - 1);
+    expect(await errOf(deployAs(session, 1_000_000, 0b10000))).to.contain('NotAuthorised');
+    // a session can't outlive the one-week cap
+    expect(await errOf(setSession(now + 8 * 86_400, 0))).to.contain('BadSession');
+    // the owner always can, and a fresh session works again
+    await deployAs(player, 1_000_000, 0b10000);
+    await setSession(now + 3_600, 0);
+    await deployAs(session, 1_000_000, 0b100000);
   });
 
   it('buys gear with SKR', async () => {
@@ -791,6 +905,136 @@ describe('gali', () => {
       await program.methods.withdrawTreasury(new anchor.BN(5_000_000)).accountsStrict(accounts(admin)).rpc();
       expect(await skrOf(treasury)).to.eq(t0 - 5_000_000);
       expect((await skrOf(dest)) - d0).to.eq(5_000_000);
+    });
+
+    it('refining: the fee is shared pro rata between every remaining holder', async function () {
+      this.timeout(180_000);
+      const conn = provider.connection;
+      const refinery = find(Buffer.from('refinery'));
+      const unclaimedOf = (o: PublicKey) => find(Buffer.from('unclaimed'), o.toBuffer());
+      const ataOf = (o: PublicKey) =>
+        PublicKey.findProgramAddressSync([o.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.toBuffer()], ASSOCIATED_TOKEN_PROGRAM_ID)[0];
+      // three miners, all on all 25 spots, with different amounts per spot
+      const crew = [1_000_000, 2_000_000, 5_000_000].map((per) => ({ kp: Keypair.generate(), per }));
+      for (const m of crew) {
+        await conn.confirmTransaction(await conn.requestAirdrop(m.kp.publicKey, 2 * LAMPORTS_PER_SOL));
+        await program.methods
+          .initPlayer()
+          .accountsStrict({ owner: m.kp.publicKey, player: find(Buffer.from('player'), m.kp.publicKey.toBuffer()), systemProgram: SystemProgram.programId })
+          .signers([m.kp])
+          .rpc();
+      }
+      // the SKR reward only splits on a shared spot; on a solo spot one miner takes it all, so retry
+      let skr: number[] = [];
+      for (let attempt = 0; attempt < 4 && skr.length === 0; attempt++) {
+        const round = await freshRound(10);
+        const pot = find(Buffer.from('pot'), u64le(round));
+        const stakeOf = (o: PublicKey) => find(Buffer.from('stake'), o.toBuffer(), u64le(round));
+        for (const m of crew) {
+          await program.methods
+            .deploy(new anchor.BN(round), (1 << 25) - 1, new anchor.BN(m.per))
+            .accountsStrict({
+              signer: m.kp.publicKey,
+              owner: m.kp.publicKey,
+              config,
+              player: find(Buffer.from('player'), m.kp.publicKey.toBuffer()),
+              pot,
+              stake: stakeOf(m.kp.publicKey),
+              systemProgram: SystemProgram.programId,
+            })
+            .signers([m.kp])
+            .rpc();
+        }
+        await afterRound(round);
+        await lockRound(round);
+        for (let i = 0; !(await conn.getAccountInfo(roundOf(round))); i++) {
+          const e = await errOf(revealRound(round));
+          if (e && (i > 40 || !e.includes('NoEntropy'))) throw new Error(e);
+          if (e) await sleep(300);
+        }
+        await program.methods
+          .settlePot(new anchor.BN(round))
+          .accountsStrict({ config, round: roundOf(round), pot, feeTo: admin, buyback, skrMint: mint, rewards, motherlode, potVault, tokenProgram: TOKEN_PROGRAM_ID })
+          .rpc();
+        const got: number[] = [];
+        for (const m of crew) {
+          const before = (await acc.unclaimed.fetchNullable(unclaimedOf(m.kp.publicKey)))?.skr.toNumber() ?? 0;
+          await program.methods
+            .claimPot(new anchor.BN(round))
+            .accountsStrict({
+              cranker: provider.wallet.publicKey,
+              owner: m.kp.publicKey,
+              payer: m.kp.publicKey,
+              config,
+              player: find(Buffer.from('player'), m.kp.publicKey.toBuffer()),
+              round: roundOf(round),
+              pot,
+              stake: stakeOf(m.kp.publicKey),
+              unclaimed: unclaimedOf(m.kp.publicKey),
+              refinery,
+              systemProgram: SystemProgram.programId,
+            })
+            .rpc();
+          got.push((await acc.unclaimed.fetch(unclaimedOf(m.kp.publicKey))).skr.toNumber() - before);
+        }
+        if ((await acc.pot.fetch(pot)).splitReward && got.every((v) => v > 0)) skr = got;
+      }
+      expect(skr.length, 'no round landed on a shared spot in 4 tries').to.eq(3);
+      // the reward splits by SOL on the winning spot: 1 : 2 : 5
+      expect(skr[1]).to.be.closeTo(skr[0] * 2, 2);
+      expect(skr[2]).to.be.closeTo(skr[0] * 5, 5);
+
+      // earlier tests left their own unrefined SKR in the refinery, so measure against the real total
+      const rf0 = await acc.refinery.fetch(refinery);
+      const held0 = rf0.totalUnrefined.toNumber();
+      expect(held0).to.be.gte(skr[0] + skr[1] + skr[2]);
+      const claim = (kp: Keypair) =>
+        program.methods
+          .claimRewards(2)
+          .accountsStrict({
+            owner: kp.publicKey,
+            config,
+            player: find(Buffer.from('player'), kp.publicKey.toBuffer()),
+            unclaimed: unclaimedOf(kp.publicKey),
+            refinery,
+            skrMint: mint,
+            potVault,
+            rewards,
+            ownerAta: ataOf(kp.publicKey),
+            tokenProgram: TOKEN_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+          })
+          .signers([kp])
+          .rpc();
+
+      // the smallest holder cashes out; its 10% fee is split between the two who stay in, by size
+      const fee0 = Math.floor(skr[0] / 10);
+      await claim(crew[0].kp);
+      expect(await skrOf(ataOf(crew[0].kp.publicKey))).to.eq(skr[0] - fee0);
+      const SCALE = 1_000_000_000_000n;
+      const held1 = held0 - skr[0];
+      const delta = (BigInt(fee0) * SCALE) / BigInt(held1);
+      const gain = [1, 2].map((i) => Number((delta * BigInt(skr[i])) / SCALE));
+      expect(gain[0]).to.be.greaterThan(0);
+      expect(gain[1]).to.be.closeTo(gain[0] * 2.5, 2); // 5 : 2, the ratio of what they still hold
+      const rf1 = await acc.refinery.fetch(refinery);
+      expect(rf1.totalUnrefined.toNumber()).to.eq(held1);
+      expect(rf1.totalRefined.toNumber()).to.eq(rf0.totalRefined.toNumber() + fee0);
+      console.log(`      refining: unrefined ${skr.join(' / ')} of ${held0} held, fee ${fee0} split ${gain.join(' / ')}`);
+
+      // the middle holder cashes out next, and its own 10% is shared the same way
+      const fee1 = Math.floor(skr[1] / 10);
+      await claim(crew[1].kp);
+      expect(await skrOf(ataOf(crew[1].kp.publicKey))).to.eq(skr[1] - fee1 + gain[0]);
+      const held2 = held1 - skr[1];
+      const delta2 = (BigInt(fee1) * SCALE) / BigInt(held2);
+      const gain2 = gain[1] + Number((delta2 * BigInt(skr[2])) / SCALE);
+      const fee2 = Math.floor(skr[2] / 10);
+      await claim(crew[2].kp);
+      expect(await skrOf(ataOf(crew[2].kp.publicKey))).to.eq(skr[2] - fee2 + gain2);
+      const rf2 = await acc.refinery.fetch(refinery);
+      expect(rf2.totalUnrefined.toNumber()).to.eq(held2 - skr[2]);
     });
 
     it('hands over authority in two steps, and back', async () => {

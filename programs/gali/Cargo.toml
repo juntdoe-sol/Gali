@@ -19,6 +19,9 @@ idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 custom-heap = []
 custom-panic = []
 anchor-debug = []
+# Test-only: drops the close/abandon waiting periods to zero so the suite can
+# exercise close_round and refund_stake without waiting a day. Never ship this.
+fasttime = []
 
 [dependencies]
 anchor-lang = { version = "=0.31.1", features = ["init-if-needed"] }
