@@ -8,7 +8,7 @@ import {
 import { GEAR_ICON, ITEM_ICON } from './icons';
 import { useGame, useLevelXp, useOwnedMask, usePoints } from '../game/store';
 import { chainReady, CLUSTER, fetchLeaderboard, fetchPastRounds, PROGRAM_ID, short, SKR_MINT, type LeaderRow, type PastRound } from '../chain/client';
-import { ADMIN_FEE, emptyPot, fmtSol, POT_FEE, practiceMotherlode, simPot, soloMask } from '../game/pot';
+import { ADMIN_FEE, emptyPot, fmtSol, potFee_, practiceMotherlode, simPot, soloMask } from '../game/pot';
 import { UnclaimedRow } from './Dock';
 import { Bar, Btn, Card, Pill, T } from './kit';
 
@@ -183,7 +183,7 @@ function MotherlodeCard() {
         1 round in {MOTHERLODE_ODDS} is a motherlode. It pays out the whole pool (~{usd(pool)} right now), split between the miners on the gold spot by their SOL there, and each gets {MOTHERLODE_POINTS.toLocaleString()} bonus points. An early hit pays less; a late one pays more.
       </T>
       <T v="muted" style={{ marginTop: 6 }}>
-        Every played round adds {MOTHERLODE_ACCRUAL_SKR} SKR to it, plus {Math.round(MOTHERLODE_POOL_SHARE * 100)}% of every gear sale, and anyone can top it up. Another {Math.round(REWARDS_POOL_SHARE * 100)}% of gear sales fills the Rewards Pool that pays {ROUND_REWARD_SKR} SKR to the gold spot every round.{owner && won > 0 ? ` You've won ${won.toLocaleString()} SKR.` : ''}
+        Every played round adds {MOTHERLODE_ACCRUAL_SKR} SKR to it, plus {Math.round(MOTHERLODE_POOL_SHARE * 100)}% of every gear sale, and anyone can top it up. Another {Math.round(REWARDS_POOL_SHARE * 100)}% of gear sales fills the Rewards Pool that pays up to {ROUND_REWARD_SKR} SKR to the gold spot every round (a round pays at most 0.05% of the pool, so payouts follow what flows in).{owner && won > 0 ? ` You've won ${won.toLocaleString()} SKR.` : ''}
       </T>
     </Card>
   );
@@ -271,7 +271,7 @@ function practiceRounds(before: number, n: number): PastRound[] {
     const pot = simPot(id, 1);
     const split = (soloMask(id) & (1 << winning)) === 0;
     const motherlode = Math.floor(h * 1e6) % 625 === 0;
-    const fees = pot.perBlock.reduce((sum, d, i) => sum + d * ADMIN_FEE + (i === winning ? 0 : d * (1 - ADMIN_FEE) * POT_FEE), 0);
+    const fees = pot.perBlock.reduce((sum, d, i) => sum + d * ADMIN_FEE + (i === winning ? 0 : d * (1 - ADMIN_FEE) * potFee_()), 0);
     return {
       roundId: id,
       winning,
@@ -416,7 +416,7 @@ function Ranks() {
 function Me() {
   const w = useGame((s) => s.wallet);
   const save = useGame((s) => s.save);
-  const { connect, disconnect, airdrop, setMute, refreshWallet } = useGame.getState();
+  const { connect, disconnect, airdrop, setMute, refreshWallet, sweepSession } = useGame.getState();
   return (
     <>
       <Card>
@@ -430,8 +430,9 @@ function Me() {
               Session key: {w.sessionSol.toFixed(3)} SOL to deploy
               {w.player?.sessionExpires ? ` · expires ${new Date(w.player.sessionExpires * 1000).toLocaleString()}` : ''}
             </T>
-            <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
               <Btn small label="Refresh" onPress={() => void refreshWallet()} />
+              {w.sessionSol > 0.001 ? <Btn small label="Return session SOL" onPress={() => void sweepSession()} /> : null}
               {CLUSTER === 'devnet' ? <Btn small label="+1 devnet SOL" onPress={() => void airdrop()} /> : null}
               <Btn small kind="ghost" label="Disconnect" onPress={() => void disconnect()} />
             </View>
@@ -446,7 +447,7 @@ function Me() {
       <View style={styles.grid}>
         {[
           ['Rounds played', String(w.player?.rounds ?? save.digs)],
-          ['SOL returned', (w.player?.solWon ?? 0).toFixed(3)],
+          ['SOL returned', (w.player?.solWon ?? save.practiceUnclaimedSol ?? 0).toFixed(3)],
           ['SKR mined', Math.floor(w.player?.skrMined ?? save.practiceSkr).toLocaleString()],
           ['Wins', String(w.player?.wins ?? save.wins)],
           ['Day streak', String(w.player?.streak ?? save.dayStreak)],

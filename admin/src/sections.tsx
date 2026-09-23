@@ -99,7 +99,7 @@ export function OverviewTab({ d }: { d: Data }) {
           tone={daysLeft < 7 ? 'bad' : 'skr'}
         />
         <Stat label="Motherlode Pool" value={`${fmt(bal.motherlode)} SKR`} sub={`+${fmt(cfg.motherlodeSkr)} SKR a round · whole pool paid on a hit (1 in ${MOTHERLODE_ODDS})`} tone="skr" />
-        <Stat label="Owed to SKR buybacks" value={`${fmt(cfg.buybackDueSol, 4)} SOL`} sub={`${cfg.buybackBps / 100}% of fees · buy SKR, add it to Rewards, mark it in Money`} tone="sol" />
+        <Stat label="Buyback escrow" value={`${fmt(cfg.buybackDueSol, 4)} SOL`} sub={`${cfg.buybackBps / 100}% of fees, held on-chain · withdraw it in Money to buy SKR`} tone="sol" />
         <Stat label="Unclaimed SKR (escrow)" value={`${fmt(bal.potEscrow)} SKR`} sub="won, waiting for claims" />
         <Stat label="Staked by players" value={`${fmt(bal.staked)} SKR`} sub="players can always unstake" />
       </div>
@@ -127,11 +127,11 @@ function BuybackCard({ d, wallet, isAdmin, run }: { d: Data; wallet?: AnchorWall
   return (
     <Card
       title="SKR buybacks"
-      hint={`${cfg.buybackBps / 100}% of every round's SOL fees is set aside to buy SKR for the Rewards Pool, so the SKR players mine is paid for by fees. Swap the SOL for SKR (e.g. on Jupiter), add the SKR to the Rewards Pool below, then record the SOL spent here.`}
+      hint={`${cfg.buybackBps / 100}% of every round's SOL fees stays in an on-chain escrow. Withdraw it here, swap it for SKR (e.g. on Jupiter), then add that SKR to the Rewards Pool below.`}
     >
-      <p className="big sol">{fmt(cfg.buybackDueSol, 4)} SOL owed</p>
+      <p className="big sol">{fmt(cfg.buybackDueSol, 4)} SOL in escrow</p>
       <label>
-        SOL spent on SKR
+        SOL to withdraw
         <div className="row">
           <input inputMode="decimal" value={spent} onChange={(e) => setSpent(e.target.value)} placeholder="0" />
           <button className="ghost" onClick={() => setSpent(String(cfg.buybackDueSol))}>
@@ -139,8 +139,8 @@ function BuybackCard({ d, wallet, isAdmin, run }: { d: Data; wallet?: AnchorWall
           </button>
         </div>
       </label>
-      <button disabled={!isAdmin || !wallet || !(v > 0)} onClick={() => void run(`Record ${fmt(v, 4)} SOL of buybacks`, () => markBuyback(wallet!, v)).then((ok) => ok && setSpent(''))}>
-        Record buyback
+      <button disabled={!isAdmin || !wallet || !(v > 0)} onClick={() => void run(`Withdraw ${fmt(v, 4)} SOL for buybacks`, () => markBuyback(wallet!, v)).then((ok) => ok && setSpent(''))}>
+        Withdraw for buyback
       </button>
       <p className="hint">
         Round budget: at most {cfg.dripBps / 100}% of the Rewards Pool per round{cfg.dripBps === 0 ? ' (off: fixed payouts)' : ''}, capped at {fmt(cfg.roundRewardSkr)} + {fmt(cfg.motherlodeSkr)} SKR. Payouts follow what you add.

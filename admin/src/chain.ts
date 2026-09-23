@@ -38,6 +38,7 @@ export const pda = {
   potVault: find(enc('pot_vault')),
   round: (r: number) => find(enc('round'), u64le(r)),
   pot: (r: number) => find(enc('pot'), u64le(r)),
+  buyback: find(enc('buyback')),
   draw: (r: number) => find(enc('draw'), u64le(r)),
 };
 
@@ -242,10 +243,11 @@ export async function updateConfig(wallet: AnchorWallet, cfg: Config, ch: Config
 }
 
 /** Record SOL (from the fees owed to buybacks) that has been spent buying SKR for the Rewards Pool. */
-export const markBuyback = (wallet: AnchorWallet, solSpent: number) =>
+/** Withdraw SOL from the on-chain buyback escrow (to swap it for SKR). */
+export const markBuyback = (wallet: AnchorWallet, solSpent: number, destination?: PublicKey) =>
   programFor(wallet)
     .methods.markBuyback(new BN(Math.round(solSpent * LAMPORTS_PER_SOL)))
-    .accountsStrict({ authority: wallet.publicKey, config: pda.config })
+    .accountsStrict({ authority: wallet.publicKey, config: pda.config, buyback: pda.buyback, destination: destination ?? wallet.publicKey })
     .rpc();
 
 export const setPaused = (wallet: AnchorWallet, paused: boolean) =>
@@ -318,6 +320,7 @@ export async function revealAndSettle(wallet: AnchorWallet, cfg: Config, roundId
       round: pda.round(roundId),
       pot: pda.pot(roundId),
       feeTo: new PublicKey(cfg.authority),
+      buyback: pda.buyback,
       skrMint: cfg.skrMint,
       rewards: pda.rewards,
       motherlode: pda.motherlode,

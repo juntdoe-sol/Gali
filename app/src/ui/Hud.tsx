@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Image, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CAVE_IN_EVERY, COLORS, LOCK_MS, levelFromXp, xpForLevel } from '../game/constants';
+import { CAVE_IN_EVERY, COLORS, LOCK_MS, levelFromXp, ROUND_SECS, xpForLevel } from '../game/constants';
 import { chainReady } from '../chain/client';
 import { roundEnd, useGame, useLevelXp, usePoints, useRoundReward } from '../game/store';
 const fmtSkr = (v: number) => (v >= 10 ? Math.floor(v).toLocaleString() : v.toFixed(1));
@@ -155,7 +155,7 @@ export function RoundCard() {
           color={phase !== 'mining' ? COLORS.gold : secs <= 5 || locking ? COLORS.red : COLORS.text}
         />
       </View>
-      <Bar pct={phase === 'mining' ? (left / 60000) * 100 : 0} height={4} />
+      <Bar pct={phase === 'mining' ? (left / (ROUND_SECS * 1000)) * 100 : 0} height={4} />
       <View style={[styles.row, { marginTop: 4 }]}>
         <T v="bold" style={{ fontSize: 11, color: cave ? COLORS.red : COLORS.muted }} numberOfLines={1}>
           #{(roundId % 100000).toLocaleString()} · {cave ? '⚠ CAVE-IN' : `Cave-in in ${CAVE_IN_EVERY - (roundId % CAVE_IN_EVERY)}`}

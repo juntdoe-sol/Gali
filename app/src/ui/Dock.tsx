@@ -272,49 +272,50 @@ function RunButton({ ready, label, sub, onStart }: { ready: boolean; label: stri
   return <Btn kind={ready ? 'gold' : 'plain'} label={busy ?? label} sub={sub} onPress={onStart} disabled={!ready || Boolean(busy)} style={{ marginTop: 10, minHeight: 54 }} />;
 }
 
-/* ---------------- LITE: pick a budget, we spread it ---------------- */
+/* ---------------- LITE: SOL per spot on all 25, one round or many ---------------- */
 function LitePanel({ compact }: { compact: boolean }) {
   const { balance } = useBalance();
   const startRun = useGame((s) => s.startRun);
-  const [amount, setAmount] = useState('');
-  const [perSpot, setPerSpot] = useState<string | null>(null); // null = Optimal
-  const total = Number(amount) || 0;
-  const spot = perSpot === null ? optimalPerSpot(total) : Number(perSpot) || 0;
+  const [perSpot, setPerSpot] = useState('0.0004');
+  const [rounds, setRounds] = useState(1);
+  const spot = Number(perSpot) || 0;
   const per = spot * BLOCKS; // SOL a round
-  const rounds = total > 0 && per > 0 ? Math.floor(total / per + 1e-9) : 0;
+  const need = per * rounds;
+  const maxRounds = per > 0 ? Math.max(1, Math.floor((balance - RESERVE) / per)) : 1;
   const perBlockOk = spot >= MIN_SOL_PER_BLOCK;
-  const enough = total <= balance + 1e-9;
-  const ready = total > 0 && rounds > 0 && perBlockOk && enough;
+  const enough = need <= balance + 1e-9;
+  const ready = per > 0 && rounds > 0 && perBlockOk && enough;
   const ALL = (1 << BLOCKS) - 1;
   const potWith = usePotWith(ALL, spot);
   const range = potWith ? strikeRange(potWith, ALL, spot) : null;
-  const label = !total
+  const label = !per
     ? 'ENTER AMOUNT'
-    : !enough
-      ? 'NOT ENOUGH SOL'
-      : !perBlockOk
-        ? `MIN ${MIN_SOL_PER_BLOCK} SOL PER SPOT`
-        : `DEPLOY ${rounds} ROUND${rounds > 1 ? 'S' : ''}`;
+    : !perBlockOk
+      ? `MIN ${MIN_SOL_PER_BLOCK} SOL PER SPOT`
+      : !enough
+        ? 'NOT ENOUGH SOL'
+        : rounds === 1
+          ? `MINE THIS ROUND · ${fmtSol(per)} SOL`
+          : `AUTOPILOT ${rounds} ROUNDS · ${fmtSol(need)} SOL`;
   return (
     <>
       {compact ? null : (
         <>
-          <BalanceRow onHalf={() => setAmount(trim((balance - RESERVE) / 2))} onAll={() => setAmount(trim(balance - RESERVE))} />
-          <AmountBox value={amount} onChange={setAmount} hint="Total SOL to deploy" />
+          <BalanceRow
+            onHalf={() => setPerSpot(trim((balance - RESERVE) / 2 / BLOCKS / Math.max(1, rounds)))}
+            onAll={() => setPerSpot(trim((balance - RESERVE) / BLOCKS / Math.max(1, rounds)))}
+          />
+          <AmountBox value={perSpot} onChange={setPerSpot} hint="SOL per spot" suffix="per spot" />
           <Row
             icon="🪙"
-            label="Per spot"
-            info={`SOL on each of the 25 spots every round (${fmtSol(per)} SOL a round), so you are always on the gold spot. Optimal spreads your amount over ${OPTIMAL_ROUNDS} rounds. Minimum ${MIN_SOL_PER_BLOCK} SOL a spot.`}
+            label="A round costs"
+            info={`LITE puts the same SOL on all 25 spots, so you are always on the gold spot. ${fmtSol(spot, 5)} a spot is ${fmtSol(per)} SOL a round. Minimum ${MIN_SOL_PER_BLOCK} SOL a spot. Optimal spreads your balance over ${OPTIMAL_ROUNDS} rounds.`}
             right={
               <>
-                <Chip label="Optimal" on={perSpot === null} onPress={() => setPerSpot(null)} />
-                <TextInput
-                  value={perSpot === null ? (spot ? fmtSol(spot, 5) : '0') : perSpot}
-                  onChangeText={(t) => setPerSpot(t.replace(',', '.').replace(/[^0-9.]/g, ''))}
-                  keyboardType="decimal-pad"
-                  style={styles.small}
-                  accessibilityLabel="SOL per spot"
-                />
+                <Chip label="Optimal" onPress={() => setPerSpot(trim(optimalPerSpot(balance - RESERVE)))} />
+                <T v="black" style={{ fontSize: 13, color: per ? COLORS.text : COLORS.muted }}>
+                  {per ? `${fmtSol(per)} SOL` : '—'}
+                </T>
               </>
             }
           />
@@ -331,12 +332,22 @@ function LitePanel({ compact }: { compact: boolean }) {
           <Row
             icon="🔁"
             label="Rounds"
-            info="Autopilot deploys once a round until your amount is used. Keep the app open. You can stop any time."
+            info="1 = mine this round only, no autopilot. More = the same deploy every round until they are used up. Keep the app open; you can stop any time."
             last
             right={
-              <T v="black" style={{ fontSize: 15, color: rounds ? COLORS.text : COLORS.muted }}>
-                {rounds || '—'}
-              </T>
+              <>
+                <View style={[styles.tag, rounds > 1 && { borderColor: COLORS.teal }]}>
+                  <T v="black" style={{ fontSize: 9, letterSpacing: 1, color: rounds > 1 ? COLORS.teal : COLORS.muted }}>
+                    {rounds > 1 ? 'AUTO' : 'MANUAL'}
+                  </T>
+                </View>
+                <Chip label="−" onPress={() => setRounds(Math.max(1, rounds - 1))} />
+                <T v="black" style={{ fontSize: 15, minWidth: 22, textAlign: 'center' }}>
+                  {rounds}
+                </T>
+                <Chip label="+" onPress={() => setRounds(Math.min(100, rounds + 1))} />
+                <Chip label="Max" onPress={() => setRounds(Math.min(100, maxRounds))} />
+              </>
             }
           />
         </>
@@ -344,7 +355,7 @@ function LitePanel({ compact }: { compact: boolean }) {
       <RunButton
         ready={ready}
         label={label}
-        sub={ready ? `${fmtSol(spot, 5)} SOL × 25 spots = ${fmtSol(per)} SOL a round · always on the gold spot` : undefined}
+        sub={ready ? `${fmtSol(spot, 5)} SOL × 25 spots${rounds > 1 ? ` × ${rounds} rounds` : ''} · always on the gold spot` : undefined}
         onStart={() => void startRun({ kind: 'lite', perRound: per, perSpot: spot, blocks: 'all', smartN: BLOCKS, manualMask: 0, total: rounds })}
       />
     </>

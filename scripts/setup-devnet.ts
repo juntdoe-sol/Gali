@@ -74,6 +74,7 @@ async function main() {
         motherlode: pda.motherlode(),
         rewards: pda.rewards(),
         potVault: pda.potVault(),
+        buyback: pda.buyback(),
         tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
       })

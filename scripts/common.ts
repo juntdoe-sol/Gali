@@ -24,6 +24,7 @@ export const pda = {
   draw: (round: number | bigint) => PublicKey.findProgramAddressSync([Buffer.from('draw'), u64le(round)], PROGRAM_ID)[0],
   round: (round: number | bigint) => PublicKey.findProgramAddressSync([Buffer.from('round'), u64le(round)], PROGRAM_ID)[0],
   pot: (round: number | bigint) => PublicKey.findProgramAddressSync([Buffer.from('pot'), u64le(round)], PROGRAM_ID)[0],
+  buyback: () => PublicKey.findProgramAddressSync([Buffer.from('buyback')], PROGRAM_ID)[0],
   refinery: () => PublicKey.findProgramAddressSync([Buffer.from('refinery')], PROGRAM_ID)[0],
   unclaimed: (owner: PublicKey) => PublicKey.findProgramAddressSync([Buffer.from('unclaimed'), owner.toBuffer()], PROGRAM_ID)[0],
 };
