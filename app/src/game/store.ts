@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { PublicKey, type Keypair } from '@solana/web3.js';
 import * as chain from '../chain/client';
+import * as board from '../chain/board';
+import { maskToSquares } from '../chain/ore/tx';
 import {
   ACHIEVEMENTS, BLOCKS, boostFor, FREE_GEAR_MASK, GEAR, LOCK_MS, localDay, levelFromXp, MOTHERLODE_ODDS,
   pointsFor, QUESTS, REVEAL_MIN_MS, ROUND_REWARD_SKR, ROUND_SECS,
@@ -144,7 +146,7 @@ interface Wallet {
   sessionSol: number;
   pool: number; // SKR in the Motherlode Pool
   rewards: number; // SKR in the Rewards Pool
-  unclaimed: chain.Unclaimed;
+  unclaimed: board.Claimable;
   economy: chain.Economy | null;
   busy: string | null;
 }
@@ -212,7 +214,7 @@ interface GameState {
 }
 
 let toastId = 1;
-const NO_UNCLAIMED: chain.Unclaimed = { sol: 0, unrefined: 0, refined: 0, fee: 0, claimedSol: 0, claimedSkr: 0 };
+const NO_UNCLAIMED: board.Claimable = board.NOTHING_CLAIMABLE;
 /** Practice mode: other (simulated) miners' refining fees add this share of your unrefined SKR each round. */
 const PRACTICE_REFINE_RATE = 0.003;
 let lastClockSync = Date.now();
@@ -310,12 +312,12 @@ export const useGame = create<GameState>((set, get) => {
       const owner = ownerKey();
       try {
         if (!owner || !session) throw new Error('wallet disconnected');
-        const r = await chain.sessionSettlePot(owner, session, roundId);
+        const r = await board.settleAndRead(owner, session, roundId);
         winning = r.winning;
         motherlode = r.motherlode;
         solOut = r.payout;
-        skrMined = r.skr;
-        skr = r.skrMotherlode;
+        skrMined = r.oreMined;
+        skr = r.oreMotherlode;
         split = r.split;
         lucky = r.lucky;
       } catch (e) {
@@ -402,23 +404,23 @@ export const useGame = create<GameState>((set, get) => {
     const roundId = list[0];
     const done = () => updateSave((sv) => ({ ...sv, unsettled: (sv.unsettled ?? []).filter((r) => r !== roundId) }));
     try {
-      const r = await chain.sessionSettlePot(owner, session, roundId);
+      const r = await board.settleAndRead(owner, session, roundId);
       done();
       await get().refreshWallet();
-      if (r.payout > 0 || r.skr > 0) get().toast(`Round #${roundId % 100000} settled: +${r.payout.toFixed(4)} SOL`, 'good');
+      if (r.payout > 0 || r.oreMined > 0) get().toast(`Round #${roundId % 100000} settled: +${r.payout.toFixed(4)} SOL`, 'good');
       return;
     } catch (e) {
       if (chain.isRateLimited(e)) return; // try again later
       const ageSecs = chainNow(get().offsetMs) / 1000 - (roundId + 1) * ROUND_SECS;
       if (ageSecs < 3_600) return;
-      // nobody ever revealed it: take our own SOL back
+      // A round that never drew refunds through ORE's own checkpoint, so there is
+      // nothing separate to call: settling it again is the refund.
       try {
-        const back = await chain.refundStake(owner, session, roundId);
+        await board.settleBoardRound(owner, session);
         done();
         await get().refreshWallet();
-        if (back > 0) get().toast(`Round #${roundId % 100000} was never revealed: ${back.toFixed(4)} SOL refunded`, 'info');
       } catch {
-        if (ageSecs > 86_400) done(); // give up: the crank already handled it, or the stake is gone
+        if (ageSecs > 86_400) done(); // ORE expired the round; the position is gone
       }
     }
   }
@@ -467,7 +469,7 @@ export const useGame = create<GameState>((set, get) => {
         setWallet({ busy: `Deploying ${total.toFixed(4)} SOL…` });
         const nowMs = chainNow(get().offsetMs);
         if (roundOf(nowMs) !== roundId || roundEnd(roundId) - nowMs <= LOCK_MS) throw new Error('RoundLocked');
-        await chain.sessionDeploy(owner, s, roundId, mask, perBlock);
+        await board.deployToBoard(owner, s, maskToSquares(mask), perBlock);
       } else {
         if (get().save.practiceSol < total) throw new Error('insufficient practice SOL. Refill it in the panel');
         updateSave((sv) => ({ ...sv, practiceSol: sv.practiceSol - total }));
@@ -777,7 +779,7 @@ export const useGame = create<GameState>((set, get) => {
           return st.toast(`Claimed ${sol.toFixed(4)} SOL (practice)`, 'good');
         }
         if (unrefined + refined <= 0) return st.toast('No SKR to claim yet', 'info');
-        const fee = unrefined * chain.REFINING_FEE;
+        const fee = unrefined * board.REFINING_FEE;
         updateSave((s) => ({ ...s, practiceSkr: s.practiceSkr + unrefined - fee + refined, practiceUnclaimedSkr: 0, practiceRefinedSkr: 0 }));
         play('win');
         return st.toast(`Claimed ${fmtSkr(unrefined - fee + refined)} SKR · ${fmtSkr(fee)} refining fee (practice)`, 'good');
@@ -787,7 +789,7 @@ export const useGame = create<GameState>((set, get) => {
       try {
         // only the wallet can move rewards out, so this one always asks for a signature
         setWallet({ busy: `Approve: claim your ${what.toUpperCase()}` });
-        await chain.claimRewards(owner, what === 'sol' ? chain.CLAIM_SOL : chain.CLAIM_SKR);
+        await (what === 'sol' ? board.claimBoardSol() : board.claimBoardOre());
         await get().refreshWallet();
         play('win');
         haptic.win();
@@ -824,7 +826,7 @@ export const useGame = create<GameState>((set, get) => {
           chain.fetchSolBalance(session.publicKey),
           chain.fetchMotherlodePool(),
           chain.fetchRewardsPool(),
-          chain.fetchUnclaimed(owner).catch(() => NO_UNCLAIMED),
+          board.fetchClaimable(owner).catch(() => NO_UNCLAIMED),
           chain.fetchEconomy().catch(() => null),
         ]);
         if (get().wallet.owner !== owner.toBase58()) return; // disconnected or switched while loading
@@ -876,8 +878,8 @@ export const useGame = create<GameState>((set, get) => {
       const rid = roundOf(now);
       if (st.phase !== 'mining') return; // keep the played round's board during the reveal
       if (chain.chainReady && st.wallet.owner) {
-        const p = await chain.fetchPot(rid).catch(() => null);
-        set({ pot: p ? { roundId: rid, perBlock: p.perBlock, total: p.total, miners: p.miners } : emptyPot(rid) });
+        const p = await board.fetchBoardRound(rid).catch(() => null);
+        set({ pot: p ? { roundId: rid, perBlock: p.perSquare, total: p.total, miners: p.miners } : emptyPot(rid) });
         return;
       }
       const frac = 1 - (roundEnd(rid) - now) / (ROUND_SECS * 1000);

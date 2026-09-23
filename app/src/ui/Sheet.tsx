@@ -7,7 +7,8 @@ import {
 } from '../game/constants';
 import { GEAR_ICON, ITEM_ICON } from './icons';
 import { useGame, useLevelXp, useOwnedMask, usePoints } from '../game/store';
-import { chainReady, CLUSTER, fetchLeaderboard, fetchPastRounds, PROGRAM_ID, short, SKR_MINT, type LeaderRow, type PastRound } from '../chain/client';
+import { chainReady, CLUSTER, fetchLeaderboard, PROGRAM_ID, short, SKR_MINT, type LeaderRow } from '../chain/client';
+import { fetchPastBoardRounds, type BoardRound } from '../chain/board';
 import { ADMIN_FEE, emptyPot, fmtSol, potFee_, practiceMotherlode, simPot, soloMask } from '../game/pot';
 import { UnclaimedRow } from './Dock';
 import { Bar, Btn, Card, Pill, T } from './kit';
@@ -263,7 +264,7 @@ function SkrTab() {
 
 const BOT_NAMES = ['Batu', 'Emas', 'Intan', 'Perak', 'Kilat', 'Rimba', 'Sagu', 'Tembaga'];
 /** Practice mode: stand-in history built from the same simulated crowd the map shows. */
-function practiceRounds(before: number, n: number): PastRound[] {
+function practiceRounds(before: number, n: number): BoardRound[] {
   return [...Array(n).keys()].map((k) => {
     const id = before - 1 - k;
     const h = (Math.imul(id, 2654435761) >>> 0) / 4294967296;
@@ -275,19 +276,17 @@ function practiceRounds(before: number, n: number): PastRound[] {
     return {
       roundId: id,
       winning,
-      pot: {
-        ...emptyPot(id),
-        ...pot,
-        fees,
-        pool: pot.total - fees,
-        skrReward: pot.perBlock[winning] > 0 ? ROUND_REWARD_SKR : 0,
-        motherlodeSkr: motherlode ? practiceMotherlode(id) : 0,
-        motherlode,
-        split,
-        winner: split ? null : `${BOT_NAMES[Math.floor(h * 97) % BOT_NAMES.length]}-bot`,
-        winnersPaid: Math.max(1, Math.round(pot.miners * 0.3)),
-        settled: true,
-      },
+      perSquare: pot.perBlock,
+      total: pot.total,
+      returned: pot.total - fees,
+      fees,
+      oreReward: pot.perBlock[winning] > 0 ? 1 : 0,
+      motherlodeOre: motherlode ? practiceMotherlode(id) / 1000 : 0,
+      motherlode,
+      split,
+      winner: split ? null : `${BOT_NAMES[Math.floor(h * 97) % BOT_NAMES.length]}-bot`,
+      miners: pot.miners,
+      settled: true,
     };
   });
 }
@@ -296,12 +295,12 @@ function Rounds() {
   const owner = useGame((s) => s.wallet.owner);
   const roundId = useGame((s) => s.roundId);
   const onChain = Boolean(owner && chainReady);
-  const [rows, setRows] = useState<PastRound[] | null>(null);
+  const [rows, setRows] = useState<BoardRound[] | null>(null);
   const [at, setAt] = useState(0);
   useEffect(() => {
     let live = true;
     setRows(null);
-    (onChain ? fetchPastRounds(roundId) : Promise.resolve(practiceRounds(roundId, 12)))
+    (onChain ? fetchPastBoardRounds(roundId) : Promise.resolve(practiceRounds(roundId, 12)))
       .then((r) => live && setRows(r))
       .catch(() => live && setRows([]));
     return () => {
@@ -335,12 +334,13 @@ function Rounds() {
         </Card>
       ) : (
         rows.map((r) => {
-          const p = r.pot;
-          const nobody = !(p.perBlock[r.winning] > 0);
+          const p = r;
+          const win = r.winning ?? 0;
+          const nobody = !(p.perSquare[win] > 0);
           const who = nobody
             ? 'Nobody on the gold spot'
             : p.split
-              ? `Split · ${p.winnersPaid || '…'} miner${p.winnersPaid === 1 ? '' : 's'}`
+              ? `Split · ${p.miners || '…'} miner${p.miners === 1 ? '' : 's'}`
               : p.winner
                 ? `★ Solo · ${p.winner === owner ? 'You' : p.winner.length > 20 ? short(p.winner) : p.winner}`
                 : '★ Solo · 1 wallet (claim pending)';
@@ -348,7 +348,7 @@ function Rounds() {
             <View key={r.roundId} style={[styles.past, p.winner && p.winner === owner && { borderColor: COLORS.gold }]}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <T v="bold">
-                  #{(r.roundId % 100000).toLocaleString()} · spot {r.winning + 1}
+                  #{(r.roundId % 100000).toLocaleString()} · square {win + 1}
                   {p.motherlode ? '  💎 MOTHERLODE' : ''}
                 </T>
                 <T v="muted" style={{ fontSize: 11 }}>
@@ -357,8 +357,8 @@ function Rounds() {
               </View>
               <T style={{ marginTop: 2, color: p.split || nobody ? COLORS.text : COLORS.gold }}>{who}</T>
               <T v="muted" style={{ fontSize: 12, marginTop: 2 }}>
-                ◎ {fmtSol(p.total)} SOL in · {fmtSol(p.fees)} fees · ◈ {Math.floor(p.skrReward).toLocaleString()} SKR
-                {p.motherlodeSkr > 0 ? ` + ${Math.floor(p.motherlodeSkr).toLocaleString()} motherlode` : ''}
+                ◎ {fmtSol(p.total)} SOL in · {fmtSol(p.fees)} fees · ◈ {p.oreReward.toFixed(2)} ORE
+                {p.motherlodeOre > 0 ? ` + ${p.motherlodeOre.toFixed(2)} motherlode` : ''}
               </T>
             </View>
           );
