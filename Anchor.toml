@@ -11,6 +11,9 @@ gali = "GamTh2wWNNGU6CB5G3aF7Xeu1m7fQEtd9caRGtgPcMmV"
 
 [programs.localnet]
 gali = "GamTh2wWNNGU6CB5G3aF7Xeu1m7fQEtd9caRGtgPcMmV"
+# Test-only stand-in for ORE, deployed at ORE's own address so Gali's readers can be
+# exercised offline. Never deployed anywhere but a validator.
+ore_mock = "oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv"
 
 [provider]
 cluster = "devnet"
