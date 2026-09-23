@@ -33,7 +33,8 @@
         {
           "android": {
             "minSdkVersion": 26,
-            "enableProguardInReleaseBuilds": false
+            "enableProguardInReleaseBuilds": false,
+            "enableMinifyInReleaseBuilds": false
           }
         }
       ],
@@ -44,7 +45,18 @@
         }
       ],
       "expo-font",
-      "expo-audio"
-    ]
+      [
+        "expo-audio",
+        {
+          "recordAudioAndroid": false,
+          "enableBackgroundPlayback": false
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "2c57960e-78e4-4b88-822e-275d5ade8706"
+      }
+    }
   }
 }
