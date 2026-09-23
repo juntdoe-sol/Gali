@@ -1,0 +1,131 @@
+{
+  "address": "oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv",
+  "metadata": {
+    "name": "ore_mock",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Gali: a mining game for Solana Seeker"
+  },
+  "instructions": [
+    {
+      "name": "put_board",
+      "docs": [
+        "Create or overwrite ORE's board at its fixed address."
+      ],
+      "discriminator": [
+        186,
+        227,
+        77,
+        220,
+        77,
+        200,
+        21,
+        154
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "account",
+          "writable": true
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "data",
+          "type": "bytes"
+        }
+      ]
+    },
+    {
+      "name": "put_round",
+      "docs": [
+        "Create or overwrite a round account at ORE's `[\"round\", id]` seeds."
+      ],
+      "discriminator": [
+        35,
+        43,
+        252,
+        224,
+        198,
+        81,
+        24,
+        87
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "account",
+          "writable": true
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "round_id",
+          "type": "u64"
+        },
+        {
+          "name": "data",
+          "type": "bytes"
+        }
+      ]
+    },
+    {
+      "name": "put_miner",
+      "docs": [
+        "Create or overwrite a miner account at ORE's `[\"miner\", authority]` seeds."
+      ],
+      "discriminator": [
+        150,
+        115,
+        34,
+        47,
+        124,
+        0,
+        92,
+        156
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "account",
+          "writable": true
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "authority",
+          "type": "pubkey"
+        },
+        {
+          "name": "data",
+          "type": "bytes"
+        }
+      ]
+    }
+  ],
+  "accounts": [],
+  "events": [],
+  "errors": [],
+  "types": []
+}
