@@ -86,32 +86,10 @@ pub const DRAW_EXPIRY_SLOTS: u64 = SLOT_HASH_WINDOW;
 /// End of a round as a unix timestamp, rejecting round ids that can't exist.
 
 fn check_config(cfg: &Config) -> Result<()> {
-    require!(cfg.round_secs >= 15, GaliError::BadConfig);
-    require!(cfg.gear_prices.len() <= MAX_GEAR, GaliError::BadConfig);
-    require!(cfg.pot_fee_bps <= MAX_POT_FEE_BPS, GaliError::BadConfig);
-    require!(
-        cfg.motherlode_pool_bps as u64 + cfg.rewards_pool_bps as u64 <= BPS,
-        GaliError::BadConfig
-    );
-    require!(cfg.min_deploy > 0, GaliError::BadConfig);
-    // the drip is what bounds a round's SKR payout to a slice of the pool, so it can't be switched off
-    require!(
-        cfg.reward_drip_bps >= 1 && cfg.reward_drip_bps <= MAX_DRIP_BPS,
-        GaliError::BadConfig
-    );
-    require!(cfg.buyback_bps as u64 <= BPS, GaliError::BadConfig);
+    require!(cfg.gear_prices_usd.len() <= MAX_GEAR, GaliError::BadConfig);
+    require!(cfg.motherlode_pool_bps as u64 <= BPS, GaliError::BadConfig);
     require!(
         cfg.boost_tier2 == 0 || cfg.boost_tier2 >= cfg.boost_tier1,
-        GaliError::BadConfig
-    );
-    // $ORE: same shape of limits as SKR
-    require!(cfg.gear_prices_ore.len() <= MAX_GEAR, GaliError::BadConfig);
-    require!(
-        cfg.ore_motherlode_bps as u64 + cfg.ore_rewards_bps as u64 <= BPS,
-        GaliError::BadConfig
-    );
-    require!(
-        cfg.ore_drip_bps >= 1 && cfg.ore_drip_bps <= MAX_DRIP_BPS,
         GaliError::BadConfig
     );
     require!(
@@ -121,43 +99,89 @@ fn check_config(cfg: &Config) -> Result<()> {
     Ok(())
 }
 
+/// Raw token units for a price in millionths of a dollar.
+///
+/// `rate_micro` is what one whole token costs, in the same millionths, so the
+/// decimals cancel out into the token's own smallest unit. Neither SKR nor ORE has
+/// a Pyth feed, so the rate is set by the admin and the app shows a live Jupiter
+/// quote beside it for anyone who wants to check the two against each other.
+fn token_units(usd_micro: u64, rate_micro: u64, decimals: u8) -> Result<u64> {
+    require!(rate_micro > 0, GaliError::PriceUnset);
+    let scale = 10u128
+        .checked_pow(decimals as u32)
+        .ok_or(GaliError::BadConfig)?;
+    let units = (usd_micro as u128)
+        .checked_mul(scale)
+        .ok_or(GaliError::BadAmount)?
+        / rate_micro as u128;
+    u64::try_from(units).map_err(|_| GaliError::BadAmount.into())
+}
+
+/// Refuses a sale priced off a rate nobody has touched in too long.
+fn fresh_prices(cfg: &Config) -> Result<()> {
+    if cfg.price_max_age_secs == 0 {
+        return Ok(());
+    }
+    let age = Clock::get()?
+        .unix_timestamp
+        .saturating_sub(cfg.price_updated_at);
+    require!(age <= cfg.price_max_age_secs as i64, GaliError::PriceStale);
+    Ok(())
+}
+
 #[program]
 pub mod gali {
     use super::*;
 
     pub fn init_config(ctx: Context<InitConfig>, args: ConfigArgs) -> Result<()> {
-        require!(args.gear_prices.len() <= MAX_GEAR, GaliError::BadConfig);
+        require!(args.gear_prices_usd.len() <= MAX_GEAR, GaliError::BadConfig);
         let c = &mut ctx.accounts.config;
         c.authority = ctx.accounts.authority.key();
         c.skr_mint = ctx.accounts.skr_mint.key();
-        c.round_secs = args.round_secs;
+        c.ore_mint = ctx.accounts.ore_mint.key();
         c.base_points = args.base_points;
         c.motherlode_points = args.motherlode_points;
         c.boost_tier1 = args.boost_tier1;
         c.boost_tier2 = args.boost_tier2;
-        c.gear_prices = args.gear_prices;
-        c.motherlode_skr = args.motherlode_skr;
-        c.motherlode_pool_bps = args.motherlode_pool_bps;
-        c.rewards_pool_bps = args.rewards_pool_bps;
-        c.pot_fee_bps = args.pot_fee_bps;
-        c.min_deploy = args.min_deploy;
-        c.round_reward_skr = args.round_reward_skr;
-        c.reward_drip_bps = args.reward_drip_bps;
-        c.buyback_bps = args.buyback_bps;
-        c.buyback_due = 0;
-        c.ore_mint = ctx.accounts.ore_mint.key();
-        c.gear_prices_ore = args.gear_prices_ore;
-        c.ore_motherlode_bps = args.ore_motherlode_bps;
-        c.ore_rewards_bps = args.ore_rewards_bps;
         c.ore_boost_tier1 = args.ore_boost_tier1;
         c.ore_boost_tier2 = args.ore_boost_tier2;
-        c.round_reward_ore = args.round_reward_ore;
-        c.motherlode_ore = args.motherlode_ore;
-        c.ore_drip_bps = args.ore_drip_bps;
+        c.gear_prices_usd = args.gear_prices_usd;
+        c.skr_price_micro = args.skr_price_micro;
+        c.ore_price_micro = args.ore_price_micro;
+        c.price_updated_at = Clock::get()?.unix_timestamp;
+        c.price_max_age_secs = args.price_max_age_secs;
+        c.motherlode_pool_bps = args.motherlode_pool_bps;
         c.paused = false;
         c.pending_authority = Pubkey::default();
         c.bump = ctx.bumps.config;
         check_config(c)
+    }
+
+    /// Set what one whole SKR and one whole ORE cost, in millionths of a dollar.
+    ///
+    /// Gear is priced in dollars, so this is the only thing that decides how many
+    /// tokens an item costs. It is admin-only and stamped with the time, and
+    /// `price_max_age_secs` is what stops a forgotten rate from selling a $270 item
+    /// for pennies after the token moves.
+    pub fn set_token_prices(
+        ctx: Context<AdminConfig>,
+        skr_price_micro: u64,
+        ore_price_micro: u64,
+    ) -> Result<()> {
+        require!(
+            skr_price_micro > 0 && ore_price_micro > 0,
+            GaliError::BadAmount
+        );
+        let c = &mut ctx.accounts.config;
+        c.skr_price_micro = skr_price_micro;
+        c.ore_price_micro = ore_price_micro;
+        c.price_updated_at = Clock::get()?.unix_timestamp;
+        emit!(TokenPricesSet {
+            skr_price_micro,
+            ore_price_micro,
+            at: c.price_updated_at,
+        });
+        Ok(())
     }
 
     /* ---------------- admin ---------------- */
@@ -177,58 +201,21 @@ pub mod gali {
         if let Some(v) = u.boost_tier2 {
             c.boost_tier2 = v;
         }
-        if let Some(v) = u.gear_prices {
-            require!(v.len() <= MAX_GEAR, GaliError::BadConfig);
-            c.gear_prices = v;
-        }
-        if let Some(v) = u.motherlode_skr {
-            c.motherlode_skr = v;
-        }
-        if let Some(v) = u.motherlode_pool_bps {
-            c.motherlode_pool_bps = v;
-        }
-        if let Some(v) = u.rewards_pool_bps {
-            c.rewards_pool_bps = v;
-        }
-        if let Some(v) = u.pot_fee_bps {
-            c.pot_fee_bps = v;
-        }
-        if let Some(v) = u.min_deploy {
-            c.min_deploy = v;
-        }
-        if let Some(v) = u.round_reward_skr {
-            c.round_reward_skr = v;
-        }
-        if let Some(v) = u.reward_drip_bps {
-            c.reward_drip_bps = v;
-        }
-        if let Some(v) = u.buyback_bps {
-            c.buyback_bps = v;
-        }
-        if let Some(v) = u.gear_prices_ore {
-            require!(v.len() <= MAX_GEAR, GaliError::BadConfig);
-            c.gear_prices_ore = v;
-        }
-        if let Some(v) = u.ore_motherlode_bps {
-            c.ore_motherlode_bps = v;
-        }
-        if let Some(v) = u.ore_rewards_bps {
-            c.ore_rewards_bps = v;
-        }
         if let Some(v) = u.ore_boost_tier1 {
             c.ore_boost_tier1 = v;
         }
         if let Some(v) = u.ore_boost_tier2 {
             c.ore_boost_tier2 = v;
         }
-        if let Some(v) = u.round_reward_ore {
-            c.round_reward_ore = v;
+        if let Some(v) = u.gear_prices_usd {
+            require!(v.len() <= MAX_GEAR, GaliError::BadConfig);
+            c.gear_prices_usd = v;
         }
-        if let Some(v) = u.motherlode_ore {
-            c.motherlode_ore = v;
+        if let Some(v) = u.price_max_age_secs {
+            c.price_max_age_secs = v;
         }
-        if let Some(v) = u.ore_drip_bps {
-            c.ore_drip_bps = v;
+        if let Some(v) = u.motherlode_pool_bps {
+            c.motherlode_pool_bps = v;
         }
         check_config(c)?;
         emit!(ConfigUpdated {
@@ -245,23 +232,17 @@ pub mod gali {
     }
 
     /// Move SKR from the treasury (the protocol's cut of gear sales) to any SKR account.
-    /// The Motherlode Pool, Rewards Pool, pot escrow and staking vault have no withdraw path.
-    /// Anyone can top up the $ORE pools: the team, ORE themselves, a sponsor, a player.
-    /// `to_motherlode` picks which pool; false means the Rewards Pool that rounds mine from.
-    pub fn fund_ore(ctx: Context<FundOre>, amount: u64, to_motherlode: bool) -> Result<()> {
+    /// Top up the $ORE pool. Anyone may: the team, ORE themselves, a sponsor, a player.
+    /// The pool has no withdraw path, so what goes in can only leave as a payout.
+    pub fn fund_ore(ctx: Context<FundOre>, amount: u64) -> Result<()> {
         require!(amount > 0, GaliError::BadAmount);
-        let dest = if to_motherlode {
-            ctx.accounts.ore_motherlode.to_account_info()
-        } else {
-            ctx.accounts.ore_rewards.to_account_info()
-        };
         token_interface::transfer_checked(
             CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
                 TransferChecked {
                     from: ctx.accounts.funder_ata.to_account_info(),
                     mint: ctx.accounts.ore_mint.to_account_info(),
-                    to: dest,
+                    to: ctx.accounts.ore_motherlode.to_account_info(),
                     authority: ctx.accounts.funder.to_account_info(),
                 },
             ),
@@ -271,7 +252,7 @@ pub mod gali {
         emit!(OreFunded {
             funder: ctx.accounts.funder.key(),
             amount,
-            to_motherlode
+            to_motherlode: true,
         });
         Ok(())
     }
@@ -595,21 +576,23 @@ pub mod gali {
         let cfg = &ctx.accounts.config;
         require!(!cfg.paused, GaliError::Paused);
         require!((item as usize) < MAX_GEAR, GaliError::UnknownItem);
-        let price = *cfg
-            .gear_prices_ore
+        fresh_prices(cfg)?;
+        let usd = *cfg
+            .gear_prices_usd
             .get(item as usize)
             .ok_or(GaliError::UnknownItem)?;
-        // 0 means this item is SKR-only
-        require!(price > 0, GaliError::UnknownItem);
+        require!(usd > 0, GaliError::UnknownItem);
+        let decimals = ctx.accounts.ore_mint.decimals;
+        let price = token_units(usd, cfg.ore_price_micro, decimals)?;
+        require!(price > 0, GaliError::BadAmount);
+
         let p = &mut ctx.accounts.player;
         require!(p.gear_mask & (1u32 << item) == 0, GaliError::AlreadyOwned);
-        let to_motherlode = price.saturating_mul(cfg.ore_motherlode_bps as u64) / BPS;
-        let to_rewards = price.saturating_mul(cfg.ore_rewards_bps as u64) / BPS;
-        let to_treasury = price - to_motherlode - to_rewards;
-        let decimals = ctx.accounts.ore_mint.decimals;
+
+        let to_motherlode = price.saturating_mul(cfg.motherlode_pool_bps as u64) / BPS;
+        let to_treasury = price - to_motherlode;
         for (amount, dest) in [
             (to_motherlode, ctx.accounts.ore_motherlode.to_account_info()),
-            (to_rewards, ctx.accounts.ore_rewards.to_account_info()),
             (to_treasury, ctx.accounts.ore_treasury.to_account_info()),
         ] {
             if amount == 0 {
@@ -759,40 +742,43 @@ pub mod gali {
     pub fn buy_gear(ctx: Context<BuyGear>, item: u8) -> Result<()> {
         let cfg = &ctx.accounts.config;
         require!(!cfg.paused, GaliError::Paused);
-        let price = *cfg
-            .gear_prices
+        require!((item as usize) < MAX_GEAR, GaliError::UnknownItem);
+        fresh_prices(cfg)?;
+        let usd = *cfg
+            .gear_prices_usd
             .get(item as usize)
             .ok_or(GaliError::UnknownItem)?;
+        require!(usd > 0, GaliError::UnknownItem);
+        let decimals = ctx.accounts.skr_mint.decimals;
+        let price = token_units(usd, cfg.skr_price_micro, decimals)?;
+        require!(price > 0, GaliError::BadAmount);
+
         let p = &mut ctx.accounts.player;
-        require!((item as usize) < MAX_GEAR, GaliError::UnknownItem);
         require!(p.gear_mask & (1u32 << item) == 0, GaliError::AlreadyOwned);
-        if price > 0 {
-            let to_motherlode = price.saturating_mul(cfg.motherlode_pool_bps as u64) / BPS;
-            let to_rewards = price.saturating_mul(cfg.rewards_pool_bps as u64) / BPS;
-            let to_treasury = price - to_motherlode - to_rewards;
-            let decimals = ctx.accounts.skr_mint.decimals;
-            for (amount, dest) in [
-                (to_motherlode, ctx.accounts.motherlode.to_account_info()),
-                (to_rewards, ctx.accounts.rewards.to_account_info()),
-                (to_treasury, ctx.accounts.treasury.to_account_info()),
-            ] {
-                if amount == 0 {
-                    continue;
-                }
-                token_interface::transfer_checked(
-                    CpiContext::new(
-                        ctx.accounts.token_program.to_account_info(),
-                        TransferChecked {
-                            from: ctx.accounts.user_ata.to_account_info(),
-                            mint: ctx.accounts.skr_mint.to_account_info(),
-                            to: dest,
-                            authority: ctx.accounts.owner.to_account_info(),
-                        },
-                    ),
-                    amount,
-                    decimals,
-                )?;
+
+        // Most of a sale goes back into the jackpot players are chasing.
+        let to_motherlode = price.saturating_mul(cfg.motherlode_pool_bps as u64) / BPS;
+        let to_treasury = price - to_motherlode;
+        for (amount, dest) in [
+            (to_motherlode, ctx.accounts.motherlode.to_account_info()),
+            (to_treasury, ctx.accounts.treasury.to_account_info()),
+        ] {
+            if amount == 0 {
+                continue;
             }
+            token_interface::transfer_checked(
+                CpiContext::new(
+                    ctx.accounts.token_program.to_account_info(),
+                    TransferChecked {
+                        from: ctx.accounts.user_ata.to_account_info(),
+                        mint: ctx.accounts.skr_mint.to_account_info(),
+                        to: dest,
+                        authority: ctx.accounts.owner.to_account_info(),
+                    },
+                ),
+                amount,
+                decimals,
+            )?;
         }
         p.gear_mask |= 1u32 << item;
         emit!(GearBought {
@@ -830,58 +816,40 @@ fn boost_bps(cfg: &Config, staked_skr: u64, staked_ore: u64) -> u16 {
 pub struct Config {
     pub authority: Pubkey,
     pub skr_mint: Pubkey,
-    pub round_secs: u32,
-    pub base_points: u64,
-    pub motherlode_points: u64,
-    /// raw SKR amounts (with decimals) for the 1.25x and 1.5x boosts
-    pub boost_tier1: u64,
-    pub boost_tier2: u64,
-    /// raw SKR price per gear item, index = item id (bit in Player::gear_mask)
-    #[max_len(32)]
-    pub gear_prices: Vec<u64>,
-    /// raw SKR moved from the Rewards Pool to the Motherlode Pool by each settled round
-    pub motherlode_skr: u64,
-    /// share of every gear sale routed to the Motherlode Pool, in bps
-    pub motherlode_pool_bps: u16,
-    /// share of every gear sale routed to the Rewards Pool, in bps (the rest goes to the treasury)
-    pub rewards_pool_bps: u16,
-    /// SOL fee on each losing spot (after the 1% admin fee), in bps (sent to the authority / treasury wallet)
-    pub pot_fee_bps: u16,
-    /// minimum lamports per block for `deploy`
-    pub min_deploy: u64,
-    /// raw SKR mined per round, split between the miners on the winning block
-    pub round_reward_skr: u64,
-    /// when true, `deploy` and `buy_gear` are refused
-    pub paused: bool,
+    pub ore_mint: Pubkey,
     /// set by `propose_authority`, cleared by `accept_authority`
     pub pending_authority: Pubkey,
     pub bump: u8,
-    // Added with the fee-funded rewards. They sit in the old config's unused gear-price space and read as 0
-    // there (0 = the old fixed payouts), so existing configs keep working after an upgrade.
-    /// max share of the Rewards Pool one round can pay out (round reward + Motherlode top-up), in bps; 0 = no limit
-    pub reward_drip_bps: u16,
-    /// share of each round's SOL fees owed to SKR buybacks for the Rewards Pool, in bps
-    pub buyback_bps: u16,
-    /// lamports of fees held in the buyback escrow and not yet withdrawn to buy SKR
-    pub buyback_due: u64,
-    // --- $ORE: the second asset. Gali never mints it either; every ORE paid out was spent
-    // on gear by a player or funded by someone. ---
-    pub ore_mint: Pubkey,
-    /// raw ORE price per gear item, index = item id. Empty or 0 = that item cannot be bought with ORE.
-    #[max_len(32)]
-    pub gear_prices_ore: Vec<u64>,
-    /// share of every ORE gear sale routed to the ORE Motherlode Pool, in bps
-    pub ore_motherlode_bps: u16,
-    /// share of every ORE gear sale routed to the ORE Rewards Pool, in bps (the rest goes to the treasury)
-    pub ore_rewards_bps: u16,
-    /// raw ORE staked for the 1.25x and 1.5x boosts; the better of the SKR and ORE boosts applies
+    /// when true, gear sales and staking are refused
+    pub paused: bool,
+
+    /// points a recorded win is worth before the per-square and boost scaling
+    pub base_points: u64,
+    /// extra points when the round hit ORE's motherlode
+    pub motherlode_points: u64,
+
+    /// raw SKR staked for the 1.25x and 1.5x point boosts
+    pub boost_tier1: u64,
+    pub boost_tier2: u64,
+    /// raw ORE staked for the same tiers; the better of the two applies, they do not stack
     pub ore_boost_tier1: u64,
     pub ore_boost_tier2: u64,
-    /// raw ORE mined per round by the winning spot, and moved into the ORE Motherlode Pool each round
-    pub round_reward_ore: u64,
-    pub motherlode_ore: u64,
-    /// max share of the ORE Rewards Pool one round can pay out, in bps
-    pub ore_drip_bps: u16,
+
+    /// Gear is priced in millionths of a dollar, one entry per item id, so a move in
+    /// either token does not silently reprice the shop.
+    #[max_len(32)]
+    pub gear_prices_usd: Vec<u64>,
+    /// millionths of a dollar for one whole SKR, and for one whole ORE
+    pub skr_price_micro: u64,
+    pub ore_price_micro: u64,
+    /// when the rates above were last set
+    pub price_updated_at: i64,
+    /// how stale a rate may be before gear sales are refused. 0 disables the check,
+    /// which is only reasonable on a test validator.
+    pub price_max_age_secs: u32,
+
+    /// share of every gear sale routed to the Motherlode Pool, in bps; the rest is treasury
+    pub motherlode_pool_bps: u16,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Default)]
@@ -890,49 +858,26 @@ pub struct ConfigUpdate {
     pub motherlode_points: Option<u64>,
     pub boost_tier1: Option<u64>,
     pub boost_tier2: Option<u64>,
-    pub gear_prices: Option<Vec<u64>>,
-    pub motherlode_skr: Option<u64>,
-    pub motherlode_pool_bps: Option<u16>,
-    pub rewards_pool_bps: Option<u16>,
-    pub pot_fee_bps: Option<u16>,
-    pub min_deploy: Option<u64>,
-    pub round_reward_skr: Option<u64>,
-    pub reward_drip_bps: Option<u16>,
-    pub buyback_bps: Option<u16>,
-    pub gear_prices_ore: Option<Vec<u64>>,
-    pub ore_motherlode_bps: Option<u16>,
-    pub ore_rewards_bps: Option<u16>,
     pub ore_boost_tier1: Option<u64>,
     pub ore_boost_tier2: Option<u64>,
-    pub round_reward_ore: Option<u64>,
-    pub motherlode_ore: Option<u64>,
-    pub ore_drip_bps: Option<u16>,
+    pub gear_prices_usd: Option<Vec<u64>>,
+    pub price_max_age_secs: Option<u32>,
+    pub motherlode_pool_bps: Option<u16>,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct ConfigArgs {
-    pub round_secs: u32,
     pub base_points: u64,
     pub motherlode_points: u64,
     pub boost_tier1: u64,
     pub boost_tier2: u64,
-    pub gear_prices: Vec<u64>,
-    pub motherlode_skr: u64,
-    pub motherlode_pool_bps: u16,
-    pub rewards_pool_bps: u16,
-    pub pot_fee_bps: u16,
-    pub min_deploy: u64,
-    pub round_reward_skr: u64,
-    pub reward_drip_bps: u16,
-    pub buyback_bps: u16,
-    pub gear_prices_ore: Vec<u64>,
-    pub ore_motherlode_bps: u16,
-    pub ore_rewards_bps: u16,
     pub ore_boost_tier1: u64,
     pub ore_boost_tier2: u64,
-    pub round_reward_ore: u64,
-    pub motherlode_ore: u64,
-    pub ore_drip_bps: u16,
+    pub gear_prices_usd: Vec<u64>,
+    pub skr_price_micro: u64,
+    pub ore_price_micro: u64,
+    pub price_max_age_secs: u32,
+    pub motherlode_pool_bps: u16,
 }
 
 #[account]
@@ -1022,16 +967,6 @@ pub struct InitConfig<'info> {
         token::mint = skr_mint, token::authority = config, token::token_program = token_program
     )]
     pub motherlode: Box<InterfaceAccount<'info, TokenAccount>>,
-    #[account(
-        init, payer = authority, seeds = [b"rewards"], bump,
-        token::mint = skr_mint, token::authority = config, token::token_program = token_program
-    )]
-    pub rewards: Box<InterfaceAccount<'info, TokenAccount>>,
-    #[account(
-        init, payer = authority, seeds = [b"pot_vault"], bump,
-        token::mint = skr_mint, token::authority = config, token::token_program = token_program
-    )]
-    pub pot_vault: Box<InterfaceAccount<'info, TokenAccount>>,
     /// $ORE, the second asset. Same rule as SKR: a plain SPL mint only.
     #[account(constraint = *ore_mint.to_account_info().owner == anchor_spl::token::ID @ GaliError::BadConfig)]
     pub ore_mint: Box<InterfaceAccount<'info, Mint>>,
@@ -1050,16 +985,6 @@ pub struct InitConfig<'info> {
         token::mint = ore_mint, token::authority = config, token::token_program = token_program
     )]
     pub ore_motherlode: Box<InterfaceAccount<'info, TokenAccount>>,
-    #[account(
-        init, payer = authority, seeds = [b"ore_rewards"], bump,
-        token::mint = ore_mint, token::authority = config, token::token_program = token_program
-    )]
-    pub ore_rewards: Box<InterfaceAccount<'info, TokenAccount>>,
-    #[account(
-        init, payer = authority, seeds = [b"ore_pot_vault"], bump,
-        token::mint = ore_mint, token::authority = config, token::token_program = token_program
-    )]
-    pub ore_pot_vault: Box<InterfaceAccount<'info, TokenAccount>>,
     pub token_program: Interface<'info, TokenInterface>,
     pub system_program: Program<'info, System>,
 }
@@ -1086,8 +1011,6 @@ pub struct FundOre<'info> {
     pub ore_mint: Box<InterfaceAccount<'info, Mint>>,
     #[account(mut, token::mint = ore_mint, token::authority = funder, token::token_program = token_program)]
     pub funder_ata: Box<InterfaceAccount<'info, TokenAccount>>,
-    #[account(mut, seeds = [b"ore_rewards"], bump)]
-    pub ore_rewards: Box<InterfaceAccount<'info, TokenAccount>>,
     #[account(mut, seeds = [b"ore_motherlode"], bump)]
     pub ore_motherlode: Box<InterfaceAccount<'info, TokenAccount>>,
     pub token_program: Interface<'info, TokenInterface>,
@@ -1168,8 +1091,6 @@ pub struct BuyGearOre<'info> {
     pub ore_treasury: InterfaceAccount<'info, TokenAccount>,
     #[account(mut, seeds = [b"ore_motherlode"], bump)]
     pub ore_motherlode: InterfaceAccount<'info, TokenAccount>,
-    #[account(mut, seeds = [b"ore_rewards"], bump)]
-    pub ore_rewards: InterfaceAccount<'info, TokenAccount>,
     pub token_program: Interface<'info, TokenInterface>,
 }
 
@@ -1319,8 +1240,6 @@ pub struct BuyGear<'info> {
     pub treasury: InterfaceAccount<'info, TokenAccount>,
     #[account(mut, seeds = [b"motherlode"], bump)]
     pub motherlode: InterfaceAccount<'info, TokenAccount>,
-    #[account(mut, seeds = [b"rewards"], bump)]
-    pub rewards: InterfaceAccount<'info, TokenAccount>,
     pub token_program: Interface<'info, TokenInterface>,
 }
 
@@ -1331,6 +1250,13 @@ pub struct SessionSet {
     pub owner: Pubkey,
     pub session: Pubkey,
     pub expires_at: i64,
+}
+
+#[event]
+pub struct TokenPricesSet {
+    pub skr_price_micro: u64,
+    pub ore_price_micro: u64,
+    pub at: i64,
 }
 
 #[event]
@@ -1490,4 +1416,8 @@ pub enum GaliError {
     OreRoundStillLive,
     #[msg("You were not on the winning square")]
     NotOnWinningSquare,
+    #[msg("No exchange rate is set for that token")]
+    PriceUnset,
+    #[msg("The exchange rate is stale; gear sales are paused until it is refreshed")]
+    PriceStale,
 }
