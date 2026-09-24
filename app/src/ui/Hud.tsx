@@ -1,10 +1,10 @@
 import type { ReactNode } from 'react';
 import { Image, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CAVE_IN_EVERY, COLORS, LOCK_MS, levelFromXp, ROUND_SECS, xpForLevel } from '../game/constants';
+import { CAVE_IN_EVERY, COLORS, LOCK_MS, levelFromXp, MOTHERLODE_ODDS, ROUND_SECS, xpForLevel } from '../game/constants';
 import { chainReady } from '../chain/client';
 import { roundEnd, useGame, useLevelXp, usePoints, useRoundReward } from '../game/store';
-const fmtSkr = (v: number) => (v >= 10 ? Math.floor(v).toLocaleString() : v.toFixed(1));
+const fmtOre = (v: number) => (v >= 10 ? Math.floor(v).toLocaleString() : v >= 1 ? v.toFixed(2) : v.toFixed(3));
 import { short } from '../chain/client';
 import { fmtSol, practiceMotherlode } from '../game/pot';
 import { Bar, F, Frame, Pill, T } from './kit';
@@ -154,7 +154,7 @@ export function RoundCard() {
           color={COLORS.text}
         />
         <View style={styles.divider} />
-        <BigStat icon={<T v="black" style={{ fontSize: 18, color: COLORS.gold }}>◈</T>} value={compact(pool)} label="MOTHERLODE" color={COLORS.gold} />
+        <BigStat icon={<T v="black" style={{ fontSize: 18, color: COLORS.gold }}>◈</T>} value={compact(pool)} label="SKR MOTHERLODE" color={COLORS.gold} />
         <View style={styles.divider} />
         <BigStat
           value={
@@ -176,12 +176,12 @@ export function RoundCard() {
           #{(roundId % 100000).toLocaleString()} · {cave ? '⚠ CAVE-IN' : `Cave-in in ${CAVE_IN_EVERY - (roundId % CAVE_IN_EVERY)}`}
         </T>
         <T v="bold" style={{ fontSize: 11, color: COLORS.muted }} numberOfLines={1}>
-          {pending ? `You: ${covered} claim${covered > 1 ? 's' : ''} · ${fmtSol(pending.total)} SOL` : `${fmtSkr(reward)} SKR to mine · 1/625`}
+          {pending ? `You: ${covered} claim${covered > 1 ? 's' : ''} · ${fmtSol(pending.total)} SOL` : `${fmtOre(reward)} ORE to mine · motherlode 1/${MOTHERLODE_ODDS}`}
         </T>
       </View>
       <T v="muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 1, color: run ? COLORS.teal : pending && boost > 10_000 ? COLORS.skr : COLORS.muted }} numberOfLines={1}>
         {run ? `Autopilot ${run.total - run.left}/${run.total} · ` : ''}⛏ {miners} miner{miners === 1 ? '' : 's'} this round · 👥 {here} on the map
-        {pending && boost > 10_000 ? ` · ${boost / 10_000}x SKR boost` : ''}
+        {pending && boost > 10_000 ? ` · ${boost / 10_000}x points` : ''}
       </T>
     </Frame>
   );
