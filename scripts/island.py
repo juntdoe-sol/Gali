@@ -61,8 +61,8 @@ def fbm(x, y, s):
 GX, GY = np.meshgrid(np.arange(COLS, dtype=float), np.arange(ROWS, dtype=float))
 
 # ---- the island as a field, so the coast comes out ragged rather than blocky ----
-CX, CY = COLS / 2.0, ROWS / 2.0 + 0.5
-RX, RY = COLS * 0.415, ROWS * 0.400
+CX, CY = COLS / 2.0, ROWS / 2.0 - 3.0
+RX, RY = COLS * 0.415, ROWS * 0.378
 
 
 def _landness() -> np.ndarray:
@@ -70,7 +70,7 @@ def _landness() -> np.ndarray:
     dy = (GY - CY) / RY
     d = np.sqrt(dx * dx + dy * dy)
     ang = np.arctan2(dy, dx)
-    d = d * (1 + 0.15 * np.sin(ang * 3 + 0.9) + 0.09 * np.sin(ang * 5 - 2.1))
+    d = d * (1 + 0.12 * np.sin(ang * 3 + 0.9) + 0.07 * np.sin(ang * 5 - 2.1))
     return (1 - d) + (fbm(GX / 16, GY / 16, 3) - 0.5) * 0.40
 
 
@@ -78,7 +78,7 @@ LANDNESS = _landness()
 LAND = (LANDNESS > 0)
 
 # the northern range: a few peaks the elevation piles up around
-PEAKS = [(37, 9, 17, 1.05), (51, 5, 20, 1.25), (66, 8, 18, 1.12), (83, 10, 15, 0.95), (25, 15, 13, 0.82)]
+PEAKS = [(37, 11, 17, 1.05), (51, 7, 20, 1.25), (66, 10, 18, 1.12), (83, 12, 15, 0.95), (25, 17, 13, 0.82)]
 
 # gentle relief only: the range is drawn on top as objects, so the ground
 # underneath stays walkable rather than spiking into snow.
@@ -143,9 +143,9 @@ def carve_river(sx, sy):
             x, y = bx, by
 
 
-carve_river(53, 11)
-carve_river(72, 14)
-carve_river(33, 16)
+carve_river(46, 20)
+carve_river(62, 22)
+carve_river(30, 24)
 river = lambda x, y: bool(at(RIVER, x, y, False))
 
 # ---- the 25 claims ----
@@ -264,30 +264,12 @@ for dy in (-1, 0, 1):
         _same += (_pad[1 + dy:ROWS + 1 + dy, 1 + dx:COLS + 1 + dx] == OWNER)
 OWNER = np.where((OWNER >= 0) & (_same <= 2), -1, OWNER).astype(np.int8)
 
-# A claim hemmed in by the coast ends up a sliver, and a sliver is a claim a
-# player cannot reliably hit with a thumb. Rather than leave it small, let it
-# reach past MAX_REACH into the open ground nearest its seed until it is worth
-# tapping. The unclaimed pool is what gives, so the gaps stay where there is
-# room for them.
-for c in CLAIMS:
-    i = c['i']
-    short = MIN_AREA - int((OWNER == i).sum())
-    if short <= 0:
-        continue
-    ys, xs = np.nonzero((_best == i) & (OWNER < 0) & np.isfinite(_raw))
-    if len(xs) == 0:
-        continue
-    take = np.argsort(_raw[ys, xs], kind='stable')[:short]
-    OWNER[ys[take], xs[take]] = i
-
-
 def fat_radius(i):
     """Blocks of radius at the claim's thickest point: what a thumb has to hit."""
     own = (OWNER == i)
     pad = np.zeros((ROWS + 2, COLS + 2), dtype=bool)
     pad[1:-1, 1:-1] = own
-    dist = np.zeros((ROWS, COLS), dtype=np.int16)
-    grown = own.copy()
+    grown = own
     for r in range(1, 10):
         nxt = grown.copy()
         for dy in (-1, 0, 1):
@@ -295,15 +277,45 @@ def fat_radius(i):
                 nxt &= pad[1 + dy:ROWS + 1 + dy, 1 + dx:COLS + 1 + dx]
         if not nxt.any():
             return r - 1
-        dist = np.where(nxt, r, dist)
         pad[:] = False
         pad[1:-1, 1:-1] = nxt
         grown = nxt
     return 9
 
 
-_small = [(c['i'], int((OWNER == c['i']).sum()), fat_radius(c['i'])) for c in CLAIMS]
-_bad = [(i, a, f) for i, a, f in _small if a < MIN_AREA or f < MIN_FAT]
+def neighbours_of(i):
+    """How many blocks of claim `i` touch each block on the map."""
+    pad = np.zeros((ROWS + 2, COLS + 2), dtype=np.int16)
+    pad[1:-1, 1:-1] = (OWNER == i)
+    n = np.zeros((ROWS, COLS), dtype=np.int16)
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            if dx or dy:
+                n += pad[1 + dy:ROWS + 1 + dy, 1 + dx:COLS + 1 + dx]
+    return n
+
+
+# A claim hemmed in by the coast ends up a sliver, and so does one the wobble
+# happens to carve a notch out of. Either way it is a claim a player cannot
+# reliably hit with a thumb. Rather than leave it and hand-move the seed, let it
+# take more of the open ground next to it until it is both big enough and fat
+# enough. Filling beside blocks it already owns widens the claim instead of
+# growing a tail, which is what the thickness floor actually cares about.
+for c in CLAIMS:
+    i = c['i']
+    for _ in range(24):
+        area = int((OWNER == i).sum())
+        if area >= MIN_AREA and fat_radius(i) >= MIN_FAT:
+            break
+        free = (OWNER < 0) & np.isfinite(_raw) & (neighbours_of(i) >= 3)
+        ys, xs = np.nonzero(free)
+        if len(xs) == 0:
+            break
+        take = np.argsort(_raw[ys, xs], kind='stable')[:8]
+        OWNER[ys[take], xs[take]] = i
+
+_bad = [(c['i'], int((OWNER == c['i']).sum()), fat_radius(c['i'])) for c in CLAIMS
+        if int((OWNER == c['i']).sum()) < MIN_AREA or fat_radius(c['i']) < MIN_FAT]
 if _bad:
     raise SystemExit(
         'these claims are too small to tap (claim, blocks, thickest radius): '
@@ -430,12 +442,10 @@ def paint_sea():
 
 # ---- small islands out in the sea: somewhere for the eye to rest, nothing to tap ----
 ISLETS = [
-    dict(x=16,  y=24,  r=2.8, palm=True,  rock=False),
-    dict(x=344, y=40,  r=2.4, palm=False, rock=True),
-    dict(x=13,  y=170, r=2.2, palm=False, rock=True),
-    dict(x=347, y=158, r=2.8, palm=True,  rock=False),
-    dict(x=128, y=8,   r=1.8, palm=False, rock=False),
-    dict(x=232, y=202, r=2.0, palm=False, rock=False),
+    dict(x=134, y=30,  r=1.8, palm=False, rock=False),
+    dict(x=288, y=186, r=2.0, palm=False, rock=False),
+    dict(x=54,  y=178, r=2.2, palm=True,  rock=False),
+    dict(x=302, y=48,  r=2.0, palm=False, rock=True),
 ]
 
 
@@ -549,9 +559,9 @@ def mountain(cx, base_y, w, h, snowy):
 
 
 RANGE = [
-    (54, 104, 27, 17, False), (74, 88, 33, 25, False), (100, 77, 44, 36, True),
-    (136, 70, 58, 47, True), (173, 74, 49, 41, True), (207, 81, 40, 30, True),
-    (238, 90, 33, 23, False), (269, 99, 29, 18, False),
+    (54, 95, 27, 17, False), (74, 82, 33, 25, False), (100, 72, 44, 36, True),
+    (136, 66, 58, 47, True), (173, 70, 49, 41, True), (207, 76, 40, 30, True),
+    (238, 84, 33, 23, False), (269, 92, 29, 18, False),
 ]
 
 # roads between neighbouring claims. One loose network, not every pair: a road to
@@ -578,7 +588,7 @@ def paint_features():
         o = owner_at(x, y)
         if o >= 0 and abs(CEN[o][0] - px) < 22 and abs(CEN[o][1] - py) < 20:
             continue
-        if py < 108 and 40 < px < 300:   # the range
+        if py < 100 and 40 < px < 300:   # the range
             continue
         if bm == 2:
             P.rect(px + 1, py + 3, 3, 2, '#7a5a2a')
@@ -883,6 +893,32 @@ def ship_courses():
     ]
 
 
+def fit_box(pad=5):
+    """The rectangle the app should fit to: everything drawn, not the canvas.
+
+    The canvas carries a band of sea on every side so nothing is clipped when it
+    is painted, but the app tiles that same water across the whole screen anyway
+    — fitting to the canvas only shrinks the board to make room for sea it is
+    already drawing. The union below is the land plus the two things that sit
+    outside it, the mountains rising above the coast and the islets off it;
+    either one sliced by the screen edge reads as a bug rather than a crop.
+    """
+    ys, xs = np.nonzero(LAND)
+    x0, y0 = int(xs.min()) * B, int(ys.min()) * B
+    x1, y1 = (int(xs.max()) + 1) * B, (int(ys.max()) + 1) * B + 5   # +5 for the cliff face
+    for cx, base, w, h, _snow in RANGE:
+        x0, x1 = min(x0, cx - w // 2), max(x1, cx + w // 2)
+        y0, y1 = min(y0, base - h), max(y1, base + 2)
+    for isl in ISLETS:
+        r = isl['r'] * B + B + 4
+        x0, x1 = min(x0, int(isl['x'] - r)), max(x1, int(isl['x'] + r))
+        head = 14 if isl['palm'] else 10 if isl['rock'] else 0
+        y0, y1 = min(y0, int(isl['y'] - r - head)), max(y1, int(isl['y'] + r + 5))
+    x0, y0 = max(0, x0 - pad), max(0, y0 - pad)
+    x1, y1 = min(W, x1 + pad), min(H, y1 + pad)
+    return [x0, y0, x1 - x0, y1 - y0]
+
+
 def home_point():
     """Where a character stands when they have nothing to work: open ground on the
     southern flats, off anyone's claim."""
@@ -900,11 +936,39 @@ def home_point():
 
 
 REGION_LABELS = [
-    ['THE CAP', 109, 27],
-    ['RUST BADLANDS', 284, 72],
-    ['THE GREEN', 98, 108],
-    ['SOUTH SANDS', 147, 162],
+    ['THE CAP', 96, 62],
+    ['RUST BADLANDS', 268, 104],
+    ['THE GREEN', 112, 132],
+    ['SOUTH SANDS', 186, 168],
 ]
+
+
+SEA_COLOURS = {(18, 58, 107), (10, 19, 48), (22, 71, 126), (111, 211, 232), (29, 110, 168)}
+MARGIN = 5
+
+
+def check_margin(art, margin=MARGIN):
+    """Fail if anything but open water reaches the edge of the canvas.
+
+    The island's south coast grew into the bottom edge and was being sliced off
+    flat, which is the kind of thing that is obvious on a phone and invisible
+    while tuning numbers. Cheaper to assert it than to notice it twice.
+    """
+    px = art.convert('RGB').load()
+    bad = []
+    for y in range(art.height):
+        for x in range(art.width):
+            if margin <= x < art.width - margin and margin <= y < art.height - margin:
+                continue
+            if px[x, y] not in SEA_COLOURS:
+                bad.append((x, y))
+    if bad:
+        xs = [b[0] for b in bad]
+        ys = [b[1] for b in bad]
+        raise SystemExit(
+            f'{len(bad)} pixels of land reach the canvas edge and will be cropped: '
+            f'x {min(xs)}-{max(xs)}, y {min(ys)}-{max(ys)}. '
+            'Shrink RX/RY or move the islet that overhangs.')
 
 
 def build(out_dir, scale=4):
@@ -931,7 +995,9 @@ def build(out_dir, scale=4):
         w = pen.textlength(text)
         pen.text((lx - w / 2 + 1, ly + 1), text, fill=(2, 5, 15, 105))
         pen.text((lx - w / 2, ly), text, fill=(236, 244, 255, 120))
-    save(Image.alpha_composite(art, ink), 'island.png')
+    art = Image.alpha_composite(art, ink)
+    check_margin(art)
+    save(art, 'island.png')
 
     boxes = []
     for c in CLAIMS:
@@ -980,6 +1046,7 @@ def build(out_dir, scale=4):
         ],
         'regions': REGION_LABELS,
         'ships': ship_courses(),
+        'fit': fit_box(),
         'home': home_point(),
         'grid': grid_string(),
     }

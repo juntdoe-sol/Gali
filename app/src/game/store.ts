@@ -5,7 +5,7 @@ import * as board from '../chain/board';
 import { maskToSquares } from '../chain/ore/tx';
 import {
   ACHIEVEMENTS, BLOCKS, boostFor, FREE_GEAR_MASK, GEAR, LOCK_MS, localDay, levelFromXp, MOTHERLODE_ODDS,
-  pointsFor, QUESTS, REVEAL_MIN_MS, ROUND_REWARD_SKR, ROUND_SECS,
+  pointsFor, QUESTS, REVEAL_MIN_MS, ROUND_REWARD_ORE, ROUND_REWARD_SKR, ROUND_SECS,
 } from './constants';
 import { addToPot, emptyPot, idxOf, maskOf, MIN_SOL_PER_BLOCK, payoutFor, practiceMotherlode, PRACTICE_SOL, setPotFee, simPot, smartPick, soloMask, type PotView } from './pot';
 import { haptic, play, setMuted } from './sfx';
@@ -917,6 +917,5 @@ export const useLevelXp = () =>
 export const usePoints = () => useGame((s) => (s.wallet.player ? s.wallet.player.points : s.save.points));
 export const useOwnedMask = () => useGame((s) => (s.wallet.player?.gearMask ?? 0) | FREE_GEAR_MASK);
 
-/** SKR the gold spot mines this round: the on-chain budget when connected, the fixed cap in practice. */
-export const useRoundReward = () =>
-  useGame((s) => (s.wallet.owner && chain.chainReady && s.wallet.economy ? chain.roundRewardNow(s.wallet.economy, s.wallet.rewards) : ROUND_REWARD_SKR));
+/** ORE the gold claim mines this round. ORE mints it, so the figure is the same on chain and in practice. */
+export const useRoundReward = () => ROUND_REWARD_ORE;

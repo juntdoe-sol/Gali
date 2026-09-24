@@ -226,13 +226,19 @@ export default function PixelMine() {
   const top = Math.min(fx.viewTop, H * 0.45);
   const bottom = Math.min(fx.viewBottom, H * 0.5);
   const band = Math.max(120, H - top - bottom);
-  const want = Math.min(W / MAP_W, band / MAP_H);
+  // Fit the island, not the canvas. The canvas carries a band of sea on every
+  // side so nothing is clipped when it is drawn, but the app tiles that same
+  // water across the whole screen anyway — fitting to the canvas would shrink
+  // the board to make room for sea it is already drawing. The surplus crops
+  // into the tiled ocean and the join does not show.
+  const [fitX, fitY, fitW, fitH] = ISLE.fit;
+  const want = Math.min(W / fitW, band / fitH);
   const scale = useRef(want);
   scale.current += (want - scale.current) * 0.35;
   if (Math.abs(want - scale.current) < 0.01) scale.current = want;
   const s = scale.current;
-  const left = W / 2 - (MAP_W / 2) * s;
-  const topPx = top + band / 2 - (MAP_H / 2) * s;
+  const left = W / 2 - (fitX + fitW / 2) * s;
+  const topPx = top + band / 2 - (fitY + fitH / 2) * s;
 
   // the sea tile behind everything, phased to the board so the join is invisible
   const tile = ISLE.seaTile;

@@ -6,7 +6,7 @@ export const LOCK_MS = 3_000;
 export const REVEAL_MIN_MS = 4_500; // animation length once the winner is known
 export const BASE_POINTS = 40; // points for covering every block; × 25/blocks otherwise
 export const MOTHERLODE_POINTS = 10_000;
-export const MOTHERLODE_ODDS = 625;
+export const MOTHERLODE_ODDS = 500; // ORE's own motherlode odds; a hit pays Gali's SKR pool on top to the same winners
 export const CAVE_IN_EVERY = 10;
 
 export const pointsFor = (covered: number, motherlode: boolean, boostBps: number) =>
@@ -77,7 +77,13 @@ export const SKR_USD = 0.018;
 export const MOTHERLODE_ACCRUAL_SKR = 40; // added to the Motherlode Pool by every played round; a hit pays out the whole pool
 export const MOTHERLODE_POOL_SHARE = 0.3; // share of each gear sale that feeds the Motherlode Pool
 export const REWARDS_POOL_SHARE = 0.4; // share of each gear sale that feeds the Rewards Pool
-export const ROUND_REWARD_SKR = 200; // SKR mined per round: split pro rata on the winning spot, or all to one miner if a solo spot wins
+export const ROUND_REWARD_SKR = 200; // legacy: the pre-ORE per-round SKR budget, still referenced by copy awaiting rewrite
+/**
+ * ORE mined per round, split pro rata across the gold claim, or taken whole by
+ * one miner when a solo claim wins. ORE mints this; Gali does not. Per-round SKR
+ * mining was dropped in the pivot: one asset is mined, one is the jackpot.
+ */
+export const ROUND_REWARD_ORE = 1;
 export const usd = (skr: number) => `$${(skr * SKR_USD).toLocaleString(undefined, { maximumFractionDigits: skr * SKR_USD < 10 ? 2 : 0 })}`;
 
 export const RARITY_COLOR: Record<Rarity, string> = {
