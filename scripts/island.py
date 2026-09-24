@@ -386,15 +386,34 @@ FACE = [('#6b4a32', '#4a3122'), ('#6e7a8c', '#4c5666'), ('#8a4a22', '#5e3115'), 
 P = Paint(W, H)
 
 
-def paint_sea():
-    P.rect(0, 0, W, H, '#123a6b')
-    for y in range(0, H, 4):
-        for x in range(0, W, 4):
-            n = _hash(x * 0.37 + y * 1.13)
+# The open sea repeats every SEA_TILE pixels, so the app can tile the same water
+# across the whole screen behind the board. Without it the map floats on a flat
+# blue rectangle with a visible edge, which is what the ocean around the island
+# looked like before.
+SEA_TILE = 24
+SEA_DEEP, SEA_DARK, SEA_LIGHT = '#123a6b', '#0a1330', '#16477e'
+
+
+def sea_speckle(paint, w, h):
+    for y in range(0, h, 4):
+        for x in range(0, w, 4):
+            n = _hash((x % SEA_TILE) * 0.37 + (y % SEA_TILE) * 1.13)
             if n > 0.86:
-                P.rect(x, y, 4, 2, '#0a1330')
+                paint.rect(x, y, 4, 2, SEA_DARK)
             elif n < 0.08:
-                P.rect(x, y, 4, 2, '#16477e')
+                paint.rect(x, y, 4, 2, SEA_LIGHT)
+
+
+def sea_tile():
+    t = Paint(SEA_TILE, SEA_TILE)
+    t.rect(0, 0, SEA_TILE, SEA_TILE, SEA_DEEP)
+    sea_speckle(t, SEA_TILE, SEA_TILE)
+    return t.image()
+
+
+def paint_sea():
+    P.rect(0, 0, W, H, SEA_DEEP)
+    sea_speckle(P, W, H)
     pad = np.zeros((ROWS + 6, COLS + 6), dtype=np.int16)
     pad[3:-3, 3:-3] = LAND
     near1 = sum(pad[3 + dy:ROWS + 3 + dy, 3 + dx:COLS + 3 + dx] for dy in (-1, 0, 1) for dx in (-1, 0, 1))
@@ -695,6 +714,55 @@ def icon(kind):
     return Image.fromarray(out, 'RGBA')
 
 
+ISLET_W, ISLET_H, ISLET_AX, ISLET_AY = 40, 34, 20, 24
+
+
+def islet_sprite(r, palm, rock, seed=0):
+    """A standalone islet, for the open water outside the board.
+
+    The six islets in the picture are painted into the terrain. These are the
+    same thing as sprites, so the app can drop a few into the sea it tiles
+    around the board, where there is room for them.
+    """
+    q = Paint(ISLET_W, ISLET_H)
+    mask = np.zeros((ISLET_H, ISLET_W), dtype=bool)
+
+    def put(x, y, w, h, col):
+        q.rect(x, y, w, h, col)
+        x0, y0 = max(0, int(x)), max(0, int(y))
+        mask[y0:int(y) + int(h), x0:int(x) + int(w)] = True
+
+    cx, cy = ISLET_AX / B, ISLET_AY / B
+    for y in range(int(cy - r - 3), int(cy + r + 4)):
+        for x in range(int(cx - r - 3), int(cx + r + 4)):
+            d = math.hypot(x - cx, y - cy) + (_hash(x * 5.1 + y * 2.3 + seed) - 0.5) * 1.3
+            if d > r + 2.4:
+                continue
+            if d > r + 1.0:
+                put(x * B, y * B, B, B, '#6fd3e8')
+            elif d > r - 0.6:
+                put(x * B, y * B, B, B, '#e3cf94')
+            else:
+                put(x * B, y * B, B, B, '#5c9440' if _hash(x * 3.7 + y * 9.1) > 0.5 else '#4e8034')
+    for y in range(int(cy - r), int(cy + r + 1)):
+        for x in range(int(cx - r), int(cx + r + 1)):
+            if math.hypot(x - cx, y - cy) <= r - 0.6 < math.hypot(x - cx, y + 1 - cy):
+                put(x * B, y * B + B, B, 3, '#6b4a32')
+                put(x * B, y * B + B + 2, B, 2, '#4a3122')
+    px, py = ISLET_AX, ISLET_AY - 2
+    if palm:
+        put(px, py - 7, 2, 8, '#6b4a32')
+        put(px - 5, py - 9, 5, 2, '#3f6b2a'); put(px + 2, py - 9, 5, 2, '#3f6b2a')
+        put(px - 4, py - 11, 4, 2, '#548a35'); put(px + 2, py - 11, 4, 2, '#548a35')
+        put(px - 1, py - 12, 4, 2, '#69a544')
+    if rock:
+        put(px - 5, py - 4, 10, 6, '#5a6472')
+        put(px - 4, py - 8, 8, 6, '#7d8796')
+        put(px - 2, py - 7, 3, 2, '#98a2b0')
+    out = np.dstack([q.a.round().clip(0, 255).astype(np.uint8), np.where(mask, 255, 0).astype(np.uint8)])
+    return Image.fromarray(out, 'RGBA')
+
+
 SHIP_W, SHIP_H, SHIP_AX, SHIP_AY = 24, 20, 12, 13
 BIRD_W, BIRD_H, BIRD_AX, BIRD_AY = 10, 6, 4, 3
 
@@ -877,6 +945,12 @@ def build(out_dir, scale=4):
         save(icon(k), f'claim-icon-{k}.png')
     for k in ('sloop', 'trader', 'skiff'):
         save(ship(k), f'ship-{k}.png')
+    # 1x, unlike every other sprite: the app tiles this one at its intrinsic size
+    # to fill the screen behind the board, so it must not be pre-scaled.
+    sea_tile().save(os.path.join(out_dir, 'sea-tile.png'), optimize=True)
+    save(islet_sprite(3.6, True, False, 3), 'islet-palm.png')
+    save(islet_sprite(3.0, False, True, 11), 'islet-rock.png')
+    save(islet_sprite(2.4, False, False, 19), 'islet-bare.png')
     save(bird(True), 'bird-0.png')
     save(bird(False), 'bird-1.png')
 
@@ -888,6 +962,9 @@ def build(out_dir, scale=4):
         'icon': [ICON_W, ICON_H, ICON_AX, ICON_AY],
         'ship': [SHIP_W, SHIP_H, SHIP_AX, SHIP_AY],
         'bird': [BIRD_W, BIRD_H, BIRD_AX, BIRD_AY],
+        'islet': [ISLET_W, ISLET_H, ISLET_AX, ISLET_AY],
+        'seaTile': SEA_TILE,
+        'sea': SEA_DEEP,
         'claims': [
             {
                 'i': c['i'],
