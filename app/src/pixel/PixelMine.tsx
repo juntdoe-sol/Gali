@@ -20,7 +20,7 @@ import {
   MAP_W,
   SHIPS,
   SHIP_ANCHOR,
-  claimAt,
+  claimForTap,
   openSpot,
   shipAt,
   toLand,
@@ -529,7 +529,7 @@ export default function PixelMine() {
         const lx = (Number.isFinite(ne.locationX) ? (ne.locationX as number) : (ne.pageX ?? 0) - left) / s;
         const ly = (Number.isFinite(ne.locationY) ? (ne.locationY as number) : (ne.pageY ?? 0) - topPx) / s;
         if (!Number.isFinite(lx) || !Number.isFinite(ly)) return;
-        const hit = claimAt(lx, ly);
+        const hit = claimForTap(lx, ly);
         if (hit >= 0 && el < 0) {
           if (mo.idx === hit && mo.bonkedAt < 0) {
             mo.bonkedAt = Date.now();

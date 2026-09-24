@@ -41,9 +41,50 @@ export function ownerOf(cx: number, cy: number): number {
   return ch >= 'A' && ch <= 'Y' ? ch.charCodeAt(0) - 65 : -1;
 }
 
-/** The claim under a point in map pixels, or -1. This is the whole tap test. */
+/** The claim under a point in map pixels, or -1. */
 export const claimAt = (x: number, y: number) =>
   ownerOf(Math.floor(x / BLOCK), Math.floor(y / BLOCK));
+
+/**
+ * How far off a claim a tap still counts, in map pixels.
+ *
+ * A claim is about 34x36 of these across. Rendered between the HUD and the
+ * deploy panel that lands near 32 screen pixels, which is under a fingertip —
+ * the old square spots were nearly twice that, because only a fifth of the map
+ * was on screen. Growing the claims to compensate would pave over the open
+ * ground that makes the island an island, so the tolerance goes here instead,
+ * where it costs no pixels: the drawn claim stays honest and the thing you have
+ * to hit is bigger than the thing you can see.
+ */
+export const TAP_SLOP = 8;
+
+/**
+ * The claim a tap meant: the one under it, or the nearest one within the slop.
+ * Returns -1 only when the tap is genuinely out on open ground or water.
+ */
+export function claimForTap(x: number, y: number): number {
+  const here = claimAt(x, y);
+  if (here >= 0) return here;
+  const gx = Math.floor(x / BLOCK);
+  const gy = Math.floor(y / BLOCK);
+  const reach = Math.ceil(TAP_SLOP / BLOCK);
+  let best = -1;
+  let bd = TAP_SLOP * TAP_SLOP;
+  for (let dy = -reach; dy <= reach; dy++) {
+    for (let dx = -reach; dx <= reach; dx++) {
+      const o = ownerOf(gx + dx, gy + dy);
+      if (o < 0) continue;
+      const px = (gx + dx) * BLOCK + BLOCK / 2 - x;
+      const py = (gy + dy) * BLOCK + BLOCK / 2 - y;
+      const d = px * px + py * py;
+      if (d < bd) {
+        bd = d;
+        best = o;
+      }
+    }
+  }
+  return best;
+}
 
 export const isLand = (x: number, y: number) =>
   cell(Math.floor(x / BLOCK), Math.floor(y / BLOCK)) !== '~';

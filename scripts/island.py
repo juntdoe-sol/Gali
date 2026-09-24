@@ -62,7 +62,7 @@ GX, GY = np.meshgrid(np.arange(COLS, dtype=float), np.arange(ROWS, dtype=float))
 
 # ---- the island as a field, so the coast comes out ragged rather than blocky ----
 CX, CY = COLS / 2.0, ROWS / 2.0 + 0.5
-RX, RY = COLS * 0.375, ROWS * 0.355
+RX, RY = COLS * 0.415, ROWS * 0.400
 
 
 def _landness() -> np.ndarray:
@@ -78,7 +78,7 @@ LANDNESS = _landness()
 LAND = (LANDNESS > 0)
 
 # the northern range: a few peaks the elevation piles up around
-PEAKS = [(39, 12, 15, 1.05), (52, 8, 18, 1.25), (65, 11, 16, 1.12), (81, 13, 14, 0.95), (28, 17, 12, 0.82)]
+PEAKS = [(37, 9, 17, 1.05), (51, 5, 20, 1.25), (66, 8, 18, 1.12), (83, 10, 15, 0.95), (25, 15, 13, 0.82)]
 
 # gentle relief only: the range is drawn on top as objects, so the ground
 # underneath stays walkable rather than spiking into snow.
@@ -143,44 +143,44 @@ def carve_river(sx, sy):
             x, y = bx, by
 
 
-carve_river(54, 14)
-carve_river(71, 16)
-carve_river(36, 18)
+carve_river(53, 11)
+carve_river(72, 14)
+carve_river(33, 16)
 river = lambda x, y: bool(at(RIVER, x, y, False))
 
 # ---- the 25 claims ----
 # Six bands down the island, widest through the middle where there is most land.
 # `k` picks the icon, `r` the region the HUD names.
 CLAIMS = [
-    dict(i=0,  sx=27, sy=23, k='scree',  r='The Cap'),
-    dict(i=1,  sx=39, sy=18, k='scree',  r='The Cap'),
-    dict(i=2,  sx=21, sy=31, k='cave',  r='The Cap'),
-    dict(i=3,  sx=33, sy=27, k='dig',   r='The Cap'),
-    dict(i=4,  sx=53, sy=20, k='scree',  r='The Cap'),
+    dict(i=0,  sx=23, sy=21, k='scree',    r='The Cap'),
+    dict(i=1,  sx=37, sy=16, k='scree',    r='The Cap'),
+    dict(i=2,  sx=17, sy=30, k='cave',     r='The Cap'),
+    dict(i=3,  sx=30, sy=26, k='dig',      r='The Cap'),
+    dict(i=4,  sx=52, sy=18, k='scree',    r='The Cap'),
 
-    dict(i=5,  sx=68, sy=16, k='scree',  r='Rust Badlands'),
-    dict(i=6,  sx=87, sy=20, k='gold',  r='Rust Badlands'),
-    dict(i=7,  sx=78, sy=27, k='dig',   r='Rust Badlands'),
-    dict(i=8,  sx=95, sy=31, k='gold',  r='Rust Badlands'),
-    dict(i=9,  sx=84, sy=38, k='dig',   r='Rust Badlands'),
+    dict(i=5,  sx=69, sy=14, k='scree',    r='Rust Badlands'),
+    dict(i=6,  sx=90, sy=18, k='gold',     r='Rust Badlands'),
+    dict(i=7,  sx=80, sy=26, k='dig',      r='Rust Badlands'),
+    dict(i=8,  sx=99, sy=30, k='gold',     r='Rust Badlands'),
+    dict(i=9,  sx=87, sy=38, k='dig',      r='Rust Badlands'),
 
-    dict(i=10, sx=46, sy=26, k='dig',   r='The Green'),
-    dict(i=11, sx=58, sy=24, k='dig',   r='The Green'),
-    dict(i=12, sx=39, sy=36, k='gold',  r='The Green'),
-    dict(i=13, sx=54, sy=34, k='dig',   r='The Green'),
-    dict(i=14, sx=28, sy=40, k='cave',  r='The Green'),
+    dict(i=10, sx=45, sy=25, k='dig',      r='The Green'),
+    dict(i=11, sx=58, sy=23, k='dig',      r='The Green'),
+    dict(i=12, sx=37, sy=36, k='gold',     r='The Green'),
+    dict(i=13, sx=53, sy=34, k='dig',      r='The Green'),
+    dict(i=14, sx=25, sy=41, k='cave',     r='The Green'),
+    dict(i=15, sx=67, sy=34, k='dig',      r='The Green'),
 
-    dict(i=15, sx=66, sy=34, k='dig',   r='The Green'),
-    dict(i=16, sx=76, sy=44, k='dig',   r='Rust Badlands'),
-    dict(i=17, sx=65, sy=45, k='reef',  r='South Sands'),
-    dict(i=18, sx=50, sy=44, k='dig',   r='The Green'),
-    dict(i=19, sx=89, sy=48, k='scree',  r='Rust Badlands'),
+    dict(i=16, sx=78, sy=45, k='dig',      r='Rust Badlands'),
+    dict(i=17, sx=66, sy=46, k='reef',     r='South Sands'),
+    dict(i=18, sx=49, sy=45, k='dig',      r='The Green'),
+    dict(i=19, sx=92, sy=50, k='scree',    r='Rust Badlands'),
 
-    dict(i=20, sx=36, sy=48, k='dig',   r='South Sands'),
-    dict(i=21, sx=55, sy=54, k='reef',  r='South Sands'),
-    dict(i=22, sx=25, sy=47, k='cave',  r='South Sands'),
-    dict(i=23, sx=71, sy=55, k='reef',  r='South Sands'),
-    dict(i=24, sx=42, sy=56, k='gold',  r='South Sands'),
+    dict(i=20, sx=33, sy=50, k='dig',      r='South Sands'),
+    dict(i=21, sx=54, sy=56, k='reef',     r='South Sands'),
+    dict(i=22, sx=21, sy=48, k='cave',     r='South Sands'),
+    dict(i=23, sx=72, sy=57, k='reef',     r='South Sands'),
+    dict(i=24, sx=40, sy=59, k='gold',     r='South Sands'),
 ]
 assert len(CLAIMS) == CLAIM_COUNT
 
@@ -192,21 +192,60 @@ assert len(CLAIMS) == CLAIM_COUNT
 # the jitter and the wobble below keep the edges ragged rather than circular.
 # Whatever is left over is open ground: roads, meadow, beach, the land players
 # walk on. A board where the claims meet edge to edge has nowhere to stand.
-BUDGET = 76       # blocks per claim
-MAX_REACH = 7.5   # blocks; a claim never sprawls further than this for its budget
+# The budget is a compromise between two things a player wants at once: claims
+# big enough to hit with a thumb, and enough open ground between them that the
+# island reads as somewhere you walk rather than a tiled board. The claim itself
+# stops short of thumb-sized; the tap tolerance in the app (see island.ts) makes
+# up the rest, which is free — it costs no pixels.
+BUDGET = 96       # blocks per claim
+MIN_AREA = 96     # a claim below this is too small to tap; it takes more ground
+MIN_FAT = 3       # blocks of radius at the claim's thickest point
+MAX_REACH = 11.0  # blocks; a claim never sprawls further than this for its budget
+
+def relax(seeds, rounds=24):
+    """Lloyd relaxation over the land, so the 25 claims come out evenly spread.
+
+    The seeds above are placed by hand, and by hand it is impossible to keep 25
+    of them balanced on a coastline: one ends up hemmed between two neighbours
+    and the sea, and comes out a sliver no thumb can hit. Each pass reassigns
+    every land block to its nearest seed and moves the seed to the middle of
+    what it got, which pulls seeds off the coast and away from each other until
+    the regions are of a size. The hand placement still decides the layout; this
+    only takes the unfairness out of it.
+    """
+    ly, lx = np.nonzero(LAND)
+    pts = np.array(seeds, dtype=float)
+    for _ in range(rounds):
+        who = np.argmin((lx[None, :] - pts[:, :1]) ** 2 + (ly[None, :] - pts[:, 1:2]) ** 2, axis=0)
+        moved = 0.0
+        for i in range(len(pts)):
+            m = who == i
+            if not m.any():
+                continue
+            nxt = np.array([lx[m].mean(), ly[m].mean()])
+            moved = max(moved, float(np.hypot(*(nxt - pts[i]))))
+            pts[i] = nxt
+        if moved < 0.05:
+            break
+    return pts
+
+
+SEEDS = relax([(c['sx'], c['sy']) for c in CLAIMS])
 
 _px = GX + (noise(GX / 9, GY / 9, 1) - 0.5) * 5
 _py = GY + (noise(GX / 9, GY / 9, 2) - 0.5) * 5
 _best = np.full((ROWS, COLS), -1, dtype=np.int8)
 _bd = np.full((ROWS, COLS), 1e9)
 for c in CLAIMS:
-    d = np.hypot(c['sx'] - _px, c['sy'] - _py)
+    sx, sy = SEEDS[c['i']]
+    d = np.hypot(sx - _px, sy - _py)
     hit = d < _bd
     _bd = np.where(hit, d, _bd)
     _best = np.where(hit, c['i'], _best).astype(np.int8)
 # the reach wobbles, so a claim is a worked patch rather than a circle
-_bd = _bd / (0.72 + noise(GX / 6, GY / 6, 11) * 0.62)
-_bd = np.where(LAND & (_bd <= MAX_REACH), _bd, np.inf)
+_bd = _bd / (0.84 + noise(GX / 6, GY / 6, 11) * 0.36)
+_raw = np.where(LAND, _bd, np.inf)
+_bd = np.where(_bd <= MAX_REACH, _raw, np.inf)
 
 OWNER = np.full((ROWS, COLS), -1, dtype=np.int8)
 for c in CLAIMS:
@@ -225,6 +264,51 @@ for dy in (-1, 0, 1):
         _same += (_pad[1 + dy:ROWS + 1 + dy, 1 + dx:COLS + 1 + dx] == OWNER)
 OWNER = np.where((OWNER >= 0) & (_same <= 2), -1, OWNER).astype(np.int8)
 
+# A claim hemmed in by the coast ends up a sliver, and a sliver is a claim a
+# player cannot reliably hit with a thumb. Rather than leave it small, let it
+# reach past MAX_REACH into the open ground nearest its seed until it is worth
+# tapping. The unclaimed pool is what gives, so the gaps stay where there is
+# room for them.
+for c in CLAIMS:
+    i = c['i']
+    short = MIN_AREA - int((OWNER == i).sum())
+    if short <= 0:
+        continue
+    ys, xs = np.nonzero((_best == i) & (OWNER < 0) & np.isfinite(_raw))
+    if len(xs) == 0:
+        continue
+    take = np.argsort(_raw[ys, xs], kind='stable')[:short]
+    OWNER[ys[take], xs[take]] = i
+
+
+def fat_radius(i):
+    """Blocks of radius at the claim's thickest point: what a thumb has to hit."""
+    own = (OWNER == i)
+    pad = np.zeros((ROWS + 2, COLS + 2), dtype=bool)
+    pad[1:-1, 1:-1] = own
+    dist = np.zeros((ROWS, COLS), dtype=np.int16)
+    grown = own.copy()
+    for r in range(1, 10):
+        nxt = grown.copy()
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                nxt &= pad[1 + dy:ROWS + 1 + dy, 1 + dx:COLS + 1 + dx]
+        if not nxt.any():
+            return r - 1
+        dist = np.where(nxt, r, dist)
+        pad[:] = False
+        pad[1:-1, 1:-1] = nxt
+        grown = nxt
+    return 9
+
+
+_small = [(c['i'], int((OWNER == c['i']).sum()), fat_radius(c['i'])) for c in CLAIMS]
+_bad = [(i, a, f) for i, a, f in _small if a < MIN_AREA or f < MIN_FAT]
+if _bad:
+    raise SystemExit(
+        'these claims are too small to tap (claim, blocks, thickest radius): '
+        + repr(_bad) + f'\nfloors are {MIN_AREA} blocks and radius {MIN_FAT}; move their seeds inland')
+
 owner_at = lambda x, y: int(at(OWNER, x, y, -1))
 
 # centroids, in logical pixels
@@ -234,6 +318,29 @@ for c in CLAIMS:
     if len(xs) == 0:
         raise SystemExit(f"claim {c['i']} ended up with no ground; move its seed")
     CEN.append((int(round(xs.mean() * B + B / 2)), int(round(ys.mean() * B + B / 2)), len(xs)))
+
+
+def ground_of(i):
+    """The region a claim sits in and the icon that belongs there.
+
+    Read off the ground rather than a hand-written table: relaxation moves the
+    claims, and a table would quietly end up putting a coral reef in the snow.
+    """
+    own = OWNER == i
+    bio = int(np.bincount((BIOME[own] + 1).astype(int), minlength=5).argmax()) - 1
+    ys, _ = np.nonzero(own)
+    north = ys.mean() < ROWS * 0.36
+    if bio == 2:
+        return ('gold' if i % 2 else 'dig'), 'Rust Badlands'
+    if bio == 3:
+        return ('reef' if i % 2 else 'gold'), 'South Sands'
+    if bio == 1 or north:
+        return ('scree' if i % 2 else 'cave'), 'The Cap'
+    return ('dig' if i % 3 else 'gold' if i % 2 else 'cave'), 'The Green'
+
+
+for _c in CLAIMS:
+    _c['k'], _c['r'] = ground_of(_c['i'])
 
 
 # ---- painting ----
@@ -304,12 +411,12 @@ def paint_sea():
 
 # ---- small islands out in the sea: somewhere for the eye to rest, nothing to tap ----
 ISLETS = [
-    dict(x=24,  y=32,  r=3.4, palm=True,  rock=False),
-    dict(x=334, y=52,  r=2.8, palm=False, rock=True),
-    dict(x=20,  y=160, r=2.6, palm=False, rock=True),
-    dict(x=338, y=146, r=3.4, palm=True,  rock=False),
-    dict(x=140, y=12,  r=2.2, palm=False, rock=False),
-    dict(x=216, y=196, r=2.4, palm=False, rock=False),
+    dict(x=16,  y=24,  r=2.8, palm=True,  rock=False),
+    dict(x=344, y=40,  r=2.4, palm=False, rock=True),
+    dict(x=13,  y=170, r=2.2, palm=False, rock=True),
+    dict(x=347, y=158, r=2.8, palm=True,  rock=False),
+    dict(x=128, y=8,   r=1.8, palm=False, rock=False),
+    dict(x=232, y=202, r=2.0, palm=False, rock=False),
 ]
 
 
@@ -423,9 +530,9 @@ def mountain(cx, base_y, w, h, snowy):
 
 
 RANGE = [
-    (66, 104, 24, 15, False), (84, 90, 30, 22, False), (108, 80, 40, 32, True),
-    (140, 74, 52, 42, True), (174, 78, 44, 36, True), (204, 84, 36, 27, True),
-    (232, 92, 30, 20, False), (260, 100, 26, 16, False),
+    (54, 104, 27, 17, False), (74, 88, 33, 25, False), (100, 77, 44, 36, True),
+    (136, 70, 58, 47, True), (173, 74, 49, 41, True), (207, 81, 40, 30, True),
+    (238, 90, 33, 23, False), (269, 99, 29, 18, False),
 ]
 
 # roads between neighbouring claims. One loose network, not every pair: a road to
@@ -452,7 +559,7 @@ def paint_features():
         o = owner_at(x, y)
         if o >= 0 and abs(CEN[o][0] - px) < 22 and abs(CEN[o][1] - py) < 20:
             continue
-        if py < 106 and 52 < px < 292:   # the range
+        if py < 108 and 40 < px < 300:   # the range
             continue
         if bm == 2:
             P.rect(px + 1, py + 3, 3, 2, '#7a5a2a')
@@ -725,10 +832,10 @@ def home_point():
 
 
 REGION_LABELS = [
-    ['THE CAP', 116, 36],
-    ['RUST BADLANDS', 274, 76],
-    ['THE GREEN', 106, 108],
-    ['SOUTH SANDS', 150, 156],
+    ['THE CAP', 109, 27],
+    ['RUST BADLANDS', 284, 72],
+    ['THE GREEN', 98, 108],
+    ['SOUTH SANDS', 147, 162],
 ]
 
 
