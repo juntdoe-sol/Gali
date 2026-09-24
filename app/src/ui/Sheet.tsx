@@ -181,10 +181,10 @@ function MotherlodeCard() {
         {Math.floor(pool).toLocaleString()} SKR{owner && chainReady ? '' : ' (practice)'}
       </T>
       <T>
-        1 round in {MOTHERLODE_ODDS} is a motherlode. It pays out the whole pool (~{usd(pool)} right now), split between the miners on the gold spot by their SOL there, and each gets {MOTHERLODE_POINTS.toLocaleString()} bonus points. An early hit pays less; a late one pays more.
+        1 round in {MOTHERLODE_ODDS} is a motherlode. It pays out the whole pool (~{usd(pool)} right now), split between the miners on the gold claim by their SOL there, and each gets {MOTHERLODE_POINTS.toLocaleString()} bonus points. An early hit pays less; a late one pays more.
       </T>
       <T v="muted" style={{ marginTop: 6 }}>
-        Every played round adds {MOTHERLODE_ACCRUAL_SKR} SKR to it, plus {Math.round(MOTHERLODE_POOL_SHARE * 100)}% of every gear sale, and anyone can top it up. Another {Math.round(REWARDS_POOL_SHARE * 100)}% of gear sales fills the Rewards Pool that pays up to {ROUND_REWARD_SKR} SKR to the gold spot every round (a round pays at most 0.05% of the pool, so payouts follow what flows in).{owner && won > 0 ? ` You've won ${won.toLocaleString()} SKR.` : ''}
+        Every played round adds {MOTHERLODE_ACCRUAL_SKR} SKR to it, plus {Math.round(MOTHERLODE_POOL_SHARE * 100)}% of every gear sale, and anyone can top it up. Another {Math.round(REWARDS_POOL_SHARE * 100)}% of gear sales fills the Rewards Pool that pays up to {ROUND_REWARD_SKR} SKR to the gold claim every round (a round pays at most 0.05% of the pool, so payouts follow what flows in).{owner && won > 0 ? ` You've won ${won.toLocaleString()} SKR.` : ''}
       </T>
     </Card>
   );
@@ -338,7 +338,7 @@ function Rounds() {
           const win = r.winning ?? 0;
           const nobody = !(p.perSquare[win] > 0);
           const who = nobody
-            ? 'Nobody on the gold spot'
+            ? 'Nobody on the gold claim'
             : p.split
               ? `Split · ${p.miners || '…'} miner${p.miners === 1 ? '' : 's'}`
               : p.winner
@@ -465,7 +465,7 @@ function Me() {
         <T style={{ flex: 1 }}>Mute sound</T>
         <Switch id="mute" value={save.muted} onValueChange={setMute} trackColor={{ true: COLORS.teal, false: COLORS.card2 }} />
       </Card>
-      <T v="muted">How it works: each minute is a round on a quarry with 25 mining spots. Put SOL on 1 to 25 spots. One spot strikes gold. Its miners split the whole pot (the SOL on every spot, after a 1% fee and 10% of the losing spots) by their SOL on the gold spot; SOL on the other spots is lost. The gold spot also mines up to 200 SKR, split the same way, or on one of the round's 10 solo spots (★) taken whole by one miner, with odds equal to their share. Fewer spots pay more points: 1,000 for a single spot, 40 for all 25. A 1-in-625 motherlode pays out the whole Motherlode Pool. Everything lands in Unclaimed until you claim it. This is a game of chance: only play with SOL you can afford to lose.</T>
+      <T v="muted">How it works: each minute is a round on an island with 25 mining claims. Put SOL on 1 to 25 claims. One claim strikes gold. Its miners split the whole pot (the SOL on every claim, after a 1% fee and 10% of the losing claims) by their SOL on the gold claim; SOL on the other claims is lost. The gold claim also mines up to 200 SKR, split the same way, or on one of the round's 10 solo claims (★) taken whole by one miner, with odds equal to their share. Fewer claims pay more points: 1,000 for a single claim, 40 for all 25. A 1-in-625 motherlode pays out the whole Motherlode Pool. Everything lands in Unclaimed until you claim it. This is a game of chance: only play with SOL you can afford to lose.</T>
       <Pressable onPress={() => Linking.openURL(`https://explorer.solana.com/address/${PROGRAM_ID.toBase58()}?cluster=${CLUSTER}`)}>
         <T v="muted" style={{ textDecorationLine: 'underline' }}>
           Program {short(PROGRAM_ID.toBase58())} on Solana Explorer
