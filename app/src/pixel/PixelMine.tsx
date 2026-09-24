@@ -29,7 +29,7 @@ import { META, SPRITES, type SpriteName } from './sprites';
 
 const [MNW, MNH] = META.miner;
 const FPS = 12;
-const SEA = '#123a6b';
+const SEA: string = ISLE.sea;
 
 const SOLO_STAR = {
   position: 'absolute' as const,
@@ -109,6 +109,32 @@ function ClaimShape({ i, s, tint, fill, edge }: { i: number; s: number; tint: st
   );
 }
 
+/**
+ * A sprite placed in screen pixels, sized in board pixels.
+ *
+ * The board is fitted to the width, so on a tall phone there is open water
+ * above and below it. Anything drawn inside the board's own container is
+ * clipped to that rectangle, which is why the ships used to turn back at an
+ * invisible wall. These live outside it and have the whole ocean.
+ */
+function SeaSprite({ name, x, y, w, h, s, flip, opacity }: { name: SpriteName; x: number; y: number; w: number; h: number; s: number; flip?: boolean; opacity?: number }) {
+  return (
+    <Image
+      source={SPRITES[name]}
+      fadeDuration={0}
+      style={{
+        position: 'absolute',
+        left: Math.round(x),
+        top: Math.round(y),
+        width: Math.round(w * s),
+        height: Math.round(h * s),
+        opacity,
+        transform: flip ? [{ scaleX: -1 }] : undefined,
+      }}
+    />
+  );
+}
+
 type Item = { z: number; key: string; node: ReactNode };
 
 type Look = { hat: string; fit: string; pick: string };
@@ -165,14 +191,23 @@ function Tag({ x, y, s, text, tone, emoji }: { x: number; y: number; s: number; 
 type MinerState = { x: number; y: number; tx: number; ty: number; mode: 'idle' | 'walk' | 'swing'; since: number; target: number; hitCycle: number; facing: 1 | -1; last: number };
 type MoleState = { idx: number; start: number; nextAt: number; bonkedAt: number };
 
-/** Flocks drift across the water and wrap round the edge. */
-const FLOCKS = Array.from({ length: 4 }, (_, i) => ({
-  x: seeded(i * 3.1) * MAP_W,
-  y: MAP_H * 0.08 + seeded(i * 5.7) * MAP_H * 0.7,
-  sp: 5 + seeded(i * 9.3) * 6,
+/** Flocks drift across the whole screen and wrap round the edge, in fractions of it. */
+const FLOCKS = Array.from({ length: 5 }, (_, i) => ({
+  id: i,
+  x: seeded(i * 3.1),
+  y: 0.06 + seeded(i * 5.7) * 0.78,
+  sp: 0.006 + seeded(i * 9.3) * 0.008,
   dir: seeded(i * 11.9) > 0.5 ? 1 : -1,
   n: 2 + Math.floor(seeded(i * 7.1) * 3),
 }));
+
+/** Islets for the water above and below the board. `t` is how far into that band. */
+const OUTER_ISLETS = [
+  { name: 'islet-palm', x: 0.13, t: 0.52, above: true },
+  { name: 'islet-rock', x: 0.82, t: 0.38, above: true },
+  { name: 'islet-bare', x: 0.24, t: 0.46, above: false },
+  { name: 'islet-palm', x: 0.72, t: 0.6, above: false },
+];
 
 export default function PixelMine() {
   const { width: W, height: H } = useWindowDimensions();
@@ -198,6 +233,11 @@ export default function PixelMine() {
   const s = scale.current;
   const left = W / 2 - (MAP_W / 2) * s;
   const topPx = top + band / 2 - (MAP_H / 2) * s;
+
+  // the sea tile behind everything, phased to the board so the join is invisible
+  const tile = ISLE.seaTile;
+  const seaX = left - Math.ceil(left / tile) * tile;
+  const seaY = topPx - Math.ceil(topPx / tile) * tile;
 
   // ---- reveal state ----
   const el = revealEl();
@@ -435,36 +475,71 @@ export default function PixelMine() {
   }
   items.sort((a, b) => a.z - b.z);
 
-  // ---- the sea: ships on a slow circuit, birds drifting over ----
+  // ---- the sea: ships on a slow circuit, birds drifting over, islets ----
+  // All of it in screen pixels, outside the board's container, so the water the
+  // app tiles across the whole phone has something in it.
+  const toScreen = (mx: number, my: number): [number, number] => [left + mx * s, topPx + my * s];
+  const cxS = left + (MAP_W / 2) * s;
+  const cyS = topPx + (MAP_H / 2) * s;
   const [shw, shh] = ISLE.ship;
-  const sea: ReactNode[] = SHIPS.map((sh, k) => {
-    const [x, y, dir] = shipAt(sh.path, sh.from + (now / 1000) * sh.speed);
+  const [isw, ish, isax, isay] = ISLE.islet;
+  const [bw, bh] = ISLE.bird;
+
+  const sea: ReactNode[] = [];
+  SHIPS.forEach((sh, k) => {
+    const [mx, my, dir] = shipAt(sh.path, sh.from + (now / 1000) * sh.speed);
+    const [px, py] = toScreen(mx, my);
+    // Push the course outward from the middle of the board to use the open water.
+    // Scaling a path that already clears the coast can only move it further out,
+    // so the ships stay off the land however much room there is.
+    const dx = px - cxS;
+    const dy = py - cyS;
+    const room = Math.min(
+      (W / 2 - 16) / Math.max(1, Math.abs(dx)),
+      (H / 2 - 16) / Math.max(1, Math.abs(dy)),
+    );
+    const k2 = Math.max(1, Math.min(room, 1 + k * 0.45));
     const bob = Math.sin(now / 420 + k * 2) > 0 ? 0 : 1;
-    return (
-      <Sprite
+    sea.push(
+      <SeaSprite
         key={`ship${k}`}
         name={`ship-${sh.kind}` as SpriteName}
-        x={x - SHIP_ANCHOR[0]}
-        y={y - SHIP_ANCHOR[1] + bob}
+        x={cxS + dx * k2 - SHIP_ANCHOR[0] * s}
+        y={cyS + dy * k2 - SHIP_ANCHOR[1] * s + bob * s}
         w={shw}
         h={shh}
         s={s}
         flip={dir < 0}
-      />
+      />,
     );
   });
-  const [bw, bh] = ISLE.bird;
+
+  // Islets drop into the bands of water the board does not cover, and only when
+  // those bands are deep enough to hold one; with the deploy panel open there is
+  // no such water and none are drawn.
+  const bandTop = topPx - top;
+  const bandBottom = top + band - (topPx + MAP_H * s);
+  const isleH = ish * s;
+  OUTER_ISLETS.forEach((o, k) => {
+    const deep = o.above ? bandTop : bandBottom;
+    if (deep < isleH * 0.9) return;
+    const y = o.above ? topPx - deep * o.t - isay * s : topPx + MAP_H * s + deep * o.t - isay * s;
+    sea.push(
+      <SeaSprite key={`isle${k}`} name={o.name as SpriteName} x={W * o.x - isax * s} y={y} w={isw} h={ish} s={s} />,
+    );
+  });
+
   const birds: ReactNode[] = [];
   for (const f of FLOCKS) {
     f.x += f.sp * f.dir * dt * 6;
-    if (f.x > MAP_W + 30) f.x = -30;
-    if (f.x < -30) f.x = MAP_W + 30;
+    if (f.x > 1.2) f.x = -0.2;
+    if (f.x < -0.2) f.x = 1.2;
     for (let b = 0; b < f.n; b++) {
-      const bx = f.x - f.dir * b * 9;
-      const by = f.y + Math.sin(now / 700 + b) * 3 + b * 4;
+      const bx = f.x * W - f.dir * b * 9 * s;
+      const by = f.y * H + (Math.sin(now / 700 + b) * 3 + b * 4) * s;
       const up = Math.sin(now / 160 + b * 1.7) > 0;
       birds.push(
-        <Sprite key={`bird${f.x.toFixed(0)}-${b}`} name={up ? 'bird-0' : 'bird-1'} x={bx - BIRD_ANCHOR[0]} y={by - BIRD_ANCHOR[1]} w={bw} h={bh} s={s} opacity={0.9} />,
+        <SeaSprite key={`bird${f.id}-${b}`} name={up ? 'bird-0' : 'bird-1'} x={bx - BIRD_ANCHOR[0] * s} y={by - BIRD_ANCHOR[1] * s} w={bw} h={bh} s={s} opacity={0.9} />,
       );
     }
   }
@@ -571,16 +646,27 @@ export default function PixelMine() {
 
   return (
     <View style={[StyleSheet.absoluteFill, { backgroundColor: SEA, overflow: 'hidden' }]} {...({ dataSet: { pixel: '1' } } as object)}>
+      {/* The same water the board is painted on, tiled over the whole screen.
+          The board is fitted to the width, so on a tall phone there is room left
+          above and below it; filled with flat colour that read as a blue box
+          around the map instead of open sea. Offset so the tiling lines up with
+          the map's own sea and the join does not show. */}
+      <Image
+        source={SPRITES['sea-tile']}
+        resizeMode="repeat"
+        style={{ position: 'absolute', left: seaX, top: seaY, width: W - seaX + tile, height: H - seaY + tile }}
+        fadeDuration={0}
+      />
       <View style={{ position: 'absolute', left: left + shake * s, top: topPx, width: MAP_W * s, height: MAP_H * s }}>
         <Image source={SPRITES.island} style={{ position: 'absolute', left: 0, top: 0, width: MAP_W * s, height: MAP_H * s }} fadeDuration={0} />
-        {sea}
         {shapes}
         {items.map((it) => it.node)}
         {amounts}
         {top_}
-        {birds}
         {taps}
       </View>
+      {sea}
+      {birds}
       <RevealSounds />
     </View>
   );

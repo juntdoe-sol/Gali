@@ -16,6 +16,7 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
   const owner = useGame((s) => s.wallet.owner);
   const skr = useGame((s) => s.wallet.skr);
   const connect = useGame((s) => s.connect);
+  const disconnect = useGame((s) => s.disconnect);
   const xp = useLevelXp();
   const points = usePoints();
   const lvl = levelFromXp(xp);
@@ -29,15 +30,29 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
         <Image source={require('../../assets/brand/wordmark.png')} style={styles.logo} resizeMode="contain" />
         <View style={{ flexDirection: 'row', gap: 8 }}>
           {owner ? (
-            <Pressable onPress={onMenu} style={styles.chip}>
-              <View style={[styles.dot, { backgroundColor: COLORS.skr }]} />
-              <T v="bold" style={{ fontSize: 13 }}>
-                {skr.toLocaleString(undefined, { maximumFractionDigits: 0 })} SKR
-              </T>
-              <T v="muted" style={{ fontSize: 11 }}>
-                {short(owner)}
-              </T>
-            </Pressable>
+            <>
+              <Pressable onPress={onMenu} style={styles.chip}>
+                <View style={[styles.dot, { backgroundColor: COLORS.skr }]} />
+                <T v="bold" style={{ fontSize: 13 }}>
+                  {skr.toLocaleString(undefined, { maximumFractionDigits: 0 })} SKR
+                </T>
+                <T v="muted" style={{ fontSize: 11 }}>
+                  {short(owner)}
+                </T>
+              </Pressable>
+              {/* Connecting is one tap from the header, so leaving should be too,
+                  rather than buried three screens deep in the Me tab. */}
+              <Pressable
+                onPress={() => void disconnect()}
+                style={styles.unplug}
+                accessibilityRole="button"
+                accessibilityLabel={`Disconnect wallet ${short(owner)}`}
+              >
+                <T v="display" style={{ fontSize: 16, color: COLORS.muted }}>
+                  ⏻
+                </T>
+              </Pressable>
+            </>
           ) : (
             <Pressable onPress={() => void connect()} style={[styles.chip, { borderColor: COLORS.skr }]}>
               <T v="bold" style={{ fontSize: 13, color: COLORS.skr }}>
@@ -213,6 +228,16 @@ const styles = StyleSheet.create({
     height: 38,
   },
   dot: { width: 9, height: 9, borderRadius: 2, transform: [{ rotate: '45deg' }] },
+  unplug: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.line,
+    backgroundColor: '#070d20cc',
+  },
   menu: {
     width: 38,
     height: 38,
