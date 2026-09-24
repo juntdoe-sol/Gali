@@ -1,5 +1,6 @@
-// The mine: a pixel-art quarry with 25 mining spots, a miner who works your claims,
-// a mole to bonk, and the strike animation. Drawn with plain Images at 12 fps.
+// Gali Island: 25 claims with real ground between them, a miner who works the
+// ones you picked, a mole to bonk, ships on the water and the strike animation.
+// Drawn with plain Images at 12 fps.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Image, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View, type ImageStyle } from 'react-native';
 import { chainReady } from '../chain/client';
@@ -10,14 +11,25 @@ import { roundEnd, useGame } from '../game/store';
 import { clearBots, ensureBots, publishMe, startWorld, stopWorld, thinkBots, useWorld, type Avatar, type Pose } from '../game/world';
 import { F } from '../ui/kit';
 import { fx, revealEl } from './fx';
+import {
+  BIRD_ANCHOR,
+  CLAIMS,
+  ICON_ANCHOR,
+  ISLE,
+  MAP_H,
+  MAP_W,
+  SHIPS,
+  SHIP_ANCHOR,
+  claimAt,
+  openSpot,
+  shipAt,
+  toLand,
+} from './island';
 import { META, SPRITES, type SpriteName } from './sprites';
 
-const [MW, MH] = META.map;
-const [SW, SH, PAD_Y] = META.spot;
-const [GX, GY, STEP, GW, GH] = META.grid;
 const [MNW, MNH] = META.miner;
 const FPS = 12;
-const GRASS = '#6fa345';
+const SEA = '#123a6b';
 
 const SOLO_STAR = {
   position: 'absolute' as const,
@@ -27,20 +39,27 @@ const SOLO_STAR = {
   textShadowOffset: { width: 1, height: 1 },
   textShadowRadius: 0,
 };
-const SPOT_AMT = {
+const CLAIM_AMT = {
   position: 'absolute' as const,
   alignItems: 'center' as const,
   backgroundColor: '#070d20cc',
   borderWidth: 1,
   borderRadius: 3,
 };
-/** Compact SOL amount for a spot label: 0, .004, 0.12, 1.2, 12 */
-const fmtSpot = (v: number) => (v <= 0 ? '0' : v < 0.001 ? '<.001' : v < 0.01 ? `.${Math.round(v * 1000).toString().padStart(3, '0')}` : v < 1 ? v.toFixed(2) : v < 10 ? v.toFixed(1) : Math.round(v).toString());
-const spotXY = (i: number): [number, number] => [GX + (i % 5) * STEP, GY + Math.floor(i / 5) * STEP];
+/** Compact SOL amount for a claim label: 0, .004, 0.12, 1.2, 12 */
+const fmtAmt = (v: number) => (v <= 0 ? '0' : v < 0.001 ? '<.001' : v < 0.01 ? `.${Math.round(v * 1000).toString().padStart(3, '0')}` : v < 1 ? v.toFixed(2) : v < 10 ? v.toFixed(1) : Math.round(v).toString());
 const seeded = (n: number) => {
   const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
   return x - Math.floor(x);
 };
+
+/** Feet-on-the-ground point for a sprite drawn from its top-left corner. */
+const footOf = (x: number, y: number): [number, number] => [x + MNW / 2, y + MNH];
+const fromFoot = (x: number, y: number): [number, number] => [x - MNW / 2, y - MNH];
+
+const HOME = fromFoot(ISLE.home[0], ISLE.home[1]);
+/** Where a character stands to work claim `i`: on its own ground, never in the sea. */
+const standAt = (i: number): [number, number] => fromFoot(CLAIMS[i].stand[0], CLAIMS[i].stand[1]);
 
 // browsers smooth scaled images; pixel art should stay crisp
 if (Platform.OS === 'web' && typeof document !== 'undefined' && !document.getElementById('gali-pixel-css')) {
@@ -72,6 +91,22 @@ function Sprite({ name, x, y, w, h, s, tint, opacity, flip }: SpriteProps) {
     transform: flip ? [{ scaleX: -1 }] : undefined,
   };
   return <Image source={SPRITES[name]} style={style} fadeDuration={0} />;
+}
+
+/**
+ * A claim's own shape, tinted.
+ *
+ * Every claim ships as two cropped images, a solid fill and its outline, so
+ * lighting one up is two draws rather than a polygon redrawn every frame.
+ */
+function ClaimShape({ i, s, tint, fill, edge }: { i: number; s: number; tint: string; fill: number; edge: number }) {
+  const [x, y, w, h] = CLAIMS[i].box;
+  return (
+    <View pointerEvents="none">
+      {fill > 0 ? <Sprite name={`claim-${i}-fill` as SpriteName} x={x} y={y} w={w} h={h} s={s} tint={tint} opacity={fill} /> : null}
+      {edge > 0 ? <Sprite name={`claim-${i}-edge` as SpriteName} x={x} y={y} w={w} h={h} s={s} tint={tint} opacity={edge} /> : null}
+    </View>
+  );
 }
 
 type Item = { z: number; key: string; node: ReactNode };
@@ -130,11 +165,14 @@ function Tag({ x, y, s, text, tone, emoji }: { x: number; y: number; s: number; 
 type MinerState = { x: number; y: number; tx: number; ty: number; mode: 'idle' | 'walk' | 'swing'; since: number; target: number; hitCycle: number; facing: 1 | -1; last: number };
 type MoleState = { idx: number; start: number; nextAt: number; bonkedAt: number };
 
-const HOME: [number, number] = [MW / 2 - MNW / 2, GY + GH - 4];
-const standAt = (i: number): [number, number] => {
-  const [x, y] = spotXY(i);
-  return [x + SW / 2 - MNW / 2 + 3, y + SH - MNH + 4];
-};
+/** Flocks drift across the water and wrap round the edge. */
+const FLOCKS = Array.from({ length: 4 }, (_, i) => ({
+  x: seeded(i * 3.1) * MAP_W,
+  y: MAP_H * 0.08 + seeded(i * 5.7) * MAP_H * 0.7,
+  sp: 5 + seeded(i * 9.3) * 6,
+  dir: seeded(i * 11.9) > 0.5 ? 1 : -1,
+  n: 2 + Math.floor(seeded(i * 7.1) * 3),
+}));
 
 export default function PixelMine() {
   const { width: W, height: H } = useWindowDimensions();
@@ -149,21 +187,17 @@ export default function PixelMine() {
   }, []);
   const manualUntil = useRef(0);
 
-  // ---- fit the spots between the HUD and the deploy panel ----
+  // ---- fit the island between the HUD and the deploy panel ----
   const top = Math.min(fx.viewTop, H * 0.45);
   const bottom = Math.min(fx.viewBottom, H * 0.5);
   const band = Math.max(120, H - top - bottom);
-  const bx0 = GX - 8;
-  const by0 = GY - 2;
-  const bw = GW + 16;
-  const bh = GH + 26; // room below the grid for the miner's spot on the road
-  const want = Math.min(W / bw, band / bh);
+  const want = Math.min(W / MAP_W, band / MAP_H);
   const scale = useRef(want);
   scale.current += (want - scale.current) * 0.35;
   if (Math.abs(want - scale.current) < 0.01) scale.current = want;
   const s = scale.current;
-  const left = W / 2 - (bx0 + bw / 2) * s;
-  const topPx = top + band / 2 - (by0 + bh / 2) * s;
+  const left = W / 2 - (MAP_W / 2) * s;
+  const topPx = top + band / 2 - (MAP_H / 2) * s;
 
   // ---- reveal state ----
   const el = revealEl();
@@ -173,7 +207,7 @@ export default function PixelMine() {
   const pendMask = st.pending?.mask ?? 0;
   const mining = st.phase === 'mining' && roundEnd(st.roundId) - st.offsetMs - Date.now() > 5000;
 
-  // ---- miner ----
+  // ---- your miner ----
   const mref = useRef<MinerState>({ x: HOME[0], y: HOME[1], tx: HOME[0], ty: HOME[1], mode: 'idle', since: now, target: -1, hitCycle: -1, facing: 1, last: now });
   const m = mref.current;
   const dt = Math.min(0.25, (now - m.last) / 1000);
@@ -191,7 +225,7 @@ export default function PixelMine() {
     const dx = m.tx - m.x;
     const dy = m.ty - m.y;
     const d = Math.hypot(dx, dy);
-    const step = 46 * dt;
+    const step = 52 * dt;
     if (Math.abs(dx) > 0.5) m.facing = dx > 0 ? 1 : -1;
     if (d <= step) {
       m.x = m.tx;
@@ -221,7 +255,7 @@ export default function PixelMine() {
       const next = work.length ? work[(work.indexOf(m.target) + 1) % work.length] : -1;
       if (next >= 0 && next !== m.target) goTo(...standAt(next), next);
       else if (next < 0) goTo(HOME[0], HOME[1], -1);
-      else m.since = now; // only one spot: keep swinging
+      else m.since = now; // only one claim: keep swinging
     }
   } else if (now < manualUntil.current) {
     // the player walked somewhere by hand: stay a while
@@ -272,19 +306,19 @@ export default function PixelMine() {
     pref.current.y += (m.y + 12 - pref.current.y) * Math.min(1, dt * 3);
   }
 
-  // ---- other miners ----
+  // ---- everyone else ----
   const lvl = levelFromXp(st.wallet.player ? st.wallet.player.xp + st.save.bonusXp : st.save.xp);
-  const spotsStand = [...Array(BLOCKS).keys()].map(standAt);
+  const stands = [...Array(BLOCKS).keys()].map(standAt);
   if (practice && world.status !== 'online') {
-    ensureBots(spotsStand);
-    thinkBots(spotsStand, () => [GX - 20 + Math.random() * (GW + 40), GY + GH - 10 + Math.random() * 20]);
+    ensureBots(stands);
+    thinkBots(stands, () => fromFoot(...openSpot()));
   } else clearBots();
   const peers = Object.values(world.peers);
   for (const p of peers) {
     const dx = p.tx - p.x;
     const dy = p.ty - p.y;
     const d = Math.hypot(dx, dy);
-    const step = (p.bot ? 30 : 46) * dt;
+    const step = (p.bot ? 34 : 52) * dt;
     if (d > 0.3) {
       if (Math.abs(dx) > 0.5) p.facing = dx > 0 ? 1 : -1;
       const k = Math.min(1, step / d);
@@ -308,41 +342,48 @@ export default function PixelMine() {
     return e && now - e.at < 2500 ? e.emoji : undefined;
   };
 
-  // ---- build the scene, depth-sorted by feet position ----
+  // ---- claim lighting, under everything that stands on the ground ----
+  const shapes: ReactNode[] = [];
+  for (let i = 0; i < BLOCKS; i++) {
+    const isWin = winner === i && el >= 2500;
+    if (el >= 1400 && winner !== null && winner !== undefined && winner !== i) {
+      const order = (i * 11) % BLOCKS;
+      const k = Math.max(0, Math.min(1, (el - 1400 - order * 40) / 300));
+      if (k > 0) shapes.push(<ClaimShape key={`dim${i}`} i={i} s={s} tint="#02050f" fill={k * 0.55} edge={0} />);
+      continue;
+    }
+    if (isWin) {
+      shapes.push(<ClaimShape key={`win${i}`} i={i} s={s} tint="#ffcf4a" fill={0.22 + 0.16 * Math.sin(now / 140)} edge={1} />);
+      continue;
+    }
+    if (el < 0 && Boolean(pendMask & (1 << i))) {
+      shapes.push(<ClaimShape key={`dug${i}`} i={i} s={s} tint="#ffd84a" fill={0.30} edge={1} />);
+    } else if (el < 0 && st.selected.includes(i)) {
+      shapes.push(<ClaimShape key={`sel${i}`} i={i} s={s} tint="#5ceeff" fill={0.44} edge={1} />);
+    }
+  }
+
+  // ---- build the scene, depth-sorted by where things stand ----
   const items: Item[] = [];
   const solo = soloMask(st.roundId);
   for (let i = 0; i < BLOCKS; i++) {
-    const [x, y0] = spotXY(i);
-    const kind = META.kinds[META.layout[i]];
-    const selected = st.selected.includes(i);
-    const dug = Boolean(pendMask & (1 << i));
+    const c = CLAIMS[i];
     const isWin = winner === i && el >= 2500;
-    let y = y0;
-    let dimK = 0;
-    if (el >= 1400 && winner !== null && winner !== i) {
-      const order = (i * 11) % BLOCKS;
-      dimK = Math.max(0, Math.min(1, (el - 1400 - order * 40) / 300));
-      y += dimK;
-    }
-    if (isWin) y -= 3 + Math.abs(Math.sin(now / 160)) * 2;
-    else if (selected) y -= 1;
+    const lift = isWin ? 3 + Math.abs(Math.sin(now / 160)) * 2 : st.selected.includes(i) ? 1 : 0;
+    const ix = c.cx - ICON_ANCHOR[0];
+    const iy = c.cy - ICON_ANCHOR[1] - lift;
     const hitAge = now - (fx.hits.get(i) ?? 0);
     const flash = Math.floor(now / 300) % 2;
+    const [iw, ih] = ISLE.icon;
     items.push({
-      z: y0 + SH,
-      key: `spot${i}`,
+      z: c.cy,
+      key: `claim${i}`,
       node: (
-        <View key={`spot${i}`} pointerEvents="none">
-          {isWin ? <Sprite name="glow" x={x} y={y} w={SW} h={SH} s={s} opacity={0.6 + 0.4 * Math.sin(now / 120)} /> : null}
-          <Sprite name={`spot-${kind}` as SpriteName} x={x} y={y} w={SW} h={SH} s={s} />
-          {dimK > 0 ? <Sprite name="dim" x={x} y={y} w={SW} h={SH} s={s} opacity={dimK * 0.55} /> : null}
-          {selected && el < 0 ? <Sprite name={`select-${flash}` as SpriteName} x={x} y={y0} w={SW} h={SH} s={s} /> : null}
-          {solo & (1 << i) && dimK === 0 ? (
-            <Text style={[SOLO_STAR, { left: (x + 1) * s, top: (y + PAD_Y - 3) * s, fontSize: 7 * s, lineHeight: 8 * s }]}>★</Text>
-          ) : null}
-          {dug ? <Sprite name={`flag-${flash}` as SpriteName} x={x + 17} y={y + PAD_Y - 12} w={14} h={16} s={s} /> : null}
-          {hitAge < 350 ? <Sprite name={`dust-${Math.min(2, Math.floor(hitAge / 117))}` as SpriteName} x={x + 4} y={y + PAD_Y + 8} w={20} h={12} s={s} /> : null}
-          {isWin ? <Sprite name={`sparkle-${Math.floor(now / 110) % 3}` as SpriteName} x={x} y={y - 4} w={SW} h={SH} s={s} /> : null}
+        <View key={`claim${i}`} pointerEvents="none">
+          <Sprite name={`claim-icon-${c.kind}` as SpriteName} x={ix} y={iy} w={iw} h={ih} s={s} />
+          {Boolean(pendMask & (1 << i)) ? <Sprite name={`flag-${flash}` as SpriteName} x={c.cx + 4} y={c.cy - 24} w={14} h={16} s={s} /> : null}
+          {hitAge < 350 ? <Sprite name={`dust-${Math.min(2, Math.floor(hitAge / 117))}` as SpriteName} x={c.cx - 10} y={c.cy - 2} w={20} h={12} s={s} /> : null}
+          {isWin ? <Sprite name={`sparkle-${Math.floor(now / 110) % 3}` as SpriteName} x={c.cx - 14} y={c.cy - 22} w={28} h={36} s={s} /> : null}
         </View>
       ),
     });
@@ -351,9 +392,9 @@ export default function PixelMine() {
       const bonked = mo.bonkedAt > 0;
       const mf = bonked ? 3 : age < 120 ? 0 : age < 240 ? 1 : age > UP - 120 ? 0 : age > UP - 240 ? 1 : 2;
       items.push({
-        z: y0 + SH + 0.5,
+        z: c.cy + 0.5,
         key: 'mole',
-        node: <Sprite key="mole" name={`mole-${mf}` as SpriteName} x={x + 6} y={y0 + PAD_Y + 4} w={16} h={16} s={s} />,
+        node: <Sprite key="mole" name={`mole-${mf}` as SpriteName} x={c.cx - 18} y={c.cy - 8} w={16} h={16} s={s} />,
       });
     }
   }
@@ -394,90 +435,122 @@ export default function PixelMine() {
   }
   items.sort((a, b) => a.z - b.z);
 
+  // ---- the sea: ships on a slow circuit, birds drifting over ----
+  const [shw, shh] = ISLE.ship;
+  const sea: ReactNode[] = SHIPS.map((sh, k) => {
+    const [x, y, dir] = shipAt(sh.path, sh.from + (now / 1000) * sh.speed);
+    const bob = Math.sin(now / 420 + k * 2) > 0 ? 0 : 1;
+    return (
+      <Sprite
+        key={`ship${k}`}
+        name={`ship-${sh.kind}` as SpriteName}
+        x={x - SHIP_ANCHOR[0]}
+        y={y - SHIP_ANCHOR[1] + bob}
+        w={shw}
+        h={shh}
+        s={s}
+        flip={dir < 0}
+      />
+    );
+  });
+  const [bw, bh] = ISLE.bird;
+  const birds: ReactNode[] = [];
+  for (const f of FLOCKS) {
+    f.x += f.sp * f.dir * dt * 6;
+    if (f.x > MAP_W + 30) f.x = -30;
+    if (f.x < -30) f.x = MAP_W + 30;
+    for (let b = 0; b < f.n; b++) {
+      const bx = f.x - f.dir * b * 9;
+      const by = f.y + Math.sin(now / 700 + b) * 3 + b * 4;
+      const up = Math.sin(now / 160 + b * 1.7) > 0;
+      birds.push(
+        <Sprite key={`bird${f.x.toFixed(0)}-${b}`} name={up ? 'bird-0' : 'bird-1'} x={bx - BIRD_ANCHOR[0]} y={by - BIRD_ANCHOR[1]} w={bw} h={bh} s={s} opacity={0.9} />,
+      );
+    }
+  }
+
   // ---- effects on top ----
   const top_: ReactNode[] = [];
   if (winner !== null && winner !== undefined && el >= 2500) {
-    const [x, y] = spotXY(winner);
+    const c = CLAIMS[winner];
     const k = Math.min(1, (el - 2500) / 300);
-    top_.push(<Sprite key="beam" name="beam" x={x + 4} y={y + PAD_Y + 14 - 90} w={20} h={90} s={s} opacity={0.85 * k} />);
+    top_.push(<Sprite key="beam" name="beam" x={c.cx - 10} y={c.cy - 70} w={20} h={70} s={s} opacity={0.85 * k} />);
   }
   if (el >= 0 && cave) {
     for (let k = 0; k < 14; k++) {
       const t = Math.max(0, el / 1000 - seeded(k + 400) * 1.2);
-      const tx = GX + seeded(k + 200) * GW;
-      const ty = GY + 6 + seeded(k + 300) * GH;
-      const y = Math.min(ty, GY - 60 + 90 * t * t);
+      const tx = MAP_W * 0.15 + seeded(k + 200) * MAP_W * 0.7;
+      const ty = MAP_H * 0.25 + seeded(k + 300) * MAP_H * 0.55;
+      const y = Math.min(ty, -MAP_H * 0.1 + MAP_H * 0.9 * t * t);
       top_.push(<Sprite key={`rock${k}`} name="rock" x={tx - 4} y={y} w={8} h={8} s={s} opacity={t > 0 ? 1 : 0} />);
     }
   }
 
-  // ---- SOL on each spot this round ----
+  // ---- the SOL on each claim ----
+  // The region names are painted into the island itself; drawn here they fought
+  // the amount chips for the same pixels and both lost.
+  const fs = Math.max(7, 5.2 * s);
   const potNow = st.pot.roundId === st.roundId ? st.pot : null;
-  const fs = Math.max(8, 6.2 * s);
   const amounts: ReactNode[] = [];
   if (el < 0 || el < 2500)
     for (let i = 0; i < BLOCKS; i++) {
+      const c = CLAIMS[i];
       const v = potNow?.perBlock[i] ?? 0;
-      const [x, y] = spotXY(i);
       const mine = Boolean(pendMask & (1 << i));
       amounts.push(
         <View
           key={`amt${i}`}
           pointerEvents="none"
-          style={[SPOT_AMT, { left: (x + 1) * s, top: (y + SH - 7) * s, width: 26 * s, borderColor: mine ? '#ffd84a' : '#2a4480' }]}
+          style={[CLAIM_AMT, { left: (c.cx - 11) * s, top: (c.cy + 5) * s, width: 22 * s, borderColor: mine ? '#ffd84a' : '#2a4480' }]}
         >
           <Text numberOfLines={1} style={{ color: v > 0 ? (mine ? '#ffd84a' : '#bfe9ff') : '#6f82b0', fontFamily: F.display, fontSize: fs, lineHeight: fs * 1.15 }}>
-            {fmtSpot(v)}
+            {fmtAmt(v)}
           </Text>
         </View>,
       );
+      if (solo & (1 << i) && !(el >= 1400 && winner !== null && winner !== i))
+        amounts.push(
+          <Text key={`solo${i}`} style={[SOLO_STAR, { left: (c.cx + 5) * s, top: (c.cy - 20) * s, fontSize: 7 * s, lineHeight: 8 * s }]}>
+            ★
+          </Text>,
+        );
     }
 
   // ---- taps ----
+  // One surface over the whole island: the claim shapes are irregular, so the
+  // grid decides what was hit rather than a rectangle per claim.
   const taps: ReactNode[] = [
     <Pressable
       key="ground"
-      accessibilityLabel="Walk here"
+      accessibilityLabel="The island: tap a claim to pick it, or open ground to walk there"
       onPress={(e) => {
         // locationX isn't always filled in on web; fall back to the page position minus the map's offset
         const ne = e.nativeEvent as { locationX?: number; locationY?: number; pageX?: number; pageY?: number };
         const lx = (Number.isFinite(ne.locationX) ? (ne.locationX as number) : (ne.pageX ?? 0) - left) / s;
         const ly = (Number.isFinite(ne.locationY) ? (ne.locationY as number) : (ne.pageY ?? 0) - topPx) / s;
         if (!Number.isFinite(lx) || !Number.isFinite(ly)) return;
-        const tx = Math.max(4, Math.min(MW - MNW - 4, lx - MNW / 2));
-        const ty = Math.max(4, Math.min(MH - MNH - 4, ly - MNH + 3));
+        const hit = claimAt(lx, ly);
+        if (hit >= 0 && el < 0) {
+          if (mo.idx === hit && mo.bonkedAt < 0) {
+            mo.bonkedAt = Date.now();
+            useGame.getState().bonkMole();
+            return;
+          }
+          toggle(hit);
+          return;
+        }
+        const [gx, gy] = toLand(lx, ly);
+        const [tx, ty] = fromFoot(gx, gy);
         manualUntil.current = Date.now() + 8000;
-        m.tx = tx;
-        m.ty = ty;
+        m.tx = Math.max(2, Math.min(MAP_W - MNW - 2, tx));
+        m.ty = Math.max(2, Math.min(MAP_H - MNH - 2, ty));
         m.target = -1;
         m.mode = 'walk';
         m.since = Date.now();
       }}
-      style={{ position: 'absolute', left: 0, top: 0, width: MW * s, height: MH * s }}
+      style={{ position: 'absolute', left: 0, top: 0, width: MAP_W * s, height: MAP_H * s }}
     />,
   ];
-  if (el < 0) {
-    for (let i = 0; i < BLOCKS; i++) {
-      const [x, y] = spotXY(i);
-      const isMole = mo.idx === i && mo.bonkedAt < 0;
-      taps.push(
-        <Pressable
-          key={`tap${i}`}
-          accessibilityRole="button"
-          accessibilityLabel={isMole ? 'Bonk the mole' : `Mining spot ${i + 1}${solo & (1 << i) ? ' (solo spot)' : ''}`}
-          onPress={() => {
-            if (isMole) {
-              mo.bonkedAt = Date.now();
-              useGame.getState().bonkMole();
-              return;
-            }
-            toggle(i);
-          }}
-          style={{ position: 'absolute', left: (x + 1) * s, top: (y + PAD_Y - 2) * s, width: 26 * s, height: 25 * s }}
-        />,
-      );
-    }
-  }
   for (const p of peers)
     taps.push(
       <Pressable
@@ -497,12 +570,15 @@ export default function PixelMine() {
   );
 
   return (
-    <View style={[StyleSheet.absoluteFill, { backgroundColor: GRASS, overflow: 'hidden' }]} {...({ dataSet: { pixel: '1' } } as object)}>
-      <View style={{ position: 'absolute', left: left + shake * s, top: topPx, width: MW * s, height: MH * s }}>
-        <Image source={SPRITES.map} style={{ position: 'absolute', left: 0, top: 0, width: MW * s, height: MH * s }} fadeDuration={0} />
+    <View style={[StyleSheet.absoluteFill, { backgroundColor: SEA, overflow: 'hidden' }]} {...({ dataSet: { pixel: '1' } } as object)}>
+      <View style={{ position: 'absolute', left: left + shake * s, top: topPx, width: MAP_W * s, height: MAP_H * s }}>
+        <Image source={SPRITES.island} style={{ position: 'absolute', left: 0, top: 0, width: MAP_W * s, height: MAP_H * s }} fadeDuration={0} />
+        {sea}
+        {shapes}
         {items.map((it) => it.node)}
         {amounts}
         {top_}
+        {birds}
         {taps}
       </View>
       <RevealSounds />

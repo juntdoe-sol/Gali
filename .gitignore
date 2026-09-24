@@ -18,3 +18,6 @@ target/*
 target/deploy/*.json
 scripts/ore-layout/target/
 scripts/ore-layout.json.checked
+
+__pycache__/
+*.pyc
