@@ -1,3 +1,4 @@
+import './polyfill-web';
 import { AnchorProvider, BN, Program, utils, type Idl } from '@coral-xyz/anchor';
 import { transact, type Web3MobileWallet } from '@solana-mobile/mobile-wallet-adapter-protocol-web3js';
 import {
@@ -19,32 +20,17 @@ import { webConnect, webDisconnect, webOwner, webSign } from './webWallet';
 export { listWebWallets, PickWalletError, type WebWalletInfo } from './webWallet';
 import idlJson from './idl.json';
 import deployment from './deployment.json';
+import { CLUSTER, clockOffsetMs, MAX_SESSION_FUND_SOL, PROGRAM_ID_STR, RPC_URL, retryingFetch, SKR_MINT_STR } from './light';
 
-export const CLUSTER = deployment.cluster as 'devnet';
-// EXPO_PUBLIC_RPC_URL overrides the endpoint at build time (e.g. a private devnet RPC, or a local validator for tests).
-export const RPC_URL = process.env.EXPO_PUBLIC_RPC_URL || 'https://api.devnet.solana.com';
-export const PROGRAM_ID = new PublicKey(deployment.programId);
-export const SKR_MINT = new PublicKey(deployment.skrMint);
+export { CLUSTER, RPC_URL, chainReady, isRateLimited, clockOffsetMs, MAX_SESSION_FUND_SOL, short, explorer } from './light';
+// PublicKey for code outside src/chain, which reaches web3 only through this lazily loaded module.
+export { PublicKey };
+export const PROGRAM_ID = new PublicKey(PROGRAM_ID_STR);
+export const SKR_MINT = new PublicKey(SKR_MINT_STR);
 export const SKR_DECIMALS = deployment.skrDecimals;
 export const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 export const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
 export const APP_IDENTITY = { name: 'Gali', uri: 'https://gali.bounded.page', icon: 'favicon.png' };
-export const chainReady = deployment.skrMint !== '11111111111111111111111111111111';
-
-/** True when an RPC turned us away for asking too often (public endpoints do this a lot). */
-export const isRateLimited = (e: unknown) => /\b429\b|rate limit|too many requests/i.test(String((e as Error)?.message ?? e));
-const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-/** Retries 429s with a growing pause, so a busy RPC slows the app down instead of breaking it. */
-const retryingFetch: typeof fetch = async (input, init) => {
-  let last: Response | undefined;
-  for (let i = 0; i < 4; i++) {
-    const res = await fetch(input as RequestInfo, init as RequestInit);
-    if (res.status !== 429) return res;
-    last = res;
-    await wait(400 * 2 ** i);
-  }
-  return last as Response;
-};
 export const connection = new Connection(RPC_URL, { commitment: 'confirmed', fetch: retryingFetch, disableRetryOnRateLimit: true });
 const readOnlyWallet = {
   publicKey: Keypair.generate().publicKey,
@@ -251,13 +237,6 @@ const levelOf = (xp: number) => {
   return l;
 };
 
-/** Chain clock minus device clock, in ms. */
-export async function clockOffsetMs(): Promise<number> {
-  const slot = await connection.getSlot();
-  const t = await connection.getBlockTime(slot);
-  return t ? t * 1000 - Date.now() : 0;
-}
-
 /* ---------- wallet: Mobile Wallet Adapter on Android, injected browser wallet on web ---------- */
 export const IS_WEB = Platform.OS === 'web';
 const AUTH_KEY = 'gali-mwa-auth';
@@ -323,8 +302,6 @@ export async function loadSession(owner: PublicKey): Promise<Keypair> {
 
 export const SESSION_HOURS = 24;
 export const SESSION_FUND_SOL = 0.05;
-
-export const MAX_SESSION_FUND_SOL = 1;
 
 /** `needSol`: SOL the session key should hold afterwards (for SOL deploys); topped up in the same approval. */
 export async function startSession(owner: PublicKey, session: Keypair, hasPlayer: boolean, needSol = 0) {
@@ -463,6 +440,3 @@ export async function requestDevnetSol(owner: PublicKey) {
   await connection.confirmTransaction(sig, 'confirmed');
   return sig;
 }
-
-export const short = (k: string) => `${k.slice(0, 4)}…${k.slice(-4)}`;
-export const explorer = (sig: string) => `https://explorer.solana.com/tx/${sig}?cluster=${CLUSTER}`;

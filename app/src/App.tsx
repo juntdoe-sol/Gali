@@ -1,7 +1,6 @@
 import { ChakraPetch_500Medium, ChakraPetch_600SemiBold, ChakraPetch_700Bold } from '@expo-google-fonts/chakra-petch';
 import { Jersey15_400Regular } from '@expo-google-fonts/jersey-15';
 import { useFonts } from 'expo-font';
-import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
@@ -22,12 +21,20 @@ import { PeerCard } from './ui/World';
 // lets browser tests watch the game state
 if (Platform.OS === 'web') Object.assign(globalThis, { __gali: useGame, __galiWorld: useWorld });
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({ shouldPlaySound: false, shouldSetBadge: false, shouldShowBanner: true, shouldShowList: true }),
-});
+// expo-notifications stays out of the web startup bundle; loaded on first use.
+let notificationsP: Promise<typeof import('expo-notifications')> | null = null;
+const loadNotifications = () =>
+  (notificationsP ??= import('expo-notifications').then((N) => {
+    N.setNotificationHandler({
+      handleNotification: async () => ({ shouldPlaySound: false, shouldSetBadge: false, shouldShowBanner: true, shouldShowList: true }),
+    });
+    return N;
+  }));
+if (Platform.OS !== 'web') void loadNotifications().catch(() => undefined);
 
 async function scheduleDailyReminder() {
   try {
+    const Notifications = await loadNotifications();
     const perm = await Notifications.requestPermissionsAsync();
     if (!perm.granted) return;
     await Notifications.cancelAllScheduledNotificationsAsync();

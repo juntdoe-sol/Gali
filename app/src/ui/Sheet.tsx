@@ -7,8 +7,8 @@ import {
 } from '../game/constants';
 import { GEAR_ICON, ITEM_ICON } from './icons';
 import { useGame, useLevelXp, useOwnedMask, usePoints } from '../game/store';
-import { chainReady, CLUSTER, fetchLeaderboard, PROGRAM_ID, short, SKR_MINT, type LeaderRow } from '../chain/client';
-import { fetchPastBoardRounds, type BoardRound } from '../chain/board';
+import { chainReady, CLUSTER, PROGRAM_ID_STR, short, SKR_MINT_STR, type BoardRound, type LeaderRow } from '../chain/light';
+import { loadBoard, loadChain } from '../chain/lazy';
 import { ADMIN_FEE, emptyPot, fmtSol, potFee_, practiceMotherlode, simPot, soloMask } from '../game/pot';
 import { UnclaimedRow } from './Dock';
 import { Bar, Btn, Card, Pill, T } from './kit';
@@ -256,7 +256,7 @@ function SkrTab() {
         </Card>
       ))}
       <T v="muted">
-        {CLUSTER === 'devnet' ? `Devnet build uses a test SKR mint (${short(SKR_MINT.toBase58())}). ` : ''}SKR is the native asset of the Solana Mobile ecosystem.
+        {CLUSTER === 'devnet' ? `Devnet build uses a test SKR mint (${short(SKR_MINT_STR)}). ` : ''}SKR is the native asset of the Solana Mobile ecosystem.
       </T>
     </>
   );
@@ -300,7 +300,7 @@ function Rounds() {
   useEffect(() => {
     let live = true;
     setRows(null);
-    (onChain ? fetchPastBoardRounds(roundId) : Promise.resolve(practiceRounds(roundId, 12)))
+    (onChain ? loadBoard().then((b) => b.fetchPastBoardRounds(roundId)) : Promise.resolve(practiceRounds(roundId, 12)))
       .then((r) => live && setRows(r))
       .catch(() => live && setRows([]));
     return () => {
@@ -375,7 +375,8 @@ function Ranks() {
   const xp = useLevelXp();
   useEffect(() => {
     if (!chainReady) return;
-    fetchLeaderboard()
+    loadChain()
+      .then((c) => c.fetchLeaderboard())
       .then(setRows)
       .catch(() => setRows([]));
   }, []);
@@ -466,9 +467,9 @@ function Me() {
         <Switch id="mute" value={save.muted} onValueChange={setMute} trackColor={{ true: COLORS.teal, false: COLORS.card2 }} />
       </Card>
       <T v="muted">How it works: each minute is a round on an island with 25 mining claims. Put SOL on 1 to 25 claims. One claim strikes gold. Its miners split the whole pot (the SOL on every claim, after a 1% fee and 10% of the losing claims) by their SOL on the gold claim; SOL on the other claims is lost. The gold claim also mines ORE, split the same way, or on one of the round's 10 solo claims (★) taken whole by one miner, with odds equal to their share. Fewer claims pay more points: 1,000 for a single claim, 40 for all 25. A 1-in-500 motherlode pays out the whole SKR Motherlode Pool on top. Everything lands in Unclaimed until you claim it. This is a game of chance: only play with SOL you can afford to lose.</T>
-      <Pressable onPress={() => Linking.openURL(`https://explorer.solana.com/address/${PROGRAM_ID.toBase58()}?cluster=${CLUSTER}`)}>
+      <Pressable onPress={() => Linking.openURL(`https://explorer.solana.com/address/${PROGRAM_ID_STR}?cluster=${CLUSTER}`)}>
         <T v="muted" style={{ textDecorationLine: 'underline' }}>
-          Program {short(PROGRAM_ID.toBase58())} on Solana Explorer
+          Program {short(PROGRAM_ID_STR)} on Solana Explorer
         </T>
       </Pressable>
     </>

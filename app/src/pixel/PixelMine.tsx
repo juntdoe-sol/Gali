@@ -3,7 +3,7 @@
 // Drawn with plain Images at 12 fps.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Image, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View, type ImageStyle } from 'react-native';
-import { chainReady } from '../chain/client';
+import { chainReady } from '../chain/light';
 import { BLOCKS, CAVE_IN_EVERY, GEAR, gearByKey, levelFromXp } from '../game/constants';
 import { soloMask } from '../game/pot';
 import { play } from '../game/sfx';

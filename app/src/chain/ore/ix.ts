@@ -8,6 +8,7 @@
  * up by name, so a list that is merely complete but out of order will fail in
  * confusing ways or, worse, pass the wrong account.
  */
+import '../polyfill-web';
 import { PublicKey, SystemProgram, TransactionInstruction } from '@solana/web3.js';
 import { Buffer } from 'buffer';
 import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from '@solana/spl-token';

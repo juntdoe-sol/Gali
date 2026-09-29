@@ -3,9 +3,13 @@
 // Nothing here is trusted: payloads are clamped, and a wallet name is only shown after the
 // sender proves (with its session key) that the wallet's on-chain Player uses that session.
 // In practice mode, a few labelled bots wander the quarry instead.
-import { RealtimeClient, type RealtimeChannel } from '@supabase/realtime-js';
+// The Supabase client and the chain code are loaded on demand (startWorld / a peer's identity claim),
+// so neither is in the startup bundle.
+import type { RealtimeChannel, RealtimeClient } from '@supabase/realtime-js';
+import type { Keypair } from '@solana/web3.js';
 import { create } from 'zustand';
-import * as chain from '../chain/client';
+import { loadChain, loadedChain } from '../chain/lazy';
+import { short } from '../chain/light';
 import cfg from '../chain/chat.json';
 
 export type Pose = 'idle' | 'walk' | 'swing';
@@ -88,13 +92,32 @@ export const useWorld = create<WorldState>((set, get) => ({
 let client: RealtimeClient | null = null;
 let channel: RealtimeChannel | null = null;
 let pruneTimer: ReturnType<typeof setInterval> | null = null;
+/** Bumped by stopWorld, so a start still waiting on the Supabase chunk knows it was cancelled. */
+let startGen = 0;
+let starting = false;
 const MAX_PEERS = 60;
 const verified = new Map<string, string | null>(); // `${id}:${wallet}:${session}` -> wallet or null (pending/failed)
 
 export function startWorld() {
-  if (!worldReady || client) return;
+  if (!worldReady || client || starting) return;
+  starting = true;
+  const gen = ++startGen;
   useWorld.setState({ status: 'connecting' });
-  client = new RealtimeClient(URL_, { params: { apikey: KEY }, vsn: '1.0.0' } as ConstructorParameters<typeof RealtimeClient>[1]);
+  import('@supabase/realtime-js').then(
+    ({ RealtimeClient }) => {
+      starting = false;
+      if (gen !== startGen || client) return; // stopped (or restarted) while the chunk loaded
+      connect(RealtimeClient);
+    },
+    () => {
+      starting = false;
+      if (gen === startGen) useWorld.setState({ status: 'off' });
+    },
+  );
+}
+
+function connect(RealtimeClientCtor: typeof RealtimeClient) {
+  client = new RealtimeClientCtor(URL_, { params: { apikey: KEY }, vsn: '1.0.0' } as ConstructorParameters<typeof RealtimeClient>[1]);
   channel = client.channel('gali-world', { config: { broadcast: { self: false, ack: false } } });
   channel
     .on('broadcast', { event: 'state' }, ({ payload }) => onState(payload))
@@ -137,6 +160,8 @@ function sayBye() {
 }
 
 export function stopWorld() {
+  startGen++;
+  starting = false;
   sayBye();
   if (pruneTimer) clearInterval(pruneTimer);
   void channel?.unsubscribe();
@@ -183,16 +208,19 @@ function onState(p: any) {
       return;
     }
     verified.set(key, null);
-    void chain.verifySessionClaim(p.wallet, p.session, claimMessage(id, p.ts), p.sig).then((ok) => {
-      if (!ok) return;
-      verified.set(key, p.wallet);
-      setIdentity(id, p.wallet);
-    });
+    void loadChain()
+      .then((chain) => chain.verifySessionClaim(p.wallet, p.session, claimMessage(id, p.ts), p.sig))
+      .catch(() => false)
+      .then((ok) => {
+        if (!ok) return;
+        verified.set(key, p.wallet);
+        setIdentity(id, p.wallet);
+      });
   }
 }
 
 function setIdentity(id: string, wallet: string) {
-  useWorld.setState((s) => (s.peers[id] ? { peers: { ...s.peers, [id]: { ...s.peers[id], wallet, name: chain.short(wallet) } } } : s));
+  useWorld.setState((s) => (s.peers[id] ? { peers: { ...s.peers, [id]: { ...s.peers[id], wallet, name: short(wallet) } } } : s));
 }
 
 const claimMessage = (id: string, ts: number) => `gali-world:${id}:${ts}`;
@@ -203,7 +231,7 @@ let lastKey = '';
 let claim: { wallet: string; session: string; sig: string; ts: number } | null = null;
 
 /** Called every frame by the map with our miner's state; sends it when it changes (and as a heartbeat). */
-export function publishMe(me: MeState, identity: { wallet: string | null; session: import('@solana/web3.js').Keypair | null; sessionValid: boolean }) {
+export function publishMe(me: MeState, identity: { wallet: string | null; session: Keypair | null; sessionValid: boolean }) {
   if (!channel || useWorld.getState().status !== 'online') return;
   if (![me.x, me.y, me.tx, me.ty].every(Number.isFinite)) return;
   const now = Date.now();
@@ -224,7 +252,11 @@ export function publishMe(me: MeState, identity: { wallet: string | null; sessio
   };
   const key = JSON.stringify(payload);
   if (now - lastSent < SEND_MS || (key === lastKey && now - lastSent < BEAT_MS)) return;
-  if (identity.wallet && identity.session && identity.sessionValid) {
+  const claimable = identity.wallet && identity.session && identity.sessionValid;
+  // a session key only exists once store.ts has loaded the chain code, so this is set whenever claimable is
+  const chain = claimable ? loadedChain() : null;
+  if (claimable && !chain) void loadChain().catch(() => undefined);
+  if (chain && identity.wallet && identity.session && identity.sessionValid) {
     if (!claim || claim.wallet !== identity.wallet || now - lastClaim > CLAIM_MS) {
       const ts = now;
       claim = { wallet: identity.wallet, session: identity.session.publicKey.toBase58(), sig: chain.signWithSession(identity.session, claimMessage(payload.id as string, ts)), ts };

@@ -10,8 +10,10 @@
  * ORE's program. Nothing here invents a number: each field traces to an account
  * ORE owns, and the ones ORE does not track are absent rather than faked.
  */
+import './polyfill-web';
 import { Keypair, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
 import { connection } from './client';
+import { NOTHING_CLAIMABLE, REFINING_FEE, REFINING_FEE_BPS } from './light';
 import { ORE_SPLIT_ADDRESS_B58 } from './ore/consts';
 import {
   fetchClock,
@@ -30,7 +32,10 @@ export type { OreClock } from './ore/read';
 export const ORE_UNIT = 100_000_000_000;
 
 /** What ORE charges on claiming ORE that has not been refined yet. Their fee, not Gali's. */
-export const REFINING_FEE = Number(ORE_REFINING_BPS) / 10_000;
+export { REFINING_FEE };
+// light.ts keeps a copy of ORE's refining fee so the startup bundle can show it without web3.
+if (Number(ORE_REFINING_BPS) !== REFINING_FEE_BPS)
+  console.error(`[gali] light.ts REFINING_FEE_BPS (${REFINING_FEE_BPS}) is out of step with ORE_REFINING_BPS (${ORE_REFINING_BPS})`);
 
 /** A round's state, as the quarry renders it. */
 export interface BoardRound {
@@ -126,14 +131,7 @@ export interface Claimable {
   settled: boolean;
 }
 
-export const NOTHING_CLAIMABLE: Claimable = {
-  sol: 0,
-  unrefined: 0,
-  refined: 0,
-  fee: 0,
-  roundId: 0,
-  settled: true,
-};
+export { NOTHING_CLAIMABLE };
 
 export async function fetchClaimable(owner: PublicKey): Promise<Claimable> {
   const [clock, miner] = await Promise.all([

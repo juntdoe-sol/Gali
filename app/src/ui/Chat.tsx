@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { short } from '../chain/client';
+import { short } from '../chain/light';
 import { chatReady, startChatPolling, useChat, type ChatMsg } from '../game/chat';
 import { COLORS, usd } from '../game/constants';
 import { useGame } from '../game/store';

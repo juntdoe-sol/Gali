@@ -12,6 +12,7 @@
  * player's behalf every round with no pop-up, exactly as before, except the rule
  * is enforced by ORE rather than by us and ORE pays the key a fee for the work.
  */
+import '../polyfill-web';
 import { Keypair, LAMPORTS_PER_SOL, PublicKey, TransactionInstruction } from '@solana/web3.js';
 import { connection, sendWithKey, sendWithWallet } from '../client';
 import { AUTOMATION_STRATEGY, EXECUTOR_ADDRESS } from './consts';

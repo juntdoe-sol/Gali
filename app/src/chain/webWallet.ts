@@ -4,6 +4,7 @@
 //  - older injected providers (window.phantom.solana, window.solflare, window.backpack, window.solana)
 // Transactions are signed by the wallet and sent through our own devnet connection, so the
 // wallet's network setting doesn't matter for sending (switch it to devnet to see balances).
+import './polyfill-web';
 import { PublicKey, Transaction } from '@solana/web3.js';
 
 export interface WebWalletInfo {
