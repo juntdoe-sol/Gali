@@ -24,7 +24,7 @@ export interface RoundResult {
   skr: number; // SKR from the Motherlode Pool
   solIn: number; // SOL deployed this round
   solOut: number; // SOL given back this round (after fees; credited to Unclaimed)
-  skrMined: number; // SKR mined from the round reward
+  oreMined: number; // ORE the gold claim mined this round
   split?: boolean; // the round's SKR was split (false: a solo spot won and one miner took it)
   lucky?: boolean; // you were the lucky winner
 }
@@ -304,7 +304,7 @@ export const useGame = create<GameState>((set, get) => {
     let winning: number;
     let motherlode = false;
     let solOut = 0;
-    let skrMined = 0;
+    let oreMined = 0;
     let skr = 0; // from the Motherlode Pool
     let split = true;
     let lucky = false;
@@ -316,7 +316,7 @@ export const useGame = create<GameState>((set, get) => {
         winning = r.winning;
         motherlode = r.motherlode;
         solOut = r.payout;
-        skrMined = r.oreMined;
+        oreMined = r.oreMined;
         skr = r.oreMotherlode;
         split = r.split;
         lucky = r.lucky;
@@ -335,7 +335,7 @@ export const useGame = create<GameState>((set, get) => {
       const final = addToPot(simPot(roundId, 1), pending.mask, pending.perBlock);
       const pay = payoutFor(final, winning, pending.perBlock, pending.mask, motherlode ? practiceMotherlode(roundId) : 0, split, Math.random());
       solOut = pay.sol;
-      skrMined = pay.skr;
+      oreMined = pay.ore;
       skr = pay.skrMotherlode;
       lucky = pay.lucky;
     }
@@ -347,7 +347,7 @@ export const useGame = create<GameState>((set, get) => {
     const solIn = pending.total;
     setTimeout(async () => {
       if (pending.onChain) await get().refreshWallet();
-      const result: RoundResult = { roundId, winning, covered, won, points, motherlode, onChain: pending.onChain, skr, solIn, solOut, skrMined, split, lucky };
+      const result: RoundResult = { roundId, winning, covered, won, points, motherlode, onChain: pending.onChain, skr, solIn, solOut, oreMined, split, lucky };
       updateSave((s) => {
         const winStreak = won ? s.winStreak + 1 : 0;
         const qp = { ...s.questProgress };
@@ -360,10 +360,10 @@ export const useGame = create<GameState>((set, get) => {
           points: pending.onChain ? s.points : s.points + points,
           wins: pending.onChain ? s.wins : s.wins + (practiceWin ? 1 : 0),
           practiceUnclaimedSol: pending.onChain ? s.practiceUnclaimedSol : (s.practiceUnclaimedSol ?? 0) + solOut,
-          practiceUnclaimedSkr: pending.onChain ? s.practiceUnclaimedSkr : (s.practiceUnclaimedSkr ?? 0) + skrMined + skr,
+          practiceUnclaimedSkr: pending.onChain ? s.practiceUnclaimedSkr : (s.practiceUnclaimedSkr ?? 0) + oreMined,
           practiceRefinedSkr: pending.onChain
             ? s.practiceRefinedSkr
-            : (s.practiceRefinedSkr ?? 0) + ((s.practiceUnclaimedSkr ?? 0) + skrMined + skr) * PRACTICE_REFINE_RATE,
+            : (s.practiceRefinedSkr ?? 0) + ((s.practiceUnclaimedSkr ?? 0) + oreMined) * PRACTICE_REFINE_RATE,
           winStreak,
           bestStreak: Math.max(s.bestStreak, winStreak),
           questProgress: qp,

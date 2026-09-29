@@ -1,5 +1,5 @@
 import { sha256 } from '@noble/hashes/sha2.js';
-import { BLOCKS, MOTHERLODE_ACCRUAL_SKR, MOTHERLODE_ODDS, ROUND_REWARD_SKR } from './constants';
+import { BLOCKS, MOTHERLODE_ACCRUAL_SKR, MOTHERLODE_ODDS, ROUND_REWARD_ORE } from './constants';
 
 /** Mirrors the program: 1% of every spot, plus the config's pot_fee_bps of the rest on each losing spot. */
 export const ADMIN_FEE = 0.01;
@@ -118,16 +118,17 @@ export function poolFor(pot: PotView, win: number) {
 /**
  * What `claim_pot` credits. SOL: the winning spot's miners split the whole pool (their SOL plus the
  * losing spots' SOL, minus fees) by their SOL on that spot; losing spots get nothing back.
- * SKR: the round's reward is split the same way, or on a solo spot goes whole to one miner
- * (odds = their share, `luckyRoll` in [0, 1)). A motherlode pays out the whole pool (`motherlodeSkr`), always split.
+ * ORE: what the round mines is split the same way, or on a solo claim goes whole to one
+ * miner (odds = their share, `luckyRoll` in [0, 1)). ORE mints it; Gali does not.
+ * A motherlode pays Gali's whole SKR pool (`motherlodeSkr`) on top, always split.
  */
 export function payoutFor(pot: PotView, win: number, minePerBlock: number, mask: number, motherlodeSkr: number, split: boolean, luckyRoll: number) {
   const mine = mask & (1 << win) ? minePerBlock : 0;
   const onWin = pot.perBlock[win];
-  if (!mine || !onWin) return { sol: 0, skr: 0, skrMotherlode: 0, lucky: false };
+  if (!mine || !onWin) return { sol: 0, ore: 0, skrMotherlode: 0, lucky: false };
   const share = mine / onWin;
   const lucky = !split && luckyRoll < share;
-  return { sol: share * poolFor(pot, win), skr: split ? share * ROUND_REWARD_SKR : lucky ? ROUND_REWARD_SKR : 0, skrMotherlode: share * motherlodeSkr, lucky };
+  return { sol: share * poolFor(pot, win), ore: split ? share * ROUND_REWARD_ORE : lucky ? ROUND_REWARD_ORE : 0, skrMotherlode: share * motherlodeSkr, lucky };
 }
 
 /** Your SOL if a spot you cover strikes: the smallest and largest payout over your spots, given the pot so far (yours included). */
