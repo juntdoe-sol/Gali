@@ -3,7 +3,7 @@ import { Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { chainReady } from '../chain/client';
 import { REFINING_FEE } from '../chain/board';
-import { BLOCKS, boostFor, COLORS, pointsFor, ROUND_REWARD_SKR } from '../game/constants';
+import { BLOCKS, boostFor, COLORS, pointsFor } from '../game/constants';
 import { watchMotion } from '../game/motion';
 import { addToPot, fmtSol, maskOf, strikeRange, MIN_SOL_PER_BLOCK, OPTIMAL_ROUNDS, optimalPerSpot, smartPick, soloMask } from '../game/pot';
 import { useGame, type DockTab, type Preset } from '../game/store';
@@ -126,14 +126,14 @@ export function UnclaimedRow() {
   const claim = useGame((s) => s.claimRewards);
   const fee = useGame((s) => (onChain ? s.wallet.unclaimed.fee : (s.save.practiceUnclaimedSkr ?? 0) * REFINING_FEE));
   return (
-    <View style={styles.unclaimed} accessibilityLabel={`Unclaimed ${sol.toFixed(4)} SOL, ${Math.floor(unrefined)} unrefined SKR, ${Math.floor(refined)} refined SKR`}>
+    <View style={styles.unclaimed} accessibilityLabel={`Unclaimed ${sol.toFixed(4)} SOL, ${Math.floor(unrefined)} unrefined ORE, ${Math.floor(refined)} refined ORE`}>
       <View style={styles.uRow}>
         <T style={{ fontSize: 13 }}>🎁</T>
         <T v="label" style={{ color: COLORS.muted }}>
           Unclaimed
         </T>
         <Info
-          text={`Finished rounds credit your SOL and mined SKR here${onChain ? ' (held by the program for your wallet)' : ''}. SOL claims are free. Mined (unrefined) SKR pays a 10% refining fee when you claim it, and that fee is shared with everyone still holding theirs, as refined SKR you can claim with no fee. The longer you hold, the more refined SKR you collect.`}
+          text={`Finished rounds credit your SOL and the ORE you mined here${onChain ? ' (held by ORE for your wallet)' : ''}. SOL claims are free. Unrefined ORE pays ORE's own 10% fee when you claim it, and that fee is shared with everyone still holding theirs, as refined ORE you can claim with no fee. The longer you hold, the more refined ORE you collect.`}
         />
         <T v="black" numberOfLines={1} style={{ flex: 1, fontSize: 13, color: COLORS.sol, textAlign: 'right' }}>
           {fmtSol(sol)} SOL
@@ -146,7 +146,7 @@ export function UnclaimedRow() {
           {fee >= 1 ? ` · fee ${Math.floor(fee).toLocaleString()}` : ''}
         </T>
         <T v="black" numberOfLines={1} style={{ fontSize: 13, color: COLORS.skr }}>
-          {Math.floor(unrefined - fee + refined).toLocaleString()} SKR
+          {(unrefined - fee + refined).toFixed(2)} ORE
         </T>
         <Chip label="CLAIM" on={unrefined + refined > 0} disabled={!(unrefined + refined > 0) || Boolean(busy)} onPress={() => void claim('skr')} />
       </View>
@@ -468,7 +468,7 @@ function ProPanel({ compact }: { compact: boolean }) {
           <Row
             icon="🏆"
             label="If it strikes"
-            info={`Only the gold claim gets paid. Its SKR (up to ${ROUND_REWARD_SKR} a round, paid from the Rewards Pool) is split by SOL there, unless it is one of this round's 10 solo claims (★ on the map): then one miner takes it all, with odds equal to their share. A 1-in-625 motherlode pays out the whole Motherlode Pool, split by SOL on the gold claim, plus 10,000 points. Points: 40 x 25 / claims covered. ${RETURN_INFO}`}
+            info={`Only the gold claim gets paid. The ORE it mines is split by SOL there, unless it is one of this round's 10 solo claims (★ on the map): then one miner takes it all, with odds equal to their share. A 1-in-500 motherlode pays the whole SKR Motherlode Pool on top, split by SOL on the gold claim, plus 10,000 points. Points: 40 x 25 / claims covered. ${RETURN_INFO}`}
             last
             right={
               <T v="black" style={{ fontSize: 13, color: COLORS.gold }}>

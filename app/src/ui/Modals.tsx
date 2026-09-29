@@ -90,9 +90,9 @@ function SolLine({ res, dark, big }: { res: RoundResult; dark: boolean; big?: bo
       <T v="display" style={{ fontSize: big ? 40 : 26, lineHeight: big ? 46 : 30, color: dark ? '#0b5a3a' : '#c8ffe6' }}>
         +{fmtSol(res.solOut)} SOL
       </T>
-      {res.skrMined ? (
+      {res.oreMined ? (
         <T v="display" style={{ fontSize: big ? 24 : 18, color: dark ? '#3d5a00' : '#eaffc4' }}>
-          {res.lucky ? '★ ' : ''}+{res.skrMined.toLocaleString(undefined, { maximumFractionDigits: 2 })} SKR {res.lucky ? 'solo winner!' : 'mined'}
+          {res.lucky ? '★ ' : ''}+{res.oreMined.toLocaleString(undefined, { maximumFractionDigits: 2 })} ORE {res.lucky ? 'solo winner!' : 'mined'}
         </T>
       ) : res.won && res.split === false ? (
         <T v="bold" style={{ fontSize: 12, color: dark ? '#3d5a00' : '#eaffc4' }}>

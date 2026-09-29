@@ -75,8 +75,12 @@ export const gearByKey = (k: string | null | undefined) => GEAR.find((g) => g.ke
 // SKR economy, priced at roughly 1 SKR = $0.018 (55 SKR = $1). Keep in sync with scripts/setup-devnet.ts.
 export const SKR_USD = 0.018;
 export const MOTHERLODE_ACCRUAL_SKR = 40; // added to the Motherlode Pool by every played round; a hit pays out the whole pool
-export const MOTHERLODE_POOL_SHARE = 0.3; // share of each gear sale that feeds the Motherlode Pool
-export const REWARDS_POOL_SHARE = 0.4; // share of each gear sale that feeds the Rewards Pool
+/**
+ * Share of each gear sale that goes back into the SKR motherlode. Seven in ten,
+ * per the deck: Gali never mints SKR, so the pool players chase is refilled by
+ * the players themselves. The rest is the team's.
+ */
+export const MOTHERLODE_POOL_SHARE = 0.7;
 export const ROUND_REWARD_SKR = 200; // legacy: the pre-ORE per-round SKR budget, still referenced by copy awaiting rewrite
 /**
  * ORE mined per round, split pro rata across the gold claim, or taken whole by
