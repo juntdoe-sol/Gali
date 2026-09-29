@@ -11,6 +11,7 @@
  * rather than return plausible nonsense, because reading a wrong offset would show a
  * player the wrong balance.
  */
+import '../polyfill-web';
 import { PublicKey } from '@solana/web3.js';
 import { Buffer } from 'buffer';
 

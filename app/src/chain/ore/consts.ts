@@ -8,6 +8,7 @@
  * ORE runs on mainnet only. There is no devnet deployment; local testing uses
  * ORE's own localnet.sh.
  */
+import '../polyfill-web';
 import { PublicKey } from '@solana/web3.js';
 import { Buffer } from 'buffer';
 

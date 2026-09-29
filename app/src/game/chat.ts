@@ -1,6 +1,7 @@
-import { PublicKey } from '@solana/web3.js';
+import type { PublicKey } from '@solana/web3.js';
 import { create } from 'zustand';
-import * as chain from '../chain/client';
+import { loadChain } from '../chain/lazy';
+import { short } from '../chain/light';
 import cfg from '../chain/chat.json';
 import { haptic, play } from './sfx';
 import { useGame } from './store';
@@ -46,6 +47,7 @@ async function post(body: string, extra?: { tip: { to: string; amount: number; s
   const player = g.wallet.player;
   const valid = player && player.session === session.publicKey.toBase58() && player.sessionExpires * 1000 > Date.now();
   if (!valid) throw new Error('Play one round on-chain to start a session, then chat');
+  const chain = await loadChain();
   const ts = Date.now();
   const sig = chain.signWithSession(session, `gali-chat:${ROOM}:${owner}:${ts}:${body}`);
   const r = await fetch(`${cfg.url}/functions/v1/chat-post`, {
@@ -131,9 +133,16 @@ export const useChat = create<ChatState>((set, get) => ({
 
   tip: async (to, amount, note) => {
     const g = useGame.getState();
+    let chain: Awaited<ReturnType<typeof loadChain>>;
+    try {
+      chain = await loadChain();
+    } catch (e) {
+      g.toast(String((e as Error).message ?? e).slice(0, 90), 'bad');
+      return false;
+    }
     let dest: PublicKey;
     try {
-      dest = new PublicKey(to.trim());
+      dest = new chain.PublicKey(to.trim());
     } catch {
       g.toast("That isn't a Solana address", 'bad');
       return false;
@@ -152,7 +161,7 @@ export const useChat = create<ChatState>((set, get) => ({
       await g.refreshWallet();
       play('mint');
       haptic.win();
-      g.toast(`Sent ${amount} SKR to ${chain.short(dest.toBase58())}`, 'gold');
+      g.toast(`Sent ${amount} SKR to ${short(dest.toBase58())}`, 'gold');
       set({ tipTarget: null });
       if (chatReady) {
         const body = note.trim() || `sent ${amount} SKR ⛏`;

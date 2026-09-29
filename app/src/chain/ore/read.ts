@@ -9,6 +9,7 @@
  *
  * Everything here is a read. Nothing in this file signs or sends.
  */
+import '../polyfill-web';
 import { Connection, PublicKey } from '@solana/web3.js';
 import {
   automationPda,
