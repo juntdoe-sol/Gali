@@ -7,10 +7,9 @@ import { BackHandler, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BLOCKS, COLORS } from '../game/constants';
 import { fmtSol, soloMask } from '../game/pot';
-import { useGame } from '../game/store';
+import { roundEnd, useGame } from '../game/store';
 import { CLAIMS } from '../engine/island';
 import { closeupView } from '../pixel/PixelMine';
-import { fx } from '../pixel/fx';
 import { useView } from '../pixel/view';
 import { Btn, Frame, T } from './kit';
 
@@ -27,6 +26,9 @@ export function ClaimPanel() {
   const roundId = useGame((s) => s.roundId);
   const pot = useGame((s) => s.pot);
   const winning = useGame((s) => s.winning);
+  const now = useGame((s) => s.now);
+  const top = insets.top + 104;
+  closeupView.top = top + 52;
 
   useEffect(() => {
     if (focus < 0) return;
@@ -47,6 +49,8 @@ export function ClaimPanel() {
   const share = total > 0 && onClaim > 0 ? Math.round((onClaim / total) * 100) : 0;
   const locked = phase !== 'mining' || Boolean(pending) || Boolean(run);
   const struck = phase === 'reveal' && winning === focus;
+  const secs = Math.max(0, Math.ceil((roundEnd(roundId) - now) / 1000));
+  const clock = phase === 'mining' ? `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` : phase === 'settling' ? 'MINING' : 'STRIKE!';
 
   let action = picked ? 'PICKED  ✓' : 'PICK THIS CLAIM';
   let sub = picked ? 'Tap to unpick. Deploy from the island.' : 'Adds it to your picks for this round';
@@ -68,12 +72,20 @@ export function ClaimPanel() {
         accessibilityRole="button"
         accessibilityLabel="Back to the island"
         hitSlop={10}
-        style={[styles.back, { top: fx.viewTop + 6 }]}
+        style={[styles.back, { top }]}
       >
         <T v="black" style={styles.backText}>
           ‹ ISLAND
         </T>
       </Pressable>
+      <View pointerEvents="none" style={[styles.clock, { top }]}>
+        <T v="bold" style={styles.clockLabel}>
+          {`#${(roundId % 100000).toLocaleString()}`}
+        </T>
+        <T v="display" style={[styles.clockValue, { color: phase !== 'mining' ? COLORS.gold : secs <= 5 ? COLORS.red : COLORS.text }]}>
+          {clock}
+        </T>
+      </View>
       <View
         style={[styles.wrap, { paddingBottom: insets.bottom + 10 }]}
         onLayout={(e) => {
@@ -151,16 +163,31 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   backText: { color: COLORS.text, fontSize: 13, letterSpacing: 1 },
+  clock: {
+    position: 'absolute',
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#070d20e6',
+    borderColor: COLORS.line,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  clockLabel: { color: COLORS.muted, fontSize: 11 },
+  clockValue: { fontSize: 24, lineHeight: 28 },
   wrap: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 10 },
-  card: { padding: 14, gap: 10 },
+  card: { padding: 12, gap: 8 },
   head: { flexDirection: 'row', alignItems: 'center' },
   arrow: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 10, backgroundColor: '#0c1734', borderWidth: 1, borderColor: COLORS.line },
   arrowText: { color: COLORS.gold, fontSize: 30, lineHeight: 32 },
   title: { color: COLORS.text, fontSize: 26, letterSpacing: 1 },
   subtitle: { fontSize: 12 },
   stats: { flexDirection: 'row', gap: 8 },
-  stat: { flex: 1, backgroundColor: '#0c1734', borderRadius: 10, borderWidth: 1, borderColor: COLORS.line, paddingVertical: 8, alignItems: 'center' },
+  stat: { flex: 1, backgroundColor: '#0c1734', borderRadius: 10, borderWidth: 1, borderColor: COLORS.line, paddingVertical: 6, alignItems: 'center' },
   statLabel: { fontSize: 9, letterSpacing: 1 },
-  statValue: { fontSize: 20, marginTop: 2 },
-  note: { fontSize: 12, textAlign: 'center' },
+  statValue: { fontSize: 19, marginTop: 1 },
+  note: { fontSize: 11, textAlign: 'center' },
 });

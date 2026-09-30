@@ -572,7 +572,7 @@ export function drawScene(c: Ctx, sc: Scene, v: Visit, st: CloseupState, ox: num
     c.fillRect(P(l.x), Q(l.y - 4), Math.ceil(s), 3 * s);
     c.fillStyle = '#ffcf70';
     c.fillRect(P(l.x - 1), Q(l.y - 1), 3 * s, 3 * s);
-    lights.push({ x: P(l.x), y: Q(l.y), r: 34 * s * fl * dim, c: '#ffb45a', k: fl });
+    lights.push({ x: P(l.x), y: Q(l.y), r: 44 * s * fl * dim, c: '#ffb45a', k: fl });
   }
   lights.push({ x: P(SHAFT_X + 16), y: Q(sc.surf[SHAFT_X + 16] - 7), r: 18 * s, c: '#ffcf70', k: 1 });
 
@@ -695,7 +695,7 @@ export function drawScene(c: Ctx, sc: Scene, v: Visit, st: CloseupState, ox: num
 /** The ambient painter for the lightmap: daylight above ground, near black below. */
 export function paintUnderground(sc: Scene, ox: number, oy: number, s: number, W: number, H: number, sky: RGB) {
   return (g: Ctx, q: number) => {
-    g.fillStyle = '#3a3450';
+    g.fillStyle = '#4a4262';
     g.beginPath();
     g.moveTo(0, H / q);
     for (let x = 0; x <= SW; x += 4) g.lineTo((ox + x * s) / q, (oy + (sc.surf[Math.min(SW - 1, x)] + 3) * s) / q);

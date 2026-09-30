@@ -754,7 +754,10 @@ export class Engine {
     const dpr = this.dpr;
     const vw = this.W;
     const vh = cam.vh;
-    const s = Math.max(1, Math.floor(Math.min(vw / 176, vh / (SH - 40)) * dpr));
+    // whole device pixels per art pixel where the screen allows it; a fraction on
+    // small or low-density screens rather than a scene too small to read
+    const raw = Math.min(vw / 168, vh / (SH - 44)) * dpr;
+    const s = raw >= 3 ? Math.floor(raw) : Math.max(1, raw);
     const ox = Math.round((vw * dpr) / 2 - SCENE_CX * s);
     const oy = Math.round(cam.vy * dpr + (vh * dpr - (SH - 40) * s) / 2 - 20 * s);
     return { s, ox, oy };

@@ -26,7 +26,7 @@ const byColor = (kind: Gear['kind'], color: string | null | undefined) => (color
 const pickByAccent = (color: string) => GEAR.find((g) => g.kind === 'pickaxe' && g.accent.toLowerCase() === color.toLowerCase());
 
 /** The panel height when a claim is open; set by ClaimPanel. */
-export const closeupView = { bottom: 260 };
+export const closeupView = { top: 160, bottom: 260 };
 
 function lookOfPeer(p: Avatar): Look {
   const pick = pickByAccent(p.pick);
@@ -76,7 +76,7 @@ function snapshot(): Snapshot {
     emoji: emo(p.id),
   }));
   return {
-    view: { top: fx.viewTop, bottom: focus >= 0 ? closeupView.bottom : fx.viewBottom },
+    view: focus >= 0 ? { top: closeupView.top, bottom: closeupView.bottom } : { top: fx.viewTop, bottom: fx.viewBottom },
     phase: st.phase,
     roundId: st.roundId,
     roundEndsAt: roundEnd(st.roundId) - st.offsetMs,
