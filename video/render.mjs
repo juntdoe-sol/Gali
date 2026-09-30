@@ -3,7 +3,19 @@ import { chromium } from '/root/deck/node_modules/playwright/index.mjs';
 import { spawn } from 'child_process';
 import fs from 'fs';
 const [w, h, target, ...rest] = process.argv.slice(2);
-const port = 4800;
+// serve ./public ourselves, so a render never depends on a server left running elsewhere
+import http from 'http';
+import path from 'path';
+const ROOT = new URL('./public/', import.meta.url).pathname;
+const TYPES = { '.js': 'application/javascript', '.html': 'text/html', '.png': 'image/png', '.woff2': 'font/woff2', '.json': 'application/json' };
+const server = http.createServer((req, res) => {
+  const f = path.join(ROOT, decodeURIComponent(req.url.split('?')[0]));
+  if (!f.startsWith(ROOT) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { res.writeHead(404); return res.end(); }
+  res.writeHead(200, { 'content-type': TYPES[path.extname(f)] || 'application/octet-stream' });
+  res.end(fs.readFileSync(f));
+}).listen(0);
+await new Promise((r) => server.once('listening', r));
+const port = server.address().port;
 const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
 const p = await b.newPage({ viewport: { width: 400, height: 400 }, deviceScaleFactor: 1 });
 p.on('pageerror', (e) => console.error('PAGE', e.message));
@@ -33,5 +45,9 @@ if (target === '--stills') {
   }
   ff.stdin.end();
   await new Promise((r) => ff.on('close', r));
+  // what the engine played, and when, so the score can follow it
+  const ev = await p.evaluate(() => ({ events: window.gali.events(), timeline: window.gali.timeline() }));
+  fs.writeFileSync(target.replace(/\.mp4$/, '') + '.events.json', JSON.stringify(ev));
 }
 await b.close();
+server.close();

@@ -352,7 +352,7 @@ export function buildScene(i: number): Scene {
   }
 
   const crowd: Crowd[] = [];
-  return { i, biome, kind: c.kind, ground, far, surf, veins, lanterns, cart: 0.2, cartDir: 1, crowd, lastHit: 0 };
+  return { i, biome, kind: c.kind, ground, far, surf, veins, lanterns, cart: 0.2, cartDir: 1, crowd, lastHit: -1 };
 }
 
 /** What stands over the hole, by kind of claim. */
@@ -591,13 +591,13 @@ export function drawScene(c: Ctx, sc: Scene, v: Visit, st: CloseupState, ox: num
     if (look.glow !== 'none') parts.burst('spark', x, y - 2, 4, 30, 18, look.glow === 'legendary' ? ['#ff4fd8', '#c7f284', '#ffffff'] : ['#fff1a8', '#ffd24a'], 0.5);
   };
   for (const m of sc.crowd) {
-    const f = frameAt('swing', m.since, now);
+    // swings loop on the clock, so a slow frame never freezes a miner mid-swing
+    const f = swingFrame(now - m.since, swingMs);
     const cycle = Math.floor((now - m.since) / swingMs);
     if (f >= HIT_FRAME && m.lastSwing !== cycle) {
       m.lastSwing = cycle;
       onHit(m.x + (IMPACT[0] - 10) + 3, GAL_BOT - 2, m.look);
     }
-    if ((now - m.since) % swingMs >= swingMs - 20) m.since = now; // restart cleanly
     drawMiner(c, m.look, 'swing', f, P(m.x), Q(GAL_BOT - 1), s, 1);
     lights.push({ x: P(m.x + 3), y: Q(GAL_BOT - 22), r: 16 * s, c: '#fff1c8', k: 1 });
   }
@@ -643,16 +643,16 @@ export function drawScene(c: Ctx, sc: Scene, v: Visit, st: CloseupState, ox: num
       me.pose = 'swing';
       me.since = now;
       me.facing = 1;
+      sc.lastHit = -1;
     }
     pose = 'swing';
-    const f = frameAt('swing', me.since, now);
+    const f = swingFrame(now - me.since, swingMs);
     const cycle = Math.floor((now - me.since) / swingMs);
     if (f >= HIT_FRAME && sc.lastHit !== cycle) {
       sc.lastHit = cycle;
       onHit(me.x + 6, GAL_BOT - 2, st.look);
       sfx('hit');
     }
-    if ((now - me.since) % swingMs >= swingMs - 20) me.since = now;
   } else {
     if (me.pose !== 'idle' && me.pose !== 'cheer') {
       me.pose = 'idle';
@@ -662,7 +662,7 @@ export function drawScene(c: Ctx, sc: Scene, v: Visit, st: CloseupState, ox: num
   }
   if (isWin && st.mine > 0) pose = 'cheer';
   const climbing = me.path.length > 0 && Math.abs(me.path[0][0] - me.x) < 0.5 && me.y > sc.surf[SHAFT_X] + 2;
-  const f = frameAt(pose, pose === 'cheer' ? now - (now % 480) : me.since, now);
+  const f = pose === 'swing' ? swingFrame(now - me.since, swingMs) : frameAt(pose, pose === 'cheer' ? now - (now % 480) : me.since, now);
   drawMiner(c, st.look, climbing ? 'walk' : pose, climbing ? Math.floor(now / 160) % 2 : f, P(me.x), Q(me.y), s, me.facing);
   const lampY = me.y - 22;
   lights.push({ x: P(me.x + 3 * me.facing), y: Q(lampY), r: 22 * s, c: '#fff1c8', k: 1 });
@@ -712,3 +712,9 @@ export function paintUnderground(sc: Scene, ox: number, oy: number, s: number, W
 }
 
 export const SCENE_SURF = SURF;
+
+/** Frame of a looping swing, `el` ms after it started. */
+function swingFrame(el: number, swingMs: number) {
+  const n = 6;
+  return Math.min(n - 1, Math.floor(((((el % swingMs) + swingMs) % swingMs) / swingMs) * n));
+}
