@@ -137,7 +137,7 @@
     {
       "name": "update_config",
       "docs": [
-        "Change game settings. Only fields that are `Some` change. `round_secs` and the mint are fixed."
+        "Change game settings. Only fields that are `Some` change. The SKR and ORE mints are fixed."
       ],
       "discriminator": [
         29,
@@ -173,7 +173,7 @@
     {
       "name": "set_paused",
       "docs": [
-        "Stop (or restart) new deploys and gear sales. Settling, claiming and unstaking always work."
+        "Stop (or restart) gear sales, round recording and jackpot claims. Staking and unstaking always work."
       ],
       "discriminator": [
         91,
@@ -205,7 +205,6 @@
     {
       "name": "fund_ore",
       "docs": [
-        "Move SKR from the treasury (the protocol's cut of gear sales) to any SKR account.",
         "Top up the $ORE pool. Anyone may: the team, ORE themselves, a sponsor, a player.",
         "The pool has no withdraw path, so what goes in can only leave as a payout."
       ],
@@ -296,6 +295,9 @@
     },
     {
       "name": "withdraw_treasury",
+      "docs": [
+        "Move SKR from the treasury (the protocol's cut of gear sales) to any SKR account."
+      ],
       "discriminator": [
         40,
         63,
@@ -681,9 +683,9 @@
     {
       "name": "buy_gear_ore",
       "docs": [
-        "Buy a gear item with $ORE instead of SKR. Same items, same one-per-player rule,",
-        "separate price list. The ORE splits into the ORE Motherlode and ORE Rewards Pools",
-        "and the treasury, so ORE spent on cosmetics comes back to miners as mined ORE."
+        "Buy a gear item with $ORE instead of SKR. Same items, same USD prices, same",
+        "one-per-player rule. `ore_motherlode_bps` of the ORE goes to Gali's ORE jackpot",
+        "pool and the rest to the treasury, so ORE spent on cosmetics comes back to winners."
       ],
       "discriminator": [
         48,
@@ -1473,7 +1475,7 @@
           {
             "name": "paused",
             "docs": [
-              "when true, gear sales and staking are refused"
+              "when true, gear sales, round recording and jackpot claims are refused"
             ],
             "type": "bool"
           },

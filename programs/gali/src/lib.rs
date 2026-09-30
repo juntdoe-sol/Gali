@@ -11,7 +11,7 @@
 //!   and awards points, wins, day streaks and XP from them. Permissionless, like
 //!   ORE's own checkpoint, so a player who closes the app still gets credited, and
 //!   a no-op on a round already recorded.
-//! * `claim_skr_jackpot` pays Gali's SKR pool when ORE's motherlode hits, to the
+//! * `claim_jackpot` pays Gali's SKR pool when ORE's motherlode hits, to the
 //!   same winners, split by the same share of the winning square ORE used for the
 //!   ORE. The first claim snapshots the pool so late claimers are not short-changed
 //!   by a pool that grew while they waited.
@@ -42,48 +42,11 @@ pub mod ore;
 declare_id!("GamTh2wWNNGU6CB5G3aF7Xeu1m7fQEtd9caRGtgPcMmV");
 
 pub const BLOCKS: u32 = 25;
-pub const ALL_BLOCKS_MASK: u32 = (1 << BLOCKS) - 1;
-pub const LOCK_SECS: i64 = 3;
 pub const SECONDS_PER_DAY: i64 = 86_400;
-pub const MOTHERLODE_ODDS: u64 = 625;
 pub const BPS: u64 = 10_000;
 pub const MAX_SESSION_SECS: i64 = 7 * SECONDS_PER_DAY;
 pub const MAX_SESSION_FUND: u64 = 1_000_000_000; // 1 SOL
 pub const MAX_GEAR: usize = 32;
-pub const MAX_POT_FEE_BPS: u16 = 2_000;
-/// A round can take at most 1% of the Rewards Pool.
-pub const MAX_DRIP_BPS: u16 = 100;
-/// Fee on claimed unrefined SKR, shared with the players who keep theirs unclaimed.
-pub const REFINING_FEE_BPS: u64 = 1_000;
-/// Fixed-point scale for the refinery's per-SKR accumulator.
-/// Round and pot accounts can be closed (rent back to whoever paid it) this long after the round ends.
-#[cfg(not(feature = "fasttime"))]
-pub const CLOSE_AFTER_SECS: i64 = SECONDS_PER_DAY;
-/// If a round is still unrevealed this long after it ended, players can take their own SOL back.
-#[cfg(not(feature = "fasttime"))]
-pub const ABANDON_SECS: i64 = 3_600;
-/// Test-only waiting periods, enabled by the `fasttime` feature so the suite can exercise
-/// close_round and refund_stake without waiting a day. Never built for devnet or mainnet.
-#[cfg(feature = "fasttime")]
-pub const CLOSE_AFTER_SECS: i64 = 0;
-#[cfg(feature = "fasttime")]
-pub const ABANDON_SECS: i64 = 0;
-/// SlotHashes keeps this many entries; past it a locked slot can never be revealed.
-pub const SLOT_HASH_WINDOW: u64 = 512;
-/// Paid by each player's first deploy of a round and handed to whoever claims their stake.
-/// Taken from every spot, win or lose (sent to the treasury wallet).
-/// Spots per round where the winner takes the whole SKR reward.
-pub const SOLO_SPOTS: usize = 10;
-/// `lock_round` targets the slot this many slots ahead.
-pub const DRAW_DELAY_SLOTS: u64 = 5;
-/// A lock can only be replaced once its slot has fallen out of SlotHashes, so a losing player can't
-/// withhold the reveal and re-roll: by then nobody could have revealed it either.
-pub const DRAW_EXPIRY_SLOTS: u64 = SLOT_HASH_WINDOW;
-
-
-
-
-/// End of a round as a unix timestamp, rejecting round ids that can't exist.
 
 fn check_config(cfg: &Config) -> Result<()> {
     require!(cfg.gear_prices_usd.len() <= MAX_GEAR, GaliError::BadConfig);
@@ -188,7 +151,7 @@ pub mod gali {
 
     /* ---------------- admin ---------------- */
 
-    /// Change game settings. Only fields that are `Some` change. `round_secs` and the mint are fixed.
+    /// Change game settings. Only fields that are `Some` change. The SKR and ORE mints are fixed.
     pub fn update_config(ctx: Context<AdminConfig>, u: ConfigUpdate) -> Result<()> {
         let c = &mut ctx.accounts.config;
         if let Some(v) = u.base_points {
@@ -229,14 +192,13 @@ pub mod gali {
         Ok(())
     }
 
-    /// Stop (or restart) new deploys and gear sales. Settling, claiming and unstaking always work.
+    /// Stop (or restart) gear sales, round recording and jackpot claims. Staking and unstaking always work.
     pub fn set_paused(ctx: Context<AdminConfig>, paused: bool) -> Result<()> {
         ctx.accounts.config.paused = paused;
         emit!(PausedSet { paused });
         Ok(())
     }
 
-    /// Move SKR from the treasury (the protocol's cut of gear sales) to any SKR account.
     /// Top up the $ORE pool. Anyone may: the team, ORE themselves, a sponsor, a player.
     /// The pool has no withdraw path, so what goes in can only leave as a payout.
     pub fn fund_ore(ctx: Context<FundOre>, amount: u64) -> Result<()> {
@@ -291,6 +253,7 @@ pub mod gali {
         Ok(())
     }
 
+    /// Move SKR from the treasury (the protocol's cut of gear sales) to any SKR account.
     pub fn withdraw_treasury(ctx: Context<WithdrawTreasury>, amount: u64) -> Result<()> {
         require!(
             amount > 0 && amount <= ctx.accounts.treasury.amount,
@@ -605,9 +568,9 @@ pub mod gali {
         Ok(())
     }
 
-    /// Buy a gear item with $ORE instead of SKR. Same items, same one-per-player rule,
-    /// separate price list. The ORE splits into the ORE Motherlode and ORE Rewards Pools
-    /// and the treasury, so ORE spent on cosmetics comes back to miners as mined ORE.
+    /// Buy a gear item with $ORE instead of SKR. Same items, same USD prices, same
+    /// one-per-player rule. `ore_motherlode_bps` of the ORE goes to Gali's ORE jackpot
+    /// pool and the rest to the treasury, so ORE spent on cosmetics comes back to winners.
     pub fn buy_gear_ore(ctx: Context<BuyGearOre>, item: u8) -> Result<()> {
         let cfg = &ctx.accounts.config;
         require!(!cfg.paused, GaliError::Paused);
@@ -856,7 +819,7 @@ pub struct Config {
     /// set by `propose_authority`, cleared by `accept_authority`
     pub pending_authority: Pubkey,
     pub bump: u8,
-    /// when true, gear sales and staking are refused
+    /// when true, gear sales, round recording and jackpot claims are refused
     pub paused: bool,
 
     /// points a recorded win is worth before the per-square and boost scaling
