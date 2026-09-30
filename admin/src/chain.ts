@@ -1,12 +1,7 @@
 import { AnchorProvider, BN, Program, type Idl } from '@coral-xyz/anchor';
-import {
-  ASSOCIATED_TOKEN_PROGRAM_ID,
-  createAssociatedTokenAccountIdempotentInstruction,
-  getAssociatedTokenAddressSync,
-  TOKEN_PROGRAM_ID,
-} from '@solana/spl-token';
+import { createAssociatedTokenAccountIdempotentInstruction, getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import type { AnchorWallet } from '@solana/wallet-adapter-react';
-import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, SYSVAR_SLOT_HASHES_PUBKEY, type TransactionInstruction } from '@solana/web3.js';
+import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
 import idlJson from '../../target/idl/gali.json';
 
 export const RPC_URL = import.meta.env.VITE_RPC_URL ?? 'https://api.devnet.solana.com';
@@ -22,83 +17,84 @@ const reader = programFor();
 const accounts = reader.account as any;
 
 /* ---------- addresses ---------- */
-const u64le = (n: number) => {
-  const b = new Uint8Array(8);
-  new DataView(b.buffer).setBigUint64(0, BigInt(n), true);
-  return b;
-};
-const find = (...seeds: Uint8Array[]) => PublicKey.findProgramAddressSync(seeds, PROGRAM_ID)[0];
-const enc = (s: string) => new TextEncoder().encode(s);
+const find = (seed: string) => PublicKey.findProgramAddressSync([new TextEncoder().encode(seed)], PROGRAM_ID)[0];
 export const pda = {
-  config: find(enc('config')),
-  vault: find(enc('vault')),
-  treasury: find(enc('treasury')),
-  motherlode: find(enc('motherlode')),
-  rewards: find(enc('rewards')),
-  potVault: find(enc('pot_vault')),
-  round: (r: number) => find(enc('round'), u64le(r)),
-  pot: (r: number) => find(enc('pot'), u64le(r)),
-  buyback: find(enc('buyback')),
-  draw: (r: number) => find(enc('draw'), u64le(r)),
+  config: find('config'),
+  skrVault: find('vault'),
+  skrTreasury: find('treasury'),
+  skrMotherlode: find('motherlode'),
+  oreVault: find('ore_vault'),
+  oreTreasury: find('ore_treasury'),
+  oreMotherlode: find('ore_motherlode'),
 };
 
 /* ---------- reads ---------- */
+export type Token = 'SKR' | 'ORE';
+export const TOKENS: Token[] = ['SKR', 'ORE'];
+
 const num = (v: BN | number) => (typeof v === 'number' ? v : Number(v.toString()));
 export const sol = (lamports: BN | number) => num(lamports) / LAMPORTS_PER_SOL;
+/** The program keeps prices in millionths of a dollar. */
+const usd = (micro: BN | number) => num(micro) / 1_000_000;
 
 export interface Config {
   authority: string;
   pendingAuthority: string | null;
-  skrMint: PublicKey;
-  decimals: number;
-  roundSecs: number;
   paused: boolean;
-  potFeeBps: number;
-  motherlodePoolBps: number;
-  rewardsPoolBps: number;
-  minDeploySol: number;
-  roundRewardSkr: number;
-  motherlodeSkr: number;
+  mint: Record<Token, PublicKey>;
+  decimals: Record<Token, number>;
+  /** dollars for one whole token */
+  priceUsd: Record<Token, number>;
+  /** unix seconds */
+  priceUpdatedAt: number;
+  /** 0 means gear sales never refuse a stale price */
+  priceMaxAgeSecs: number;
+  /** whole tokens staked for the 1.25x and 1.5x point boosts */
+  boostTier1: Record<Token, number>;
+  boostTier2: Record<Token, number>;
+  /** share of gear sales sent to each token's motherlode pool; the rest is treasury */
+  motherlodeBps: Record<Token, number>;
   basePoints: number;
   motherlodePoints: number;
-  boostTier1Skr: number;
-  boostTier2Skr: number;
-  gearPricesSkr: number[];
-  dripBps: number;
-  buybackBps: number;
-  buybackDueSol: number;
+  gearPricesUsd: number[];
+}
+
+async function mintDecimals(mint: PublicKey): Promise<number> {
+  const info = await connection.getParsedAccountInfo(mint);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const decimals = (info.value?.data as any)?.parsed?.info?.decimals;
+  if (typeof decimals !== 'number') throw new Error(`Could not read the mint ${mint.toBase58()}`);
+  return decimals;
 }
 
 export async function fetchConfig(): Promise<Config | null> {
   const c = await accounts.config.fetchNullable(pda.config);
   if (!c) return null;
-  const mint = await connection.getParsedAccountInfo(c.skrMint);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const decimals: number = (mint.value?.data as any)?.parsed?.info?.decimals ?? 6;
-  const skr = (v: BN) => num(v) / 10 ** decimals;
+  const [skrDecimals, oreDecimals] = await Promise.all([mintDecimals(c.skrMint), mintDecimals(c.oreMint)]);
+  const whole = (v: BN, decimals: number) => num(v) / 10 ** decimals;
   const pending = c.pendingAuthority.toBase58();
   return {
     authority: c.authority.toBase58(),
     pendingAuthority: pending === PublicKey.default.toBase58() ? null : pending,
-    skrMint: c.skrMint,
-    decimals,
-    roundSecs: c.roundSecs,
     paused: c.paused,
-    potFeeBps: c.potFeeBps,
-    motherlodePoolBps: c.motherlodePoolBps,
-    rewardsPoolBps: c.rewardsPoolBps,
-    minDeploySol: sol(c.minDeploy),
-    roundRewardSkr: skr(c.roundRewardSkr),
-    motherlodeSkr: skr(c.motherlodeSkr),
+    mint: { SKR: c.skrMint, ORE: c.oreMint },
+    decimals: { SKR: skrDecimals, ORE: oreDecimals },
+    priceUsd: { SKR: usd(c.skrPriceMicro), ORE: usd(c.orePriceMicro) },
+    priceUpdatedAt: num(c.priceUpdatedAt),
+    priceMaxAgeSecs: c.priceMaxAgeSecs,
+    boostTier1: { SKR: whole(c.boostTier1, skrDecimals), ORE: whole(c.oreBoostTier1, oreDecimals) },
+    boostTier2: { SKR: whole(c.boostTier2, skrDecimals), ORE: whole(c.oreBoostTier2, oreDecimals) },
+    motherlodeBps: { SKR: c.motherlodePoolBps, ORE: c.oreMotherlodeBps },
     basePoints: num(c.basePoints),
     motherlodePoints: num(c.motherlodePoints),
-    boostTier1Skr: skr(c.boostTier1),
-    boostTier2Skr: skr(c.boostTier2),
-    gearPricesSkr: c.gearPrices.map(skr),
-    dripBps: c.rewardDripBps,
-    buybackBps: c.buybackBps,
-    buybackDueSol: sol(c.buybackDue),
+    gearPricesUsd: c.gearPricesUsd.map(usd),
   };
+}
+
+/** Seconds since the token prices were set, and whether gear sales are refusing them. */
+export function priceAge(cfg: Config) {
+  const secs = Math.max(0, Math.floor(Date.now() / 1000) - cfg.priceUpdatedAt);
+  return { secs, stale: cfg.priceMaxAgeSecs > 0 && secs > cfg.priceMaxAgeSecs };
 }
 
 const tokenBalance = async (k: PublicKey) => {
@@ -110,251 +106,158 @@ const tokenBalance = async (k: PublicKey) => {
 };
 
 export interface Balances {
-  treasury: number;
-  rewards: number;
-  motherlode: number;
-  potEscrow: number;
-  staked: number;
+  treasury: Record<Token, number>;
+  motherlode: Record<Token, number>;
+  staked: Record<Token, number>;
   authoritySol: number;
 }
 export async function fetchBalances(authority: string): Promise<Balances> {
-  const [treasury, rewards, motherlode, potEscrow, staked, authoritySol] = await Promise.all([
-    tokenBalance(pda.treasury),
-    tokenBalance(pda.rewards),
-    tokenBalance(pda.motherlode),
-    tokenBalance(pda.potVault),
-    tokenBalance(pda.vault),
+  const [skrTreasury, oreTreasury, skrMotherlode, oreMotherlode, skrStaked, oreStaked, authoritySol] = await Promise.all([
+    tokenBalance(pda.skrTreasury),
+    tokenBalance(pda.oreTreasury),
+    tokenBalance(pda.skrMotherlode),
+    tokenBalance(pda.oreMotherlode),
+    tokenBalance(pda.skrVault),
+    tokenBalance(pda.oreVault),
     connection.getBalance(new PublicKey(authority)).then(sol),
   ]);
-  return { treasury, rewards, motherlode, potEscrow, staked, authoritySol };
-}
-
-export interface PotRow {
-  roundId: number;
-  totalSol: number;
-  poolSol: number;
-  feeSol: number;
-  skrReward: number;
-  miners: number;
-  settled: boolean;
-  motherlode: boolean;
-  splitReward: boolean;
-  motherlodePaid: number;
-  winner: string | null;
-}
-export async function fetchPots(decimals: number): Promise<PotRow[]> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  // only current-layout pots (older rounds have a shorter account and can't be decoded)
-  const all: { account: any }[] = await accounts.pot.all([{ dataSize: accounts.pot.size }]);
-  return all
-    .map(({ account: p }) => ({
-      roundId: num(p.roundId),
-      totalSol: sol(p.total),
-      poolSol: sol(p.pool),
-      feeSol: p.settled ? sol(p.adminFee) + sol(p.protocolFee) : 0,
-      skrReward: num(p.skrReward) / 10 ** decimals,
-      miners: p.miners,
-      settled: p.settled,
-      motherlode: p.motherlode,
-      splitReward: p.splitReward,
-      motherlodePaid: num(p.motherlodeSkr) / 10 ** decimals,
-      winner: p.winner.equals(PublicKey.default) ? null : p.winner.toBase58(),
-    }))
-    .sort((a, b) => b.roundId - a.roundId);
+  return {
+    treasury: { SKR: skrTreasury, ORE: oreTreasury },
+    motherlode: { SKR: skrMotherlode, ORE: oreMotherlode },
+    staked: { SKR: skrStaked, ORE: oreStaked },
+    authoritySol,
+  };
 }
 
 export interface PlayerRow {
   owner: string;
   points: number;
+  xp: number;
   wins: number;
   rounds: number;
+  /** UTC day of the last recorded round */
   day: number;
   streak: number;
+  gearOwned: number;
   stakedSkr: number;
+  stakedOre: number;
   solDeployed: number;
-  solWon: number;
-  skrMined: number;
+  /** jackpot payouts: SKR from the SKR pool, ORE from the ORE pool */
   skrWon: number;
+  oreWon: number;
+  lastOreRound: number;
 }
-export async function fetchPlayers(decimals: number): Promise<PlayerRow[]> {
+const bitCount = (n: number) => n.toString(2).replace(/0/g, '').length;
+
+export async function fetchPlayers(cfg: Config): Promise<PlayerRow[]> {
+  // only current-layout players; older ones have a shorter account and can't be decoded
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const all: { account: any }[] = await accounts.player.all([{ dataSize: accounts.player.size }]);
-  const skr = (v: BN) => num(v) / 10 ** decimals;
+  const skr = (v: BN) => num(v) / 10 ** cfg.decimals.SKR;
+  const ore = (v: BN) => num(v) / 10 ** cfg.decimals.ORE;
   return all
     .map(({ account: p }) => ({
       owner: p.owner.toBase58(),
       points: num(p.points),
+      xp: num(p.xp),
       wins: p.wins,
       rounds: p.rounds,
       day: p.day,
       streak: p.streak,
+      gearOwned: bitCount(p.gearMask),
       stakedSkr: skr(p.stakedSkr),
+      stakedOre: ore(p.stakedOre),
       solDeployed: sol(p.solDeployed),
-      solWon: sol(p.solWon),
-      skrMined: skr(p.skrMined),
       skrWon: skr(p.skrWon),
+      oreWon: ore(p.oreMined),
+      lastOreRound: num(p.lastOreRound),
     }))
     .sort((a, b) => b.points - a.points);
 }
 
-export const roundRevealed = async (r: number) => Boolean(await connection.getAccountInfo(pda.round(r)));
+export const walletBalance = (cfg: Config, token: Token, owner: PublicKey) =>
+  tokenBalance(getAssociatedTokenAddressSync(cfg.mint[token], owner));
 
 /* ---------- writes (signed by the connected wallet) ---------- */
-const raw = (whole: number, decimals: number) => new BN(BigInt(Math.round(whole * 10 ** decimals)).toString());
+/** Whole tokens to raw units, through a decimal string so 11-decimal ORE doesn't lose precision. */
+const raw = (whole: number, decimals: number) => new BN(whole.toFixed(decimals).replace('.', ''));
+const micro = (dollars: number) => new BN(Math.round(dollars * 1_000_000));
+const admin = (wallet: AnchorWallet) => ({ authority: wallet.publicKey, config: pda.config });
 
+export const setTokenPrices = (wallet: AnchorWallet, skrUsd: number, oreUsd: number) =>
+  programFor(wallet).methods.setTokenPrices(micro(skrUsd), micro(oreUsd)).accountsStrict(admin(wallet)).rpc();
+
+/** Fields left undefined stay as they are on-chain. Token amounts are whole tokens, prices dollars. */
 export interface ConfigChange {
-  potFeePct?: number;
-  motherlodePoolPct?: number;
-  rewardsPoolPct?: number;
-  minDeploySol?: number;
-  roundRewardSkr?: number;
-  motherlodeSkr?: number;
   basePoints?: number;
   motherlodePoints?: number;
   boostTier1Skr?: number;
   boostTier2Skr?: number;
-  gearPricesSkr?: number[];
-  dripPct?: number;
-  buybackPct?: number;
+  boostTier1Ore?: number;
+  boostTier2Ore?: number;
+  motherlodePct?: number;
+  oreMotherlodePct?: number;
+  priceMaxAgeSecs?: number;
+  gearPricesUsd?: number[];
 }
 
-export async function updateConfig(wallet: AnchorWallet, cfg: Config, ch: ConfigChange) {
-  const d = cfg.decimals;
-  const opt = <T>(v: T | undefined) => (v === undefined ? null : v);
-  const bps = (pct?: number) => (pct === undefined ? null : Math.round(pct * 100));
+export function updateConfig(wallet: AnchorWallet, cfg: Config, ch: ConfigChange) {
+  // ConfigUpdate is a struct of Options, so every field goes on the wire and null means "keep"
+  const opt = <T, R>(v: T | undefined, f: (v: T) => R) => (v === undefined ? null : f(v));
+  const bps = (pct: number) => Math.round(pct * 100);
+  const skr = (v: number) => raw(v, cfg.decimals.SKR);
+  const ore = (v: number) => raw(v, cfg.decimals.ORE);
   return programFor(wallet)
     .methods.updateConfig({
-      basePoints: opt(ch.basePoints === undefined ? undefined : new BN(ch.basePoints)),
-      motherlodePoints: opt(ch.motherlodePoints === undefined ? undefined : new BN(ch.motherlodePoints)),
-      boostTier1: opt(ch.boostTier1Skr === undefined ? undefined : raw(ch.boostTier1Skr, d)),
-      boostTier2: opt(ch.boostTier2Skr === undefined ? undefined : raw(ch.boostTier2Skr, d)),
-      gearPrices: opt(ch.gearPricesSkr?.map((p) => raw(p, d))),
-      motherlodeSkr: opt(ch.motherlodeSkr === undefined ? undefined : raw(ch.motherlodeSkr, d)),
-      motherlodePoolBps: bps(ch.motherlodePoolPct),
-      rewardsPoolBps: bps(ch.rewardsPoolPct),
-      potFeeBps: bps(ch.potFeePct),
-      minDeploy: opt(ch.minDeploySol === undefined ? undefined : new BN(Math.round(ch.minDeploySol * LAMPORTS_PER_SOL))),
-      roundRewardSkr: opt(ch.roundRewardSkr === undefined ? undefined : raw(ch.roundRewardSkr, d)),
-      rewardDripBps: bps(ch.dripPct),
-      buybackBps: bps(ch.buybackPct),
+      basePoints: opt(ch.basePoints, (v) => new BN(v)),
+      motherlodePoints: opt(ch.motherlodePoints, (v) => new BN(v)),
+      boostTier1: opt(ch.boostTier1Skr, skr),
+      boostTier2: opt(ch.boostTier2Skr, skr),
+      oreBoostTier1: opt(ch.boostTier1Ore, ore),
+      oreBoostTier2: opt(ch.boostTier2Ore, ore),
+      gearPricesUsd: opt(ch.gearPricesUsd, (v) => v.map(micro)),
+      priceMaxAgeSecs: opt(ch.priceMaxAgeSecs, (v) => v),
+      motherlodePoolBps: opt(ch.motherlodePct, bps),
+      oreMotherlodeBps: opt(ch.oreMotherlodePct, bps),
     })
-    .accountsStrict({ authority: wallet.publicKey, config: pda.config })
+    .accountsStrict(admin(wallet))
     .rpc();
 }
 
-/** Record SOL (from the fees owed to buybacks) that has been spent buying SKR for the Rewards Pool. */
-/** Withdraw SOL from the on-chain buyback escrow (to swap it for SKR). */
-export const markBuyback = (wallet: AnchorWallet, solSpent: number, destination?: PublicKey) =>
-  programFor(wallet)
-    .methods.markBuyback(new BN(Math.round(solSpent * LAMPORTS_PER_SOL)))
-    .accountsStrict({ authority: wallet.publicKey, config: pda.config, buyback: pda.buyback, destination: destination ?? wallet.publicKey })
-    .rpc();
-
 export const setPaused = (wallet: AnchorWallet, paused: boolean) =>
-  programFor(wallet).methods.setPaused(paused).accountsStrict({ authority: wallet.publicKey, config: pda.config }).rpc();
+  programFor(wallet).methods.setPaused(paused).accountsStrict(admin(wallet)).rpc();
 
 export const proposeAuthority = (wallet: AnchorWallet, next: PublicKey) =>
-  programFor(wallet).methods.proposeAuthority(next).accountsStrict({ authority: wallet.publicKey, config: pda.config }).rpc();
+  programFor(wallet).methods.proposeAuthority(next).accountsStrict(admin(wallet)).rpc();
 
 export const acceptAuthority = (wallet: AnchorWallet) =>
   programFor(wallet).methods.acceptAuthority().accountsStrict({ newAuthority: wallet.publicKey, config: pda.config }).rpc();
 
-/** Withdraw treasury SKR to `owner`'s SKR account (created if missing). */
-export async function withdrawTreasury(wallet: AnchorWallet, cfg: Config, owner: PublicKey, amount: number) {
-  const dest = getAssociatedTokenAddressSync(cfg.skrMint, owner, true);
-  const pre: TransactionInstruction[] = [createAssociatedTokenAccountIdempotentInstruction(wallet.publicKey, dest, owner, cfg.skrMint)];
-  return programFor(wallet)
-    .methods.withdrawTreasury(raw(amount, cfg.decimals))
-    .accountsStrict({
-      authority: wallet.publicKey,
-      config: pda.config,
-      skrMint: cfg.skrMint,
-      treasury: pda.treasury,
-      destination: dest,
-      tokenProgram: TOKEN_PROGRAM_ID,
-    })
-    .preInstructions(pre)
-    .rpc();
+/** Withdraw treasury SKR or ORE to `owner`'s token account for that mint (created if missing). */
+export function withdrawTreasury(wallet: AnchorWallet, cfg: Config, token: Token, owner: PublicKey, amount: number) {
+  const mint = cfg.mint[token];
+  const destination = getAssociatedTokenAddressSync(mint, owner, true);
+  const createDestination = createAssociatedTokenAccountIdempotentInstruction(wallet.publicKey, destination, owner, mint);
+  const methods = programFor(wallet).methods;
+  const common = { authority: wallet.publicKey, config: pda.config, destination, tokenProgram: TOKEN_PROGRAM_ID };
+  const call =
+    token === 'SKR'
+      ? methods.withdrawTreasury(raw(amount, cfg.decimals.SKR)).accountsStrict({ ...common, skrMint: mint, treasury: pda.skrTreasury })
+      : methods.withdrawTreasuryOre(raw(amount, cfg.decimals.ORE)).accountsStrict({ ...common, oreMint: mint, oreTreasury: pda.oreTreasury });
+  return call.preInstructions([createDestination]).rpc();
 }
 
-/** Top up a pool from the connected wallet's SKR. */
-export async function fundPool(wallet: AnchorWallet, cfg: Config, pool: 'rewards' | 'motherlode', amount: number) {
-  const funderAta = getAssociatedTokenAddressSync(cfg.skrMint, wallet.publicKey);
-  const p = programFor(wallet);
-  const common = { funder: wallet.publicKey, config: pda.config, skrMint: cfg.skrMint, funderAta, tokenProgram: TOKEN_PROGRAM_ID };
-  return pool === 'rewards'
-    ? p.methods
-        .fundRewards(raw(amount, cfg.decimals))
-        .accountsStrict({ ...common, rewards: pda.rewards })
-        .rpc()
-    : p.methods
-        .fundMotherlode(raw(amount, cfg.decimals))
-        .accountsStrict({ ...common, motherlode: pda.motherlode })
-        .rpc();
+/** Add SKR or ORE from the connected wallet to that token's motherlode pool. Anyone may. */
+export function fundMotherlode(wallet: AnchorWallet, cfg: Config, token: Token, amount: number) {
+  const mint = cfg.mint[token];
+  const methods = programFor(wallet).methods;
+  const common = { funder: wallet.publicKey, config: pda.config, funderAta: getAssociatedTokenAddressSync(mint, wallet.publicKey), tokenProgram: TOKEN_PROGRAM_ID };
+  const call =
+    token === 'SKR'
+      ? methods.fundMotherlode(raw(amount, cfg.decimals.SKR)).accountsStrict({ ...common, skrMint: mint, motherlode: pda.skrMotherlode })
+      : methods.fundOre(raw(amount, cfg.decimals.ORE)).accountsStrict({ ...common, oreMint: mint, oreMotherlode: pda.oreMotherlode });
+  return call.rpc();
 }
 
-export const walletSkr = (cfg: Config, owner: PublicKey) => tokenBalance(getAssociatedTokenAddressSync(cfg.skrMint, owner));
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/**
- * Reveal (if needed) and settle a finished round's pot. Anyone may do this; the SOL fee still goes to the authority.
- * Revealing takes two transactions: lock the round to a future slot, then reveal once that slot has passed.
- */
-export async function revealAndSettle(wallet: AnchorWallet, cfg: Config, roundId: number) {
-  const p = programFor(wallet);
-  const lock = () =>
-    p.methods
-      .lockRound(new BN(roundId))
-      .accountsStrict({
-        payer: wallet.publicKey,
-        config: pda.config,
-        draw: pda.draw(roundId),
-        round: pda.round(roundId),
-        systemProgram: SystemProgram.programId,
-      })
-      .rpc();
-  const settle = () =>
-    p.methods.settlePot(new BN(roundId)).accountsStrict({
-      config: pda.config,
-      round: pda.round(roundId),
-      pot: pda.pot(roundId),
-      feeTo: new PublicKey(cfg.authority),
-      buyback: pda.buyback,
-      skrMint: cfg.skrMint,
-      rewards: pda.rewards,
-      motherlode: pda.motherlode,
-      potVault: pda.potVault,
-      tokenProgram: TOKEN_PROGRAM_ID,
-    });
-  if (await roundRevealed(roundId)) return settle().rpc();
-  if (!(await connection.getAccountInfo(pda.draw(roundId)))) await lock();
-  const reveal = await p.methods
-    .revealRound(new BN(roundId))
-    .accountsStrict({
-      payer: wallet.publicKey,
-      config: pda.config,
-      round: pda.round(roundId),
-      draw: pda.draw(roundId),
-      slotHashes: SYSVAR_SLOT_HASHES_PUBKEY,
-      systemProgram: SystemProgram.programId,
-    })
-    .instruction();
-  let last: unknown;
-  for (let i = 0; i < 8; i++) {
-    await sleep(900); // wait for the locked slot to pass
-    if (await roundRevealed(roundId)) return settle().rpc();
-    try {
-      return await settle().preInstructions([reveal]).rpc();
-    } catch (e) {
-      last = e;
-      if (/DrawExpired/.test(String(e))) await lock();
-    }
-  }
-  throw last;
-}
-
-export const explorerTx = (sig: string) => `https://explorer.solana.com/tx/${sig}?cluster=${CLUSTER === 'mainnet-beta' ? '' : CLUSTER}`;
 export const explorerAddr = (a: string) => `https://explorer.solana.com/address/${a}?cluster=${CLUSTER === 'mainnet-beta' ? '' : CLUSTER}`;
 export const short = (k: string) => `${k.slice(0, 4)}…${k.slice(-4)}`;
-export { ASSOCIATED_TOKEN_PROGRAM_ID };

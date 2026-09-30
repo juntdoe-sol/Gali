@@ -1,7 +1,6 @@
-// Game values the admin page shows. Copied from app/src/game/constants.ts so the admin build
+// Gear names by on-chain item id. Copied from app/src/game/constants.ts so the admin build
 // does not depend on the Expo app's packages; keep them in sync when the shop changes.
-export const MOTHERLODE_ODDS = 625;
-export const SKR_USD = 0.018;
+// Prices are not copied: the admin page reads them from the program's config.
 export const GEAR: { id: number; kind: string; name: string }[] = [
   { id: 0, kind: 'pickaxe', name: 'Kayu Pick' },
   { id: 1, kind: 'pickaxe', name: 'Besi Pick' },
@@ -25,3 +24,5 @@ export const GEAR: { id: number; kind: string; name: string }[] = [
   { id: 19, kind: 'pet', name: 'Gem Sprite' },
   { id: 20, kind: 'pet', name: 'Pelita Firefly' },
 ];
+
+export const gearName = (id: number) => GEAR.find((g) => g.id === id)?.name ?? `Item ${id}`;
