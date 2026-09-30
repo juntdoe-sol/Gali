@@ -8,6 +8,7 @@ const fmtOre = (v: number) => (v >= 10 ? Math.floor(v).toLocaleString() : v >= 1
 import { fmtSol, practiceMotherlode } from '../game/pot';
 import { Bar, F, Frame, Pill, T } from './kit';
 import { fx } from '../pixel/fx';
+import { useView } from '../pixel/view';
 import { useMinersHere } from './World';
 
 export function TopBar({ onMenu }: { onMenu: () => void }) {
@@ -129,6 +130,7 @@ export function RoundCard() {
   const run = useGame((s) => s.run);
   const here = useMinersHere();
   const reward = useRoundReward();
+  const inside = useView((s) => s.focus >= 0);
   const live = pot.roundId === roundId;
   const miners = live ? pot.miners : 0;
   const left = Math.max(0, roundEnd(roundId) - now);
@@ -136,6 +138,8 @@ export function RoundCard() {
   const cave = roundId % CAVE_IN_EVERY === 0;
   const locking = phase === 'mining' && left < LOCK_MS;
   const covered = pending ? pending.mask.toString(2).split('1').length - 1 : 0;
+  // inside a claim the panel below carries the numbers; the scene gets the room
+  if (inside) return null;
   return (
     <Frame style={[styles.round, { top: insets.top + 104 }]} glow={cave ? COLORS.red : undefined} radius={12}>
       <View
