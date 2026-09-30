@@ -47,6 +47,8 @@ export const pda = {
   vault: find(Buffer.from('vault')),
   treasury: find(Buffer.from('treasury')),
   motherlode: find(Buffer.from('motherlode')),
+  oreTreasury: find(Buffer.from('ore_treasury')),
+  oreMotherlode: find(Buffer.from('ore_motherlode')),
   player: (o: PublicKey) => find(Buffer.from('player'), o.toBuffer()),
 };
 export const ata = (owner: PublicKey, mint = SKR_MINT) =>
@@ -102,13 +104,33 @@ export async function sweepSession(owner: PublicKey, session: Keypair) {
   return amount / LAMPORTS_PER_SOL;
 }
 
-export async function fetchSkrBalance(owner: PublicKey): Promise<number> {
+export async function fetchSkrBalance(owner: PublicKey, mint = SKR_MINT): Promise<number> {
   try {
-    const b = await connection.getTokenAccountBalance(ata(owner));
+    const b = await connection.getTokenAccountBalance(ata(owner, mint));
     return Number(b.value.uiAmount ?? 0);
   } catch {
     return 0;
   }
+}
+
+export const fetchOreBalance = (owner: PublicKey, oreMint: string) => fetchSkrBalance(owner, new PublicKey(oreMint));
+
+/** What the shop needs from the config: the ORE mint it accepts and the dollar rates. */
+export interface ShopConfig {
+  oreMint: string;
+  skrUsd: number; // what one whole SKR costs
+  oreUsd: number; // what one whole ORE costs
+  gearUsd: number[]; // item price in dollars, by gear id
+}
+export async function fetchShopConfig(): Promise<ShopConfig> {
+  const c = await accounts.config.fetch(pda.config);
+  const usd = (micro: BN) => toNum(micro) / 1e6;
+  return {
+    oreMint: c.oreMint.toBase58(),
+    skrUsd: usd(c.skrPriceMicro),
+    oreUsd: usd(c.orePriceMicro),
+    gearUsd: (c.gearPricesUsd as BN[]).map(usd),
+  };
 }
 
 /** Current SKR in the Motherlode Pool (whole SKR). */
@@ -340,6 +362,27 @@ export const unstakeSkr = (amount: number) =>
       })
       .instruction(),
   ]);
+
+/** Buy gear with ORE at the config's dollar rate. The mint must be the one the config names. */
+export const buyGearOre = (item: number, oreMintB58: string) =>
+  sendWithWallet(async (o) => {
+    const oreMint = new PublicKey(oreMintB58);
+    return [
+      await program.methods
+      .buyGearOre(item)
+      .accountsStrict({
+        owner: o,
+        config: pda.config,
+        player: pda.player(o),
+        oreMint,
+        userAta: ata(o, oreMint),
+        oreTreasury: pda.oreTreasury,
+        oreMotherlode: pda.oreMotherlode,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .instruction(),
+    ];
+  });
 
 export const buyGear = (item: number) =>
   sendWithWallet(async (o) => [

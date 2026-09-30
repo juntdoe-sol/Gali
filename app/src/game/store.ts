@@ -3,11 +3,11 @@ import type { Keypair, PublicKey } from '@solana/web3.js';
 import { loadBoard, loadChain, loadOreTx } from '../chain/lazy';
 import {
   chainReady, clockOffsetMs, isPickWalletError, isRateLimited, MAX_SESSION_FUND_SOL, NOTHING_CLAIMABLE, REFINING_FEE, short,
-  type ChainPlayer, type Claimable, type WebWalletInfo,
+  type ChainPlayer, type Claimable, type ShopConfig, type WebWalletInfo,
 } from '../chain/light';
 import {
   ACHIEVEMENTS, BLOCKS, boostFor, FREE_GEAR_MASK, GEAR, LOCK_MS, localDay, levelFromXp, MOTHERLODE_ODDS,
-  pointsFor, QUESTS, REVEAL_MIN_MS, ROUND_REWARD_ORE, ROUND_SECS,
+  pointsFor, QUESTS, REVEAL_MIN_MS, ROUND_REWARD_ORE, ROUND_SECS, type Gear,
 } from './constants';
 import { addToPot, emptyPot, idxOf, maskOf, MIN_SOL_PER_BLOCK, payoutFor, practiceMotherlode, practiceOreMotherlode, PRACTICE_SOL, simPot, smartPick, soloMask, type PotView } from './pot';
 import { haptic, play, setMuted } from './sfx';
@@ -149,6 +149,8 @@ interface Wallet {
   sessionSol: number;
   pool: number; // SKR in Gali's Motherlode Pool
   orePool: number; // ORE in ORE's own motherlode
+  ore: number; // ORE in the wallet
+  shop: ShopConfig | null; // gear prices and token rates from the config
   unclaimed: Claimable;
   busy: string | null;
 }
@@ -192,7 +194,7 @@ interface GameState {
   doEmote: () => void;
   claimQuest: (id: string) => void;
   equip: (key: string) => void;
-  buyGear: (key: string) => Promise<void>;
+  buyGear: (key: string, pay?: 'skr' | 'ore') => Promise<void>;
   stake: (amount: number) => Promise<void>;
   unstake: (amount: number) => Promise<void>;
   claimRewards: (what: 'sol' | 'skr') => Promise<void>;
@@ -531,7 +533,7 @@ export const useGame = create<GameState>((set, get) => {
   return {
     loaded: false,
     save: freshSave(),
-    wallet: { owner: null, player: null, skr: 0, sol: 0, sessionSol: 0, pool: 0, orePool: 0, unclaimed: NO_UNCLAIMED, busy: null },
+    wallet: { owner: null, player: null, skr: 0, sol: 0, sessionSol: 0, pool: 0, orePool: 0, ore: 0, shop: null, unclaimed: NO_UNCLAIMED, busy: null },
     offsetMs: 0,
     now: Date.now(),
     roundId: roundOf(Date.now()),
@@ -705,16 +707,23 @@ export const useGame = create<GameState>((set, get) => {
       });
     },
 
-    buyGear: async (key) => {
+    buyGear: async (key, pay = 'skr') => {
       const g = GEAR.find((x) => x.key === key);
       const st = get();
       if (!g) return;
-      if (!st.wallet.owner) return st.toast('Connect a wallet to buy gear with SKR', 'bad');
+      const unit = pay.toUpperCase();
+      if (!st.wallet.owner) return st.toast(`Connect a wallet to buy gear with ${unit}`, 'bad');
       if (!st.wallet.player) return st.toast('Play one round first to create your miner', 'bad');
-      if (st.wallet.skr < g.priceSkr) return st.toast(`You need ${g.priceSkr} SKR`, 'bad');
+      const shop = st.wallet.shop;
+      const price = pay === 'ore' ? orePrice(g, shop) : g.priceSkr;
+      if (price === null) return st.toast('ORE prices are not set yet', 'bad');
+      const balance = pay === 'ore' ? st.wallet.ore : st.wallet.skr;
+      if (balance < price) return st.toast(`You need ${fmtToken(price)} ${unit}`, 'bad');
       try {
-        setWallet({ busy: `Buying ${g.name} for ${g.priceSkr} SKR…` });
-        await (await loadChain()).buyGear(g.id);
+        setWallet({ busy: `Buying ${g.name} for ${fmtToken(price)} ${unit}…` });
+        const chain = await loadChain();
+        if (pay === 'ore' && shop) await chain.buyGearOre(g.id, shop.oreMint);
+        else await chain.buyGear(g.id);
         await get().refreshWallet();
         play('mint');
         haptic.win();
@@ -846,7 +855,7 @@ export const useGame = create<GameState>((set, get) => {
       await chain?.disconnectWallet();
       saveJson('gali-owner', { owner: null }, 0);
       session = null;
-      set({ run: null, wallet: { owner: null, player: null, skr: 0, sol: 0, sessionSol: 0, pool: 0, orePool: 0, unclaimed: NO_UNCLAIMED, busy: null } });
+      set({ run: null, wallet: { owner: null, player: null, skr: 0, sol: 0, sessionSol: 0, pool: 0, orePool: 0, ore: 0, shop: null, unclaimed: NO_UNCLAIMED, busy: null } });
     },
 
     refreshWallet: async () => {
@@ -864,8 +873,10 @@ export const useGame = create<GameState>((set, get) => {
           board.fetchOreMotherlode().catch(() => 0),
           board.fetchClaimable(owner).catch(() => NO_UNCLAIMED),
         ]);
+        const shop = await chain.fetchShopConfig().catch(() => null);
+        const ore = shop ? await chain.fetchOreBalance(owner, shop.oreMint) : 0;
         if (get().wallet.owner !== owner.toBase58()) return; // disconnected or switched while loading
-        setWallet({ player, skr, sol, sessionSol, pool, orePool, unclaimed });
+        setWallet({ player, skr, sol, sessionSol, pool, orePool, unclaimed, ore, shop });
       } catch {
         /* offline */
       }
@@ -952,6 +963,15 @@ export const useGame = create<GameState>((set, get) => {
 export const useLevelXp = () =>
   useGame((s) => (s.wallet.player ? s.wallet.player.xp + s.save.bonusXp : s.save.xp));
 export const usePoints = () => useGame((s) => (s.wallet.player ? s.wallet.player.points : s.save.points));
+/** An item's price in whole ORE at the config's rate, or null before the rates are known. */
+export function orePrice(g: Gear, shop: ShopConfig | null): number | null {
+  const usd = shop?.gearUsd[g.id];
+  if (!shop || usd === undefined || !(shop.oreUsd > 0)) return null;
+  return usd / shop.oreUsd;
+}
+/** Token amounts for buttons and toasts: whole numbers stay whole, small ORE keeps 3 significant digits. */
+export const fmtToken = (v: number) => (v >= 100 ? Math.ceil(v).toLocaleString() : Number(v.toPrecision(3)).toString());
+
 export const useOwnedMask = () => useGame((s) => (s.wallet.player?.gearMask ?? 0) | FREE_GEAR_MASK);
 
 /** ORE the gold claim mines this round. ORE mints it, so the figure is the same on chain and in practice. */
