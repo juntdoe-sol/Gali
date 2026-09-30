@@ -21,3 +21,9 @@ scripts/ore-layout.json.checked
 
 __pycache__/
 *.pyc
+
+# Bounded deploy config: per-account, holds a login email
+app/.bounded/
+app/bounded.json
+admin/dist/
+*.tsbuildinfo

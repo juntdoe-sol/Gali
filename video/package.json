@@ -1,15 +1,15 @@
 {
-  "name": "video",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "gali-intro-video",
+  "private": true,
+  "description": "Gali's intro video, rendered from the real game engine",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "bundle": "esbuild src/main.ts --bundle --outfile=public/main.js --loader:.json=json --target=es2020",
+    "render:v": "npm run bundle && node render.mjs 1080 1920 out/gali-v.mp4",
+    "render:h": "npm run bundle && node render.mjs 1920 1080 out/gali-h.mp4"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "devDependencies": {
-    "esbuild": "^0.25.12"
+    "esbuild": "^0.25.12",
+    "playwright": "^1.56.1"
   }
 }
