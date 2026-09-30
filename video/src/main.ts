@@ -369,7 +369,7 @@ function goldFill(y: number, h: number) {
 }
 
 /**
- * "01  PICK YOUR CLAIMS": a numbered card. The gold number tile lands first, then
+ * "01  PICK YOUR SPOTS": a numbered card. The gold number tile lands first, then
  * the title panel unrolls out of it; on the way out it snaps shut and flies left.
  */
 function stepCard(n: string, title: string, sub: string, t: number, t0: number, t1: number, at?: number) {
@@ -725,7 +725,7 @@ function sceneIsland(t: number) {
     const y = PORTRAIT ? H - 470 * U : H - 110 * U;
     const big = (PORTRAIT ? 150 : 110) * U;
     const numW = textW('25', big);
-    const labW = textW(' CLAIMS', big * 0.5);
+    const labW = textW(' SPOTS', big * 0.5);
     const x0 = W / 2 - (numW + labW) / 2;
     const bump = 1 + 0.12 * (1 - prog(t, T.wave + (n - 1) * (b(2) / 25), T.wave + (n - 1) * (b(2) / 25) + 0.12));
     g.save();
@@ -739,7 +739,7 @@ function sceneIsland(t: number) {
     font(big * 0.5);
     g.fillStyle = WHITE;
     g.textAlign = 'left';
-    g.fillText(' CLAIMS', x0 + numW, y);
+    g.fillText(' SPOTS', x0 + numW, y);
     font(26 * U, BODY);
     g.textAlign = 'center';
     g.fillStyle = MUTED;
@@ -770,7 +770,7 @@ function coin(x: number, y: number, r: number, color: string) {
 }
 
 function sceneSteps(t: number) {
-  stepCard('01', 'PICK YOUR CLAIMS', 'TAP A CLAIM TO LOOK INSIDE · HOLD TO PICK', t, T.s1, T.s1Out);
+  stepCard('01', 'PICK YOUR SPOTS', 'TAP A SPOT TO LOOK INSIDE · HOLD TO PICK', t, T.s1, T.s1Out);
   // a finger on the glass, landing on the beat
   if (t > T.s1 && t < T.s2 + 0.2) {
     const path = PICKS.map((i) => onScreen(i));
@@ -803,7 +803,7 @@ function sceneSteps(t: number) {
       ring(x, y, t, a, 0.5, 90, TEAL, 8);
     });
   }
-  stepCard('02', 'DEPLOY SOL', 'YOUR SOL GOES ON THE CLAIMS YOU PICKED', t, T.s2, T.s2Out);
+  stepCard('02', 'DEPLOY SOL', 'YOUR SOL GOES ON THE SPOTS YOU PICKED', t, T.s2, T.s2Out);
   // SOL coins arc from the bottom of the screen into each pick, an eighth note apart
   if (t > T.s2 && t < T.s2Out) {
     PICKS.forEach((i, k) => {
@@ -831,7 +831,7 @@ function sceneSteps(t: number) {
     g.fillText(`${(n * 0.01).toFixed(2)} SOL`, W / 2, y);
     font(26 * U, BODY);
     g.fillStyle = MUTED;
-    g.fillText(`ON ${n} CLAIMS`, W / 2, y + 52 * U);
+    g.fillText(`ON ${n} SPOTS`, W / 2, y + 52 * U);
     g.restore();
   }
   // the countdown: one digit a beat, each slammed in over speed lines
@@ -868,7 +868,7 @@ function sceneSteps(t: number) {
     g.fillText('LOCKED', 0, 0);
     g.restore();
   }
-  stepCard('03', 'ONE CLAIM STRIKES GOLD', 'ITS MINERS SPLIT THE POT BY THEIR SOL', t, T.s3, T.s3Out);
+  stepCard('03', 'ONE SPOT STRIKES GOLD', 'ITS MINERS SPLIT THE POT BY THEIR SOL', t, T.s3, T.s3Out);
   // STRUCK GOLD, on the downbeat
   if (t >= T.strike - 0.05 && t < T.dive + 0.3) {
     const [x, y] = onScreen(WINNER);
