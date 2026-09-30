@@ -14,16 +14,7 @@ export interface GameRef extends DOMImperativeFactory {
   focus: (...args: any[]) => void;
 }
 
-const ATLAS = require('../../assets/pixel/atlas.png');
-const atlasUri = (a: unknown): string => {
-  // In a browser, index.html has already preloaded the same file from /pixel/.
-  // Inside the Android WebView there is no server, so use the bundled asset.
-  const inApp = typeof window !== 'undefined' && ('ReactNativeWebView' in window || window.location.protocol === 'file:');
-  if (!inApp && typeof window !== 'undefined' && /^https?:$/.test(window.location.protocol)) return '/pixel/atlas.png';
-  return typeof a === 'string' ? a : a && typeof a === 'object' && 'uri' in a ? String((a as { uri: string }).uri) : String(a);
-};
-
-export default function GameView({ ref, onEvent }: { ref: Ref<GameRef>; onEvent: (e: EngineEvent) => void; dom?: DOMProps }) {
+export default function GameView({ ref, onEvent, atlas }: { ref: Ref<GameRef>; onEvent: (e: EngineEvent) => void; atlas: string; dom?: DOMProps }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const engine = useRef<Engine | null>(null);
   const pending = useRef<Snapshot | null>(null);
@@ -51,7 +42,7 @@ export default function GameView({ ref, onEvent }: { ref: Ref<GameRef>; onEvent:
     const e = new Engine(cv, (ev) => onEvent(ev));
     engine.current = e;
     if (pending.current) e.push(pending.current);
-    void e.start(atlasUri(ATLAS));
+    void e.start(atlas);
     return () => e.stop();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
