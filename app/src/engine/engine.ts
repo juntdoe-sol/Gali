@@ -251,13 +251,18 @@ export class Engine {
     }
   }
 
+  private lowWindows = 0;
+  private perfFrom = performance.now() + 6000; // ignore start-up hitches
   private perf(dt: number) {
+    if (performance.now() < this.perfFrom) return;
     this.fpsAcc.n++;
     this.fpsAcc.t += dt;
     if (this.fpsAcc.t < 2.5) return;
     const fps = this.fpsAcc.n / this.fpsAcc.t;
     this.fpsAcc = { n: 0, t: 0 };
-    if (fps < 42 && this.quality === 1) {
+    // two slow windows in a row, not one hiccup, before stepping the effects down
+    this.lowWindows = fps < 40 ? this.lowWindows + 1 : 0;
+    if (this.lowWindows >= 2 && this.quality === 1) {
       this.quality = 0;
       this.emit({ t: 'perf', fps, quality: 0 });
     }
@@ -762,7 +767,7 @@ export class Engine {
     const s = this.snap;
     const dpr = this.dpr;
     const zoomK = this.cam.z / this.cam.fitZ;
-    const fs = Math.max(1, Math.round(1.7 * dpr * Math.min(1.3, 0.9 + zoomK * 0.1)));
+    const fs = Math.max(1, Math.round(dpr * Math.min(2, 1.25 + (zoomK - 1) * 0.5)));
     const regionA = Math.max(0, Math.min(1, (zoomK - 1.3) * 2)) * Math.max(0, Math.min(1, 3.2 - zoomK));
     if (regionA > 0) {
       c.globalAlpha = regionA * 0.75;
