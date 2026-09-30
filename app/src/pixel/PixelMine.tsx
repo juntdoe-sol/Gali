@@ -6,7 +6,7 @@
  * picture needs into a Snapshot and pushes it if anything changed. The engine
  * sends back taps, sounds and where your miner is. Nothing here draws.
  */
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { chainReady } from '../chain/light';
 import { BLOCKS, CAVE_IN_EVERY, GEAR, LOCK_MS, gearByKey, levelFromXp, type Gear } from '../game/constants';
@@ -17,6 +17,7 @@ import { clearBots, ensureBots, EMOTES, publishMe, startWorld, stopWorld, thinkB
 import { CLAIMS, openSpot } from '../engine/island';
 import type { EngineEvent, Look, PeerView, Snapshot } from '../engine/types';
 import { fx } from './fx';
+import { atlasSource } from './atlasSource';
 import GameView, { type GameRef } from './GameView';
 import { useView } from './view';
 
@@ -132,6 +133,10 @@ const SFX: Record<string, Sound> = { hit: 'hit', pop: 'pop', crack: 'crack', sel
 export default function PixelMine() {
   const ref = useRef<GameRef>(null);
   const request = useView((s) => s.request);
+  const [atlas, setAtlas] = useState<string | null>(null);
+  useEffect(() => {
+    atlasSource().then(setAtlas, () => setAtlas('/pixel/atlas.png'));
+  }, []);
 
   useEffect(() => {
     startWorld();
@@ -207,7 +212,7 @@ export default function PixelMine() {
 
   return (
     <View style={[StyleSheet.absoluteFill, { backgroundColor: '#123a6b' }]}>
-      <GameView ref={ref} onEvent={onEvent} dom={{ style: { flex: 1, backgroundColor: '#123a6b' }, scrollEnabled: false, bounces: false, overScrollMode: 'never' } as never} />
+      {atlas ? <GameView ref={ref} onEvent={onEvent} atlas={atlas} dom={{ style: { flex: 1, backgroundColor: '#123a6b' }, scrollEnabled: false, bounces: false, overScrollMode: 'never' } as never} /> : null}
       <RevealSounds />
     </View>
   );
