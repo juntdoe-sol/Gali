@@ -14,12 +14,20 @@ import { RoundCard, Toasts, TopBar } from './ui/Hud';
 import { Busy, GearReveal, LevelUp, Onboarding, ResultPop, WalletPicker } from './ui/Modals';
 import { Sheet } from './ui/Sheet';
 import { ClaimPanel } from './ui/ClaimPanel';
+import { MapHint } from './ui/MapHint';
 import { Splash } from './ui/Splash';
 import { PeerCard } from './ui/World';
 
 
 // lets browser tests watch the game state
 if (Platform.OS === 'web') Object.assign(globalThis, { __gali: useGame, __galiWorld: useWorld });
+// pixel art in the interface (gear icons) stays crisp when the browser scales it
+if (Platform.OS === 'web' && typeof document !== 'undefined' && !document.getElementById('gali-pixel-css')) {
+  const el = document.createElement('style');
+  el.id = 'gali-pixel-css';
+  el.textContent = '[data-pixelart], [data-pixelart] * { image-rendering: pixelated; image-rendering: crisp-edges; }';
+  document.head.appendChild(el);
+}
 
 // expo-notifications stays out of the web startup bundle; loaded on first use.
 let notificationsP: Promise<typeof import('expo-notifications')> | null = null;
@@ -90,6 +98,7 @@ function Ui({ menu, setMenu }: { menu: boolean; setMenu: (v: boolean) => void })
         <TopBar onMenu={() => setMenu(true)} />
         <RoundCard />
         <Dock />
+        <MapHint />
         <ClaimPanel />
         <ChatButton />
         <PeerCard />

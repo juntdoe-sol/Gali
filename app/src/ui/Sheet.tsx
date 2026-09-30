@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Linking, Modal, Pressable, ScrollView, StyleSheet, Switch, TextInput, View } from 'react-native';
+import { Linking, Modal, Pressable, ScrollView, StyleSheet, Switch, TextInput, View, Image } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ACHIEVEMENTS, BOOST_TIERS, COLORS, GEAR, GEAR_KINDS, levelFromXp, localDay, MOTHERLODE_ODDS, MOTHERLODE_POINTS,
   BLOCKS, MOTHERLODE_ACCRUAL_SKR, MOTHERLODE_POOL_SHARE, QUESTS, usd, RARITY_COLOR, SEASON, type Gear, type GearKind,
 } from '../game/constants';
+import { GEAR_ICON as PIXEL_ICON } from './gearIcons';
 import { GEAR_ICON, ITEM_ICON } from './icons';
 import { useGame, useLevelXp, useOwnedMask, usePoints } from '../game/store';
 import { chainReady, CLUSTER, PROGRAM_ID_STR, short, SKR_MINT_STR, type BoardRound, type LeaderRow } from '../chain/light';
@@ -107,10 +108,14 @@ function Quests() {
 }
 
 function GearIcon({ g }: { g: Gear }) {
+  const px = PIXEL_ICON[g.key];
   return (
-    <View style={[styles.gearIcon, { borderColor: RARITY_COLOR[g.rarity], backgroundColor: g.accent + '33' }]}>
-      <View style={[styles.swatch, { backgroundColor: g.color }]} />
-      <T style={{ fontSize: 24 }}>{ITEM_ICON[g.key] ?? GEAR_ICON[g.kind]}</T>
+    <View style={[styles.gearIcon, { borderColor: RARITY_COLOR[g.rarity], backgroundColor: g.accent + '22' }]}>
+      {px ? (
+        <Image source={px} style={{ width: 40, height: 40 }} {...({ dataSet: { pixelart: '1' } } as object)} />
+      ) : (
+        <T style={{ fontSize: 24 }}>{ITEM_ICON[g.key] ?? GEAR_ICON[g.kind]}</T>
+      )}
     </View>
   );
 }
