@@ -126,6 +126,12 @@ def main():
     atlas.add('fx-rock-0', falling_rock().img, 4, 4)
     font_meta = font_sprites(atlas)
     rects, size = atlas.pack(os.path.join(OUT, 'atlas.png'))
+    # the web build serves a copy from /pixel/atlas.png so index.html can preload it
+    # before the JavaScript has even arrived
+    pub = os.path.join(ROOT, 'app/public/pixel')
+    os.makedirs(pub, exist_ok=True)
+    import shutil
+    shutil.copyfile(os.path.join(OUT, 'atlas.png'), os.path.join(pub, 'atlas.png'))
     art = {'atlas': {'size': size, 'rects': rects}, 'island': island_meta, 'actors': actor_meta, 'font': font_meta}
     os.makedirs(os.path.dirname(ART_JSON), exist_ok=True)
     with open(ART_JSON, 'w') as f:

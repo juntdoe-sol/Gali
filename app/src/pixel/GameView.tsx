@@ -15,8 +15,13 @@ export interface GameRef extends DOMImperativeFactory {
 }
 
 const ATLAS = require('../../assets/pixel/atlas.png');
-const atlasUri = (a: unknown): string =>
-  typeof a === 'string' ? a : a && typeof a === 'object' && 'uri' in a ? String((a as { uri: string }).uri) : String(a);
+const atlasUri = (a: unknown): string => {
+  // In a browser, index.html has already preloaded the same file from /pixel/.
+  // Inside the Android WebView there is no server, so use the bundled asset.
+  const inApp = typeof window !== 'undefined' && ('ReactNativeWebView' in window || window.location.protocol === 'file:');
+  if (!inApp && typeof window !== 'undefined' && /^https?:$/.test(window.location.protocol)) return '/pixel/atlas.png';
+  return typeof a === 'string' ? a : a && typeof a === 'object' && 'uri' in a ? String((a as { uri: string }).uri) : String(a);
+};
 
 export default function GameView({ ref, onEvent }: { ref: Ref<GameRef>; onEvent: (e: EngineEvent) => void; dom?: DOMProps }) {
   const canvas = useRef<HTMLCanvasElement>(null);
