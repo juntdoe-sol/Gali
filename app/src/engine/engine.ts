@@ -79,6 +79,11 @@ export class Engine {
   private petPos = { x: HOME[0] - 12, y: HOME[1] + 2 };
   private peers = new Map<string, PeerDisp>();
   private hits = new Map<number, number>();
+  /** when each claim's flag went in this round, for the planting animation */
+  private planted = new Map<number, number>();
+  private prevPending = 0;
+  private celebrated = -1;
+  private punched = -1;
   private mole = { idx: -1, start: 0, nextAt: Date.now() + 5000, bonkedAt: -1 };
   private flocks = Array.from({ length: 5 }, (_, i) => ({ x: -60 + seeded(i * 3.1) * 480, y: -30 + seeded(i * 5.7) * 260, sp: 6 + seeded(i * 9.3) * 8, dir: seeded(i * 11.9) > 0.5 ? 1 : -1, n: 2 + Math.floor(seeded(i * 7.1) * 3) }));
   private props = (ISLE.props as { s: string; x: number; y: number; n: number; ms: number; sway: number }[]).slice();
@@ -264,6 +269,43 @@ export class Engine {
     const me = this.me;
     const pend = s?.pending ?? 0;
     const deployed = [...Array(BLOCKS).keys()].filter((i) => pend & (1 << i));
+    // a deploy lands: flags go in claim by claim, each with a puff of dust
+    if (pend !== this.prevPending) {
+      const fresh = deployed.filter((i) => !(this.prevPending & (1 << i)));
+      fresh.forEach((i, k) => this.planted.set(i, now + k * 45));
+      if (!pend) this.planted.clear();
+      this.prevPending = pend;
+    }
+    for (const [i, at] of this.planted) {
+      if (at > 0 && now >= at) {
+        const cl = CLAIMS[i];
+        this.parts.burst('dust', cl.cx + 8, cl.cy, 5, 14, 10, ['#f2e6c8', '#d8c8a8'], 0.6);
+        this.parts.burst('star', cl.cx + 8, cl.cy - 10, 2, 10, 14, ['#ffd84a'], 0.5);
+        this.planted.set(i, -at);
+      }
+    }
+    const w = s?.winner ?? null;
+    // the camera leans in on the strike, and eases back out when the next round opens
+    if (w !== null && el > 2450 && this.punched !== s!.roundId && this.mode === 'island' && !this.cam.userZoomed) {
+      this.punched = s!.roundId;
+      const cl = CLAIMS[w];
+      const z = this.cam.fitZ * 1.7;
+      // don't push the winner off the edge of the band
+      this.cam.hold = true;
+      this.cam.flyTo(cl.cx * 0.55 + (FIT_X + FIT_W / 2) * 0.45, cl.cy * 0.55 + (FIT_Y + FIT_H / 2) * 0.45, z, 520);
+      this.emit({ t: 'sfx', name: 'whoosh' });
+    } else if (this.punched >= 0 && (s?.phase === 'mining' || this.mode !== 'island') && this.punched !== -2) {
+      if (!this.cam.userZoomed) this.cam.home(700);
+      this.punched = -2;
+    }
+    // the strike pays you: coins spray out of the winning claim
+    if (w !== null && el > 2550 && this.celebrated !== s!.roundId && this.mode === 'island') {
+      this.celebrated = s!.roundId;
+      const cl = CLAIMS[w];
+      const mineWon = Boolean(pend & (1 << w));
+      this.parts.burst('coin', cl.cx, cl.cy - 4, mineWon ? 40 : 14, 34, 70, ['#ffd24a', '#fff1a8', '#e0a020'], 1.4);
+      this.parts.burst('star', cl.cx, cl.cy - 14, 12, 30, 30, ['#ffffff', '#fff1a8'], 0.9);
+    }
     const work = el >= 0 ? [] : deployed.length ? deployed : (s?.selected ?? []);
     const goTo = (x: number, y: number, target: number) => {
       me.path = findPath(me.x, me.y, x, y);
@@ -483,11 +525,11 @@ export class Engine {
       let edge = 0;
       if (el >= 1400 && winner !== null && winner !== i) {
         const order = (i * 11) % BLOCKS;
-        fill = Math.max(0, Math.min(1, (el - 1400 - order * 40) / 300)) * 0.55;
+        fill = Math.max(0, Math.min(1, (el - 1400 - order * 40) / 300)) * 0.62;
         tint = '#02050f';
       } else if (isWin) {
         tint = '#ffcf4a';
-        fill = 0.22 + 0.16 * Math.sin(now / 140);
+        fill = 0.4 + 0.18 * Math.sin(now / 140);
         edge = 1;
       } else if (el < 0 && pend & (1 << i)) {
         tint = '#ffd84a';
@@ -535,7 +577,19 @@ export class Engine {
         z: cl.cy,
         f: () => {
           draw(c, `icon-${cl.kind}`, OX + cl.cx * S, OY + (cl.cy - lift) * S, S);
-          if (pend & (1 << i)) draw(c, `fx-flag-${Math.floor(now / 300) % 2}`, OX + (cl.cx + 7) * S, OY + (cl.cy - 8) * S, S);
+          if (pend & (1 << i)) {
+            const at = Math.abs(this.planted.get(i) ?? 0);
+            const k = at ? Math.max(0, Math.min(1, (now - at) / 220)) : 1;
+            if (k > 0) {
+              const rise = Math.round((1 - k) * 10);
+              c.save();
+              c.beginPath();
+              c.rect(OX + (cl.cx - 2) * S, OY + (cl.cy - 30) * S, 24 * S, 30 * S);
+              c.clip();
+              draw(c, `fx-flag-${Math.floor(now / 300) % 2}`, OX + (cl.cx + 7) * S, OY + (cl.cy - 8 + rise) * S, S);
+              c.restore();
+            }
+          }
           if (isWin) draw(c, `fx-sparkle-${Math.floor(now / 110) % 3}`, OX + cl.cx * S, OY + (cl.cy - 10) * S, S);
         },
       });
@@ -577,7 +631,7 @@ export class Engine {
     tIs = performance.now();
 
     this.parts.draw(c, OX, OY, S);
-    if (this.quality) this.sky.drawShadows(c, OX, OY, S);
+    if (this.quality && el < 1400) this.sky.drawShadows(c, OX, OY, S);
 
     // falling rock on a cave-in round
     if (el >= 0 && s?.caveIn) {
@@ -646,6 +700,12 @@ export class Engine {
       const k = Math.min(1, (el - 2500) / 300);
       c.save();
       c.globalCompositeOperation = 'lighter';
+      const R = 46 * S * (0.9 + 0.1 * Math.sin(now / 120));
+      const gr = c.createRadialGradient(OX + cl.cx * S, OY + cl.cy * S, 0, OX + cl.cx * S, OY + cl.cy * S, R);
+      gr.addColorStop(0, `rgba(255,210,74,${0.55 * k})`);
+      gr.addColorStop(1, 'rgba(255,210,74,0)');
+      c.fillStyle = gr;
+      c.fillRect(OX + cl.cx * S - R, OY + cl.cy * S - R, R * 2, R * 2);
       draw(c, 'fx-beam-0', OX + cl.cx * S, OY + (cl.cy + 2) * S, S, false, 0.85 * k);
       c.restore();
       if (Math.random() < 0.5) this.parts.burst('star', cl.cx + (Math.random() - 0.5) * 16, cl.cy - Math.random() * 30, 1, 4, 6, ['#fff1a8', '#ffffff'], 0.9);
@@ -668,7 +728,8 @@ export class Engine {
         draw(c, up ? 'bird-0' : 'bird-1', OX + bx * S, OY + by * S, S, f.dir < 0, 0.9);
       }
     }
-    this.sky.drawClouds(c, OX, OY, S, Math.max(0, Math.min(1, 1.6 - zoomK * 0.6)));
+    const parting = el >= 1400 ? Math.max(0.1, 1 - (el - 1400) / 600) : 1;
+    this.sky.drawClouds(c, OX, OY, S, Math.max(0, Math.min(1, 1.6 - zoomK * 0.6)) * parting);
     this.sky.drawRain(c, DW, DH, Math.max(1, Math.round(dpr)));
     if (this.sky.lightning > 0.3) {
       c.fillStyle = `rgba(255,255,255,${(this.sky.lightning - 0.3) * 0.5})`;

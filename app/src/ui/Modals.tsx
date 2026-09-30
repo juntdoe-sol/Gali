@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Image, Modal, Pressable, StyleSheet, View } from 'react-native';
 import { COLORS, gearByKey, RARITY_COLOR } from '../game/constants';
 import { fmtSol } from '../game/pot';
+import { GEAR_ICON as PIXEL_ICON } from './gearIcons';
 import { GEAR_ICON } from './icons';
 import { play } from '../game/sfx';
 import { useGame, type RoundResult } from '../game/store';
@@ -164,7 +165,11 @@ export function GearReveal() {
             {g.rarity.toUpperCase()}
           </T>
           <View style={[styles.orb, { backgroundColor: g.accent, shadowColor: g.accent }]}>
-            <T style={{ fontSize: 50 }}>{GEAR_ICON[g.kind]}</T>
+            {PIXEL_ICON[g.key] ? (
+              <Image source={PIXEL_ICON[g.key]} style={{ width: 80, height: 80 }} {...({ dataSet: { pixelart: '1' } } as object)} />
+            ) : (
+              <T style={{ fontSize: 50 }}>{GEAR_ICON[g.kind]}</T>
+            )}
           </View>
           <T v="display" style={{ fontSize: 28 }}>
             {g.name}

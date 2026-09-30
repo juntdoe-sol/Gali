@@ -435,7 +435,7 @@ function ProPanel({ compact }: { compact: boolean }) {
           <Row
             icon="▦"
             label="Claims"
-            info="Tap claims on the map, take All 25, or Smart: the least-crowded claims, where your SOL buys the biggest share."
+            info="Press and hold claims on the map to pick them (a quick tap opens one up), take All 25, or Smart: the least-crowded claims, where your SOL buys the biggest share."
             right={
               <>
                 <T v="black" style={{ fontSize: 15, color: blocks ? COLORS.text : COLORS.muted, marginRight: 4 }}>

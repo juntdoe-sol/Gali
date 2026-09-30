@@ -20,10 +20,12 @@ export class Camera {
   vh = 1;
   private fly: { t0: number; ms: number; a: [number, number, number]; b: [number, number, number] } | null = null;
   userZoomed = false;
+  /** keep the current framing (a punch-in on the winner) instead of easing back to fit */
+  hold = false;
 
   setView(x: number, y: number, w: number, h: number) {
     const fit = Math.min(w / FW, h / FH);
-    const wasFit = !this.userZoomed && !this.fly;
+    const wasFit = !this.userZoomed && !this.fly && !this.hold;
     this.vx = x;
     this.vy = y;
     this.vw = w;
@@ -47,6 +49,7 @@ export class Camera {
   }
   home(ms = 420) {
     this.userZoomed = false;
+    this.hold = false;
     this.flyTo(FX + FW / 2, FY + FH / 2, this.fitZ, ms);
   }
 
