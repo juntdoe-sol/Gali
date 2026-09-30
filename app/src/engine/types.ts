@@ -54,6 +54,8 @@ export interface Snapshot {
   practice: boolean;
   /** 0 = low effects (older phones), 1 = full */
   quality: number;
+  /** draw the SOL on every claim (PRO); otherwise only a heat tint */
+  amounts: boolean;
 }
 
 export type EngineEvent =

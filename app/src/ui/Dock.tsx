@@ -126,6 +126,8 @@ export function UnclaimedRow() {
   const busy = useGame((s) => s.wallet.busy);
   const claim = useGame((s) => s.claimRewards);
   const fee = useGame((s) => (onChain ? s.wallet.unclaimed.fee : (s.save.practiceUnclaimedSkr ?? 0) * REFINING_FEE));
+  // nothing to claim yet: give the island the room
+  if (sol < 0.00005 && unrefined < 0.005 && refined < 0.005) return null;
   return (
     <View style={styles.unclaimed} accessibilityLabel={`Unclaimed ${sol.toFixed(4)} SOL, ${Math.floor(unrefined)} unrefined ORE, ${Math.floor(refined)} refined ORE`}>
       <View style={styles.uRow}>

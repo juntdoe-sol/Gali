@@ -516,6 +516,20 @@ export class Engine {
     blit(c, 'ground', OX, OY, MAP_W * S, MAP_H * S);
     water?.drawRiver(c, now, OX, OY, S);
 
+    // heat: the more SOL on a claim, the warmer it glows
+    if (s && el < 0) {
+      const maxV = Math.max(1e-9, ...s.perBlock);
+      for (let i = 0; i < BLOCKS; i++) {
+        const v = s.perBlock[i] ?? 0;
+        if (v <= 0 || s.selected.includes(i) || pend & (1 << i)) continue;
+        const [bx, by, bw, bh] = CLAIMS[i].box;
+        const f = sprite(`claim-${i}-fill`, '#ff9a3c');
+        if (!f) continue;
+        c.globalAlpha = 0.05 + 0.22 * Math.sqrt(v / maxV);
+        c.drawImage(f, OX + bx * S, OY + by * S, bw * S, bh * S);
+      }
+      c.globalAlpha = 1;
+    }
     // claim lighting: picked, deployed, the winner, the losers going dark
     for (let i = 0; i < BLOCKS; i++) {
       const [bx, by, bw, bh] = CLAIMS[i].box;
@@ -764,7 +778,8 @@ export class Engine {
         const mine = Boolean(s.pending & (1 << i));
         const picked = s.selected.includes(i);
         const star = Boolean(solo & (1 << i)) && !(el >= 1400 && winner !== null && winner !== i);
-        if (v <= 0 && !mine && !picked) {
+        const zoomedIn = this.cam.z / this.cam.fitZ >= 1.4;
+        if (!(s.amounts || zoomedIn) || (v <= 0 && !mine && !picked)) {
           if (star) text(c, '*', Math.round(OX + (cl.cx + 5) * S), Math.round(OY + (cl.cy - 14) * S), fs, '#ffd84a', '#3a1d00');
           continue;
         }
