@@ -518,7 +518,7 @@ export function drawScene(c: Ctx, sc: Scene, v: Visit, st: CloseupState, ox: num
   // the claim sign: number and the SOL on it
   const sx = SIGN_X;
   const sy = sc.surf[sx] - 12;
-  const label = `CLAIM ${sc.i + 1}`;
+  const label = `SPOT ${sc.i + 1}`;
   const solTxt = st.sol > 0 ? `${st.sol < 0.01 ? st.sol.toFixed(4) : st.sol.toFixed(3)} SOL` : 'NO SOL YET';
   const w = Math.max(textWidth(label), textWidth(solTxt)) + 6;
   c.fillStyle = '#5e3a20';

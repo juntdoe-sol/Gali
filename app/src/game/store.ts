@@ -229,7 +229,7 @@ export const roundEnd = (rid: number) => (rid + 1) * ROUND_SECS * 1000;
 const errMsg = (e: unknown) => {
   const m = String((e as Error)?.message ?? e);
   if (/RoundLocked/.test(m)) return 'Round is locking. Try next round';
-  if (/AlreadyOnBlock/.test(m)) return 'You already have SOL on one of those claims this round';
+  if (/AlreadyOnBlock/.test(m)) return 'You already have SOL on one of those spots this round';
   if (/StakeInPlay/.test(m)) return 'Your staked SKR is boosting this round. Unstake after it ends';
   if (/Paused/.test(m)) return 'Gali is paused for maintenance. Try again soon';
   if (/insufficient|0x1\b/i.test(m)) return 'Not enough balance';
@@ -467,9 +467,9 @@ export const useGame = create<GameState>((set, get) => {
       setWallet({ busy: null });
       get().toast(msg, 'bad');
     };
-    if (!idx.length) return stop('Pick claims on the map first');
+    if (!idx.length) return stop('Pick spots on the map first');
     const perBlock = run.perSpot ?? Math.floor((run.perRound / idx.length) * 1e9) / 1e9;
-    if (perBlock < MIN_SOL_PER_BLOCK) return stop(`Minimum is ${MIN_SOL_PER_BLOCK} SOL per claim`);
+    if (perBlock < MIN_SOL_PER_BLOCK) return stop(`Minimum is ${MIN_SOL_PER_BLOCK} SOL per spot`);
     const mask = maskOf(idx);
     const total = perBlock * idx.length;
     const onChain = Boolean(st.wallet.owner && chainReady);
@@ -646,7 +646,7 @@ export const useGame = create<GameState>((set, get) => {
       play('select');
       haptic.thud();
       updateSave((s) => ({ ...s, questProgress: { ...s.questProgress, shake: 1 } }));
-      get().toast(`Shake! Smart-picked the ${n} emptiest claims`, 'good');
+      get().toast(`Shake! Smart-picked the ${n} emptiest spots`, 'good');
     },
 
     bonkMole: () => {

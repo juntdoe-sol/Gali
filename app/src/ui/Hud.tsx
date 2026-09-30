@@ -179,7 +179,7 @@ export function RoundCard() {
           #{(roundId % 100000).toLocaleString()} · {cave ? '⚠ CAVE-IN' : `Cave-in in ${CAVE_IN_EVERY - (roundId % CAVE_IN_EVERY)}`}
         </T>
         <T v="bold" style={{ fontSize: 11, color: COLORS.muted }} numberOfLines={1}>
-          {pending ? `You: ${covered} claim${covered > 1 ? 's' : ''} · ${fmtSol(pending.total)} SOL` : `${fmtOre(reward)} ORE to mine · motherlode 1/${MOTHERLODE_ODDS}`}
+          {pending ? `You: ${covered} spot${covered > 1 ? 's' : ''} · ${fmtSol(pending.total)} SOL` : `${fmtOre(reward)} ORE to mine · motherlode 1/${MOTHERLODE_ODDS}`}
         </T>
       </View>
       <T v="muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 1, color: run ? COLORS.teal : pending && boost > 10_000 ? COLORS.skr : COLORS.muted }} numberOfLines={1}>
