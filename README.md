@@ -8,6 +8,9 @@ Built for **CLOCK IN**, the Solana Mobile hackathon. Submissions close 8 Oct 202
 
 ![Gali island](docs/gali-island.jpg)
 
+- **Android APK:** [install from Expo](https://expo.dev/accounts/juntdoe/projects/gali/builds/e3619d3c-c739-40ac-9ffe-503c04f7f8c3)
+- **Demo video:** [YouTube](https://youtube.com/shorts/e-X-gOWoZo4)
+
 ## Status
 
 Be clear about what runs today:
@@ -73,16 +76,20 @@ npm install --legacy-peer-deps
 npx expo start --web            # or: npx expo run:android
 ```
 
-Release APK: `npx eas build -p android --profile apk`, or the `android-apk` GitHub workflow. Web build: `npm run build:web` writes `app/dist`, a static site.
+Release APK: `npx eas-cli build -p android --profile apk`. Web build: `npm run build:web` writes `app/dist`, a static site.
 
 ### Program tests
 
-Needs the Solana CLI 2.1.21 and Anchor 0.31.1.
+Needs the Solana CLI 2.1.21 and Node 20+. Anchor is optional.
 
 ```bash
-anchor build
-bash scripts/test-local.sh      # validator with ore-mock at ORE's address, then the suite
+npm ci
+cargo-build-sbf --manifest-path programs/gali/Cargo.toml
+cargo-build-sbf --manifest-path programs/ore-mock/Cargo.toml
+bash scripts/test-local.sh
 ```
+
+`test-local.sh` starts a local validator with `ore-mock` at ORE's address and Gali as an upgradeable program, then runs the 18 tests. The `program` GitHub workflow does the same on every change to the programs, and the `ci` workflow type-checks and builds the app and the admin page.
 
 ### Devnet deploy
 
