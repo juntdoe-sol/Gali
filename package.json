@@ -3,7 +3,6 @@
   "private": true,
   "scripts": {
     "setup:devnet": "ts-node scripts/setup-devnet.ts",
-    "crank": "ts-node scripts/crank.ts",
     "test": "anchor test"
   },
   "dependencies": {

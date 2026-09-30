@@ -4,7 +4,7 @@
 #   ADMIN=<wallet address> bash scripts/deploy-devnet.sh   # hand the admin role to another wallet
 # Needs: the Solana CLI (https://docs.anza.xyz/cli/install), Node 20+, and ~4.5 devnet SOL
 # in ~/.config/solana/id.json. That CLI wallet pays for the deploy and keeps the right to
-# upgrade the program. The Gali admin (settings, treasury, SOL fees) is that wallet too,
+# upgrade the program. The Gali admin (settings, token prices, treasuries) is that wallet too,
 # unless ADMIN is set: then ADMIN is proposed and accepts in the admin page.
 # Uses the pre-built program in target/deploy/gali.so, so Rust and Anchor are optional.
 set -euo pipefail
@@ -51,7 +51,7 @@ solana program deploy "$SO" --program-id "$KEY" -u "$RPC" -k "$WALLET"
 say "Installing script dependencies"
 npm install --no-audit --no-fund
 
-say "Setting up config, mock SKR and pools (safe to re-run)"
+say "Setting up config and mock SKR and ORE mints (safe to re-run)"
 RPC_URL="$RPC" ANCHOR_WALLET="$WALLET" npm run -s setup:devnet
 
 if [ -n "${ADMIN:-}" ]; then
@@ -66,8 +66,6 @@ say "Done"
 cat <<MSG
 Program:  https://explorer.solana.com/address/$PROGRAM_ID?cluster=devnet
 App:      app/src/chain/deployment.json now points at devnet. Rebuild the APK (see README).
-Crank:    keep rounds settling and paying out with
-          RPC_URL=$RPC npm run crank
 Admin:    cd admin && npm install && npm run dev
           Connect $ADMIN_WALLET in Phantom/Solflare (set to devnet).${ADMIN:+
           Go to Settings and click "Accept admin role" to finish the hand-over.}

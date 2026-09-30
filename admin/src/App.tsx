@@ -1,13 +1,12 @@
 import { useAnchorWallet, useWallet } from '@solana/wallet-adapter-react';
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import { useCallback, useEffect, useState } from 'react';
-import { CLUSTER, fetchBalances, fetchConfig, fetchPlayers, fetchPots, PROGRAM_ID, explorerAddr, short, type Balances, type Config, type PlayerRow, type PotRow } from './chain';
-import { ChatTab, MoneyTab, OverviewTab, PlayersTab, RoundsTab, SettingsTab } from './sections';
+import { CLUSTER, fetchBalances, fetchConfig, fetchPlayers, PROGRAM_ID, explorerAddr, short, type Balances, type Config, type PlayerRow } from './chain';
+import { ChatTab, MoneyTab, OverviewTab, PlayersTab, SettingsTab } from './sections';
 
 export interface Data {
   cfg: Config;
   bal: Balances;
-  pots: PotRow[];
   players: PlayerRow[];
   loadedAt: number;
 }
@@ -19,10 +18,11 @@ export interface Notice {
   sig?: string;
 }
 
-const TABS = ['Overview', 'Money', 'Settings', 'Rounds', 'Players', 'Chat'] as const;
+const TABS = ['Overview', 'Money', 'Settings', 'Players', 'Chat'] as const;
 type Tab = (typeof TABS)[number];
 
-const EMPTY_BAL: Balances = { treasury: 0, rewards: 0, motherlode: 0, potEscrow: 0, staked: 0, authoritySol: 0 };
+const NONE = { SKR: 0, ORE: 0 };
+const EMPTY_BAL: Balances = { treasury: NONE, motherlode: NONE, staked: NONE, authoritySol: 0 };
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Retry reads the public RPC rejects with 429, backing off 1 s, 2 s, 4 s. */
 async function retry<T>(f: () => Promise<T>): Promise<T> {
@@ -52,13 +52,11 @@ export function App() {
       // settings first, so the page works even when the public RPC rate-limits the heavier reads
       const cfg = await retry(fetchConfig);
       if (!cfg) throw new Error('Gali is not set up on this cluster yet. Run npm run setup:devnet first.');
-      setData((d) => (d ? { ...d, cfg } : { cfg, bal: EMPTY_BAL, pots: [], players: [], loadedAt: Date.now() }));
+      setData((d) => (d ? { ...d, cfg } : { cfg, bal: EMPTY_BAL, players: [], loadedAt: Date.now() }));
       setError(null);
       const bal = await retry(() => fetchBalances(cfg.authority));
       setData((d) => d && { ...d, bal });
-      const pots = await retry(() => fetchPots(cfg.decimals));
-      setData((d) => d && { ...d, pots });
-      const players = await retry(() => fetchPlayers(cfg.decimals));
+      const players = await retry(() => fetchPlayers(cfg));
       setData((d) => d && { ...d, players, loadedAt: Date.now() });
       setWarn(null);
     } catch (e) {
@@ -175,7 +173,6 @@ export function App() {
             {tab === 'Overview' && <OverviewTab d={data} />}
             {tab === 'Money' && <MoneyTab d={data} wallet={wallet} isAdmin={isAdmin} run={run} />}
             {tab === 'Settings' && <SettingsTab d={data} wallet={wallet} isAdmin={isAdmin} isPending={isPending} run={run} />}
-            {tab === 'Rounds' && <RoundsTab d={data} wallet={wallet} run={run} />}
             {tab === 'Players' && <PlayersTab d={data} />}
             {tab === 'Chat' && <ChatTab isAdmin={isAdmin} setNotice={setNotice} />}
           </>
