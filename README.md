@@ -1,179 +1,134 @@
 # Gali
 
-A pixel-art mining game for Solana Seeker. Every minute a round opens on a quarry with 25 mining spots. Miners deploy SOL on spots, get their SOL back less a small fee, mine SKR when their spot strikes gold, chat, and tip each other SKR.
+A pixel-art mining game for Solana Seeker, played on [ORE](https://ore.supply)'s own board.
 
-Built for **CLOCK IN**, the Solana Mobile hackathon by Radiants (submissions close 9 Oct 2026, 14:59 GMT+8).
+ORE runs a 25-square mining round every 200 slots (about 80 seconds). Gali draws those 25 squares as spots on a pixel island. Players put SOL on the spots they want. When their spot strikes gold they take the losing spots' SOL and mine $ORE, and 1 round in 500 two jackpots pay at once: ORE's own motherlode and Gali's SKR pool.
 
-## What's in the repo
+Built for **CLOCK IN**, the Solana Mobile hackathon. Submissions close 8 Oct 2026 (9 Oct, 14:59 GMT+8).
+
+![Gali island](video/public/pixel/atlas.png)
+
+## Status
+
+Be clear about what runs today:
+
+- **Practice mode** is the default and runs the whole game offline: the island, rounds, picking and deploying, strikes, both motherlodes, gear, quests and the chat bots. No wallet needed.
+- **The Gali program** (`programs/gali`) is written for ORE's board and tested against a mock of ORE's accounts. It is not deployed yet.
+- **The app's on-chain mode** has the ORE client (deploy, checkpoint, claim, automation) and the Gali calls wired, and switches on once `app/src/chain/deployment.json` names a deployed program and SKR mint.
+
+Gali mints nothing, takes no cut of a winner's SOL and never holds a player's ORE position. ORE is credited here as the board Gali plays on; Gali is not affiliated with or endorsed by ORE.
+
+## Repo layout
 
 | Path | What it is |
 | --- | --- |
-| `programs/gali` | Anchor program: rounds, SOL deploys, reveal, fees and settlement, unclaimed balances and claims, session keys, SKR pools, staking, gear |
-| `tests/gali.ts` | Anchor tests (localnet) |
-| `scripts/` | Pixel-art generator (`pixel-art.py`), one-command devnet deploy, devnet setup, mock-SKR faucet, crank (reveal, settle, pay out), test runner, second test pass for the timed instructions (`test-fasttime.sh`), IDL generator |
-| `target/deploy/gali.so` | Pre-built program, so deploying doesn't need Rust or Anchor (the program keypair is not in git) |
-| `app/` | Expo (React Native) Android app: pixel-art quarry (plain Images, no 3D engine), LITE/PRO deploy panel with autopilot, miners chat, SKR tips, Mobile Wallet Adapter |
-| `admin/` | Admin web page (Vite + React): money, settings, pause, admin hand-over, rounds, players, chat moderation |
+| `programs/gali` | Anchor program: points and streaks read from ORE's rounds, the SKR jackpot, gear in SKR or ORE, staking, session keys, admin |
+| `programs/ore-mock` | Test-only stand-in for ORE's program, loaded at ORE's address on a local validator |
+| `tests/gali.ts` | Program tests against the mock (18 cases) |
+| `app/` | Expo (React Native) app for Android and web. The island is a canvas engine in `app/src/engine` |
+| `admin/` | Admin page (Vite + React): balances, token prices, settings, pools, pause, admin hand-over, players, chat moderation |
 | `supabase/` | Chat server: tables plus the `chat-post` and `chat-admin` edge functions |
-| `app/eas.json` | EAS Build profiles; `eas build -p android --profile apk` produces the release APK |
-| `.github/workflows` | CI: build + test program, optional devnet deploy, release APK |
-| `LICENSE` | MIT |
+| `scripts/` | Pixel-art generator, devnet deploy and setup, SKR faucet, ORE layout probe, IDL generator, local test runner |
+| `video/` | The 44-second intro video, rendered from the real game engine |
+| `target/deploy/*.so` | Pre-built programs, so a deploy needs no Rust toolchain. The program keypair is not in git |
+| `target/idl/` | Program IDLs (copied to `app/src/chain/idl.json` by `scripts/gen-idl.py`) |
 
-## How the game works
+## How a round works
 
-- **Rounds:** `round_id = unix_time / 60`. No crank opens rounds.
-- **Deploy:** put SOL on 1 to 25 spots with `deploy`. The amount is **per spot** (min 0.0001 SOL): 0.0001 SOL on all 25 spots costs 0.0025 SOL a round. You can deploy again in the same round on other spots. The app's LITE and PRO panels both take the amount per spot.
-- **Account rent:** a player's first deploy in a round pays the Stake account's rent (refunded when it's claimed) plus a 20,000 lamport **crank fee** that goes to whoever later claims that stake, so cranking for other players is never a loss. The round's first deployer also pays the Pot's rent and whoever reveals pays the Round's. A day after the round, once every stake is claimed, anyone can call `close_round` to close both and refund that rent; rounding dust goes to the treasury wallet (the crank does this every 10 minutes).
-- **Abandoned rounds:** if nobody locked or revealed a round an hour after it ended, anyone can call `refund_stake` for any stake in it: that player gets their own SOL, their stake's rent and the crank fee back. A round with any refund can never be settled. The app retries settlement for 24 hours and falls back to this.
-- **Reveal:** after a round ends, anyone calls `lock_round`, which commits the draw to a slot 5 slots in the future. A couple of seconds later anyone calls `reveal_round`, which must use that slot's hash (or the next one if it was skipped). The result is fixed before anyone can see it, so it can't be re-rolled by retrying or reverting a reveal. A lock can only be replaced once its slot has fallen out of SlotHashes (512 slots), so a losing player can't withhold the reveal and re-roll. The app, the crank and the admin page all do both steps. **The leader of that slot can still influence it; swap in a VRF (Switchboard or ORAO) before mainnet.**
-- **Deploy rule:** each player can put SOL on a given spot once per round (the app deploys once per round anyway). This keeps the solo draw exact.
-- **Winners take the losing spots' SOL.** Each spot pays a 1% admin fee, and every losing spot also pays `pot_fee_bps` (10%) of what is left. The miners on the gold spot split everything that remains (their own SOL plus all the SOL on the losing spots) by their share of the gold spot. SOL on losing spots is gone. Covering all 25 spots alone just returns your SOL minus fees (about 89.5% on average); you profit only when other miners put SOL on spots that lose. If nobody is on the gold spot, everything after the admin fee is protocol fee. Fees go to the treasury wallet (config authority), about 10.5% of volume.
-- **SKR per round:** only the gold spot mines. 200 SKR from the Rewards Pool goes to its miners. Each round has 10 **solo spots**, picked in advance from the round id (`solo_mask`: sha256("gali-solo" || round id) and a Fisher-Yates pick; the app shows them as ★). If a solo spot wins, one miner takes all 200 SKR: the owner of a random lamport on that spot, so the odds equal their share. Otherwise the 200 SKR is split by SOL on the spot.
-- **Motherlode:** every settled round moves `motherlode_skr` (40 SKR) from the Rewards Pool into the Motherlode Pool; gear sales add more. On a 1-in-625 hit the **whole pool** (as it stands before that round's top-up) is split by SOL on the gold spot, plus 10,000 points each. An early hit pays less, a late one more. Nobody on the gold spot: the pool rolls over.
-- **Round budget (fees pay for SKR):** a round pays at most `reward_drip_bps` (0.05%) of the Rewards Pool, capped at 200 SKR mined + 40 SKR Motherlode top-up and split in that ratio. Payouts therefore follow what flows into the pool and it never runs dry. `reward_drip_bps` is mandatory and capped at 1% (100 bps), so no config can hand a single round the whole pool. `buyback_bps` (50%) of every round's SOL fees is **held in a `Buyback` escrow PDA**, not paid to the treasury, and counted in `buyback_due`; the admin calls `mark_buyback(amount)` to withdraw from the escrow, swaps it (e.g. on Jupiter) and calls `fund_rewards`. The escrow can't be drained past what is owed. Gear sales add 40% of their SKR. `setup-devnet` sets both settings if the CLI wallet is the admin.
-- **Settle:** anyone calls `settle_pot`: fees to the treasury wallet, the round's SKR (and the Motherlode on a hit) into escrow, then the Motherlode top-up. The Pot keeps the fees, the SKR paid, the solo winner and how many winners were paid, which the app's Rounds tab reads.
-- **Claim:** anyone (the app or the crank) calls `claim_pot` for a stake. It credits the returned SOL and any SKR to the player's `Unclaimed` account (`["unclaimed", owner]`, which holds the SOL; the SKR waits in escrow) and adds points (`40 x 25 / spots covered`, x1.25 or x1.5 with staked SKR). The player then calls `claim_rewards(what)` (**the owner's wallet only** — a session key can deploy but can never move rewards out; 1 = SOL, 2 = SKR, 3 = both): SOL to the wallet, SKR to its SKR account. SOL is claimed in full. **Refining:** claiming mined (unrefined) SKR always costs 10%, shared pro rata with everyone still holding unrefined SKR as refined SKR (a global `Refinery` accumulator); refined SKR is then claimed with no fee. If nobody else is holding unrefined SKR, the fee goes back to the Rewards Pool instead. The app shows the balance as **Unclaimed** with separate SOL and SKR Claim buttons and the fee preview. Nothing expires.
-- **Session keys:** the wallet approves one `set_session` transaction that also funds a device key (up to 1 SOL). The app then deploys and settles every round without pop-ups. The session is checked against the chain's clock, expires after at most a week, and can only deploy: claims always need the wallet. LITE takes an amount per spot and mines **one round by default** (a Rounds row turns on autopilot for up to 10); PRO has 4 presets, All/Smart block picking and a round count.
-- **SKR:** Gali never mints SKR. Gear sales (21 items, 200 to 15,000 SKR) go 30% Motherlode Pool, 40% Rewards Pool, 30% treasury. Anyone can top up with `fund_motherlode` / `fund_rewards`. Staking 5,000 / 50,000 SKR boosts points. Staked SKR can't be unstaked while it boosts the current round, so the same SKR can't boost several wallets in one round. Prices assume 1 SKR ≈ $0.018. At 200 SKR a round plus the 40 SKR Motherlode top-up, the Rewards Pool pays out up to 345,600 SKR a day (only rounds someone plays count), so it needs top-ups until gear sales catch up.
-- **Admin:** only the program's upgrade authority can create the config (`init_config`). The config authority can `update_config` (fee capped at 20%, pool shares at 100%), `set_paused` (blocks new deploys and gear sales; settling, claiming and unstaking keep working), `withdraw_treasury` (treasury SKR only; pools and staked SKR have no withdraw path) and hand over admin in two steps (`propose_authority`, `accept_authority`). Use a multisig as the authority before real money.
-- **Shared quarry:** everyone on the map sees each other's miners live. Tap the ground to walk, tap a miner to wave (5 emotes), open the chat or send SKR. Positions go over Supabase Realtime broadcast on the `gali-world` channel (the same project as the chat, no tables needed; public channels must be allowed). Payloads are clamped, and a wallet name only shows after the sender signs with its session key and the on-chain Player confirms that session; everyone else shows as a guest. In practice mode, four labelled bots wander the quarry.
-- **Pixel art:** all art is original and drawn by `scripts/pixel-art.py` (`python3 scripts/pixel-art.py` rewrites `app/assets/pixel/` and `app/src/pixel/sprites.ts`).
-- **Chat + tips:** messages are signed by the player's session key; the edge function checks the signature against the on-chain Player account. Tips are plain SPL transfers from the wallet, then posted to the room with the transaction signature, which the server verifies.
-- **Devnet:** uses a mock SKR mint. Real SKR mint: `SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3` (verify decimals and token program before switching).
-- **Chance:** SOL isn't redistributed, but who mines the SKR is random, so this is still a game of chance. A real-money launch needs age gating and a legal review per market.
+1. **Pick.** Tap a spot to look inside, press and hold to pick it. LITE puts the same SOL on all 25 spots; PRO picks by hand, All or Smart (the least crowded spots). Shake the phone to Smart-pick.
+2. **Deploy.** One transaction into ORE's board. A session key funded once lets the app deploy every round without a wallet pop-up; it can deploy but never withdraw.
+3. **Strike.** ORE draws one winning square. Its miners split the losing squares' SOL (after ORE's 1% fee and 10% of the losing squares) by their SOL on the winner, and mine the round's 1 ORE. Ten squares a round are solo squares (★): on those, one miner takes the whole ORE, with odds equal to their share.
+4. **Motherlode.** ORE adds 0.2 ORE to its motherlode every round and pays the whole pool 1 round in 500, split by SOL on the winning square. When it hits, Gali pays its own jackpot to the same winners, split the same way, plus 10,000 points. That jackpot is Gali's SKR pool and its ORE pool, both filled by gear sales.
+5. **Record.** `record_ore_round` reads ORE's finished round and the player's miner account and awards points, wins, streaks and XP. It is permissionless, so a player who closed the app still gets credited.
 
-## Known limitations (devnet build)
+Points: `40 x 25 / spots covered` for a win, times 1.25 or 1.5 with staked SKR or ORE (the better boost applies).
 
-- Randomness is slot-hash based (see Reveal). Use a VRF before real money.
-- Rent now comes back (`close_round` for the pot and round, `claim_pot` for the stake), but SKR rounding dust and SKR escrowed for a stake nobody ever claims still sit in program accounts. There is no sweep instruction yet.
-- The `Refinery` is a single account every claim writes to, so claims in the same block contend. Fine at this scale; it needs sharding before high volume.
-- Upgrading from an earlier build: the account layouts changed again (every account now carries reserved padding so the next change doesn't break old accounts). Run the crank until every old round is settled and claimed **before** upgrading; old pots can't be read afterwards. The app length-checks accounts and skips ones from an older layout instead of crashing. `setup-devnet` also resets `motherlode_skr` to the 40 SKR top-up if it still holds the old 5,000 SKR payout, and sets `reward_drip_bps` and `buyback_bps` if they are 0.
-- `update_config` can store up to 30 gear prices on a config created before the round-budget fields were added (the new fields use some of the spare space).
-- The claim transaction also creates the player's SKR account if needed, so the wallet needs about 0.003 SOL for that the first time.
-- If the admin wallet holds almost no SOL, a settlement whose fee is below the rent-exempt minimum fails until the wallet is funded. Keep the admin wallet funded.
-- A round's fee, base points and Motherlode points are snapshotted by its first deploy, so a config change can't rewrite a round in progress. The SKR reward and the round budget are still read at settlement. Use a multisig and a published change policy before real money.
-- `programs/gali/Cargo.toml` has a **`fasttime`** feature that zeroes the close and abandon waiting periods. It exists only for `scripts/test-fasttime.sh`. Never deploy a build with it.
-- The SKR mint must not charge transfer fees.
+## The Gali program
 
-## Run it on your Mac
+Instructions, all in `programs/gali/src/lib.rs`:
 
-### 1. Program (devnet)
+- **Game:** `init_player`, `set_session`, `record_ore_round`, `claim_jackpot`
+- **Gear:** `buy_gear` (SKR), `buy_gear_ore` (ORE). Priced in USD, converted at an admin-set rate. `motherlode_pool_bps` of an SKR sale (70% at setup) goes to the SKR jackpot pool and `ore_motherlode_bps` of an ORE sale (50% at setup) to the ORE jackpot pool; the rest goes to the treasury
+- **Staking:** `stake_skr`, `unstake_skr`, `stake_ore`, `unstake_ore`
+- **Pools:** `fund_motherlode` (SKR), `fund_ore` (ORE). Anyone may top up; pools have no withdraw path
+- **Admin:** `init_config` (upgrade authority only), `update_config`, `set_token_prices`, `set_paused`, `withdraw_treasury`, `withdraw_treasury_ore`, `propose_authority`, `accept_authority`
 
-The quick way, using the pre-built program (needs the [Solana CLI](https://docs.anza.xyz/cli/install), Node 20+, `target/deploy/gali-keypair.json`, and about 4.5 devnet SOL in `~/.config/solana/id.json`):
+ORE is built with Steel, so there is no IDL or generated client. `programs/gali/src/ore.rs` and `app/src/chain/ore/` decode ORE's accounts at offsets checked against live mainnet accounts, and refuse anything with the wrong owner, length or address. Re-run the check after ORE redeploys:
 
 ```bash
-solana airdrop 2 -u devnet   # or https://faucet.solana.com (repeat until you have ~4.5 SOL)
+npx ts-node scripts/ore-probe.ts
+```
+
+Neither SKR nor ORE has a Pyth feed. The admin sets both rates on chain (`set_token_prices`), gear sales refuse a rate older than `price_max_age_secs`, and the app shows a live Jupiter quote beside it.
+
+## Run it
+
+### App (practice mode)
+
+Needs Node 20+.
+
+```bash
+cd app
+npm install --legacy-peer-deps
+npx expo start --web            # or: npx expo run:android
+```
+
+Release APK: `npx eas build -p android --profile apk`, or the `android-apk` GitHub workflow. Web build: `npm run build:web` writes `app/dist`, a static site.
+
+### Program tests
+
+Needs the Solana CLI 2.1.21 and Anchor 0.31.1.
+
+```bash
+anchor build
+bash scripts/test-local.sh      # validator with ore-mock at ORE's address, then the suite
+```
+
+### Devnet deploy
+
+Needs the Solana CLI, Node 20+, `target/deploy/gali-keypair.json` and about 4.5 devnet SOL in `~/.config/solana/id.json`.
+
+```bash
 bash scripts/deploy-devnet.sh
+ADMIN=<wallet> bash scripts/deploy-devnet.sh    # make another wallet the admin
 ```
 
-It deploys (or upgrades) the program, creates the mock SKR mint, config and a seeded Rewards Pool (`REWARDS_SEED`; the Motherlode Pool starts empty unless `MOTHERLODE_SEED` is set), and writes `app/src/chain/deployment.json`. The program account keeps about 4.2 SOL as rent. The CLI wallet keeps the right to upgrade the program and becomes the Gali admin (settings, treasury, SOL fees).
+It deploys or upgrades the program, creates mock SKR and ORE mints (devnet has no ORE), initialises the config and writes `app/src/chain/deployment.json`. Options: `SKR_MINT`, `ORE_MINT`, `ORE_USD`, `PRICE_MAX_AGE_SECS`, `MOTHERLODE_SEED`, `ORE_SEED`. Send test SKR with `npx ts-node scripts/faucet.ts <wallet> 50000`.
 
-To make a browser wallet (Phantom, Solflare) or a multisig the admin instead:
-
-```bash
-ADMIN=<wallet address> bash scripts/deploy-devnet.sh
-```
-
-Then open the admin page with that wallet, go to **Settings** and click **Accept admin role**. Later hand-overs: `npx ts-node scripts/propose-admin.ts <address>` or the Settings tab.
-
-Then keep rounds moving (reveal, settle, pay every winner even if their app is closed):
-
-```bash
-RPC_URL=https://api.devnet.solana.com npm run crank
-npx ts-node scripts/faucet.ts <tester-wallet> 50000   # send test SKR
-```
-
-To rebuild the program yourself: `anchor build` (Anchor 0.31.1, Solana 2.1.21). `Cargo.lock` is pinned so it builds with Solana's Rust 1.79.
-
-Tests: `anchor test --provider.cluster localnet` (or start `solana-test-validator` and run `node scripts/run-tests.cjs` with `ANCHOR_PROVIDER_URL` and `ANCHOR_WALLET` set). 21 tests cover rounds, both SKR payout modes, losers getting nothing, an empty gold spot, the lock-then-reveal draw, sessions and session expiry, refining across several holders, gear, pools, staking (including the in-round unstake lock) and every admin control. The local validator must load the program as upgradeable (`--upgradeable-program <id> target/deploy/gali.so <wallet>`), since `init_config` checks the upgrade authority.
-
-`close_round` and `refund_stake` only run a day and an hour after a round, so they get a second pass against a test-only build:
-
-```bash
-bash scripts/test-fasttime.sh   # rebuilds with --features fasttime, runs 22 tests
-anchor build                    # rebuild before deploying anywhere
-```
-
-### 2. Android app
-
-Needs Android Studio (SDK + JDK 17) and a phone with a Solana wallet (Seeker, or any Android phone with Phantom/Solflare set to devnet).
-
-```bash
-cd app
-npm install --legacy-peer-deps
-npx expo prebuild --platform android
-npx expo run:android --variant release   # installs on a USB-connected phone
-# or build the APK directly:
-cd android && ./gradlew assembleRelease  # app/android/app/build/outputs/apk/release/
-```
-
-Or build it in the cloud with EAS, which needs no Android Studio (`app/eas.json` has the profiles):
-
-```bash
-cd app
-npx eas login
-npx eas build -p android --profile apk   # internal-distribution APK, download link at the end
-```
-
-Without `deployment.json` filled in, the app runs in **practice mode**: 2 play SOL and simulated miners.
-
-### 2b. Web test build on Bounded (before the APK)
-
-Live test build: https://galimine.bounded.page
-
-The same app runs in a desktop or mobile browser with Phantom, Solflare or Backpack (the browser extension signs instead of Mobile Wallet Adapter). Everything else is the same: devnet program, session key, autopilot, chat and tips.
-
-```bash
-cd app
-npm install --legacy-peer-deps
-npx bounded login                 # once
-npm run deploy:bounded            # builds dist/ and uploads it (private at first)
-npx bounded domains slug galimine # the URL name (gali was taken)
-npx bounded site privacy public   # let testers open it
-```
-
-Testers switch their wallet to devnet (Phantom: Settings → Developer Settings → Testnet Mode, Solana Devnet), get devnet SOL from https://faucet.solana.com, and SKR with `npx ts-node scripts/faucet.ts <wallet> 50000`. Set `EXPO_PUBLIC_RPC_URL` before `npm run deploy:bounded` to use your own RPC instead of the public devnet one.
-
-### 3. Admin page
+### Admin page
 
 ```bash
 cd admin
-cp .env.example .env      # set VITE_RPC_URL (use your own RPC for real use)
+cp .env.example .env            # set VITE_RPC_URL
 npm install
-npm run dev               # or: npm run build, then host admin/dist anywhere static
+npm run dev
 ```
 
-Connect the admin wallet in Phantom or Solflare (on devnet). Other wallets see a read-only view. Tabs:
+Connect the admin wallet to make changes; any other wallet gets a read-only view. It is a static site, so `admin/dist` can go on any static host.
 
-- **Overview:** SOL fees earned, treasury, pools, players, rounds, anything waiting to settle.
-- **Money:** withdraw treasury SKR, top up a pool.
-- **Settings:** game settings and gear prices, pause, admin hand-over.
-- **Rounds:** settle stuck rounds, see how each round's SKR was paid.
-- **Players**
-- **Chat:** hide messages, mute wallets.
-
-It's a static site, so `admin/dist` can go on any static host, including a Bounded app (`npx bounded site deploy ./dist --app-id <id>`). Keep the URL private: the page only reads public chain data and every change still needs the admin wallet's signature.
-
-### 4. Chat server (Supabase)
+### Chat server (Supabase)
 
 ```bash
-supabase init                                      # once, keeps the existing supabase/ files
 supabase link --project-ref <ref>
-supabase db push                                   # creates the chat and moderation tables
+supabase db push
 supabase secrets set SKR_MINT=<mint> GALI_PROGRAM_ID=GamTh2wWNNGU6CB5G3aF7Xeu1m7fQEtd9caRGtgPcMmV
 supabase functions deploy chat-post --no-verify-jwt
 supabase functions deploy chat-admin --no-verify-jwt
 ```
 
-Then put the project URL and anon key in `app/src/chain/chat.json` (the admin page reads the same file). The same settings turn on the shared quarry (Realtime broadcast). Without them the chat shows as offline and the map shows practice bots only; SKR tips still work. Moderation (`chat-admin`) only accepts requests signed by the program's current admin wallet.
+Then put the project URL and anon key in `app/src/chain/chat.json`. The same project carries the live map (Realtime broadcast). Messages are signed by the player's session key and checked against the on-chain Player account.
 
-## Hackathon checklist
+## Pixel art
 
-- [x] Android APK (Expo prebuild + Gradle, EAS `apk` profile, or the `android-apk` workflow)
-- [x] Solana Mobile Stack: Mobile Wallet Adapter for connect, session funding, staking, gear and SKR tips
-- [x] Built for the phone: portrait pixel-art quarry that fits between the HUD and the deploy panel, haptics, shake to Smart-pick, daily reminder
-- [x] Meaningful Solana use: every deploy, reveal, settlement and claim is a devnet transaction; on-chain leaderboard
-- [x] SKR integration: SKR mined each round, Motherlode, SKR-priced gear, staking boosts, tips
-- [ ] 3-minute demo video recorded on a device
-- [x] Pitch deck
-- [ ] Release signing key for the Solana dApp Store (the default build uses the debug keystore)
+Every sprite is original and drawn in code. `python3 scripts/pixel-art.py` rebuilds the island, miners, gear, pets, props and the 3x5 bitmap font into one 1024x512 atlas (`app/public/pixel/atlas.png`, `app/src/engine/art.json`).
+
+## Known limitations
+
+- The program is not deployed and has not run against ORE's live program, only against `ore-mock`.
+- Token rates are set by the admin, not an oracle. Use a multisig as admin and a published change policy before real money.
+- `init_player` grants the starter pickaxe only. The free starter helmet and outfit exist in the app but cannot be claimed on chain yet.
+- It is a game of chance with real SOL. A real-money launch needs age gating and a legal review per market.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
