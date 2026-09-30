@@ -186,7 +186,7 @@ function MotherlodeCard() {
         {Math.floor(pool).toLocaleString()} SKR{owner && chainReady ? '' : ' (practice)'}
       </T>
       <T>
-        1 round in {MOTHERLODE_ODDS} is a motherlode. When ORE's hits, Gali pays this SKR pool (~{usd(pool)} right now) on top to the same winners, split by their SOL on the gold claim, and each gets {MOTHERLODE_POINTS.toLocaleString()} bonus points. One event, two assets. An early hit pays less; a late one pays more.
+        1 round in {MOTHERLODE_ODDS} is a motherlode. When ORE's hits, Gali pays this SKR pool (~{usd(pool)} right now) on top to the same winners, split by their SOL on the gold spot, and each gets {MOTHERLODE_POINTS.toLocaleString()} bonus points. One event, two assets. An early hit pays less; a late one pays more.
       </T>
       <T v="muted" style={{ marginTop: 6 }}>
         Every played round adds {MOTHERLODE_ACCRUAL_SKR} SKR to it, plus {Math.round(MOTHERLODE_POOL_SHARE * 100)}% of every SKR gear sale, and anyone can top it up. Gali never mints SKR: the pool is filled by the people chasing it.{owner && won > 0 ? ` You've won ${won.toLocaleString()} SKR.` : ''}
@@ -343,7 +343,7 @@ function Rounds() {
           const win = r.winning ?? 0;
           const nobody = !(p.perSquare[win] > 0);
           const who = nobody
-            ? 'Nobody on the gold claim'
+            ? 'Nobody on the gold spot'
             : p.split
               ? `Split · ${p.miners || '…'} miner${p.miners === 1 ? '' : 's'}`
               : p.winner
@@ -353,7 +353,7 @@ function Rounds() {
             <View key={r.roundId} style={[styles.past, p.winner && p.winner === owner && { borderColor: COLORS.gold }]}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <T v="bold">
-                  #{(r.roundId % 100000).toLocaleString()} · claim {win + 1}
+                  #{(r.roundId % 100000).toLocaleString()} · spot {win + 1}
                   {p.motherlode ? '  💎 MOTHERLODE' : ''}
                 </T>
                 <T v="muted" style={{ fontSize: 11 }}>
@@ -471,7 +471,7 @@ function Me() {
         <T style={{ flex: 1 }}>Mute sound</T>
         <Switch id="mute" value={save.muted} onValueChange={setMute} trackColor={{ true: COLORS.teal, false: COLORS.card2 }} />
       </Card>
-      <T v="muted">How it works: each minute is a round on an island with 25 mining claims. Put SOL on 1 to 25 claims. One claim strikes gold. Its miners split the whole pot (the SOL on every claim, after a 1% fee and 10% of the losing claims) by their SOL on the gold claim; SOL on the other claims is lost. The gold claim also mines ORE, split the same way, or on one of the round's 10 solo claims (★) taken whole by one miner, with odds equal to their share. Fewer claims pay more points: 1,000 for a single claim, 40 for all 25. A 1-in-500 motherlode pays out the whole SKR Motherlode Pool on top. Everything lands in Unclaimed until you claim it. This is a game of chance: only play with SOL you can afford to lose.</T>
+      <T v="muted">How it works: each minute is a round on an island with 25 mining spots. Put SOL on 1 to 25 spots. One spot strikes gold. Its miners split the whole pot (the SOL on every spot, after a 1% fee and 10% of the losing spots) by their SOL on the gold spot; SOL on the other spots is lost. The gold spot also mines ORE, split the same way, or on one of the round's 10 solo spots (★) taken whole by one miner, with odds equal to their share. Fewer spots pay more points: 1,000 for a single spot, 40 for all 25. A 1-in-500 motherlode pays out the whole SKR Motherlode Pool on top. Everything lands in Unclaimed until you claim it. This is a game of chance: only play with SOL you can afford to lose.</T>
       <Pressable onPress={() => Linking.openURL(`https://explorer.solana.com/address/${PROGRAM_ID_STR}?cluster=${CLUSTER}`)}>
         <T v="muted" style={{ textDecorationLine: 'underline' }}>
           Program {short(PROGRAM_ID_STR)} on Solana Explorer

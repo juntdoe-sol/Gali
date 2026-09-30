@@ -13,7 +13,7 @@ import { closeupView } from '../pixel/PixelMine';
 import { useView } from '../pixel/view';
 import { Btn, Frame, T } from './kit';
 
-const KIND: Record<string, string> = { cave: 'Cave claim', scree: 'Scree slope', dig: 'Dig pit', gold: 'Gold stream' };
+const KIND: Record<string, string> = { cave: 'Cave mouth', scree: 'Scree slope', dig: 'Dig pit', gold: 'Gold stream' };
 
 export function ClaimPanel() {
   const focus = useView((s) => s.focus);
@@ -52,7 +52,7 @@ export function ClaimPanel() {
   const secs = Math.max(0, Math.ceil((roundEnd(roundId) - now) / 1000));
   const clock = phase === 'mining' ? `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` : phase === 'settling' ? 'MINING' : 'STRIKE!';
 
-  let action = picked ? 'PICKED  ✓' : 'PICK THIS CLAIM';
+  let action = picked ? 'PICKED  ✓' : 'PICK THIS SPOT';
   let sub = picked ? 'Tap to unpick. Deploy from the island.' : 'Adds it to your picks for this round';
   if (pending) {
     action = yours > 0 ? 'YOU ARE MINING HERE' : 'NOT IN THIS ROUND';
@@ -94,33 +94,33 @@ export function ClaimPanel() {
       >
         <Frame style={styles.card} radius={14}>
           <View style={styles.head}>
-            <Pressable onPress={() => go((focus + BLOCKS - 1) % BLOCKS)} hitSlop={10} style={styles.arrow} accessibilityRole="button" accessibilityLabel="Previous claim">
+            <Pressable onPress={() => go((focus + BLOCKS - 1) % BLOCKS)} hitSlop={10} style={styles.arrow} accessibilityRole="button" accessibilityLabel="Previous spot">
               <T v="display" style={styles.arrowText}>
                 ‹
               </T>
             </Pressable>
             <View style={{ flex: 1, alignItems: 'center' }}>
               <T v="display" style={styles.title}>
-                {`CLAIM ${focus + 1}${solo ? '  ★' : ''}`}
+                {`SPOT ${focus + 1}${solo ? '  ★' : ''}`}
               </T>
               <T v="muted" style={styles.subtitle}>
-                {`${KIND[c.kind] ?? 'Claim'} · ${c.region}`}
+                {`${KIND[c.kind] ?? 'Spot'} · ${c.region}`}
               </T>
             </View>
-            <Pressable onPress={() => go((focus + 1) % BLOCKS)} hitSlop={10} style={styles.arrow} accessibilityRole="button" accessibilityLabel="Next claim">
+            <Pressable onPress={() => go((focus + 1) % BLOCKS)} hitSlop={10} style={styles.arrow} accessibilityRole="button" accessibilityLabel="Next spot">
               <T v="display" style={styles.arrowText}>
                 ›
               </T>
             </Pressable>
           </View>
           <View style={styles.stats}>
-            <Stat label="ON THIS CLAIM" value={`${fmtSol(onClaim)} SOL`} color={COLORS.teal} />
+            <Stat label="ON THIS SPOT" value={`${fmtSol(onClaim)} SOL`} color={COLORS.teal} />
             <Stat label="YOURS" value={yours > 0 ? `${fmtSol(yours)} SOL` : '—'} color={yours > 0 ? COLORS.gold : COLORS.muted} />
             <Stat label="OF THE ROUND" value={total > 0 ? `${share}%` : '—'} color={COLORS.text} />
           </View>
           <T v="muted" style={styles.note}>
             {solo
-              ? '★ Solo claim this round: if it strikes, one wallet on it takes the ORE.'
+              ? '★ Solo spot this round: if it strikes, one wallet on it takes the ORE.'
               : 'If it strikes, everyone on it splits the ORE by the SOL they put in.'}
           </T>
           <Btn

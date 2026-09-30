@@ -104,7 +104,7 @@ export function Dock() {
 
 /* ---------------- shared bits ---------------- */
 const RETURN_INFO =
-  "Only the gold claim gets paid. Its miners split the whole pot (their SOL plus the SOL on every other claim) by their share of the gold claim, after fees: 1% of every claim and 10% of the losing claims. SOL on the other claims is lost. Covering all 25 claims means you always hit, but you pay the losing claims' SOL to yourself and the others, so you only profit when others put less on the claim that strikes.";
+  "Only the gold spot gets paid. Its miners split the whole pot (their SOL plus the SOL on every other spot) by their share of the gold spot, after fees: 1% of every spot and 10% of the losing spots. SOL on the other spots is lost. Covering all 25 spots means you always hit, but you pay the losing spots' SOL to yourself and the others, so you only profit when others put less on the spot that strikes.";
 
 /** Pot as it will look with this deploy added (practice already includes a pending deploy). */
 function usePotWith(mask: number, perBlock: number) {
@@ -295,7 +295,7 @@ function LitePanel({ compact }: { compact: boolean }) {
   const label = !per
     ? 'ENTER AMOUNT'
     : !perBlockOk
-      ? `MIN ${MIN_SOL_PER_BLOCK} SOL PER CLAIM`
+      ? `MIN ${MIN_SOL_PER_BLOCK} SOL PER SPOT`
       : !enough
         ? 'NOT ENOUGH SOL'
         : rounds === 1
@@ -309,11 +309,11 @@ function LitePanel({ compact }: { compact: boolean }) {
             onHalf={() => setPerSpot(trim((balance - RESERVE) / 2 / BLOCKS / Math.max(1, rounds)))}
             onAll={() => setPerSpot(trim((balance - RESERVE) / BLOCKS / Math.max(1, rounds)))}
           />
-          <AmountBox value={perSpot} onChange={setPerSpot} hint="SOL per claim" suffix="per claim" />
+          <AmountBox value={perSpot} onChange={setPerSpot} hint="SOL per spot" suffix="per spot" />
           <Row
             icon="🪙"
             label="A round costs"
-            info={`LITE puts the same SOL on all 25 claims, so you are always on the gold claim. ${fmtSol(spot, 5)} a claim is ${fmtSol(per)} SOL a round. Minimum ${MIN_SOL_PER_BLOCK} SOL a claim. Optimal spreads your balance over ${OPTIMAL_ROUNDS} rounds.`}
+            info={`LITE puts the same SOL on all 25 spots, so you are always on the gold spot. ${fmtSol(spot, 5)} a spot is ${fmtSol(per)} SOL a round. Minimum ${MIN_SOL_PER_BLOCK} SOL a spot. Optimal spreads your balance over ${OPTIMAL_ROUNDS} rounds.`}
             right={
               <>
                 <Chip label="Optimal" onPress={() => setPerSpot(trim(optimalPerSpot(balance - RESERVE)))} />
@@ -359,7 +359,7 @@ function LitePanel({ compact }: { compact: boolean }) {
       <RunButton
         ready={ready}
         label={label}
-        sub={ready ? `${fmtSol(spot, 5)} SOL × 25 claims${rounds > 1 ? ` × ${rounds} rounds` : ''} · always on the gold claim` : undefined}
+        sub={ready ? `${fmtSol(spot, 5)} SOL × 25 spots${rounds > 1 ? ` × ${rounds} rounds` : ''} · always on the gold spot` : undefined}
         onStart={() => void startRun({ kind: 'lite', perRound: per, perSpot: spot, blocks: 'all', smartN: BLOCKS, manualMask: 0, total: rounds })}
       />
     </>
@@ -403,7 +403,7 @@ function ProPanel({ compact }: { compact: boolean }) {
     : !per
       ? 'ENTER AMOUNT'
       : perBlock < MIN_SOL_PER_BLOCK
-        ? `MIN ${MIN_SOL_PER_BLOCK} SOL PER CLAIM`
+        ? `MIN ${MIN_SOL_PER_BLOCK} SOL PER SPOT`
         : !enough
           ? 'NOT ENOUGH SOL'
           : pending
@@ -433,11 +433,11 @@ function ProPanel({ compact }: { compact: boolean }) {
             onHalf={() => editPreset({ perSpot: trim((balance - RESERVE) / 2 / Math.max(1, p.rounds) / Math.max(1, blocks)) })}
             onAll={() => editPreset({ perSpot: trim((balance - RESERVE) / Math.max(1, p.rounds) / Math.max(1, blocks)) })}
           />
-          <AmountBox value={perSpotStr} onChange={(v) => editPreset({ perSpot: v })} hint="SOL per claim" suffix="per claim" />
+          <AmountBox value={perSpotStr} onChange={(v) => editPreset({ perSpot: v })} hint="SOL per spot" suffix="per spot" />
           <Row
             icon="▦"
-            label="Claims"
-            info="Press and hold claims on the map to pick them (a quick tap opens one up), take All 25, or Smart: the least-crowded claims, where your SOL buys the biggest share."
+            label="Spots"
+            info="Press and hold spots on the map to pick them (a quick tap opens one up), take All 25, or Smart: the least-crowded spots, where your SOL buys the biggest share."
             right={
               <>
                 <T v="black" style={{ fontSize: 15, color: blocks ? COLORS.text : COLORS.muted, marginRight: 4 }}>
@@ -471,7 +471,7 @@ function ProPanel({ compact }: { compact: boolean }) {
           <Row
             icon="🏆"
             label="If it strikes"
-            info={`Only the gold claim gets paid. The ORE it mines is split by SOL there, unless it is one of this round's 10 solo claims (★ on the map): then one miner takes it all, with odds equal to their share. A 1-in-500 motherlode pays the whole SKR Motherlode Pool on top, split by SOL on the gold claim, plus 10,000 points. Points: 40 x 25 / claims covered. ${RETURN_INFO}`}
+            info={`Only the gold spot gets paid. The ORE it mines is split by SOL there, unless it is one of this round's 10 solo spots (★ on the map): then one miner takes it all, with odds equal to their share. A 1-in-500 motherlode pays the whole SKR Motherlode Pool on top, split by SOL on the gold spot, plus 10,000 points. Points: 40 x 25 / spots covered. ${RETURN_INFO}`}
             last
             right={
               <T v="black" style={{ fontSize: 13, color: COLORS.gold }}>
@@ -484,7 +484,7 @@ function ProPanel({ compact }: { compact: boolean }) {
       <RunButton
         ready={ready}
         label={label}
-        sub={ready ? `${fmtSol(perBlock, 5)} SOL × ${blocks} claim${blocks > 1 ? 's' : ''} · if one strikes: ${fmtRange(proRange)} SOL` : undefined}
+        sub={ready ? `${fmtSol(perBlock, 5)} SOL × ${blocks} spot${blocks > 1 ? 's' : ''} · if one strikes: ${fmtRange(proRange)} SOL` : undefined}
         onStart={() =>
           void startRun({
             kind: 'pro',
