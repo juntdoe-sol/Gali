@@ -1,72 +1,53 @@
 name: program
 
+# Builds both programs from source and runs the test suite on a local validator,
+# with the ore-mock fixture loaded at ORE's address (see scripts/test-local.sh).
 on:
   push:
-    paths: ['programs/**', 'tests/**', 'Anchor.toml', 'Cargo.toml', '.github/workflows/program.yml']
+    branches: [main]
+    paths:
+      - 'programs/**'
+      - 'tests/**'
+      - 'target/idl/**'
+      - 'scripts/test-local.sh'
+      - 'scripts/run-tests.cjs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/program.yml'
+  pull_request:
+    paths:
+      - 'programs/**'
+      - 'tests/**'
   workflow_dispatch:
-    inputs:
-      deploy:
-        description: 'Deploy to devnet after tests'
-        type: boolean
-        default: false
 
 env:
   SOLANA_VERSION: '2.1.21'
-  ANCHOR_VERSION: '0.31.1'
 
 jobs:
-  build-test:
-    runs-on: ubuntu-latest
+  test:
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install Solana CLI
-        run: |
-          sh -c "$(curl -sSfL https://release.anza.xyz/v${SOLANA_VERSION}/install)"
-          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
-      - name: Install Anchor CLI
-        run: cargo install --git https://github.com/coral-xyz/anchor --tag v${ANCHOR_VERSION} anchor-cli --locked --force
-      - uses: actions/setup-node@v4
-        with: { node-version: 20 }
-      - run: npm ci
-      - name: Program keypair
-        env:
-          PROGRAM_KEYPAIR: ${{ secrets.PROGRAM_KEYPAIR }}
-        run: |
-          mkdir -p target/deploy ~/.config/solana
-          if [ -n "$PROGRAM_KEYPAIR" ]; then echo "$PROGRAM_KEYPAIR" > target/deploy/gali-keypair.json; fi
-          solana-keygen new --no-bip39-passphrase -s -o ~/.config/solana/id.json --force
-      - run: anchor build
-      - run: anchor test --provider.cluster localnet
-      - uses: actions/upload-artifact@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          name: gali-program
-          path: |
-            target/deploy/gali.so
-            target/idl/gali.json
-            target/types/gali.ts
-
-  deploy-devnet:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy }}
-    needs: build-test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with: { name: gali-program, path: target }
-      - name: Install Solana CLI
+          node-version: 22
+          cache: npm
+      - name: Install the Solana CLI
         run: |
-          sh -c "$(curl -sSfL https://release.anza.xyz/v${SOLANA_VERSION}/install)"
-          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
-      - name: Deploy
-        env:
-          DEPLOYER_KEYPAIR: ${{ secrets.DEPLOYER_KEYPAIR }}
-          PROGRAM_KEYPAIR: ${{ secrets.PROGRAM_KEYPAIR }}
+          curl -sSfL -o "$RUNNER_TEMP/solana.tar.bz2" \
+            "https://github.com/anza-xyz/agave/releases/download/v${SOLANA_VERSION}/solana-release-x86_64-unknown-linux-gnu.tar.bz2"
+          tar xjf "$RUNNER_TEMP/solana.tar.bz2" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/solana-release/bin" >> "$GITHUB_PATH"
+      - run: npm ci
+      - name: Build both programs from source
+        run: |
+          cargo-build-sbf --manifest-path programs/gali/Cargo.toml
+          cargo-build-sbf --manifest-path programs/ore-mock/Cargo.toml
+      - name: Test wallet
         run: |
           mkdir -p ~/.config/solana
-          echo "$DEPLOYER_KEYPAIR" > ~/.config/solana/id.json
-          echo "$PROGRAM_KEYPAIR" > program.json
-          solana config set --url devnet
-          solana program deploy target/deploy/gali.so --program-id program.json
-          rm program.json
+          solana-keygen new --no-bip39-passphrase -s -o ~/.config/solana/id.json --force
+      - name: Tests
+        run: bash scripts/test-local.sh

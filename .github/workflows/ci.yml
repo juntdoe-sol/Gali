@@ -1,0 +1,46 @@
+name: ci
+
+# Type-checks and builds the app and the admin page on every push to main.
+# The release APK is built with EAS (`npx eas-cli build -p android --profile apk`),
+# which keeps one signing key across builds.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  app:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - name: Android bundle
+        run: npx expo export --platform android --output-dir "$RUNNER_TEMP/android"
+      - name: Web build
+        run: npx expo export --platform web --output-dir "$RUNNER_TEMP/web"
+
+  admin:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: admin
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: admin/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit -p .
+      - run: npx vite build
