@@ -112,13 +112,19 @@ export class Engine {
     (globalThis as unknown as { __galiEngine?: Engine }).__galiEngine = this;
   }
 
+  boot: Record<string, number> = {};
   async start(atlasUrl: string) {
+    const b0 = performance.now();
+    this.boot.startAt = b0;
     await loadAtlas(atlasUrl);
+    this.boot.atlas = performance.now() - b0;
     // the coast, read from the ground layer's alpha
     const g = sprite('ground');
     if (g) {
       const d = g.getContext('2d')!.getImageData(0, 0, g.width, g.height).data;
+      const w0 = performance.now();
       this.water = new Water(d);
+      this.boot.water = performance.now() - w0;
     }
     this.last = performance.now();
     const loop = (t: number) => {
@@ -197,6 +203,11 @@ export class Engine {
     return -1;
   }
 
+  private prof(name: string, t0: number) {
+    const P = (globalThis as unknown as { __galiProf?: Record<string, number> }).__galiProf;
+    if (P) P[name] = (P[name] ?? 0) + performance.now() - t0;
+  }
+
   private frame(t: number) {
     const dt = Math.min(0.1, (t - this.last) / 1000);
     this.last = t;
@@ -210,7 +221,9 @@ export class Engine {
     this.cam.setView(0, top, this.W, band);
     this.cam.update(t);
     this.sky.update(dt, now, this.quality);
-    this.water?.update(now, 1 + this.sky.wind * 0.5);
+    let t0 = performance.now();
+    this.water?.update(now, 1 + this.sky.wind * 0.5, this.quality);
+    this.prof('water', t0);
     this.parts.budget = this.quality ? 1 : 0.4;
     this.parts.update(dt, this.sky.wind);
 
@@ -220,9 +233,11 @@ export class Engine {
     const el = this.revealEl(now);
     this.think(dt, now, el);
 
+    t0 = performance.now();
     if (this.mode === 'island') this.drawIsland(c, now, dt, el);
     else if (this.mode === 'closeup') this.drawCloseup(c, now, dt, el);
     else this.drawTransition(c, t, now, dt, el);
+    this.prof('draw', t0);
 
     if (!this.ready) {
       this.ready = true;
@@ -426,6 +441,7 @@ export class Engine {
     const winner = s?.winner ?? null;
     const pend = s?.pending ?? 0;
 
+    let tIs = performance.now();
     // open ocean, anchored to the map so it doesn't slide under a pan
     if (water) {
       const pat = this.pattern(water.deepFrame(now));
@@ -452,6 +468,8 @@ export class Engine {
       draw(c, `ship-${sh.kind}`, OX + mx * S, OY + (my + bob) * S, S, dir < 0);
     });
 
+    this.prof('sea', tIs);
+    tIs = performance.now();
     // the land
     blit(c, 'ground', OX, OY, MAP_W * S, MAP_H * S);
     water?.drawRiver(c, now, OX, OY, S);
@@ -552,7 +570,11 @@ export class Engine {
       }
     }
     items.sort((a, b) => a.z - b.z);
+    this.prof('ground+claims', tIs);
+    tIs = performance.now();
     for (const it of items) it.f();
+    this.prof('items', tIs);
+    tIs = performance.now();
 
     this.parts.draw(c, OX, OY, S);
     if (this.quality) this.sky.drawShadows(c, OX, OY, S);
@@ -593,7 +615,11 @@ export class Engine {
       const cl = CLAIMS[winner];
       L(cl.cx, cl.cy - 6, 70 * Math.min(1, (el - 2500) / 300), '#ffd24a');
     }
+    this.prof('parts+shadows', tIs);
+    tIs = performance.now();
     this.sky.applyLight(c, DW, DH, lights);
+    this.prof('light', tIs);
+    tIs = performance.now();
     // the lighthouse sweeps the water at night
     if (night > 0.3) {
       const lh = ISLE.lighthouse as { x: number; y: number };
@@ -649,8 +675,11 @@ export class Engine {
       c.fillRect(0, 0, DW, DH);
     }
 
+    this.prof('sky', tIs);
     if (forClose) return;
+    tIs = performance.now();
     this.drawLabels(c, now, el, OX, OY, S);
+    this.prof('labels', tIs);
   }
 
   /** Text on the map: region names, the SOL on each claim, solo stars, name tags. */

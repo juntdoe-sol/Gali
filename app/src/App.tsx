@@ -1,6 +1,4 @@
-import { ChakraPetch_500Medium, ChakraPetch_600SemiBold, ChakraPetch_700Bold } from '@expo-google-fonts/chakra-petch';
-import { Jersey15_400Regular } from '@expo-google-fonts/jersey-15';
-import { useFonts } from 'expo-font';
+import { useAppFonts } from './fonts';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
@@ -50,7 +48,7 @@ async function scheduleDailyReminder() {
 }
 
 export default function App() {
-  const [fontsLoaded] = useFonts({ Jersey15_400Regular, ChakraPetch_500Medium, ChakraPetch_600SemiBold, ChakraPetch_700Bold });
+  const fontsLoaded = useAppFonts();
   const [menu, setMenu] = useState(false);
   const onboarded = useGame((s) => s.save.onboarded);
 

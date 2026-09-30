@@ -94,20 +94,44 @@ export class Water {
         d[i] = m;
       }
     const near: number[] = [];
+    // value noise from a coarse lattice, interpolated: the same look as calling
+    // the noise function per pixel at a fraction of the start-up cost
+    const LW = Math.ceil(MW / 5) + 2;
+    const LH = Math.ceil(MH / 5) + 2;
+    const lat = new Float32Array(LW * LH);
+    for (let j = 0; j < LH; j++)
+      for (let k = 0; k < LW; k++) {
+        const v = Math.sin(k * 127.1 + j * 311.7 + 3 * 74.7) * 43758.5453;
+        lat[j * LW + k] = v - Math.floor(v);
+      }
     for (let i = 0; i < MW * MH; i++) {
-      if (d[i] > 0 && d[i] <= REACH) near.push(i);
-      this.noise[i] = tileNoise((i % MW) / 5, Math.floor(i / MW) / 5, 1 << 20, 3);
+      if (d[i] > 0 && d[i] <= REACH) {
+        near.push(i);
+        const fx = (i % MW) / 5;
+        const fy = ((i / MW) | 0) / 5;
+        const xi = fx | 0;
+        const yi = fy | 0;
+        let u = fx - xi;
+        let v = fy - yi;
+        u = u * u * (3 - 2 * u);
+        v = v * v * (3 - 2 * v);
+        const a = lat[yi * LW + xi];
+        const b = lat[yi * LW + xi + 1];
+        const c = lat[(yi + 1) * LW + xi];
+        const e = lat[(yi + 1) * LW + xi + 1];
+        this.noise[i] = (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + e * u) * v;
+      }
     }
     this.near = Int32Array.from(near);
     for (const [bx, by] of ISLE.rivers as number[][]) this.river.push({ x: bx * BLOCK, y: by * BLOCK });
-    this.buildDeep();
+    this.buildDeep(1);
   }
 
   /** Eight frames of open ocean: calm deep water, soft swells, the odd crest catching light. */
-  private buildDeep() {
+  private buildDeep(upTo = FRAMES) {
     const CREST = hex('#2a6aa6');
     const GLINT = hex('#7fbde6');
-    for (let f = 0; f < FRAMES; f++) {
+    for (let f = this.deepFrames.length; f < upTo; f++) {
       const cv = makeCanvas(TILE, TILE);
       const g = ctx2d(cv);
       const im = g.createImageData(TILE, TILE);
@@ -136,8 +160,8 @@ export class Water {
   }
 
   /** Recompute the shallows. Cheap enough at 15 fps on a phone. */
-  update(t: number, calm: number) {
-    const step = Math.floor(t / 66);
+  update(t: number, calm: number, quality = 1) {
+    const step = Math.floor(t / (quality ? 66 : 132));
     if (step === this.lastT) return;
     this.lastT = step;
     const data = this.img.data;
@@ -191,7 +215,10 @@ export class Water {
   }
 
   deepFrame(t: number) {
-    return this.deepFrames[Math.floor(t / 220) % FRAMES];
+    const f = Math.floor(t / 220) % FRAMES;
+    // frames are drawn on first use, one at a time, so start-up doesn't pay for all eight
+    if (f >= this.deepFrames.length) this.buildDeep(this.deepFrames.length + 1);
+    return this.deepFrames[Math.min(f, this.deepFrames.length - 1)];
   }
 
   /** River highlights: bright pixels drifting downstream through each block. */
