@@ -7,7 +7,6 @@ import {
   LAMPORTS_PER_SOL,
   PublicKey,
   SystemProgram,
-  SYSVAR_SLOT_HASHES_PUBKEY,
   Transaction,
   TransactionInstruction,
 } from '@solana/web3.js';
@@ -15,12 +14,11 @@ import { ed25519 } from '@noble/curves/ed25519.js';
 import { Buffer } from 'buffer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
-import { ROUND_SECS } from '../game/constants';
 import { webConnect, webDisconnect, webOwner, webSign } from './webWallet';
 export { listWebWallets, PickWalletError, type WebWalletInfo } from './webWallet';
 import idlJson from './idl.json';
 import deployment from './deployment.json';
-import { CLUSTER, clockOffsetMs, MAX_SESSION_FUND_SOL, PROGRAM_ID_STR, RPC_URL, retryingFetch, SKR_MINT_STR } from './light';
+import { CLUSTER, MAX_SESSION_FUND_SOL, PROGRAM_ID_STR, RPC_URL, retryingFetch, SKR_MINT_STR } from './light';
 
 export { CLUSTER, RPC_URL, chainReady, isRateLimited, clockOffsetMs, MAX_SESSION_FUND_SOL, short, explorer } from './light';
 // PublicKey for code outside src/chain, which reaches web3 only through this lazily loaded module.
@@ -43,27 +41,13 @@ export const program = new Program(idlJson as Idl, provider);
 const accounts = program.account as any;
 
 /* ---------- PDAs ---------- */
-const u64le = (n: number) => {
-  const b = Buffer.alloc(8);
-  new DataView(b.buffer, b.byteOffset, 8).setBigUint64(0, BigInt(n), true);
-  return b;
-};
 const find = (...seeds: Buffer[]) => PublicKey.findProgramAddressSync(seeds, PROGRAM_ID)[0];
 export const pda = {
   config: find(Buffer.from('config')),
   vault: find(Buffer.from('vault')),
   treasury: find(Buffer.from('treasury')),
   motherlode: find(Buffer.from('motherlode')),
-  rewards: find(Buffer.from('rewards')),
-  potVault: find(Buffer.from('pot_vault')),
   player: (o: PublicKey) => find(Buffer.from('player'), o.toBuffer()),
-  round: (r: number) => find(Buffer.from('round'), u64le(r)),
-  pot: (r: number) => find(Buffer.from('pot'), u64le(r)),
-  stake: (o: PublicKey, r: number) => find(Buffer.from('stake'), o.toBuffer(), u64le(r)),
-  draw: (r: number) => find(Buffer.from('draw'), u64le(r)),
-  unclaimed: (o: PublicKey) => find(Buffer.from('unclaimed'), o.toBuffer()),
-  refinery: find(Buffer.from('refinery')),
-  buyback: find(Buffer.from('buyback')),
 };
 export const ata = (owner: PublicKey, mint = SKR_MINT) =>
   PublicKey.findProgramAddressSync([owner.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.toBuffer()], ASSOCIATED_TOKEN_PROGRAM_ID)[0];
@@ -109,51 +93,6 @@ export async function fetchPlayer(owner: PublicKey): Promise<ChainPlayer | null>
   };
 }
 
-export interface Economy {
-  roundReward: number; // whole SKR cap
-  motherlodeTopUp: number; // whole SKR cap
-  dripBps: number;
-  buybackBps: number;
-  potFeeBps: number;
-}
-export async function fetchEconomy(): Promise<Economy> {
-  const c = await accounts.config.fetch(pda.config);
-  return {
-    roundReward: fromRaw(c.roundRewardSkr),
-    motherlodeTopUp: fromRaw(c.motherlodeSkr),
-    dripBps: c.rewardDripBps,
-    buybackBps: c.buybackBps,
-    potFeeBps: c.potFeeBps,
-  };
-}
-/** SKR the next round mines, given the Rewards Pool balance (settle_pot's budget). */
-export function roundRewardNow(e: Economy, rewardsPool: number) {
-  const cap = e.roundReward + e.motherlodeTopUp;
-  if (cap <= 0) return 0;
-  const budget = e.dripBps > 0 ? Math.min(cap, (rewardsPool * e.dripBps) / 10_000) : cap;
-  return Math.min(rewardsPool, (budget * e.roundReward) / cap);
-}
-
-export const CLAIM_SOL = 1;
-export const CLAIM_SKR = 2;
-const claimRewardsIx = (owner: PublicKey, what: number) =>
-  program.methods
-    .claimRewards(what)
-    .accountsStrict({
-      owner,
-      config: pda.config,
-      player: pda.player(owner),
-      unclaimed: pda.unclaimed(owner),
-      refinery: pda.refinery,
-      skrMint: SKR_MINT,
-      potVault: pda.potVault,
-      rewards: pda.rewards,
-      ownerAta: ata(owner),
-      tokenProgram: TOKEN_PROGRAM_ID,
-      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-      systemProgram: SystemProgram.programId,
-    })
-    .instruction();
 /** Send the leftover SOL on the session key back to the wallet (keeps enough for one fee). */
 export async function sweepSession(owner: PublicKey, session: Keypair) {
   const balance = await connection.getBalance(session.publicKey);
@@ -162,25 +101,10 @@ export async function sweepSession(owner: PublicKey, session: Keypair) {
   await sendWithKey(session, [SystemProgram.transfer({ fromPubkey: session.publicKey, toPubkey: owner, lamports: amount })]);
   return amount / LAMPORTS_PER_SOL;
 }
-let feeTo: { at: number; key: PublicKey } | null = null;
-async function configAuthority() {
-  if (!feeTo || Date.now() - feeTo.at > 60_000) feeTo = { at: Date.now(), key: (await accounts.config.fetch(pda.config)).authority };
-  return feeTo.key;
-}
 
 export async function fetchSkrBalance(owner: PublicKey): Promise<number> {
   try {
     const b = await connection.getTokenAccountBalance(ata(owner));
-    return Number(b.value.uiAmount ?? 0);
-  } catch {
-    return 0;
-  }
-}
-
-/** Current SKR in the Rewards Pool (whole SKR). */
-export async function fetchRewardsPool(): Promise<number> {
-  try {
-    const b = await connection.getTokenAccountBalance(pda.rewards);
     return Number(b.value.uiAmount ?? 0);
   } catch {
     return 0;
@@ -324,8 +248,8 @@ export async function startSession(owner: PublicKey, session: Keypair, hasPlayer
     return ixs;
   });
 }
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const errText = (e: unknown) => String((e as { message?: string })?.message ?? e) + JSON.stringify((e as { logs?: unknown })?.logs ?? '');/* ---------- SKR transfers between miners ---------- */
+
+/* ---------- SKR transfers between miners ---------- */
 const TRANSFER_CHECKED = 12;
 export async function sendSkr(to: PublicKey, amount: number) {
   return sendWithWallet(async (o) => {
@@ -400,38 +324,28 @@ export const stakeSkr = (amount: number) =>
   ]);
 
 export const unstakeSkr = (amount: number) =>
-  sendWithWallet(async (o) => {
-    const round = await currentRoundOnChain();
-    return [
-      await program.methods
-        .unstakeSkr(new BN(round), raw(amount))
-        .accountsStrict({
-          owner: o,
-          config: pda.config,
-          player: pda.player(o),
-          currentStake: pda.stake(o, round),
-          skrMint: SKR_MINT,
-          userAta: ata(o),
-          vault: pda.vault,
-          tokenProgram: TOKEN_PROGRAM_ID,
-          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-          systemProgram: SystemProgram.programId,
-        })
-        .instruction(),
-    ];
-  });
-
-/** The round the chain is in now (unstaking must name it). */
-async function currentRoundOnChain() {
-  const off = await clockOffsetMs().catch(() => 0);
-  return Math.floor((Date.now() + off) / 1000 / ROUND_SECS);
-}
+  sendWithWallet(async (o) => [
+    await program.methods
+      .unstakeSkr(raw(amount))
+      .accountsStrict({
+        owner: o,
+        config: pda.config,
+        player: pda.player(o),
+        skrMint: SKR_MINT,
+        userAta: ata(o),
+        vault: pda.vault,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .instruction(),
+  ]);
 
 export const buyGear = (item: number) =>
   sendWithWallet(async (o) => [
     await program.methods
       .buyGear(item)
-      .accountsStrict({ owner: o, config: pda.config, player: pda.player(o), skrMint: SKR_MINT, userAta: ata(o), treasury: pda.treasury, motherlode: pda.motherlode, rewards: pda.rewards, tokenProgram: TOKEN_PROGRAM_ID })
+      .accountsStrict({ owner: o, config: pda.config, player: pda.player(o), skrMint: SKR_MINT, userAta: ata(o), treasury: pda.treasury, motherlode: pda.motherlode, tokenProgram: TOKEN_PROGRAM_ID })
       .instruction(),
   ]);
 

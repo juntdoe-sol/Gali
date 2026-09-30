@@ -13,7 +13,6 @@ export const ISLE = ART.island;
 export const ACTORS = ART.actors;
 export const FONT = ART.font;
 
-export type Surface = HTMLCanvasElement | OffscreenCanvas;
 export type Ctx = CanvasRenderingContext2D;
 
 export function makeCanvas(w: number, h: number): HTMLCanvasElement {
@@ -42,7 +41,6 @@ export function loadAtlas(src: string): Promise<void> {
     img.src = src;
   });
 }
-export const atlasReady = () => sheet !== null;
 
 export const has = (name: string) => name in RECTS;
 export const rect = (name: string): Rect | undefined => RECTS[name];

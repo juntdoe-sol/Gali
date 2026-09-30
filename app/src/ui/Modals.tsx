@@ -43,7 +43,10 @@ export function ResultPop() {
                   💎 MOTHERLODE 💎
                 </T>
                 <T v="display" style={{ fontSize: 30, color: '#eaffc4' }}>
-                  {res.skr > 0 ? `+${res.skr.toLocaleString(undefined, { maximumFractionDigits: 2 })} SKR` : 'Motherlode Pool was empty'}
+                  +{(res.oreMotherlode ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} ORE
+                </T>
+                <T v="display" style={{ fontSize: 22, color: '#fff3c0' }}>
+                  {res.skr > 0 ? `+${res.skr.toLocaleString(undefined, { maximumFractionDigits: 2 })} SKR` : 'SKR pool was empty'}
                 </T>
                 <SolLine res={res} dark={false} />
                 <T v="bold" style={{ color: '#fff' }}>
@@ -232,7 +235,7 @@ export function Busy() {
 
 const STEPS = [
   { t: 'Deploy SOL. Strike gold.', b: 'Every minute a new round opens on an island with 25 mining spots. Put SOL on the spots you pick. One spot strikes gold, and its miners split 90% of the pot.' },
-  { t: 'Mine SKR as you go', b: 'Every round mines up to 200 SKR for the miners on the gold spot, split by their SOL there. On one of the round\u2019s 10 solo spots (\u2605), one miner takes it all instead, with odds equal to their share. A 1-in-625 motherlode pays out the whole Motherlode Pool. Shake your phone to Smart-pick.' },
+  { t: 'Mine ORE, chase two jackpots', b: 'Every round mines 1 ORE for the miners on the gold spot, split by their SOL there. On one of the round\u2019s 10 solo spots (\u2605), one miner takes it all, with odds equal to their share. 1 round in 500, ORE\u2019s motherlode hits and Gali\u2019s SKR pool pays the same winners. Shake your phone to Smart-pick.' },
   { t: 'Bring your Seeker wallet', b: 'Practice first with 2 play SOL, or connect with Mobile Wallet Adapter. Fund a 24h session once and LITE or PRO autopilot deploys every round for you. It is a game of chance: only use SOL you can afford to lose.' },
 ];
 

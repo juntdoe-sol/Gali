@@ -16,4 +16,3 @@ export function saveJson(key: string, value: unknown, delay = 400) {
     AsyncStorage.setItem(key, JSON.stringify(value)).catch(() => undefined);
   }, delay);
 }
-export const removeKey = (key: string) => AsyncStorage.removeItem(key).catch(() => undefined);

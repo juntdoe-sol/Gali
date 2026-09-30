@@ -416,8 +416,6 @@ function ProPanel({ compact }: { compact: boolean }) {
   const proMask = p.blocks === 'all' ? (1 << BLOCKS) - 1 : maskOf(picked);
   const proPot = usePotWith(proMask, perBlock);
   const proRange = proPot ? strikeRange(proPot, proMask, perBlock) : null;
-  const onWin = selected.length ? Math.min(...selected.map((i) => pot.perBlock[i] ?? 0)) : 0;
-  const bestShare = perBlock > 0 ? perBlock / (onWin + perBlock) : 0;
 
   return (
     <>

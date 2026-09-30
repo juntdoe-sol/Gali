@@ -3,14 +3,14 @@ import { Linking, Modal, Pressable, ScrollView, StyleSheet, Switch, TextInput, V
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ACHIEVEMENTS, BOOST_TIERS, COLORS, GEAR, GEAR_KINDS, levelFromXp, localDay, MOTHERLODE_ODDS, MOTHERLODE_POINTS,
-  BLOCKS, MOTHERLODE_ACCRUAL_SKR, MOTHERLODE_POOL_SHARE, QUESTS, usd, RARITY_COLOR, SEASON, type Gear, type GearKind,
+  BLOCKS, MOTHERLODE_POOL_SHARE, QUESTS, usd, RARITY_COLOR, SEASON, type Gear, type GearKind,
 } from '../game/constants';
 import { GEAR_ICON as PIXEL_ICON } from './gearIcons';
 import { GEAR_ICON, ITEM_ICON } from './icons';
 import { useGame, useLevelXp, useOwnedMask, usePoints } from '../game/store';
 import { chainReady, CLUSTER, PROGRAM_ID_STR, short, SKR_MINT_STR, type BoardRound, type LeaderRow } from '../chain/light';
 import { loadBoard, loadChain } from '../chain/lazy';
-import { ADMIN_FEE, emptyPot, fmtSol, potFee_, practiceMotherlode, simPot, soloMask } from '../game/pot';
+import { ADMIN_FEE, fmtSol, POT_FEE, practiceMotherlode, practiceOreMotherlode, simPot, soloMask } from '../game/pot';
 import { UnclaimedRow } from './Dock';
 import { Bar, Btn, Card, Pill, T } from './kit';
 
@@ -177,19 +177,39 @@ function GearTab() {
 
 function MotherlodeCard() {
   const owner = useGame((s) => s.wallet.owner);
-  const pool = useGame((s) => (owner && chainReady ? s.wallet.pool : practiceMotherlode(s.roundId)));
+  const live = Boolean(owner && chainReady);
+  const skrPool = useGame((s) => (live ? s.wallet.pool : practiceMotherlode(s.roundId)));
+  const orePool = useGame((s) => (live ? s.wallet.orePool : practiceOreMotherlode(s.roundId)));
   const won = useGame((s) => s.wallet.player?.skrWon ?? 0);
   return (
     <Card glow={COLORS.teal}>
-      <T v="label">💎 SKR Motherlode Pool</T>
-      <T v="display" style={{ fontSize: 34, color: COLORS.teal }}>
-        {Math.floor(pool).toLocaleString()} SKR{owner && chainReady ? '' : ' (practice)'}
-      </T>
+      <T v="label">💎 Two motherlodes, one hit{live ? '' : ' (practice)'}</T>
+      <View style={{ flexDirection: 'row', gap: 18, marginVertical: 4 }}>
+        <View>
+          <T v="display" style={{ fontSize: 30, color: COLORS.teal }}>
+            {orePool.toLocaleString(undefined, { maximumFractionDigits: 1 })} ORE
+          </T>
+          <T v="muted" style={{ fontSize: 11 }}>
+            ORE&apos;S MOTHERLODE
+          </T>
+        </View>
+        <View>
+          <T v="display" style={{ fontSize: 30, color: COLORS.gold }}>
+            {Math.floor(skrPool).toLocaleString()} SKR
+          </T>
+          <T v="muted" style={{ fontSize: 11 }}>
+            GALI&apos;S SKR POOL · ~{usd(skrPool)}
+          </T>
+        </View>
+      </View>
       <T>
-        1 round in {MOTHERLODE_ODDS} is a motherlode. When ORE's hits, Gali pays this SKR pool (~{usd(pool)} right now) on top to the same winners, split by their SOL on the gold spot, and each gets {MOTHERLODE_POINTS.toLocaleString()} bonus points. One event, two assets. An early hit pays less; a late one pays more.
+        ORE adds 0.2 ORE to its motherlode every round. 1 round in {MOTHERLODE_ODDS} it hits, and the whole pool goes to the miners on the gold spot, split by their SOL there.
+      </T>
+      <T style={{ marginTop: 6 }}>
+        Gali pays its SKR pool in the same round, to the same winners, split the same way, plus {MOTHERLODE_POINTS.toLocaleString()} bonus points each. An early hit pays less; a late one pays more.
       </T>
       <T v="muted" style={{ marginTop: 6 }}>
-        Every played round adds {MOTHERLODE_ACCRUAL_SKR} SKR to it, plus {Math.round(MOTHERLODE_POOL_SHARE * 100)}% of every SKR gear sale, and anyone can top it up. Gali never mints SKR: the pool is filled by the people chasing it.{owner && won > 0 ? ` You've won ${won.toLocaleString()} SKR.` : ''}
+        The SKR pool fills from {Math.round(MOTHERLODE_POOL_SHARE * 100)}% of every gear sale, and anyone can top it up. Gali never mints SKR: the pool is filled by the people chasing it.{owner && won > 0 ? ` You've won ${won.toLocaleString()} SKR.` : ''}
       </T>
     </Card>
   );
@@ -276,8 +296,8 @@ function practiceRounds(before: number, n: number): BoardRound[] {
     const winning = Math.floor(h * BLOCKS);
     const pot = simPot(id, 1);
     const split = (soloMask(id) & (1 << winning)) === 0;
-    const motherlode = Math.floor(h * 1e6) % 625 === 0;
-    const fees = pot.perBlock.reduce((sum, d, i) => sum + d * ADMIN_FEE + (i === winning ? 0 : d * (1 - ADMIN_FEE) * potFee_()), 0);
+    const motherlode = Math.floor(h * 1e6) % MOTHERLODE_ODDS === 0;
+    const fees = pot.perBlock.reduce((sum, d, i) => sum + d * ADMIN_FEE + (i === winning ? 0 : d * (1 - ADMIN_FEE) * POT_FEE), 0);
     return {
       roundId: id,
       winning,
@@ -286,7 +306,7 @@ function practiceRounds(before: number, n: number): BoardRound[] {
       returned: pot.total - fees,
       fees,
       oreReward: pot.perBlock[winning] > 0 ? 1 : 0,
-      motherlodeOre: motherlode ? practiceMotherlode(id) / 1000 : 0,
+      motherlodeOre: motherlode ? practiceOreMotherlode(id) : 0,
       motherlode,
       split,
       winner: split ? null : `${BOT_NAMES[Math.floor(h * 97) % BOT_NAMES.length]}-bot`,

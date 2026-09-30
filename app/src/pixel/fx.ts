@@ -21,7 +21,3 @@ export function revealEl(): number {
   return -1;
 }
 
-export const isDug = (i: number) => {
-  const p = useGame.getState().pending;
-  return Boolean(p && p.mask & (1 << i));
-};

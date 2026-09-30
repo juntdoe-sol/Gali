@@ -1,16 +1,9 @@
 import { sha256 } from '@noble/hashes/sha2.js';
-import { BLOCKS, MOTHERLODE_ACCRUAL_SKR, MOTHERLODE_ODDS, ROUND_REWARD_ORE } from './constants';
+import { BLOCKS, MOTHERLODE_ACCRUAL_SKR, MOTHERLODE_ODDS, ORE_MOTHERLODE_PER_ROUND, ROUND_REWARD_ORE } from './constants';
 
-/** Mirrors the program: 1% of every spot, plus the config's pot_fee_bps of the rest on each losing spot. */
+/** Mirrors ORE's checkpoint: 1% of every square, then 10% of what is left on each losing square. */
 export const ADMIN_FEE = 0.01;
-/** Default losing-spot fee; the live value comes from the chain (see `setPotFee`). */
-export const DEFAULT_POT_FEE = 0.1;
-let potFee = DEFAULT_POT_FEE;
-/** Keeps the client's maths in step with the program's `pot_fee_bps`. */
-export const setPotFee = (bps: number) => {
-  if (bps >= 0 && bps <= 2_000) potFee = bps / 10_000;
-};
-export const potFee_ = () => potFee;
+export const POT_FEE = 0.1;
 export const SOLO_SPOTS = 10;
 export const MIN_SOL_PER_BLOCK = 0.0001;
 export const PRACTICE_SOL = 2;
@@ -103,32 +96,35 @@ export function soloMask(roundId: number): number {
 
 /** Practice mode: a stand-in Motherlode Pool that grows each round and resets on a hit. */
 export const practiceMotherlode = (roundId: number) => 1_500 + ((roundId * 7) % MOTHERLODE_ODDS) * MOTHERLODE_ACCRUAL_SKR;
+/** Practice stand-in for ORE's motherlode: 0.2 ORE a round since a simulated last hit. */
+export const practiceOreMotherlode = (roundId: number) => ((roundId * 7) % MOTHERLODE_ODDS) * ORE_MOTHERLODE_PER_ROUND;
 
-/** SOL left for the winning spot's miners if spot `win` strikes: everything minus the fees (settle_pot). */
+/** SOL left for the winning spot's miners if spot `win` strikes: everything minus ORE's fees. */
 export function poolFor(pot: PotView, win: number) {
   let fees = 0;
   for (let i = 0; i < BLOCKS; i++) {
     const d = pot.perBlock[i];
     if (!d) continue;
-    fees += d * ADMIN_FEE + (i === win ? 0 : d * (1 - ADMIN_FEE) * potFee);
+    fees += d * ADMIN_FEE + (i === win ? 0 : d * (1 - ADMIN_FEE) * POT_FEE);
   }
   return pot.perBlock[win] > 0 ? pot.total - fees : 0;
 }
 
 /**
- * What `claim_pot` credits. SOL: the winning spot's miners split the whole pool (their SOL plus the
- * losing spots' SOL, minus fees) by their SOL on that spot; losing spots get nothing back.
- * ORE: what the round mines is split the same way, or on a solo claim goes whole to one
- * miner (odds = their share, `luckyRoll` in [0, 1)). ORE mints it; Gali does not.
- * A motherlode pays Gali's whole SKR pool (`motherlodeSkr`) on top, always split.
+ * What a round pays one player, the way ORE's checkpoint works it out. SOL: the winning spot's
+ * miners split the whole pool (their SOL plus the losing spots' SOL, minus fees) by their SOL on
+ * that spot; losing spots get nothing back. ORE: what the round mines is split the same way, or
+ * on a solo spot goes whole to one miner (odds = their share, `luckyRoll` in [0, 1)).
+ * A motherlode pays ORE's whole pool (`motherlodeOre`) and Gali's whole SKR pool (`motherlodeSkr`)
+ * on top, both always split by SOL on the winning spot.
  */
-export function payoutFor(pot: PotView, win: number, minePerBlock: number, mask: number, motherlodeSkr: number, split: boolean, luckyRoll: number) {
+export function payoutFor(pot: PotView, win: number, minePerBlock: number, mask: number, motherlodeSkr: number, motherlodeOre: number, split: boolean, luckyRoll: number) {
   const mine = mask & (1 << win) ? minePerBlock : 0;
   const onWin = pot.perBlock[win];
-  if (!mine || !onWin) return { sol: 0, ore: 0, skrMotherlode: 0, lucky: false };
+  if (!mine || !onWin) return { sol: 0, ore: 0, skrMotherlode: 0, oreMotherlode: 0, lucky: false };
   const share = mine / onWin;
   const lucky = !split && luckyRoll < share;
-  return { sol: share * poolFor(pot, win), ore: split ? share * ROUND_REWARD_ORE : lucky ? ROUND_REWARD_ORE : 0, skrMotherlode: share * motherlodeSkr, lucky };
+  return { sol: share * poolFor(pot, win), ore: split ? share * ROUND_REWARD_ORE : lucky ? ROUND_REWARD_ORE : 0, skrMotherlode: share * motherlodeSkr, oreMotherlode: share * motherlodeOre, lucky };
 }
 
 /** Your SOL if a spot you cover strikes: the smallest and largest payout over your spots, given the pot so far (yours included). */
