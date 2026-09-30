@@ -47,7 +47,7 @@ async function scheduleDailyReminder() {
     if (!perm.granted) return;
     await Notifications.cancelAllScheduledNotificationsAsync();
     await Notifications.scheduleNotificationAsync({
-      content: { title: '⛏ The mine is open', body: 'A new round every minute. Keep your streak alive and mine some SKR.' },
+      content: { title: '⛏ The mine is open', body: 'A new round every minute. Keep your streak alive and mine some ORE.' },
       trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour: 9, minute: 0 },
     });
   } catch {

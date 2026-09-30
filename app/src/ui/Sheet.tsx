@@ -7,7 +7,7 @@ import {
 } from '../game/constants';
 import { GEAR_ICON as PIXEL_ICON } from './gearIcons';
 import { GEAR_ICON, ITEM_ICON } from './icons';
-import { useGame, useLevelXp, useOwnedMask, usePoints } from '../game/store';
+import { fmtToken, orePrice, useGame, useLevelXp, useOwnedMask, usePoints } from '../game/store';
 import { chainReady, CLUSTER, PROGRAM_ID_STR, short, SKR_MINT_STR, type BoardRound, type LeaderRow } from '../chain/light';
 import { loadBoard, loadChain } from '../chain/lazy';
 import { ADMIN_FEE, fmtSol, POT_FEE, practiceMotherlode, practiceOreMotherlode, simPot, soloMask } from '../game/pot';
@@ -120,13 +120,34 @@ function GearIcon({ g }: { g: Gear }) {
   );
 }
 
+/** The buy button in whichever token the player picked. ORE needs the config's rate, so it waits for a wallet. */
+function PriceBtn({ g, pay, owner, skr, ore, shop, onBuy }: { g: Gear; pay: 'skr' | 'ore'; owner: boolean; skr: number; ore: number; shop: ReturnType<typeof useGame.getState>['wallet']['shop']; onBuy: () => void }) {
+  if (pay === 'skr') {
+    return <Btn small kind="skr" label={`${g.priceSkr.toLocaleString()} SKR`} sub={usd(g.priceSkr)} disabled={!owner || skr < g.priceSkr} onPress={onBuy} />;
+  }
+  const price = orePrice(g, shop);
+  return (
+    <Btn
+      small
+      kind="skr"
+      label={price === null ? 'ORE' : `${fmtToken(price)} ORE`}
+      sub={price === null ? `${usd(g.priceSkr)} · connect` : usd(g.priceSkr)}
+      disabled={!owner || price === null || ore < price}
+      onPress={onBuy}
+    />
+  );
+}
+
 function GearTab() {
   const owned = useOwnedMask();
   const save = useGame((s) => s.save);
   const skr = useGame((s) => s.wallet.skr);
+  const ore = useGame((s) => s.wallet.ore);
+  const shop = useGame((s) => s.wallet.shop);
   const owner = useGame((s) => s.wallet.owner);
   const { buyGear, equip } = useGame.getState();
   const [kind, setKind] = useState<GearKind>('pickaxe');
+  const [pay, setPay] = useState<'skr' | 'ore'>('skr');
   const equipped = [save.pickaxe, save.helmet, save.outfit, save.pet];
   const items = GEAR.filter((g) => g.kind === kind);
   return (
@@ -139,6 +160,19 @@ function GearTab() {
           <Pressable key={k.kind} onPress={() => setKind(k.kind)} style={[styles.segBtn, kind === k.kind && styles.tabOn]}>
             <T v="bold" style={{ fontSize: 12, color: kind === k.kind ? COLORS.text : COLORS.muted }}>
               {GEAR_ICON[k.kind]} {k.label}
+            </T>
+          </Pressable>
+        ))}
+      </View>
+      <View style={[styles.seg, { alignItems: 'center' }]}>
+        <T v="bold" style={{ fontSize: 12, color: COLORS.muted, paddingHorizontal: 8 }}>
+          PAY WITH
+        </T>
+        {(['skr', 'ore'] as const).map((t) => (
+          <Pressable key={t} onPress={() => setPay(t)} style={[styles.segBtn, pay === t && styles.tabOn]} accessibilityRole="button" accessibilityLabel={`Pay with ${t.toUpperCase()}`}>
+            <T v="bold" style={{ fontSize: 12, color: pay === t ? COLORS.text : COLORS.muted }}>
+              {t === 'skr' ? '◈ SKR' : '◆ ORE'}
+              {owner ? ` · ${fmtToken(t === 'skr' ? skr : ore)}` : ''}
             </T>
           </Pressable>
         ))}
@@ -159,14 +193,7 @@ function GearTab() {
             {has ? (
               <Btn small label={on ? (g.kind === 'pet' ? 'Unequip' : 'Equipped') : 'Equip'} disabled={on && g.kind !== 'pet'} onPress={() => equip(g.key)} />
             ) : (
-              <Btn
-                small
-                kind="skr"
-                label={`${g.priceSkr.toLocaleString()} SKR`}
-                sub={usd(g.priceSkr)}
-                disabled={!owner || skr < g.priceSkr}
-                onPress={() => void buyGear(g.key)}
-              />
+              <PriceBtn g={g} pay={pay} owner={Boolean(owner)} skr={skr} ore={ore} shop={shop} onBuy={() => void buyGear(g.key, pay)} />
             )}
           </Card>
         );

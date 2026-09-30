@@ -13,7 +13,7 @@
 import deployment from './deployment.json';
 import type { Claimable } from './board';
 
-export type { ChainPlayer, LeaderRow, WebWalletInfo } from './client';
+export type { ChainPlayer, LeaderRow, ShopConfig, WebWalletInfo } from './client';
 export type { BoardRound, Claimable, OreClock, RoundOutcome } from './board';
 
 export const CLUSTER = deployment.cluster as 'devnet';
