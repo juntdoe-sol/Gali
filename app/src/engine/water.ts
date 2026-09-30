@@ -9,7 +9,7 @@
  * catches the light. It is quantised to a handful of colours with an ordered
  * dither so it stays pixel art rather than a gradient.
  */
-import { ISLE, RECTS, makeCanvas, ctx2d, type Ctx } from './art';
+import { ISLE, makeCanvas, ctx2d, type Ctx } from './art';
 import { BLOCK } from './island';
 
 const [MW, MH] = ISLE.size as [number, number];
@@ -237,4 +237,3 @@ export class Water {
   }
 }
 
-export const hasGround = () => 'ground' in RECTS;

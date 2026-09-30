@@ -19,10 +19,10 @@ import {
   fetchClock,
   fetchOreMiner,
   fetchOreRound,
+  fetchOreTreasury,
   needsCheckpoint,
   ORE_REFINING_BPS,
   readRewards,
-  type OreClock,
 } from './ore/read';
 import { oreCheckpoint, oreClaimOre, oreClaimSol, oreDeploy, toOre, toSol } from './ore/tx';
 
@@ -150,10 +150,6 @@ export async function fetchClaimable(owner: PublicKey): Promise<Claimable> {
 }
 
 /** The live round, its phase, and how long is left in it. */
-export async function fetchBoardClock(): Promise<OreClock> {
-  return fetchClock(connection);
-}
-
 /** Put SOL on squares in the live round, signed by the session key. */
 export async function deployToBoard(
   owner: PublicKey,
@@ -199,6 +195,8 @@ export interface RoundOutcome {
   oreMined: number;
   /** Whole ORE from ORE's motherlode, non-zero only on a hit they shared in. */
   oreMotherlode: number;
+  /** This player's share of the SOL on the winning square, 0 to 1. Gali's SKR jackpot splits the same way. */
+  share: number;
 }
 
 /** ORE takes 1% of every square, and 10% of each losing square on top. */
@@ -269,7 +267,14 @@ export async function settleAndRead(
     payout: Number(lamports) / LAMPORTS_PER_SOL,
     oreMined: Number(oreGrams) / ORE_UNIT,
     oreMotherlode: Number(motherGrams) / ORE_UNIT,
+    share: sqTotal > 0n ? Number(mineOnWin) / Number(sqTotal) : 0,
   };
+}
+
+/** Whole ORE waiting in ORE's motherlode right now. */
+export async function fetchOreMotherlode(): Promise<number> {
+  const t = await fetchOreTreasury(connection);
+  return Number(t.motherlode) / ORE_UNIT;
 }
 
 export const claimBoardSol = oreClaimSol;

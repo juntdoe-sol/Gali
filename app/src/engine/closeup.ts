@@ -711,7 +711,6 @@ export function paintUnderground(sc: Scene, ox: number, oy: number, s: number, W
   };
 }
 
-export const SCENE_SURF = SURF;
 
 /** Frame of a looping swing, `el` ms after it started. */
 function swingFrame(el: number, swingMs: number) {

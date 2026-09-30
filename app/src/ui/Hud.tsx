@@ -5,8 +5,8 @@ import { CAVE_IN_EVERY, COLORS, LOCK_MS, levelFromXp, MOTHERLODE_ODDS, ROUND_SEC
 import { chainReady, short } from '../chain/light';
 import { roundEnd, useGame, useLevelXp, usePoints, useRoundReward } from '../game/store';
 const fmtOre = (v: number) => (v >= 10 ? Math.floor(v).toLocaleString() : v >= 1 ? v.toFixed(2) : v.toFixed(3));
-import { fmtSol, practiceMotherlode } from '../game/pot';
-import { Bar, F, Frame, Pill, T } from './kit';
+import { fmtSol, practiceMotherlode, practiceOreMotherlode } from '../game/pot';
+import { Bar, F, Frame, T } from './kit';
 import { fx } from '../pixel/fx';
 import { useView } from '../pixel/view';
 import { useMinersHere } from './World';
@@ -118,6 +118,31 @@ function BigStat({ icon, value, label, color }: { icon?: ReactNode; value: strin
   );
 }
 
+/** Both jackpots in one cell: ORE's motherlode, and Gali's SKR pool that pays on the same hit. */
+function MotherlodeStat({ ore, skr }: { ore: number; skr: number }) {
+  return (
+    <View style={styles.bigStat}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+        <T v="black" style={{ fontSize: 18, color: COLORS.teal }}>
+          ◆
+        </T>
+        <T v="display" numberOfLines={1} style={{ fontSize: 26, lineHeight: 30, color: COLORS.teal }}>
+          {ore.toFixed(ore < 100 ? 1 : 0)}
+        </T>
+        <T v="bold" style={{ fontSize: 11, color: COLORS.teal }}>
+          ORE
+        </T>
+      </View>
+      <T v="bold" numberOfLines={1} style={{ fontSize: 10, letterSpacing: 1, color: COLORS.muted }}>
+        MOTHERLODE
+      </T>
+      <T v="bold" numberOfLines={1} style={{ fontSize: 10, lineHeight: 12, color: COLORS.gold }}>
+        +{skr >= 1000 ? `${(skr / 1000).toFixed(1)}K` : Math.floor(skr)} SKR pool
+      </T>
+    </View>
+  );
+}
+
 export function RoundCard() {
   const insets = useSafeAreaInsets();
   const roundId = useGame((s) => s.roundId);
@@ -125,7 +150,9 @@ export function RoundCard() {
   const phase = useGame((s) => s.phase);
   const pending = useGame((s) => s.pending);
   const boost = useGame((s) => s.pending?.boostBps ?? 10_000);
-  const pool = useGame((s) => (s.wallet.owner && chainReady ? s.wallet.pool : practiceMotherlode(s.roundId)));
+  const onChain = useGame((s) => Boolean(s.wallet.owner && chainReady));
+  const pool = useGame((s) => (onChain ? s.wallet.pool : practiceMotherlode(s.roundId)));
+  const orePool = useGame((s) => (onChain ? s.wallet.orePool : practiceOreMotherlode(s.roundId)));
   const pot = useGame((s) => s.pot);
   const run = useGame((s) => s.run);
   const here = useMinersHere();
@@ -157,7 +184,7 @@ export function RoundCard() {
           color={COLORS.text}
         />
         <View style={styles.divider} />
-        <BigStat icon={<T v="black" style={{ fontSize: 18, color: COLORS.gold }}>◈</T>} value={compact(pool)} label="SKR MOTHERLODE" color={COLORS.gold} />
+        <MotherlodeStat ore={orePool} skr={pool} />
         <View style={styles.divider} />
         <BigStat
           value={

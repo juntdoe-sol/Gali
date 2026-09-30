@@ -3,7 +3,7 @@
  * birds. A miner is five layers plus a helmet, composed once per look and frame
  * into a small canvas and reused, so thirty miners cost thirty draws.
  */
-import { ACTORS, RECTS, draw, drawCanvas, makeCanvas, ctx2d, sprite, type Ctx } from './art';
+import { ACTORS, draw, drawCanvas, makeCanvas, ctx2d, sprite, type Ctx } from './art';
 import type { Look, Pose } from './types';
 
 const M = ACTORS.miner;
@@ -137,4 +137,3 @@ export function stepBody(b: Body, dt: number, speed: number, now: number): boole
 }
 
 export const moleNames = ACTORS.mole as unknown as { up: string[]; idle: string[]; bonk: string; ax: number; ay: number; ms: number; idleMs: number };
-export const hasSprite = (n: string) => n in RECTS;

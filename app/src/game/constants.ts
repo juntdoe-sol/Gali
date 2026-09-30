@@ -6,7 +6,7 @@ export const LOCK_MS = 3_000;
 export const REVEAL_MIN_MS = 4_500; // animation length once the winner is known
 export const BASE_POINTS = 40; // points for covering every block; × 25/blocks otherwise
 export const MOTHERLODE_POINTS = 10_000;
-export const MOTHERLODE_ODDS = 500; // ORE's own motherlode odds; a hit pays Gali's SKR pool on top to the same winners
+export const MOTHERLODE_ODDS = 500; // ORE's own motherlode odds (round.rs); a hit pays Gali's SKR pool on top to the same winners
 export const CAVE_IN_EVERY = 10;
 
 export const pointsFor = (covered: number, motherlode: boolean, boostBps: number) =>
@@ -36,7 +36,7 @@ export interface Gear {
   perk: string;
 }
 
-/** Whole-SKR prices. Keep ids and prices in sync with scripts/setup-devnet.ts GEAR_PRICES. */
+/** Whole-SKR prices. scripts/setup-devnet.ts reads this list, turned into USD at SKR_USD, for the on-chain price table. */
 export const GEAR: Gear[] = [
   // pickaxes 0-5
   { id: 0, key: 'pick-wood', kind: 'pickaxe', name: 'Kayu Pick', priceSkr: 0, color: '#9b6b43', accent: '#c9c9c9', rarity: 'common', perk: 'Starter tool' },
@@ -72,16 +72,18 @@ export const GEAR_KINDS: { kind: GearKind; label: string }[] = [
 ];
 export const FREE_GEAR_MASK = GEAR.filter((g) => g.priceSkr === 0).reduce((m, g) => m | (1 << g.id), 0);
 export const gearByKey = (k: string | null | undefined) => GEAR.find((g) => g.key === k);
-// SKR economy, priced at roughly 1 SKR = $0.018 (55 SKR = $1). Keep in sync with scripts/setup-devnet.ts.
+// SKR economy, priced at roughly 1 SKR = $0.018 (55 SKR = $1). The on-chain rate is set with set_token_prices.
 export const SKR_USD = 0.018;
-export const MOTHERLODE_ACCRUAL_SKR = 40; // added to the Motherlode Pool by every played round; a hit pays out the whole pool
+/** Practice mode only: how fast the simulated SKR pool grows between hits. On chain it grows from gear sales. */
+export const MOTHERLODE_ACCRUAL_SKR = 40;
+/** ORE adds 0.2 ORE to its own motherlode every round (ORE's reset.rs), and a hit pays out the whole pool. */
+export const ORE_MOTHERLODE_PER_ROUND = 0.2;
 /**
  * Share of each gear sale that goes back into the SKR motherlode. Seven in ten,
  * per the deck: Gali never mints SKR, so the pool players chase is refilled by
  * the players themselves. The rest is the team's.
  */
 export const MOTHERLODE_POOL_SHARE = 0.7;
-export const ROUND_REWARD_SKR = 200; // legacy: the pre-ORE per-round SKR budget, still referenced by copy awaiting rewrite
 /**
  * ORE mined per round, split pro rata across the gold claim, or taken whole by
  * one miner when a solo claim wins. ORE mints this; Gali does not. Per-round SKR

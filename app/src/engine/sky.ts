@@ -238,5 +238,4 @@ export class Sky {
   }
 }
 
-export const cssRGB = css;
 export type { RGB };

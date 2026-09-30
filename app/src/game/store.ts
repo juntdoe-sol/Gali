@@ -3,13 +3,13 @@ import type { Keypair, PublicKey } from '@solana/web3.js';
 import { loadBoard, loadChain, loadOreTx } from '../chain/lazy';
 import {
   chainReady, clockOffsetMs, isPickWalletError, isRateLimited, MAX_SESSION_FUND_SOL, NOTHING_CLAIMABLE, REFINING_FEE, short,
-  type ChainPlayer, type Claimable, type Economy, type WebWalletInfo,
+  type ChainPlayer, type Claimable, type WebWalletInfo,
 } from '../chain/light';
 import {
   ACHIEVEMENTS, BLOCKS, boostFor, FREE_GEAR_MASK, GEAR, LOCK_MS, localDay, levelFromXp, MOTHERLODE_ODDS,
-  pointsFor, QUESTS, REVEAL_MIN_MS, ROUND_REWARD_ORE, ROUND_REWARD_SKR, ROUND_SECS,
+  pointsFor, QUESTS, REVEAL_MIN_MS, ROUND_REWARD_ORE, ROUND_SECS,
 } from './constants';
-import { addToPot, emptyPot, idxOf, maskOf, MIN_SOL_PER_BLOCK, payoutFor, practiceMotherlode, PRACTICE_SOL, setPotFee, simPot, smartPick, soloMask, type PotView } from './pot';
+import { addToPot, emptyPot, idxOf, maskOf, MIN_SOL_PER_BLOCK, payoutFor, practiceMotherlode, practiceOreMotherlode, PRACTICE_SOL, simPot, smartPick, soloMask, type PotView } from './pot';
 import { haptic, play, setMuted } from './sfx';
 import { loadJson, saveJson } from './storage';
 
@@ -23,10 +23,11 @@ export interface RoundResult {
   points: number;
   motherlode: boolean;
   onChain: boolean;
-  skr: number; // SKR from the Motherlode Pool
+  skr: number; // your share of Gali's SKR Motherlode Pool
+  oreMotherlode: number; // your share of ORE's own motherlode
   solIn: number; // SOL deployed this round
   solOut: number; // SOL given back this round (after fees; credited to Unclaimed)
-  oreMined: number; // ORE the gold claim mined this round
+  oreMined: number; // ORE the gold spot mined this round
   split?: boolean; // the round's SKR was split (false: a solo spot won and one miner took it)
   lucky?: boolean; // you were the lucky winner
 }
@@ -146,10 +147,9 @@ interface Wallet {
   skr: number;
   sol: number;
   sessionSol: number;
-  pool: number; // SKR in the Motherlode Pool
-  rewards: number; // SKR in the Rewards Pool
+  pool: number; // SKR in Gali's Motherlode Pool
+  orePool: number; // ORE in ORE's own motherlode
   unclaimed: Claimable;
-  economy: Economy | null;
   busy: string | null;
 }
 
@@ -316,7 +316,8 @@ export const useGame = create<GameState>((set, get) => {
     let motherlode = false;
     let solOut = 0;
     let oreMined = 0;
-    let skr = 0; // from the Motherlode Pool
+    let skr = 0; // share of Gali's SKR Motherlode Pool
+    let oreMotherlode = 0; // share of ORE's motherlode
     let split = true;
     let lucky = false;
     if (pending.onChain) {
@@ -329,7 +330,9 @@ export const useGame = create<GameState>((set, get) => {
         motherlode = r.motherlode;
         solOut = r.payout;
         oreMined = r.oreMined;
-        skr = r.oreMotherlode;
+        oreMotherlode = r.oreMotherlode;
+        // Gali's SKR jackpot splits by the same share; the player claims it with claim_jackpot
+        skr = r.motherlode ? r.share * get().wallet.pool : 0;
         split = r.split;
         lucky = r.lucky;
       } catch (e) {
@@ -345,10 +348,20 @@ export const useGame = create<GameState>((set, get) => {
       motherlode = Math.random() < 1 / MOTHERLODE_ODDS;
       split = (soloMask(roundId) & (1 << winning)) === 0;
       const final = addToPot(simPot(roundId, 1), pending.mask, pending.perBlock);
-      const pay = payoutFor(final, winning, pending.perBlock, pending.mask, motherlode ? practiceMotherlode(roundId) : 0, split, Math.random());
+      const pay = payoutFor(
+        final,
+        winning,
+        pending.perBlock,
+        pending.mask,
+        motherlode ? practiceMotherlode(roundId) : 0,
+        motherlode ? practiceOreMotherlode(roundId) : 0,
+        split,
+        Math.random(),
+      );
       solOut = pay.sol;
       oreMined = pay.ore;
       skr = pay.skrMotherlode;
+      oreMotherlode = pay.oreMotherlode;
       lucky = pay.lucky;
     }
     play('rumble');
@@ -359,7 +372,7 @@ export const useGame = create<GameState>((set, get) => {
     const solIn = pending.total;
     setTimeout(async () => {
       if (pending.onChain) await get().refreshWallet();
-      const result: RoundResult = { roundId, winning, covered, won, points, motherlode, onChain: pending.onChain, skr, solIn, solOut, oreMined, split, lucky };
+      const result: RoundResult = { roundId, winning, covered, won, points, motherlode, onChain: pending.onChain, skr, oreMotherlode, solIn, solOut, oreMined, split, lucky };
       updateSave((s) => {
         const winStreak = won ? s.winStreak + 1 : 0;
         const qp = { ...s.questProgress };
@@ -372,10 +385,11 @@ export const useGame = create<GameState>((set, get) => {
           points: pending.onChain ? s.points : s.points + points,
           wins: pending.onChain ? s.wins : s.wins + (practiceWin ? 1 : 0),
           practiceUnclaimedSol: pending.onChain ? s.practiceUnclaimedSol : (s.practiceUnclaimedSol ?? 0) + solOut,
-          practiceUnclaimedSkr: pending.onChain ? s.practiceUnclaimedSkr : (s.practiceUnclaimedSkr ?? 0) + oreMined,
+          // ORE pays a motherlode share as unrefined ORE, the same as the round's mining reward
+          practiceUnclaimedSkr: pending.onChain ? s.practiceUnclaimedSkr : (s.practiceUnclaimedSkr ?? 0) + oreMined + oreMotherlode,
           practiceRefinedSkr: pending.onChain
             ? s.practiceRefinedSkr
-            : (s.practiceRefinedSkr ?? 0) + ((s.practiceUnclaimedSkr ?? 0) + oreMined) * PRACTICE_REFINE_RATE,
+            : (s.practiceRefinedSkr ?? 0) + ((s.practiceUnclaimedSkr ?? 0) + oreMined + oreMotherlode) * PRACTICE_REFINE_RATE,
           winStreak,
           bestStreak: Math.max(s.bestStreak, winStreak),
           questProgress: qp,
@@ -517,7 +531,7 @@ export const useGame = create<GameState>((set, get) => {
   return {
     loaded: false,
     save: freshSave(),
-    wallet: { owner: null, player: null, skr: 0, sol: 0, sessionSol: 0, pool: 0, rewards: 0, unclaimed: NO_UNCLAIMED, economy: null, busy: null },
+    wallet: { owner: null, player: null, skr: 0, sol: 0, sessionSol: 0, pool: 0, orePool: 0, unclaimed: NO_UNCLAIMED, busy: null },
     offsetMs: 0,
     now: Date.now(),
     roundId: roundOf(Date.now()),
@@ -550,9 +564,9 @@ export const useGame = create<GameState>((set, get) => {
         .then((o) => set({ offsetMs: o, roundId: roundOf(chainNow(o)) }))
         .catch(() => undefined);
       if (chainReady) {
-        loadChain()
-          .then((chain) => Promise.all([chain.fetchMotherlodePool(), chain.fetchRewardsPool(), chain.fetchEconomy()]))
-          .then(([pool, rewards, economy]) => setWallet({ pool, rewards, economy }))
+        Promise.all([loadChain(), loadBoard()])
+          .then(([chain, board]) => Promise.all([chain.fetchMotherlodePool(), board.fetchOreMotherlode().catch(() => 0)]))
+          .then(([pool, orePool]) => setWallet({ pool, orePool }))
           .catch(() => undefined);
       }
       if (owner.owner && chainReady) {
@@ -832,7 +846,7 @@ export const useGame = create<GameState>((set, get) => {
       await chain?.disconnectWallet();
       saveJson('gali-owner', { owner: null }, 0);
       session = null;
-      set({ run: null, wallet: { owner: null, player: null, skr: 0, sol: 0, sessionSol: 0, pool: 0, rewards: 0, unclaimed: NO_UNCLAIMED, economy: null, busy: null } });
+      set({ run: null, wallet: { owner: null, player: null, skr: 0, sol: 0, sessionSol: 0, pool: 0, orePool: 0, unclaimed: NO_UNCLAIMED, busy: null } });
     },
 
     refreshWallet: async () => {
@@ -841,19 +855,17 @@ export const useGame = create<GameState>((set, get) => {
         const [chain, board, owner] = await Promise.all([loadChain(), loadBoard(), ownerKey()]);
         if (!owner) return;
         session = session ?? (await chain.loadSession(owner));
-        const [player, skr, sol, sessionSol, pool, rewards, unclaimed, economy] = await Promise.all([
+        const [player, skr, sol, sessionSol, pool, orePool, unclaimed] = await Promise.all([
           chain.fetchPlayer(owner),
           chain.fetchSkrBalance(owner),
           chain.fetchSolBalance(owner),
           chain.fetchSolBalance(session.publicKey),
           chain.fetchMotherlodePool(),
-          chain.fetchRewardsPool(),
+          board.fetchOreMotherlode().catch(() => 0),
           board.fetchClaimable(owner).catch(() => NO_UNCLAIMED),
-          chain.fetchEconomy().catch(() => null),
         ]);
         if (get().wallet.owner !== owner.toBase58()) return; // disconnected or switched while loading
-        if (economy) setPotFee(economy.potFeeBps); // keep the client's fee maths in step with the chain
-        setWallet({ player, skr, sol, sessionSol, pool, rewards, unclaimed, economy });
+        setWallet({ player, skr, sol, sessionSol, pool, orePool, unclaimed });
       } catch {
         /* offline */
       }

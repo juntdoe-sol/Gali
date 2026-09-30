@@ -15,7 +15,6 @@ import {
   automationPda,
   BOARD_ADDRESS,
   CONFIG_ADDRESS,
-  INTERMISSION_SLOTS,
   minerPda,
   ROUND_NOT_STARTED,
   ROUND_SLOTS,
