@@ -163,6 +163,8 @@ interface GameState {
   phase: Phase;
   settleStartAt: number;
   revealStartAt: number;
+  /** the round being revealed hit ORE's motherlode */
+  revealMotherlode: boolean;
   winning: number | null;
   pending: Pending | null;
   pot: PotView;
@@ -350,7 +352,7 @@ export const useGame = create<GameState>((set, get) => {
       lucky = pay.lucky;
     }
     play('rumble');
-    set({ phase: 'reveal', winning, revealStartAt: Date.now() });
+    set({ phase: 'reveal', winning, revealStartAt: Date.now(), revealMotherlode: motherlode });
     const covered = pending.mask.toString(2).split('1').length - 1;
     const won = (pending.mask & (1 << winning)) !== 0;
     const points = won ? pointsFor(covered, motherlode, pending.boostBps) : 0;
@@ -522,6 +524,7 @@ export const useGame = create<GameState>((set, get) => {
     phase: 'mining',
     settleStartAt: 0,
     revealStartAt: 0,
+    revealMotherlode: false,
     winning: null,
     pending: null,
     pot: emptyPot(roundOf(Date.now())),

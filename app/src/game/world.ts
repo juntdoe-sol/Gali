@@ -30,6 +30,9 @@ export interface Avatar {
   lvl: number;
   seen: number;
   bot?: boolean;
+  /** helmet and pet gear keys, sent by newer clients; older ones send colours only */
+  hk?: string;
+  pk?: string | null;
 }
 export interface MeState {
   x: number;
@@ -43,6 +46,8 @@ export interface MeState {
   pick: string;
   pet: string | null;
   lvl: number;
+  hk?: string;
+  pk?: string | null;
 }
 
 export const EMOTES = ['👋', '⛏️', '🎉', '💎', '🔥'] as const;
@@ -196,6 +201,8 @@ function onState(p: any) {
     pet: p.pet ? color(p.pet, '#8a5a3c') : null,
     lvl: Math.floor(clamp(p.lvl, 1, 999)),
     seen: Date.now(),
+    hk: typeof p.hk === 'string' && /^hat-[a-z]{2,12}$/.test(p.hk) ? p.hk : undefined,
+    pk: typeof p.pk === 'string' && /^pet-[a-z]{2,12}$/.test(p.pk) ? p.pk : null,
   };
   useWorld.setState((s) => ({ peers: { ...s.peers, [id]: av } }));
   // identity claim: wallet + session key + signature over a fresh timestamp
@@ -249,6 +256,8 @@ export function publishMe(me: MeState, identity: { wallet: string | null; sessio
     pick: me.pick,
     pet: me.pet,
     lvl: me.lvl,
+    hk: me.hk,
+    pk: me.pk ?? null,
   };
   const key = JSON.stringify(payload);
   if (now - lastSent < SEND_MS || (key === lastKey && now - lastSent < BEAT_MS)) return;
