@@ -18,6 +18,7 @@ Nothing about the chain changes. Claim `i` is ORE square `i`, 0 to 24.
 """
 import math
 import os
+import tempfile
 import sys
 
 import numpy as np
@@ -931,7 +932,7 @@ def preview(path, scale=4, crop=None, crop_scale=8):
 
 
 if __name__ == '__main__':
-    out = sys.argv[1] if len(sys.argv) > 1 else '/tmp/claude-0/island-preview.png'
+    out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(tempfile.gettempdir(), 'gali-island', 'island-preview.png')
     os.makedirs(os.path.dirname(out), exist_ok=True)
     print('\n'.join(preview(out)))
     print(f"island {W}x{H}, claims {len(CLAIMS)}, props {len(PROPS)}, lights {len(LIGHTS)}, "
