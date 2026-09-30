@@ -8,7 +8,7 @@ import sys
 import numpy as np
 
 SR = 44100
-DUR = 30.0
+DUR = 35.0
 BPM = 120
 BEAT = 60 / BPM
 N = int(SR * DUR)
@@ -309,23 +309,35 @@ for k, m in enumerate((72, 75, 79, 84, 87, 91)):
 whoosh(21.75, 0.5, True, 0.4); crash(22.0, 0.25)
 pads(22.0, 24.2, 0.05)
 groove(22.0, 24.2, drums=False, hats=False, bassline=True, arps=True)
-# 24.2 - 26.4: gear up
-groove(24.2, 26.4, lead=HOOK2, arps=False)
+# 24.2 - 28.0: gear up, one pop per item, a shimmer as the glint runs across
+groove(24.2, 28.0, lead=HOOK2, arps=False)
 for row, n in enumerate((6, 6, 5, 4)):
     for col in range(n):
-        blip(24.35 + (col + row) * 0.05, 700 + (col + row) * 90, 0.04, 0.06)
-# 26.4: the logo returns
-riser(26.1, 0.6, 0.25); roll(26.2, 26.7, 0.3)
-kick(26.7, 1.0); boom(26.7, 0.8); crash(26.7, 0.4, 2.6)
-groove(26.7, 28.7, lead=None, arps=True)
+        blip(24.55 + row * 0.32 + col * 0.07, 700 + (row * 6 + col) * 45, 0.04, 0.06)
+for k in range(21):
+    note(84 + (k % 5) * 2, 26.1 + k * 0.07, 0.05, 0.02, 0.25, 0.5 if k % 2 else -0.5, 0, 0.03)
+# 28.0: the logo returns
+riser(27.8, 0.8, 0.25); roll(28.1, 28.6, 0.3)
+whoosh(27.9, 0.5, True, 0.35)
+kick(28.6, 1.0); boom(28.6, 0.8); crash(28.6, 0.4, 2.6)
+groove(28.6, 32.6, lead=None, arps=True, half=True)
+pads(28.6, 32.6, 0.035)
+# one accent under each line of the promise
+for at, m in ((29.3, 60), (30.0, 63), (30.7, 67)):
+    for d in (0, 7, 12):
+        note(m + d, at, 0.35, 0.04, 0.5)
+    kick(at, 0.5)
+coin(31.5, 0.09, 88)
+# the last chord rings out
 for m in (48, 55, 60, 63, 67, 74):
-    pad([m], 28.7, 1.3, 0.05)
+    pad([m], 32.6, 2.4, 0.05)
 for k, m in enumerate((72, 75, 79, 84)):
-    note(m, 28.7 + k * 0.08, 0.6, 0.05, 0.25)
+    note(m, 32.6 + k * 0.1, 0.8, 0.05, 0.25)
+crash(32.6, 0.2, 2.4)
 
 # ---------------- master ----------------
 mix = np.stack([L, R], axis=1)
-fade = np.clip((DUR - np.arange(N) / SR) / 0.55, 0, 1)
+fade = np.clip((DUR - np.arange(N) / SR) / 0.8, 0, 1)
 mix *= fade[:, None]
 mix = np.tanh(mix * 1.1)  # gentle saturation, keeps the peaks round
 mix /= np.max(np.abs(mix)) / 0.89

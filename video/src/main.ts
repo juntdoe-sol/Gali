@@ -18,7 +18,7 @@ const H = Number(q.get('h') ?? 1920);
 const PORTRAIT = H > W;
 const U = Math.min(W, H) / 1080; // layout unit
 const FPS = 30;
-const DUR = 30;
+const DUR = 35;
 
 const NAVY = '#070d20';
 const GOLD = '#ffcf4a';
@@ -180,7 +180,7 @@ function snapshot(t: number): Snapshot {
       : { top: 108, bottom: 78 };
   const selected = t < DEPLOY_AT ? PICKS.filter((_, k) => t >= PICK_AT[k]) : [];
   let pending = t >= DEPLOY_AT && t < 17.2 ? mask(PICKS) : 0;
-  if (t >= DIG_AT && t < 26) pending = mask([WINNER]);
+  if (t >= DIG_AT && t < 28) pending = mask([WINNER]);
   const heat = prog(t, 9.2, 13.2);
   const round2 = t >= DIG_AT;
   const perBlock = others.map((v, i) => (round2 ? (i === WINNER ? 0.062 : v * 0.6) : v * heat) + (pending & (1 << i) ? 0.01 : 0));
@@ -203,7 +203,7 @@ function snapshot(t: number): Snapshot {
     solo: 0,
     perBlock: perBlock.map((v) => Math.round(v * 1e5) / 1e5),
     mine,
-    me: { look: LOOK, emoji: null, emoteAt: t >= 26.8 && t < 29 ? clock.ms - (t - 26.8) * 1000 : 0, name: 'You' },
+    me: { look: LOOK, emoji: null, emoteAt: t >= 28.7 && t < 33 ? clock.ms - (t - 28.7) * 1000 : 0, name: 'You' },
     peers: bots(t),
     practice: true,
     quality: 1,
@@ -251,7 +251,7 @@ function drive(t: number) {
     } else engine.setFocus(-1);
   }
   if (t >= 22.6 && t <= 24.6) E.sky.setTime(0.52 + inOut(prog(t, 22.6, 24.4)) * 0.43);
-  if (cue(26.4)) E.sky.setTime(0.3);
+  if (cue(28.0)) E.sky.setTime(0.3);
   lastT = t;
 }
 
@@ -880,8 +880,8 @@ function sceneLiving(t: number) {
 }
 
 function sceneGear(t: number) {
-  if (t < 24.2 || t > 26.7) return;
-  const a = prog(t, 24.2, 24.45) * (1 - prog(t, 26.35, 26.65));
+  if (t < 24.2 || t > 28.3) return;
+  const a = prog(t, 24.2, 24.5) * (1 - prog(t, 27.95, 28.3));
   g.save();
   g.globalAlpha = a * 0.82;
   g.fillStyle = NAVY;
@@ -904,8 +904,8 @@ function sceneGear(t: number) {
   rowsOf.forEach((keys, row) => {
     keys.forEach((k, col) => {
       const i = row * 7 + col;
-      const t0 = 24.35 + (col + row) * 0.05;
-      const p = outBack(prog(t, t0, t0 + 0.4), 2.4);
+      const t0 = 24.55 + row * 0.32 + col * 0.07;
+      const p = outBack(prog(t, t0, t0 + 0.5), 2.2);
       if (p <= 0) return;
       const bob = Math.sin(t * 4 + i) * 4 * U;
       const x = W / 2 - (keys.length * cell) / 2 + col * cell + cell / 2;
@@ -918,9 +918,15 @@ function sceneGear(t: number) {
       rr(-sz / 2, -sz / 2, sz, sz, 16 * U);
       g.fillStyle = '#0f1c3f';
       g.fill();
-      g.lineWidth = 5 * U;
+      const glint = Math.max(0, 1 - Math.abs(t - (26.1 + (row * 6 + col) * 0.07)) / 0.18);
+      g.lineWidth = (5 + glint * 5) * U;
       g.strokeStyle = rc;
+      if (glint > 0) {
+        g.shadowColor = rc;
+        g.shadowBlur = 30 * U * glint;
+      }
       g.stroke();
+      g.shadowBlur = 0;
       g.imageSmoothingEnabled = false;
       const is = sz * 0.8;
       g.drawImage(GEAR[k], -is / 2, -is / 2, is, is);
@@ -928,8 +934,8 @@ function sceneGear(t: number) {
     });
   });
   const ty = PORTRAIT ? gy - 120 * U : gy - 70 * U;
-  kinetic('GEAR UP', W / 2, ty, (PORTRAIT ? 130 : 100) * U, t, 24.3, { color: GOLD, shadow: '#3a1800', out: 26.35 });
-  g.globalAlpha = a * prog(t, 24.7, 25.0);
+  kinetic('GEAR UP', W / 2, ty, (PORTRAIT ? 130 : 100) * U, t, 24.3, { color: GOLD, shadow: '#3a1800', out: 27.95, stagger: 0.06, dur: 0.55 });
+  g.globalAlpha = a * prog(t, 25.9, 26.3);
   font(28 * U, BODY);
   g.textAlign = 'center';
   g.fillStyle = MUTED;
@@ -938,15 +944,15 @@ function sceneGear(t: number) {
 }
 
 function sceneEnd(t: number) {
-  if (t < 26.4) return;
-  const a = prog(t, 26.4, 26.65);
+  if (t < 28.0) return;
+  const a = prog(t, 28.0, 28.35);
   g.save();
   g.globalAlpha = a * 0.78;
   g.fillStyle = NAVY;
   g.fillRect(0, 0, W, H);
   g.restore();
   const cy = PORTRAIT ? H * 0.38 : H * 0.36;
-  const hit = 26.7;
+  const hit = 28.6;
   if (lastSceneT < hit && t >= hit) {
     const r = logoRect(1, cy);
     burst(W / 2, cy, 120, 1300, [GOLD, '#fff1a8', '#ffffff', GOLD2], 9, 1100, 1.3);
@@ -958,15 +964,15 @@ function sceneEnd(t: number) {
     const s = t < hit ? lerp(2.4, 1.1, inCubic(p)) : 1.1 - 0.1 * outElastic(prog(t, hit, hit + 0.9));
     const r = logoRect(s, cy);
     ring(W / 2, cy, t, hit, 0.8, 1200, GOLD, 12);
-    drawLogo(r, prog(t, 27.2, 27.9), clamp01(p * 2));
+    drawLogo(r, t < 31 ? prog(t, 29.1, 30.0) : prog(t, 32.2, 33.1), clamp01(p * 2));
   }
   const ty = cy + (PORTRAIT ? 310 : 250) * U;
   const size = (PORTRAIT ? 70 : 60) * U;
-  kinetic('DEPLOY SOL', W / 2, ty, size, t, 27.1, { color: WHITE });
-  kinetic('STRIKE GOLD', W / 2, ty + size * 1.05, size, t, 27.35, { color: GOLD });
-  kinetic('MINE ORE', W / 2, ty + size * 2.1, size, t, 27.6, { color: SKR });
+  kinetic('DEPLOY SOL', W / 2, ty, size, t, 29.3, { color: WHITE, stagger: 0.05, dur: 0.55 });
+  kinetic('STRIKE GOLD', W / 2, ty + size * 1.05, size, t, 30.0, { color: GOLD, stagger: 0.05, dur: 0.55 });
+  kinetic('MINE ORE', W / 2, ty + size * 2.1, size, t, 30.7, { color: SKR, stagger: 0.05, dur: 0.55 });
   g.save();
-  g.globalAlpha = prog(t, 28.1, 28.4);
+  g.globalAlpha = prog(t, 31.5, 32.0);
   const by = ty + size * 2.1 + 110 * U;
   const label = 'BUILT FOR SOLANA SEEKER';
   font(34 * U, BODY);
@@ -983,7 +989,7 @@ function sceneEnd(t: number) {
   g.restore();
   // fade to black on the last beat
   g.save();
-  g.globalAlpha = prog(t, 29.45, 30);
+  g.globalAlpha = prog(t, 34.2, 35);
   g.fillStyle = '#000';
   g.fillRect(0, 0, W, H);
   g.restore();
