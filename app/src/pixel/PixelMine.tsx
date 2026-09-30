@@ -101,6 +101,7 @@ function snapshot(): Snapshot {
     peers,
     practice: !(st.wallet.owner && chainReady),
     quality: 1,
+    amounts: st.dockTab === 'pro',
   };
 }
 
