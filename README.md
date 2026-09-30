@@ -6,7 +6,7 @@ ORE runs a 25-square mining round every 200 slots (about 80 seconds). Gali draws
 
 Built for **CLOCK IN**, the Solana Mobile hackathon. Submissions close 8 Oct 2026 (9 Oct, 14:59 GMT+8).
 
-![Gali island](video/public/pixel/atlas.png)
+![Gali island](docs/gali-island.jpg)
 
 ## Status
 
