@@ -3,7 +3,7 @@ import { Jersey15_400Regular } from '@expo-google-fonts/jersey-15';
 import { useFonts } from 'expo-font';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { COLORS } from './game/constants';
 import { initAudio } from './game/sfx';
@@ -15,6 +15,8 @@ import { Dock } from './ui/Dock';
 import { RoundCard, Toasts, TopBar } from './ui/Hud';
 import { Busy, GearReveal, LevelUp, Onboarding, ResultPop, WalletPicker } from './ui/Modals';
 import { Sheet } from './ui/Sheet';
+import { ClaimPanel } from './ui/ClaimPanel';
+import { Splash } from './ui/Splash';
 import { PeerCard } from './ui/World';
 
 
@@ -53,7 +55,15 @@ export default function App() {
   const onboarded = useGame((s) => s.save.onboarded);
 
   useEffect(() => {
-    initAudio();
+    // Web: sound files wait for the first touch (browsers won't play before one
+    // anyway), so they don't compete with the island for the first download.
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const unlock = () => {
+        initAudio();
+        window.removeEventListener('pointerdown', unlock, true);
+      };
+      window.addEventListener('pointerdown', unlock, true);
+    } else initAudio();
     void useGame.getState().boot();
     const id = setInterval(() => useGame.getState().tick(), 100);
     return () => clearInterval(id);
@@ -63,22 +73,26 @@ export default function App() {
     if (onboarded) void scheduleDailyReminder();
   }, [onboarded]);
 
-  if (!fontsLoaded) {
-    return (
-      <View style={[styles.root, styles.center]}>
-        <ActivityIndicator color={COLORS.gold} />
-      </View>
-    );
-  }
-
+  // The island draws straight away; the interface waits for its fonts.
   return (
     <SafeAreaProvider>
       <View style={styles.root}>
         <StatusBar style="light" />
         <PixelMine />
+        {fontsLoaded ? <Ui menu={menu} setMenu={setMenu} /> : null}
+        <Splash fontsLoaded={fontsLoaded} />
+      </View>
+    </SafeAreaProvider>
+  );
+}
+
+function Ui({ menu, setMenu }: { menu: boolean; setMenu: (v: boolean) => void }) {
+  return (
+    <>
         <TopBar onMenu={() => setMenu(true)} />
         <RoundCard />
         <Dock />
+        <ClaimPanel />
         <ChatButton />
         <PeerCard />
         <Toasts />
@@ -90,8 +104,7 @@ export default function App() {
         <ChatSheet />
         <Onboarding />
         <WalletPicker />
-      </View>
-    </SafeAreaProvider>
+    </>
   );
 }
 

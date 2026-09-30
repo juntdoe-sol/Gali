@@ -1,8 +1,13 @@
 """Gali Island: the board the game is played on.
 
-Generates the terrain, the 25 claim territories and the things that move on the
-sea, into app/assets/pixel/. Called from pixel-art.py so one command rebuilds
-every sprite the app uses.
+Decides the terrain, the 25 claim territories and the things that move on the
+sea, and hands the atlas the ground layer, the props standing on it and the
+claim overlays. Called from pixel-art.py so one command rebuilds every sprite
+the app uses. The painting lives next door: island_ground.py paints the ground
+(land and cliffs only; the engine draws the water), island_props.py draws and
+places the trees, rocks and buildings. Neither changes the board's shape.
+
+    python3 scripts/island.py [preview.png]   # ground + props at frame 0, 4x, and a close crop
 
 The mockup that got signed off was landscape (560x392). The phone is not, so the
 island is re-authored here at the app's own map size and the claim seeds are
@@ -11,12 +16,12 @@ meadow through the middle, beach along the south.
 
 Nothing about the chain changes. Claim `i` is ORE square `i`, 0 to 24.
 """
-import json
 import math
 import os
+import sys
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image
 
 # ---- the frame ----
 #
@@ -387,17 +392,6 @@ class Paint:
         return Image.fromarray(self.a.round().clip(0, 255).astype(np.uint8), 'RGB').convert('RGBA')
 
 
-TOP = [
-    ['#e3cf94', '#d8c185', '#6aa54a', '#5c9440', '#4f8a38', '#467d31', '#8f9a86', '#7d8a76', '#eef4fb', '#dbe7f5'],
-    ['#e3cf94', '#d8c185', '#cfe0f2', '#bed4ec', '#e8f0fa', '#d5e4f4', '#f4f9ff', '#e2eefb', '#ffffff', '#eef6ff'],
-    ['#e0c88c', '#d2b87c', '#d99a4a', '#c98a3e', '#c9803a', '#b57132', '#a85f2c', '#945124', '#c9a179', '#b88f68'],
-    ['#efe0ae', '#e3cf94', '#e3cf94', '#d8c185', '#d0b678', '#c4a96c', '#b89c60', '#ab8f56', '#efe0ae', '#e3cf94'],
-]
-FACE = [('#6b4a32', '#4a3122'), ('#6e7a8c', '#4c5666'), ('#8a4a22', '#5e3115'), ('#a8905c', '#7a6740')]
-
-P = Paint(W, H)
-
-
 # The open sea repeats every SEA_TILE pixels, so the app can tile the same water
 # across the whole screen behind the board. Without it the map floats on a flat
 # blue rectangle with a visible edge, which is what the ocean around the island
@@ -423,23 +417,6 @@ def sea_tile():
     return t.image()
 
 
-def paint_sea():
-    P.rect(0, 0, W, H, SEA_DEEP)
-    sea_speckle(P, W, H)
-    pad = np.zeros((ROWS + 6, COLS + 6), dtype=np.int16)
-    pad[3:-3, 3:-3] = LAND
-    near1 = sum(pad[3 + dy:ROWS + 3 + dy, 3 + dx:COLS + 3 + dx] for dy in (-1, 0, 1) for dx in (-1, 0, 1))
-    near3 = sum(pad[3 + dy:ROWS + 3 + dy, 3 + dx:COLS + 3 + dx] for dy in range(-3, 4) for dx in range(-3, 4))
-    for y in range(ROWS):
-        for x in range(COLS):
-            if LAND[y][x]:
-                continue
-            if near1[y][x]:
-                P.rect(x * B, y * B, B, B, '#6fd3e8')
-            elif near3[y][x]:
-                P.rect(x * B, y * B, B, B, '#1d6ea8')
-
-
 # ---- small islands out in the sea: somewhere for the eye to rest, nothing to tap ----
 ISLETS = [
     dict(x=134, y=30,  r=1.8, palm=False, rock=False),
@@ -449,115 +426,8 @@ ISLETS = [
 ]
 
 
-def paint_islets():
-    for isl in ISLETS:
-        cx, cy, r = isl['x'] / B, isl['y'] / B, isl['r']
-        for y in range(int(cy - r - 3), int(cy + r + 4)):
-            for x in range(int(cx - r - 3), int(cx + r + 4)):
-                if not (0 <= x < COLS and 0 <= y < ROWS) or LAND[y][x]:
-                    continue
-                d = math.hypot(x - cx, y - cy) + (float(noise(np.array(x / 2.2), np.array(y / 2.2), 44)) - 0.5) * 2.8
-                if d > r + 2.6:
-                    continue
-                if d > r + 1.1:
-                    P.rect(x * B, y * B, B, B, '#6fd3e8')
-                elif d > r - 0.6:
-                    P.rect(x * B, y * B, B, B, '#e3cf94')
-                else:
-                    P.rect(x * B, y * B, B, B, '#5c9440' if _hash(x * 3.7 + y * 9.1) > 0.5 else '#4e8034')
-        # a lip of rock on the seaward side, the same trick as the main coast
-        for y in range(int(cy - r), int(cy + r + 1)):
-            for x in range(int(cx - r), int(cx + r + 1)):
-                if not (0 <= x < COLS and 0 <= y < ROWS) or LAND[y][x]:
-                    continue
-                if math.hypot(x - cx, y - cy) <= r - 0.6 < math.hypot(x - cx, y + 1 - cy):
-                    P.rect(x * B, y * B + B, B, 3, '#6b4a32')
-                    P.rect(x * B, y * B + B + 2, B, 2, '#4a3122')
-        px, py = round(isl['x']), round(isl['y']) - 2
-        if isl['palm']:
-            P.rect(px, py - 7, 2, 8, '#6b4a32')
-            P.rect(px - 5, py - 9, 5, 2, '#3f6b2a')
-            P.rect(px + 2, py - 9, 5, 2, '#3f6b2a')
-            P.rect(px - 4, py - 11, 4, 2, '#548a35')
-            P.rect(px + 2, py - 11, 4, 2, '#548a35')
-            P.rect(px - 1, py - 12, 4, 2, '#69a544')
-        if isl['rock']:
-            P.rect(px - 5, py - 4, 10, 6, '#5a6472')
-            P.rect(px - 4, py - 8, 8, 6, '#7d8796')
-            P.rect(px - 2, py - 7, 3, 2, '#98a2b0')
-
-
-def paint_land():
-    # pass one: the flat top of every block
-    for y in range(ROWS):
-        for x in range(COLS):
-            t = int(TIER[y][x])
-            if t < 0:
-                continue
-            bm = int(BIOME[y][x])
-            pal = TOP[bm if bm >= 0 else 0]
-            n = _hash(x * 3.1 + y * 7.7)
-            P.rect(x * B, y * B, B, B, pal[min(9, t * 2 + (1 if n > 0.66 else 0))])
-
-    # pass two: the faces. Separate, because a face belongs on top of the ground
-    # below it, and drawing both in one pass means the next row paints over it.
-    for y in range(ROWS):
-        for x in range(COLS):
-            t = int(TIER[y][x])
-            if t < 0:
-                continue
-            bm = int(BIOME[y][x])
-            f = FACE[1 if bm == 1 else 2 if bm == 2 else 3 if bm == 3 else 0]
-            below = tier(x, y + 1)
-            sea = not is_land(x, y + 1)
-            if not sea and 0 <= below < t:
-                h = min(3, t - below) * 4
-                P.rect(x * B, y * B + B, B, h, f[0])
-                P.rect(x * B, y * B + B + h - 2, B, 2, f[1])
-                P.rect(x * B, y * B + B + h, B, 2, '#00000033')
-            elif sea and t >= 1:
-                P.rect(x * B, y * B + B, B, 5, f[0])
-                P.rect(x * B, y * B + B + 3, B, 2, f[1])
-            # sunlit rim where the ground climbs away from us
-            if tier(x, y - 1) > t:
-                P.rect(x * B, y * B, B, 1, '#ffffff26')
-            # shaded side on the right of a step
-            if 0 <= tier(x + 1, y) < t:
-                P.rect(x * B + B - 1, y * B, 1, B, '#00000026')
-
-    for y in range(ROWS):
-        for x in range(COLS):
-            if RIVER[y][x] and LAND[y][x]:
-                P.rect(x * B, y * B, B, B, '#2f86c9')
-                P.rect(x * B, y * B + 1, B, 2, '#4fa8e0')
-
-
-def mountain(cx, base_y, w, h, snowy):
-    """A mountain as an object rather than a terrain tier. This is what actually
-    reads as height; shading the ground alone never does."""
-    rock_l = '#8d97a6' if snowy else '#8a7f72'
-    rock_r = '#5c6676' if snowy else '#5e544a'
-    rock_e = '#46505f' if snowy else '#463e36'
-    for i in range(h):
-        y = base_y - h + i
-        half = round((i / h) * (w / 2))
-        if half < 1:
-            continue
-        snow = snowy and i < h * 0.42
-        P.rect(cx - half, y, half, 1, '#ffffff' if snow else rock_l)
-        P.rect(cx, y, half, 1, '#c6d6e8' if snow else rock_r)
-        if i > 2 and _hash(cx * 3.1 + y * 7.7) > 0.72:
-            P.rect(cx - half, y, 1, 1, rock_e)
-            P.rect(cx + half - 1, y, 1, 1, rock_e)
-    if snowy:
-        y = base_y - h + round(h * 0.42)
-        half = round(0.42 * (w / 2))
-        for dx in range(-half, half):
-            if _hash(cx + dx * 2.7) > 0.55:
-                P.rect(cx + dx, y, 1, 1 + int(_hash(dx * 5.1) * 3), '#ffffff' if dx < 0 else '#c6d6e8')
-    P.rect(cx - round(w / 2), base_y, w, 2, '#00000030')
-
-
+# ---- the northern range, painted into the ground (see island_ground.mountain) ----
+# (centre x, base y, width, height, snow-capped), in logical pixels
 RANGE = [
     (54, 95, 27, 17, False), (74, 82, 33, 25, False), (100, 72, 44, 36, True),
     (136, 66, 58, 47, True), (173, 70, 49, 41, True), (207, 76, 40, 30, True),
@@ -570,93 +440,6 @@ LINKS = [(0, 3), (3, 1), (1, 4), (4, 11), (11, 5), (5, 6),
          (2, 3), (3, 10), (10, 13), (13, 15), (15, 7), (7, 8),
          (14, 12), (12, 18), (18, 17), (17, 16), (16, 9),
          (20, 22), (20, 24), (24, 21), (21, 23), (23, 19)]
-
-
-def paint_features():
-    for m in RANGE:
-        mountain(*m)
-
-    # trees, in clusters, off the rock and out of the water
-    clump = fbm(GX / 7, GY / 7, 31)
-    for i in range(1400):
-        x = int(_hash(i * 1.7) * COLS)
-        y = int(_hash(i * 2.9 + 5) * ROWS)
-        t, bm = tier(x, y), biome(x, y)
-        if t < 1 or t > 2 or river(x, y) or clump[y][x] < 0.52:
-            continue
-        px, py = x * B, y * B
-        o = owner_at(x, y)
-        if o >= 0 and abs(CEN[o][0] - px) < 22 and abs(CEN[o][1] - py) < 20:
-            continue
-        if py < 100 and 40 < px < 300:   # the range
-            continue
-        if bm == 2:
-            P.rect(px + 1, py + 3, 3, 2, '#7a5a2a')
-            P.rect(px + 1, py + 1, 4, 2, '#9c7a34')
-        else:
-            P.rect(px + 2, py + 4, 1, 2, '#2b4a1c')
-            P.rect(px, py, 5, 5, '#35602a')
-            P.rect(px + 1, py - 1, 3, 4, '#4b8038')
-
-    for a, b in LINKS:
-        ax, ay, _ = CEN[a]
-        bx, by, _ = CEN[b]
-        span = max(1.0, math.hypot(bx - ax, by - ay))
-        steps = math.ceil(span / 3)
-        for s in range(steps + 1):
-            u = s / steps
-            wig = math.sin(u * math.pi) * (_hash(a * 7 + b * 13) - 0.5) * 9
-            nx = ax + (bx - ax) * u + wig * ((by - ay) / span)
-            ny = ay + (by - ay) * u - wig * ((bx - ax) / span)
-            gx, gy = int(nx // B), int(ny // B)
-            if not is_land(gx, gy):
-                continue
-            P.rect(int(nx) - 1, int(ny) - 1, 3, 2, '#8a6a44')
-            P.rect(int(nx) - 1, int(ny) - 1, 3, 1, '#a8865a')
-
-
-def paint_claim_ground():
-    for y in range(ROWS):
-        for x in range(COLS):
-            if OWNER[y][x] < 0:
-                continue
-            n = _hash(x * 13.7 + y * 4.9 + 60)
-            # turned earth and spoil, the sign that someone works here
-            if n > 0.58:
-                P.rect(x * B, y * B, B, B, '#00000022')
-            if n > 0.90:
-                P.rect(x * B + 1, y * B + 1, 2, 2, '#7b5f42')
-
-
-def paint_borders():
-    """Outline every claim against whatever is next to it, open ground included.
-    Without this a claim has no edge, and a player cannot see where to tap."""
-    for y in range(ROWS):
-        for x in range(COLS):
-            o = int(OWNER[y][x])
-            if o < 0:
-                continue
-            if owner_at(x - 1, y) != o:
-                P.rect(x * B, y * B, 1, B, '#12261a')
-                P.rect(x * B + 1, y * B, 1, B, '#ffffff1f')
-            if owner_at(x + 1, y) != o:
-                P.rect(x * B + B - 1, y * B, 1, B, '#12261a')
-            if owner_at(x, y - 1) != o:
-                P.rect(x * B, y * B, B, 1, '#12261a')
-                P.rect(x * B, y * B + 1, B, 1, '#ffffff1f')
-            if owner_at(x, y + 1) != o:
-                P.rect(x * B, y * B + B - 1, B, 1, '#12261a')
-    # marker posts at the corners, the way a real claim is pegged out
-    for y in range(ROWS):
-        for x in range(COLS):
-            o = int(OWNER[y][x])
-            if o < 0:
-                continue
-            open_sides = sum(owner_at(nx, ny) < 0 for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)))
-            if open_sides < 2 or _hash(x * 7.7 + y * 3.1) < 0.86:
-                continue
-            P.rect(x * B + 1, y * B, 2, 5, '#5c3d26')
-            P.rect(x * B + 1, y * B, 2, 2, '#c9a24e')
 
 
 # ---- overlays: one shape per claim, tinted by the app ----
@@ -943,71 +726,106 @@ REGION_LABELS = [
 ]
 
 
-SEA_COLOURS = {(18, 58, 107), (10, 19, 48), (22, 71, 126), (111, 211, 232), (29, 110, 168)}
 MARGIN = 5
 
 
-def check_margin(art, margin=MARGIN):
+def check_margin(ground, margin=MARGIN):
     """Fail if anything but open water reaches the edge of the canvas.
 
     The island's south coast grew into the bottom edge and was being sliced off
     flat, which is the kind of thing that is obvious on a phone and invisible
-    while tuning numbers. Cheaper to assert it than to notice it twice.
+    while tuning numbers. Cheaper to assert it than to notice it twice. The
+    ground layer leaves the sea transparent, so anything opaque in the margin
+    is land that will be cropped.
     """
-    px = art.convert('RGB').load()
-    bad = []
-    for y in range(art.height):
-        for x in range(art.width):
-            if margin <= x < art.width - margin and margin <= y < art.height - margin:
-                continue
-            if px[x, y] not in SEA_COLOURS:
-                bad.append((x, y))
-    if bad:
-        xs = [b[0] for b in bad]
-        ys = [b[1] for b in bad]
+    a = np.array(ground)[:, :, 3] > 0
+    inner = np.zeros_like(a)
+    inner[margin:-margin, margin:-margin] = True
+    ys, xs = np.nonzero(a & ~inner)
+    if len(xs):
         raise SystemExit(
-            f'{len(bad)} pixels of land reach the canvas edge and will be cropped: '
-            f'x {min(xs)}-{max(xs)}, y {min(ys)}-{max(ys)}. '
+            f'{len(xs)} pixels of land reach the canvas edge and will be cropped: '
+            f'x {xs.min()}-{xs.max()}, y {ys.min()}-{ys.max()}. '
             'Shrink RX/RY or move the islet that overhangs.')
 
 
-def build(out_dir, scale=4):
-    """Render everything into `out_dir` and return the block for META."""
-    paint_sea()
-    paint_islets()
-    paint_land()
-    paint_features()
-    paint_claim_ground()
-    paint_borders()
+def river_blocks():
+    ys, xs = np.nonzero(RIVER & LAND)
+    return [[int(x), int(y)] for x, y in zip(xs, ys)]
 
+
+# ---- the painted ground and the things standing on it ----
+#
+# The terrain is painted per pixel in island_ground.py and the props are drawn
+# and placed in island_props.py; both read the shape of the board from here and
+# never change it.
+#
+# PROPS: every object on the island, in draw order (y, then x), as
+#   {'s': 'prop-<name>', 'x': foot x, 'y': foot y, 'n': frames, 'ms': frame ms, 'sway': 0|1}
+#   The atlas holds each frame as prop-<name>-<f>, anchored at the foot (the
+#   pier, which lies flat, is anchored at its landward end). sway=1: the frames
+#   are wind frames, 0 at rest to n-1 leaning furthest, for the engine to drive
+#   by wind; sway=0: the frames loop every `ms` (n=1 is a still).
+# LIGHTS: what glows at night, as {'x','y','r': radius px,'c': '#rrggbb','f': flicker 0..1}.
+PROPS = []
+LIGHTS = []
+SMOKE = []          # [[x, y], ...] where smoke rises: the smelter's chimney, the campfire
+LIGHTHOUSE = {}     # {'x','y'}: the lamp, for a sweeping beam
+_GROUND = None
+_SPRITES = None
+
+
+def paint_island():
+    """Paint the ground and place the props, once. Returns (ground image, sprites)."""
+    global _GROUND, _SPRITES
+    if _GROUND is None:
+        import island_ground
+        import island_props
+        rgba, g = island_ground.paint(sys.modules[__name__])
+        _GROUND = Image.fromarray(rgba, 'RGBA')
+        check_margin(_GROUND)
+        _SPRITES = island_props.sprites()
+        props, lights, smoke, lamp = island_props.place(sys.modules[__name__], g, _SPRITES)
+        PROPS[:] = props
+        LIGHTS[:] = lights
+        SMOKE[:] = smoke
+        LIGHTHOUSE.clear()
+        LIGHTHOUSE.update(lamp)
+    return _GROUND, _SPRITES
+
+
+def compose(frame=0, sea=SEA_DEEP):
+    """The ground over flat sea with every prop drawn, in draw order: a preview
+    of what the engine puts together, minus the water's motion and the light."""
+    ground, sprites = paint_island()
+    art = Image.new('RGBA', ground.size, hexc(sea)[:3] + (255,))
+    art.alpha_composite(ground)
+    for p in PROPS:
+        d = sprites[p['s'][len('prop-'):]]
+        f = d['frames'][min(frame, len(d['frames']) - 1)].img()
+        x, y = p['x'] - d['ax'], p['y'] - d['ay']
+        layer = Image.new('RGBA', art.size, (0, 0, 0, 0))
+        layer.paste(f, (x, y))
+        art = Image.alpha_composite(art, layer)
+    return art
+
+
+def build(out_dir, scale=4):
+    """Legacy: render the board as separate 4x PNGs into `out_dir` and return the
+    block for META. The app reads the atlas now (build_atlas); this stays for
+    the old pages that still load island.png."""
     def save(img, name):
         img.resize((img.width * scale, img.height * scale), Image.NEAREST).save(
             os.path.join(out_dir, name), optimize=True)
 
-    # Region names belong to the map, not to the interface. Painted into the art
-    # they sit under the claim amounts instead of competing with them for the
-    # same few pixels, which is what happened when the app drew them as text.
-    art = P.image()
-    ink = Image.new('RGBA', art.size, (0, 0, 0, 0))
-    pen = ImageDraw.Draw(ink)
-    for text, lx, ly in REGION_LABELS:
-        text = '  '.join(text.split(' '))
-        w = pen.textlength(text)
-        pen.text((lx - w / 2 + 1, ly + 1), text, fill=(2, 5, 15, 105))
-        pen.text((lx - w / 2, ly), text, fill=(236, 244, 255, 120))
-    art = Image.alpha_composite(art, ink)
-    check_margin(art)
-    save(art, 'island.png')
-
+    save(compose(), 'island.png')
     boxes = []
     for c in CLAIMS:
         fill, edge, box = claim_overlays(c['i'])
         save(fill, f"claim-{c['i']}-fill.png")
         save(edge, f"claim-{c['i']}-edge.png")
         boxes.append(box)
-
-    kinds = sorted({c['k'] for c in CLAIMS})
-    for k in kinds:
+    for k in sorted({c['k'] for c in CLAIMS}):
         save(icon(k), f'claim-icon-{k}.png')
     for k in ('sloop', 'trader', 'skiff'):
         save(ship(k), f'ship-{k}.png')
@@ -1019,7 +837,6 @@ def build(out_dir, scale=4):
     save(islet_sprite(2.4, False, False, 19), 'islet-bare.png')
     save(bird(True), 'bird-0.png')
     save(bird(False), 'bird-1.png')
-
     return {
         'size': [W, H],
         'block': B,
@@ -1031,19 +848,7 @@ def build(out_dir, scale=4):
         'islet': [ISLET_W, ISLET_H, ISLET_AX, ISLET_AY],
         'seaTile': SEA_TILE,
         'sea': SEA_DEEP,
-        'claims': [
-            {
-                'i': c['i'],
-                'kind': c['k'],
-                'region': c['r'],
-                'cx': CEN[c['i']][0],
-                'cy': CEN[c['i']][1],
-                'area': CEN[c['i']][2],
-                'box': boxes[c['i']],
-                'stand': stand_for(c['i']),
-            }
-            for c in CLAIMS
-        ],
+        'claims': claims_meta(boxes),
         'regions': REGION_LABELS,
         'ships': ship_courses(),
         'fit': fit_box(),
@@ -1052,14 +857,82 @@ def build(out_dir, scale=4):
     }
 
 
+def claims_meta(boxes):
+    return [
+        {
+            'i': c['i'],
+            'kind': c['k'],
+            'region': c['r'],
+            'cx': CEN[c['i']][0],
+            'cy': CEN[c['i']][1],
+            'area': CEN[c['i']][2],
+            'box': boxes[c['i']],
+            'stand': stand_for(c['i']),
+        }
+        for c in CLAIMS
+    ]
+
+
+def build_atlas(atlas):
+    """Paint the island into `atlas` and return the block for art.json."""
+    ground, sprites = paint_island()
+    atlas.add('ground', ground)
+
+    boxes = []
+    for c in CLAIMS:
+        fill, edge, box = claim_overlays(c['i'])
+        atlas.add(f"claim-{c['i']}-fill", fill)
+        atlas.add(f"claim-{c['i']}-edge", edge)
+        boxes.append(box)
+    for k in sorted({c['k'] for c in CLAIMS}):
+        atlas.add(f'icon-{k}', icon(k), ICON_AX, ICON_AY)
+    for k in ('sloop', 'trader', 'skiff'):
+        atlas.add(f'ship-{k}', ship(k), SHIP_AX, SHIP_AY)
+    atlas.add('islet-palm', islet_sprite(3.6, True, False, 3), ISLET_AX, ISLET_AY)
+    atlas.add('islet-rock', islet_sprite(3.0, False, True, 11), ISLET_AX, ISLET_AY)
+    atlas.add('islet-bare', islet_sprite(2.4, False, False, 19), ISLET_AX, ISLET_AY)
+    atlas.add('bird-0', bird(True), BIRD_AX, BIRD_AY)
+    atlas.add('bird-1', bird(False), BIRD_AX, BIRD_AY)
+    # every prop sprite, placed or not, so the engine can use the spares too
+    for name, d in sprites.items():
+        for f, fr in enumerate(d['frames']):
+            atlas.add(f'prop-{name}-{f}', fr.img(), d['ax'], d['ay'])
+
+    return {
+        'size': [W, H],
+        'block': B,
+        'cols': COLS,
+        'rows': ROWS,
+        'claims': claims_meta(boxes),
+        'regions': REGION_LABELS,
+        'ships': ship_courses(),
+        'fit': fit_box(),
+        'home': home_point(),
+        'grid': grid_string(),
+        'rivers': river_blocks(),
+        'props': PROPS,
+        'lights': LIGHTS,
+        'smoke': SMOKE,
+        'lighthouse': LIGHTHOUSE,
+        'islets': ISLETS,
+    }
+
+
+def preview(path, scale=4, crop=None, crop_scale=8):
+    """Write the composed island (ground + props at frame 0) at `scale`, and a
+    close crop of a busy corner beside it, for looking at rather than shipping."""
+    art = compose()
+    art.resize((art.width * scale, art.height * scale), Image.NEAREST).save(path)
+    x0, y0, x1, y1 = crop or (150, 118, 300, 206)
+    close = art.crop((x0, y0, x1, y1))
+    base, ext = os.path.splitext(path)
+    close.resize((close.width * crop_scale, close.height * crop_scale), Image.NEAREST).save(f'{base}-close{ext}')
+    return path, f'{base}-close{ext}'
+
+
 if __name__ == '__main__':
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    out = os.path.join(root, 'app/assets/pixel')
-    os.makedirs(out, exist_ok=True)
-    meta = build(out)
-    areas = sorted(c['area'] for c in meta['claims'])
-    print(f"island {W}x{H}, claims {len(meta['claims'])}, "
-          f"area min {areas[0]} max {areas[-1]} blocks, land "
-          f"{int(LAND.sum())}/{COLS * ROWS}")
-    with open(os.path.join(out, 'island.json'), 'w') as f:
-        json.dump(meta, f)
+    out = sys.argv[1] if len(sys.argv) > 1 else '/tmp/claude-0/island-preview.png'
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    print('\n'.join(preview(out)))
+    print(f"island {W}x{H}, claims {len(CLAIMS)}, props {len(PROPS)}, lights {len(LIGHTS)}, "
+          f"land {int(LAND.sum())}/{COLS * ROWS}")

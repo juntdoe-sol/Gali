@@ -7,6 +7,7 @@ import { watchMotion } from '../game/motion';
 import { addToPot, fmtSol, maskOf, strikeRange, MIN_SOL_PER_BLOCK, OPTIMAL_ROUNDS, optimalPerSpot, smartPick, soloMask } from '../game/pot';
 import { useGame, type DockTab, type Preset } from '../game/store';
 import { fx } from '../pixel/fx';
+import { useView } from '../pixel/view';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Btn, F, Gem, T } from './kit';
 
@@ -23,6 +24,7 @@ export function Dock() {
   const setTab = useGame((s) => s.setDockTab);
   const [folded, setFolded] = useState<boolean | null>(null);
   const compact = folded ?? Boolean(run);
+  const inside = useView((s) => s.focus >= 0);
 
   // shake the phone to Smart-pick the emptiest blocks
   useEffect(() => {
@@ -38,7 +40,7 @@ export function Dock() {
 
   return (
     <View
-      style={[styles.dock, { paddingBottom: insets.bottom + (compact ? 8 : 10) }]}
+      style={[styles.dock, { paddingBottom: insets.bottom + (compact ? 8 : 10) }, inside && { display: 'none' }]}
       onLayout={(e) => {
         fx.viewBottom = e.nativeEvent.layout.height + 10;
       }}

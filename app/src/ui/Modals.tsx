@@ -96,7 +96,7 @@ function SolLine({ res, dark, big }: { res: RoundResult; dark: boolean; big?: bo
         </T>
       ) : res.won && res.split === false ? (
         <T v="bold" style={{ fontSize: 12, color: dark ? '#3d5a00' : '#eaffc4' }}>
-          ★ Solo spot: another miner took the SKR
+          ★ Solo claim: another miner took the ORE
         </T>
       ) : null}
       <T v="bold" style={{ fontSize: 12, color: dark ? '#6b3a00' : '#fff' }}>
