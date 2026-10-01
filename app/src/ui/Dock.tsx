@@ -4,12 +4,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { chainReady, REFINING_FEE } from '../chain/light';
 import { BLOCKS, boostFor, COLORS, pointsFor } from '../game/constants';
 import { watchMotion } from '../game/motion';
-import { addToPot, fmtSol, maskOf, strikeRange, MIN_SOL_PER_BLOCK, OPTIMAL_ROUNDS, optimalPerSpot, smartPick, soloMask } from '../game/pot';
+import { addToPot, fmtSol, maskOf, strikeRange, MIN_SOL_PER_BLOCK, smartPick, soloMask } from '../game/pot';
 import { useGame, type DockTab, type Preset } from '../game/store';
 import { fx } from '../pixel/fx';
 import { useView } from '../pixel/view';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Btn, F, Gem, T } from './kit';
+import { BAR_H } from './TabBar';
 
 const SHAKE_G = 2.1;
 const TABS: { id: DockTab; label: string }[] = [
@@ -22,8 +23,9 @@ export function Dock() {
   const tab = useGame((s) => s.dockTab);
   const run = useGame((s) => s.run);
   const setTab = useGame((s) => s.setDockTab);
-  const [folded, setFolded] = useState<boolean | null>(null);
-  const compact = folded ?? Boolean(run);
+  const open = useGame((s) => s.dockOpen);
+  const setOpen = useGame((s) => s.setDockOpen);
+  const compact = false;
   const inside = useView((s) => s.focus >= 0);
 
   // shake the phone to Smart-pick the emptiest blocks
@@ -38,23 +40,24 @@ export function Dock() {
     });
   }, []);
 
+  const barTop = BAR_H + insets.bottom;
+  // closed: the map frames itself down to the bottom bar
+  useEffect(() => {
+    if (!open) fx.viewBottom = barTop + 6;
+  }, [open, barTop]);
+  if (!open) return null;
+
   return (
     <View
-      style={[styles.dock, { paddingBottom: insets.bottom + (compact ? 8 : 10) }, inside && { display: 'none' }]}
+      style={[styles.dock, { bottom: barTop, paddingBottom: 10 }, inside && { display: 'none' }]}
       onLayout={(e) => {
-        fx.viewBottom = e.nativeEvent.layout.height + 10;
+        fx.viewBottom = e.nativeEvent.layout.height + barTop + 10;
       }}
     >
       <LinearGradient colors={['#15285a', '#0c1838', '#070d20']} style={[StyleSheet.absoluteFill, styles.dockBg]} />
       <View pointerEvents="none" style={styles.dockLit} />
       <Gem size={10} style={styles.dockGem} />
-      <Pressable
-        onPress={() => setFolded(!compact)}
-        hitSlop={8}
-        style={styles.handle}
-        accessibilityRole="button"
-        accessibilityLabel={compact ? 'Expand deploy panel' : 'Minimize deploy panel'}
-      >
+      <Pressable onPress={() => setOpen(false)} hitSlop={8} style={styles.handle} accessibilityRole="button" accessibilityLabel="Close the mine panel">
         <View style={styles.handleBar} />
       </Pressable>
       <View style={styles.head}>
@@ -64,13 +67,7 @@ export function Dock() {
             return (
               <Pressable
                 key={t.id}
-                onPress={() => {
-                  if (on) setFolded(!compact);
-                  else {
-                    setTab(t.id);
-                    setFolded(null);
-                  }
-                }}
+                onPress={() => setTab(t.id)}
                 style={[styles.segBtn, on && styles.segOn]}
                 accessibilityRole="tab"
                 accessibilityState={{ selected: on }}
@@ -85,13 +82,8 @@ export function Dock() {
             );
           })}
         </View>
-        <Pressable
-          onPress={() => setFolded(!compact)}
-          style={styles.fold}
-          accessibilityRole="button"
-          accessibilityLabel={compact ? 'Expand panel' : 'Minimize panel'}
-        >
-          <T v="display" style={{ fontSize: 14, color: COLORS.gold, transform: [{ rotate: compact ? '180deg' : '0deg' }] }}>
+        <Pressable onPress={() => setOpen(false)} style={styles.fold} accessibilityRole="button" accessibilityLabel="Close the mine panel">
+          <T v="display" style={{ fontSize: 14, color: COLORS.gold }}>
             ▾
           </T>
         </Pressable>
@@ -201,7 +193,7 @@ function Chip({ label, on, onPress, disabled, grow }: { label: string; on?: bool
   );
 }
 
-function BalanceRow({ onHalf, onAll }: { onHalf: () => void; onAll: () => void }) {
+function BalanceRow({ onHalf, onAll }: { onHalf?: () => void; onAll?: () => void }) {
   const { balance, onChain } = useBalance();
   const refill = useGame((s) => s.refillPractice);
   const airdrop = useGame((s) => s.airdrop);
@@ -215,10 +207,12 @@ function BalanceRow({ onHalf, onAll }: { onHalf: () => void; onAll: () => void }
         <T v="muted">{onChain ? 'SOL' : 'practice SOL'}</T>
         <Chip label={onChain ? '+1 devnet' : 'Refill'} onPress={onChain ? airdrop : refill} />
       </View>
-      <View style={styles.lineRight}>
-        <Chip label="Half" onPress={onHalf} />
-        <Chip label="All" onPress={onAll} />
-      </View>
+      {onHalf && onAll ? (
+        <View style={styles.lineRight}>
+          <Chip label="Half" onPress={onHalf} />
+          <Chip label="All" onPress={onAll} />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -273,94 +267,60 @@ function RunButton({ ready, label, sub, onStart }: { ready: boolean; label: stri
         style={{ marginTop: 10, borderColor: COLORS.red }}
       />
     );
-  return <Btn kind={ready ? 'gold' : 'plain'} label={busy ?? label} sub={sub} onPress={onStart} disabled={!ready || Boolean(busy)} style={{ marginTop: 10, minHeight: 54 }} />;
+  const start = () => {
+    onStart();
+    useGame.getState().setDockOpen(false);
+  };
+  return <Btn kind={ready ? 'gold' : 'plain'} label={busy ?? label} sub={sub} onPress={start} disabled={!ready || Boolean(busy)} style={{ marginTop: 10, minHeight: 54 }} />;
 }
 
-/* ---------------- LITE: SOL per spot on all 25, one round or many ---------------- */
+/* ---------------- LITE: one round, All 25 or Smart, nothing else ---------------- */
+const SMART_COUNTS = [3, 5, 10];
 function LitePanel({ compact }: { compact: boolean }) {
   const { balance } = useBalance();
   const startRun = useGame((s) => s.startRun);
+  const smartN = useGame((s) => s.liteSmart);
+  const setSmart = useGame((s) => s.setLiteSmart);
+  const run = useGame((s) => s.run);
+  const pot = useGame((s) => s.pot);
   const [perSpot, setPerSpot] = useState('0.0004');
-  const [rounds, setRounds] = useState(1);
   const spot = Number(perSpot) || 0;
-  const per = spot * BLOCKS; // SOL a round
-  const need = per * rounds;
-  const maxRounds = per > 0 ? Math.max(1, Math.floor((balance - RESERVE) / per)) : 1;
+  const n = smartN || BLOCKS;
+  const per = spot * n; // SOL this round
   const perBlockOk = spot >= MIN_SOL_PER_BLOCK;
-  const enough = need <= balance + 1e-9;
-  const ready = per > 0 && rounds > 0 && perBlockOk && enough;
-  const ALL = (1 << BLOCKS) - 1;
-  const potWith = usePotWith(ALL, spot);
-  const range = potWith ? strikeRange(potWith, ALL, spot) : null;
-  const label = !per
-    ? 'ENTER AMOUNT'
-    : !perBlockOk
-      ? `MIN ${MIN_SOL_PER_BLOCK} SOL PER SPOT`
-      : !enough
-        ? 'NOT ENOUGH SOL'
-        : rounds === 1
-          ? `MINE THIS ROUND · ${fmtSol(per)} SOL`
-          : `AUTOPILOT ${rounds} ROUNDS · ${fmtSol(need)} SOL`;
+  const enough = per <= balance + 1e-9;
+  const ready = per > 0 && perBlockOk && enough;
+  const mask = smartN ? maskOf(smartPick(pot.perBlock, smartN)) : (1 << BLOCKS) - 1;
+  const potWith = usePotWith(mask, spot);
+  const range = potWith ? strikeRange(potWith, mask, spot) : null;
+  const label = !per ? 'ENTER AMOUNT' : !perBlockOk ? `MIN ${MIN_SOL_PER_BLOCK} SOL PER SPOT` : !enough ? 'NOT ENOUGH SOL' : `MINE THIS ROUND · ${fmtSol(per)} SOL`;
   return (
     <>
       {compact ? null : (
         <>
-          <BalanceRow
-            onHalf={() => setPerSpot(trim((balance - RESERVE) / 2 / BLOCKS / Math.max(1, rounds)))}
-            onAll={() => setPerSpot(trim((balance - RESERVE) / BLOCKS / Math.max(1, rounds)))}
-          />
+          <BalanceRow />
           <AmountBox value={perSpot} onChange={setPerSpot} hint="SOL per spot" suffix="per spot" />
-          <Row
-            icon="🪙"
-            label="A round costs"
-            info={`LITE puts the same SOL on all 25 spots, so you are always on the gold spot. ${fmtSol(spot, 5)} a spot is ${fmtSol(per)} SOL a round. Minimum ${MIN_SOL_PER_BLOCK} SOL a spot. Optimal spreads your balance over ${OPTIMAL_ROUNDS} rounds.`}
-            right={
-              <>
-                <Chip label="Optimal" onPress={() => setPerSpot(trim(optimalPerSpot(balance - RESERVE)))} />
-                <T v="black" style={{ fontSize: 13, color: per ? COLORS.text : COLORS.muted }}>
-                  {per ? `${fmtSol(per)} SOL` : '—'}
-                </T>
-              </>
-            }
-          />
-          <Row
-            icon="🏆"
-            label="SOL if it strikes"
-            info={RETURN_INFO}
-            right={
-              <T v="black" numberOfLines={1} style={{ fontSize: 13, color: range ? COLORS.sol : COLORS.muted }}>
-                {range ? `${fmtRange(range)} a round` : '—'}
-              </T>
-            }
-          />
-          <Row
-            icon="🔁"
-            label="Rounds"
-            info="1 = mine this round only, no autopilot. More = the same deploy every round until they are used up. Keep the app open; you can stop any time."
-            last
-            right={
-              <>
-                <View style={[styles.tag, rounds > 1 && { borderColor: COLORS.teal }]}>
-                  <T v="black" style={{ fontSize: 9, letterSpacing: 1, color: rounds > 1 ? COLORS.teal : COLORS.muted }}>
-                    {rounds > 1 ? 'AUTO' : 'MANUAL'}
-                  </T>
-                </View>
-                <Chip label="−" onPress={() => setRounds(Math.max(1, rounds - 1))} />
-                <T v="black" style={{ fontSize: 15, minWidth: 22, textAlign: 'center' }}>
-                  {rounds}
-                </T>
-                <Chip label="+" onPress={() => setRounds(Math.min(100, rounds + 1))} />
-                <Chip label="Max" onPress={() => setRounds(Math.min(100, maxRounds))} />
-              </>
-            }
-          />
+          <View style={[styles.lineRight, { marginTop: 10 }]}>
+            <Chip grow label="All 25" on={!smartN} onPress={() => setSmart(0)} disabled={Boolean(run)} />
+            <Chip grow label="Smart" on={Boolean(smartN)} onPress={() => setSmart(smartN || 5)} disabled={Boolean(run)} />
+          </View>
+          {smartN ? (
+            <View style={[styles.lineRight, { marginTop: 6 }]}>
+              {SMART_COUNTS.map((c) => (
+                <Chip key={c} grow label={`${c} spots`} on={smartN === c} onPress={() => setSmart(c)} disabled={Boolean(run)} />
+              ))}
+            </View>
+          ) : null}
+          <T v="muted" style={{ fontSize: 12, textAlign: 'center', marginTop: 10 }}>
+            {range ? `If it strikes: ${fmtRange(range)} SOL` : smartN ? 'Smart takes the emptiest spots' : 'All 25: always on the gold spot'}
+          </T>
         </>
       )}
       <RunButton
         ready={ready}
         label={label}
-        sub={ready ? `${fmtSol(spot, 5)} SOL × 25 spots${rounds > 1 ? ` × ${rounds} rounds` : ''} · always on the gold spot` : undefined}
-        onStart={() => void startRun({ kind: 'lite', perRound: per, perSpot: spot, blocks: 'all', smartN: BLOCKS, manualMask: 0, total: rounds })}
+        sub={ready ? `${fmtSol(spot, 5)} SOL × ${n} spots` : undefined}
+        onStart={() => void startRun({ kind: 'lite', perRound: per, perSpot: spot, blocks: smartN ? 'smart' : 'all', smartN: n, manualMask: 0, total: 1 })}
       />
     </>
   );
@@ -435,7 +395,7 @@ function ProPanel({ compact }: { compact: boolean }) {
           <Row
             icon="▦"
             label="Spots"
-            info="Press and hold spots on the map to pick them (a quick tap opens one up), take All 25, or Smart: the least-crowded spots, where your SOL buys the biggest share."
+            info="Tap spots on the map to pick them (double tap or hold one to dive in), take All 25, or Smart: the least-crowded spots, where your SOL buys the biggest share."
             right={
               <>
                 <T v="black" style={{ fontSize: 15, color: blocks ? COLORS.text : COLORS.muted, marginRight: 4 }}>

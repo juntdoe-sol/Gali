@@ -173,6 +173,10 @@ interface GameState {
   potAt: number;
   run: Run | null;
   dockTab: DockTab;
+  /** LITE's spot choice: 0 plays all 25, otherwise Smart picks this many of the emptiest spots. */
+  liteSmart: number;
+  /** The LITE / PRO panel. Closed by default; the MINE button opens it. */
+  dockOpen: boolean;
   selected: number[];
   lastResult: RoundResult | null;
   resultAt: number;
@@ -208,6 +212,8 @@ interface GameState {
   finishOnboarding: () => void;
   toast: (text: string, tone?: Toast['tone']) => void;
   setDockTab: (t: DockTab) => void;
+  setLiteSmart: (n: number) => void;
+  setDockOpen: (open: boolean) => void;
   startRun: (r: Omit<Run, 'left' | 'lastRound'>) => Promise<void>;
   stopRun: () => void;
   refreshPot: () => Promise<void>;
@@ -414,7 +420,7 @@ export const useGame = create<GameState>((set, get) => {
         roundId: roundOf(chainNow(get().offsetMs)),
         run: run && run.left <= 0 ? null : run,
       });
-      if (run && run.left <= 0) get().toast(`Autopilot finished ${run.total} round${run.total > 1 ? 's' : ''}`, 'info');
+      if (run && run.left <= 0 && run.total > 1) get().toast(`Autopilot finished ${run.total} rounds`, 'info');
     }, REVEAL_MIN_MS - 1400);
   }
 
@@ -545,6 +551,8 @@ export const useGame = create<GameState>((set, get) => {
     potAt: 0,
     run: null,
     dockTab: 'lite',
+    liteSmart: 0,
+    dockOpen: false,
     selected: [],
     lastResult: null,
     resultAt: 0,
@@ -654,9 +662,16 @@ export const useGame = create<GameState>((set, get) => {
     shakePick: () => {
       const st = get();
       if (st.phase !== 'mining' || st.pending || st.run || st.wallet.busy) return;
-      const n = st.selected.length > 0 && st.selected.length < BLOCKS ? st.selected.length : 5;
-      set({ selected: smartPick(st.pot.perBlock, n), dockTab: 'pro' });
-      if (st.save.presets[st.save.preset]) get().editPreset({ blocks: 'smart', smartN: n });
+      if (st.dockTab === 'lite') {
+        // LITE stays LITE: shaking switches it to Smart
+        const n = st.liteSmart || 5;
+        set({ liteSmart: n, selected: smartPick(st.pot.perBlock, n) });
+      } else {
+        const n = st.selected.length > 0 && st.selected.length < BLOCKS ? st.selected.length : 5;
+        set({ selected: smartPick(st.pot.perBlock, n) });
+        if (st.save.presets[st.save.preset]) get().editPreset({ blocks: 'smart', smartN: n });
+      }
+      const n = get().selected.length;
       play('select');
       haptic.thud();
       updateSave((s) => ({ ...s, questProgress: { ...s.questProgress, shake: 1 } }));
@@ -897,6 +912,12 @@ export const useGame = create<GameState>((set, get) => {
     },
 
     setDockTab: (t) => set({ dockTab: t }),
+    setDockOpen: (open) => set({ dockOpen: open }),
+    setLiteSmart: (n) => {
+      const st = get();
+      if (st.run) return;
+      set({ liteSmart: n, selected: n ? smartPick(st.pot.perBlock, n) : [] });
+    },
 
     startRun: async (r) => {
       const st = get();

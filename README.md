@@ -40,7 +40,7 @@ Gali mints nothing, takes no cut of a winner's SOL and never holds a player's OR
 
 ## How a round works
 
-1. **Pick.** Tap a spot to look inside, press and hold to pick it. LITE puts the same SOL on all 25 spots; PRO picks by hand, All or Smart (the least crowded spots). Shake the phone to Smart-pick.
+1. **Pick.** Tap MINE to open the panel. LITE plays one round on all 25 spots or on Smart's 3, 5 or 10 least crowded spots. PRO adds picking by hand (tap a spot on the map), presets and autopilot. Double tap or hold a spot to dive into its mine. Shake the phone to Smart-pick.
 2. **Deploy.** One transaction into ORE's board. A session key funded once lets the app deploy every round without a wallet pop-up; it can deploy but never withdraw.
 3. **Strike.** ORE draws one winning square. Its miners split the losing squares' SOL (after ORE's 1% fee and 10% of the losing squares) by their SOL on the winner, and mine the round's 1 ORE. Ten squares a round are solo squares (★): on those, one miner takes the whole ORE, with odds equal to their share.
 4. **Motherlode.** ORE adds 0.2 ORE to its motherlode every round and pays the whole pool 1 round in 500, split by SOL on the winning square. When it hits, Gali pays its own jackpot to the same winners, split the same way, plus 10,000 points. That jackpot is Gali's SKR pool and its ORE pool, both filled by gear sales.

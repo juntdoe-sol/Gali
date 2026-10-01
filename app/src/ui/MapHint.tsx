@@ -1,6 +1,6 @@
 /**
  * A one-line coach mark over the map, for the first few seconds of a visit:
- * how to look inside a claim and how to pick one. It goes as soon as you do
+ * how to pick a spot and how to dive into one. It goes as soon as you do
  * either, and doesn't come back until the next visit.
  */
 import { useEffect, useRef, useState } from 'react';
@@ -15,6 +15,7 @@ export function MapHint() {
   const onboarded = useGame((s) => s.save.onboarded);
   const focus = useView((s) => s.focus);
   const picked = useGame((s) => s.selected.length);
+  const dockOpen = useGame((s) => s.dockOpen);
   const [done, setDone] = useState(false);
   const fade = useRef(new Animated.Value(0)).current;
   const startPicked = useRef(picked);
@@ -32,11 +33,11 @@ export function MapHint() {
     if (done) Animated.timing(fade, { toValue: 0, duration: 250, useNativeDriver: true }).start();
   }, [done, fade]);
 
-  if (!onboarded) return null;
+  if (!onboarded || dockOpen) return null;
   return (
     <Animated.View pointerEvents="none" style={[styles.pill, { bottom: fx.viewBottom + 6, opacity: fade }]}>
       <T v="bold" style={styles.text}>
-        Tap a spot to look inside · hold to pick it
+        Tap a spot to pick it in PRO · double tap to dive in
       </T>
     </Animated.View>
   );

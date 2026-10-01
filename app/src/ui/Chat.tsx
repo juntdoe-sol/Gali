@@ -2,31 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { short } from '../chain/light';
-import { chatReady, startChatPolling, useChat, type ChatMsg } from '../game/chat';
+import { chatReady, useChat, type ChatMsg } from '../game/chat';
 import { COLORS, usd } from '../game/constants';
 import { useGame } from '../game/store';
 import { Btn, F, T } from './kit';
 
 const TIP_AMOUNTS = [25, 100, 500, 1000];
-
-export function ChatButton() {
-  const insets = useSafeAreaInsets();
-  const unread = useChat((s) => s.unread);
-  const setOpen = useChat((s) => s.setOpen);
-  useEffect(() => startChatPolling(), []);
-  return (
-    <Pressable onPress={() => setOpen(true)} style={[styles.fab, { top: insets.top + 196 }]} accessibilityLabel="Open miners chat">
-      <T style={{ fontSize: 20 }}>💬</T>
-      {unread > 0 ? (
-        <View style={styles.badge}>
-          <T v="black" style={{ fontSize: 10, color: '#070d20' }}>
-            {unread > 9 ? '9+' : unread}
-          </T>
-        </View>
-      ) : null}
-    </Pressable>
-  );
-}
 
 export function ChatSheet() {
   const insets = useSafeAreaInsets();
