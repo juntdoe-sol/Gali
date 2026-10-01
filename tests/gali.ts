@@ -15,8 +15,10 @@
  */
 import * as anchor from '@coral-xyz/anchor';
 import {
+  ASSOCIATED_TOKEN_PROGRAM_ID,
   createMint,
   getAccount,
+  getAssociatedTokenAddressSync,
   getOrCreateAssociatedTokenAccount,
   mintTo,
   TOKEN_PROGRAM_ID,
@@ -28,6 +30,7 @@ import oreIdl from '../target/idl/ore_mock.json';
 import {
   boardBytes,
   minerBytes,
+  ONE_DAY_SLOTS,
   oreBoardPda,
   oreMinerPda,
   oreRoundPda,
@@ -77,6 +80,14 @@ describe('gali on ORE', () => {
 
   const balance = async (ata: PublicKey) => (await getAccount(conn, ata)).amount;
 
+  /** The Gali events a confirmed transaction emitted, by name. */
+  const eventsOf = async (sig: string) => {
+    await conn.confirmTransaction(sig, 'confirmed');
+    const tx = await conn.getTransaction(sig, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
+    const parser = new anchor.EventParser(program.programId, program.coder);
+    return [...parser.parseLogs(tx?.meta?.logMessages ?? [])];
+  };
+
   /** ConfigUpdate is one struct of Options, so absent fields go on the wire as null. */
   const configUpdate = (patch: Record<string, unknown>) => ({
     basePoints: null,
@@ -92,14 +103,11 @@ describe('gali on ORE', () => {
     ...patch,
   });
 
-  async function fundedPlayer() {
+  /** A wallet with SOL and a Player account, but no token accounts at all. */
+  async function barePlayer() {
     const kp = Keypair.generate();
     const sig = await conn.requestAirdrop(kp.publicKey, 2 * LAMPORTS_PER_SOL);
     await conn.confirmTransaction(sig, 'confirmed');
-    const skrAta = (await getOrCreateAssociatedTokenAccount(conn, admin, skrMint, kp.publicKey)).address;
-    const oreAta = (await getOrCreateAssociatedTokenAccount(conn, admin, oreMint, kp.publicKey)).address;
-    await mintTo(conn, admin, skrMint, skrAta, admin, 5_000_000 * 10 ** SKR_DECIMALS);
-    await mintTo(conn, admin, oreMint, oreAta, admin, Number(whole(50, ORE_DECIMALS)));
     await program.methods
       .initPlayer()
       .accountsStrict({
@@ -109,6 +117,15 @@ describe('gali on ORE', () => {
       })
       .signers([kp])
       .rpc();
+    return kp;
+  }
+
+  async function fundedPlayer() {
+    const kp = await barePlayer();
+    const skrAta = (await getOrCreateAssociatedTokenAccount(conn, admin, skrMint, kp.publicKey)).address;
+    const oreAta = (await getOrCreateAssociatedTokenAccount(conn, admin, oreMint, kp.publicKey)).address;
+    await mintTo(conn, admin, skrMint, skrAta, admin, 5_000_000 * 10 ** SKR_DECIMALS);
+    await mintTo(conn, admin, oreMint, oreAta, admin, Number(whole(50, ORE_DECIMALS)));
     return { kp, skrAta, oreAta };
   }
 
@@ -171,11 +188,15 @@ describe('gali on ORE', () => {
       .signers([kp])
       .rpc();
 
-  before(async () => {
-    skrMint = await createMint(conn, admin, admin.publicKey, null, SKR_DECIMALS);
-    oreMint = await createMint(conn, admin, admin.publicKey, null, ORE_DECIMALS);
+  /**
+   * The config can be created once, so the refusals are tried first, before the
+   * real init, and their errors kept for the tests below. A refused init creates
+   * nothing, which is also what lets the real one go through afterwards.
+   */
+  const zeroRateErrors: string[] = [];
 
-    await program.methods
+  const initConfig = (rates: { skr: number; ore: number }) =>
+    program.methods
       .initConfig({
         basePoints: new BN(10),
         motherlodePoints: new BN(500),
@@ -184,8 +205,8 @@ describe('gali on ORE', () => {
         oreBoostTier1: new BN(whole(1, ORE_DECIMALS).toString()),
         oreBoostTier2: new BN(whole(10, ORE_DECIMALS).toString()),
         gearPricesUsd: GEAR_USD.map((v) => new BN(v)),
-        skrPriceMicro: new BN(SKR_MICRO),
-        orePriceMicro: new BN(ORE_MICRO),
+        skrPriceMicro: new BN(rates.skr),
+        orePriceMicro: new BN(rates.ore),
         priceMaxAgeSecs: 0,
         motherlodePoolBps: 7_000,
         oreMotherlodeBps: 5_000,
@@ -210,6 +231,68 @@ describe('gali on ORE', () => {
         systemProgram: SystemProgram.programId,
       })
       .rpc();
+
+  before(async () => {
+    skrMint = await createMint(conn, admin, admin.publicKey, null, SKR_DECIMALS);
+    oreMint = await createMint(conn, admin, admin.publicKey, null, ORE_DECIMALS);
+
+    for (const rates of [{ skr: 0, ore: ORE_MICRO }, { skr: SKR_MICRO, ore: 0 }]) {
+      try {
+        await initConfig(rates);
+        zeroRateErrors.push('accepted');
+      } catch (e) {
+        zeroRateErrors.push(String(e));
+      }
+    }
+    await initConfig({ skr: SKR_MICRO, ore: ORE_MICRO });
+  });
+
+  describe('config and sessions', () => {
+    it('refuses to initialise with a zero SKR or ORE rate', () => {
+      expect(zeroRateErrors).to.have.length(2);
+      for (const err of zeroRateErrors) expect(err).to.match(/BadAmount/);
+    });
+
+    const setSession = (kp: Keypair, expiresAt: number) =>
+      program.methods
+        .setSession(kp.publicKey, new BN(expiresAt), new BN(0))
+        .accountsStrict({
+          owner: kp.publicKey,
+          player: playerPda(kp.publicKey),
+          session: kp.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([kp])
+        .rpc();
+
+    it('refuses a session that has already expired', async () => {
+      const kp = await barePlayer();
+      const now = (await conn.getBlockTime(await conn.getSlot()))!;
+      try {
+        await setSession(kp, now - 60);
+        expect.fail('an expired session key should never be authorised');
+      } catch (e) {
+        expect(String(e)).to.match(/BadSession/);
+      }
+      await setSession(kp, now + 3_600); // a live one still goes through
+      const p = await acc.player.fetch(playerPda(kp.publicKey));
+      expect(p.sessionExpires.toNumber()).to.equal(now + 3_600);
+    });
+
+    it('reports the old and new value of every setting a config update changes', async () => {
+      const sig = await program.methods
+        .updateConfig(configUpdate({ basePoints: new BN(11) }) as any)
+        .accountsStrict({ authority: admin.publicKey, config })
+        .rpc();
+      const ev = (await eventsOf(sig)).find((e) => e.name === 'configUpdated')!;
+      expect(ev.data.old.basePoints.toNumber()).to.equal(10);
+      expect(ev.data.new.basePoints.toNumber()).to.equal(11);
+      expect(ev.data.old.motherlodePoints).to.equal(null); // untouched fields stay empty
+      await program.methods
+        .updateConfig(configUpdate({ basePoints: new BN(10) }) as any)
+        .accountsStrict({ authority: admin.publicKey, config })
+        .rpc();
+    });
   });
 
   describe('gear is priced in dollars', () => {
@@ -435,6 +518,71 @@ describe('gali on ORE', () => {
         expect(String(e)).to.match(/OreNotCheckpointed/);
       }
     });
+
+    it('refuses an earlier round once a later one is recorded (a skipped round is forfeit)', async () => {
+      // One last_ore_round per player keeps recording cheap, at a price: rounds go in
+      // order, so a round nobody recorded before the next deploy can never be.
+      const p = await fundedPlayer();
+      const n = 1_070;
+      const deployed = zeros25();
+      deployed[3] = LAMPORTS_PER_SOL;
+      const mine = zeros25();
+      mine[3] = LAMPORTS_PER_SOL;
+      await setBoard(n + 2);
+      await setRound({ id: n, deployed, winningSquare: 3, endSlot: 10 });
+      await setRound({ id: n + 1, deployed, winningSquare: 3, endSlot: 10 });
+
+      await setMiner({ authority: p.kp.publicKey, roundId: n + 1, deployed: mine });
+      await recordRound(p.kp.publicKey, n + 1);
+
+      await setMiner({ authority: p.kp.publicKey, roundId: n, deployed: mine });
+      try {
+        await recordRound(p.kp.publicKey, n);
+        expect.fail('an earlier round should not be recordable after a later one');
+      } catch (e) {
+        expect(String(e)).to.match(/OreRoundAlreadyRecorded/);
+      }
+      expect((await acc.player.fetch(playerPda(p.kp.publicKey))).rounds).to.equal(1);
+    });
+
+    it('treats an impossible expiry or motherlode as a layout change', async () => {
+      const p = await fundedPlayer();
+      const slot = await conn.getSlot();
+      const deployed = zeros25();
+      deployed[4] = LAMPORTS_PER_SOL;
+      const mine = zeros25();
+      mine[4] = LAMPORTS_PER_SOL;
+
+      // Ten days of slots out: no real round expires that far from now.
+      const far = 1_080;
+      await setBoard(far + 1);
+      await setRound({ id: far, deployed, winningSquare: 4, endSlot: slot + 10 * ONE_DAY_SLOTS });
+      await setMiner({ authority: p.kp.publicKey, roundId: far, deployed: mine });
+      try {
+        await recordRound(p.kp.publicKey, far);
+        expect.fail('an expiry ten days out should not decode as a round');
+      } catch (e) {
+        expect(String(e)).to.match(/BadOreLayout/);
+      }
+
+      // A motherlode above ORE's whole 3M supply cannot be a real payout.
+      const rich = 1_090;
+      await setBoard(rich + 1);
+      await setRound({
+        id: rich,
+        deployed,
+        winningSquare: 4,
+        motherlode: whole(3_000_001, ORE_DECIMALS),
+        endSlot: 10,
+      });
+      await setMiner({ authority: p.kp.publicKey, roundId: rich, deployed: mine });
+      try {
+        await recordRound(p.kp.publicKey, rich);
+        expect.fail('a motherlode above max supply should not decode');
+      } catch (e) {
+        expect(String(e)).to.match(/BadOreLayout/);
+      }
+    });
   });
 
   describe('the SKR jackpot', () => {
@@ -449,6 +597,22 @@ describe('gali on ORE', () => {
           skrMint,
           funderAta: ata,
           motherlode,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .rpc();
+    };
+
+    const fundOrePool = async (raw: bigint) => {
+      const ata = (await getOrCreateAssociatedTokenAccount(conn, admin, oreMint, admin.publicKey)).address;
+      await mintTo(conn, admin, oreMint, ata, admin, raw);
+      await program.methods
+        .fundOre(new BN(raw.toString()))
+        .accountsStrict({
+          funder: admin.publicKey,
+          config,
+          oreMint,
+          funderAta: ata,
+          oreMotherlode,
           tokenProgram: TOKEN_PROGRAM_ID,
         })
         .rpc();
@@ -472,10 +636,24 @@ describe('gali on ORE', () => {
           oreRound: oreRoundPda(roundId),
           oreMiner: oreMinerPda(owner.publicKey),
           tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
         })
         .signers([owner])
         .rpc();
+
+    /** A round where ORE's motherlode hit and `stakes` (lamports) sat on the winning square. */
+    const motherlodeRound = async (roundId: number, square: number, stakes: PublicKey[], lamports: number[]) => {
+      const deployed = zeros25();
+      deployed[square] = lamports.reduce((a, b) => a + b, 0);
+      await setBoard(roundId + 1);
+      await setRound({ id: roundId, deployed, winningSquare: square, motherlode: whole(1, ORE_DECIMALS), endSlot: 10 });
+      for (let i = 0; i < stakes.length; i++) {
+        const mine = zeros25();
+        mine[square] = lamports[i];
+        await setMiner({ authority: stakes[i], roundId, deployed: mine });
+      }
+    };
 
     it('splits by the same share of the square ORE used, from a pool frozen at the first claim', async () => {
       const big = await fundedPlayer();
@@ -589,6 +767,62 @@ describe('gali on ORE', () => {
         expect(String(e)).to.match(/OreRoundAlreadyRecorded/);
       }
     });
+
+    it('pays a winner who has never held SKR or ORE, creating their token accounts', async () => {
+      const kp = await barePlayer();
+      const roundId = 2_040;
+      await fundJackpot(10_000);
+      await fundOrePool(whole(2, ORE_DECIMALS));
+      await motherlodeRound(roundId, 15, [kp.publicKey], [LAMPORTS_PER_SOL]);
+
+      const skrAta = getAssociatedTokenAddressSync(skrMint, kp.publicKey);
+      const oreAta = getAssociatedTokenAddressSync(oreMint, kp.publicKey);
+      expect(await conn.getAccountInfo(skrAta)).to.equal(null);
+      expect(await conn.getAccountInfo(oreAta)).to.equal(null);
+      const skrPool = await balance(motherlode);
+      const orePool = await balance(oreMotherlode);
+
+      await claim(kp, skrAta, oreAta, roundId);
+      // Sole winner on the square, so the whole of both pools.
+      expect(await balance(skrAta)).to.equal(skrPool);
+      expect(await balance(oreAta)).to.equal(orePool);
+    });
+
+    it('never pays out more than 10,000 bps or the pools, and leaves rounding dust in them', async () => {
+      // 1, 2 and 4 SOL on a 7 SOL square: 1428 + 2857 + 5714 = 9999 bps once floored.
+      const players = [await fundedPlayer(), await fundedPlayer(), await fundedPlayer()];
+      const lamports = [1, 2, 4].map((x) => x * LAMPORTS_PER_SOL);
+      const roundId = 2_050;
+      // Floored shares leave 1 bp unpaid; the odd ORE amount also floors below a unit.
+      await fundJackpot(10_007);
+      await fundOrePool(whole(3, ORE_DECIMALS) + 7n);
+      await motherlodeRound(roundId, 16, players.map((p) => p.kp.publicKey), lamports);
+
+      const skrSnap = await balance(motherlode);
+      const oreSnap = await balance(oreMotherlode);
+      let skrPaid = 0n;
+      let orePaid = 0n;
+      for (const p of players) {
+        const skrBefore = await balance(p.skrAta);
+        const oreBefore = await balance(p.oreAta);
+        await claim(p.kp, p.skrAta, p.oreAta, roundId);
+        skrPaid += (await balance(p.skrAta)) - skrBefore;
+        orePaid += (await balance(p.oreAta)) - oreBefore;
+      }
+
+      const jackpot = await acc.jackpot.fetch(jackpotPda(roundId));
+      expect(jackpot.bpsPaid.toNumber()).to.equal(9_999);
+      expect(jackpot.bpsPaid.toNumber()).to.be.at.most(10_000);
+      const expectSkr = [1_428n, 2_857n, 5_714n].reduce((a, bps) => a + (skrSnap * bps) / 10_000n, 0n);
+      const expectOre = [1_428n, 2_857n, 5_714n].reduce((a, bps) => a + (oreSnap * bps) / 10_000n, 0n);
+      expect(skrPaid).to.equal(expectSkr);
+      expect(orePaid).to.equal(expectOre);
+      // Never overdrawn, and what rounding left behind stays in the pools.
+      expect(await balance(motherlode)).to.equal(skrSnap - skrPaid);
+      expect(await balance(oreMotherlode)).to.equal(oreSnap - orePaid);
+      expect(skrSnap - skrPaid > 0n).to.equal(true);
+      expect(oreSnap - orePaid > 0n).to.equal(true);
+    });
   });
 
   describe('staking boosts, but only from before the round', () => {
@@ -644,6 +878,55 @@ describe('gali on ORE', () => {
       await recordRound(p.kp.publicKey, roundId);
       // Unboosted: the same tokens cannot be walked from wallet to wallet.
       expect((await acc.player.fetch(playerPda(p.kp.publicKey))).points.toNumber()).to.equal(250);
+    });
+
+    it('emits Unstaked with the amount taken out and what stays staked', async () => {
+      const p = await fundedPlayer();
+      await stake(p.kp, p.skrAta, whole(300, SKR_DECIMALS));
+      const sig = await program.methods
+        .unstakeSkr(new BN(whole(100, SKR_DECIMALS).toString()))
+        .accountsStrict({
+          owner: p.kp.publicKey,
+          config,
+          player: playerPda(p.kp.publicKey),
+          skrMint,
+          userAta: p.skrAta,
+          vault,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([p.kp])
+        .rpc();
+      const ev = (await eventsOf(sig)).find((e) => e.name === 'unstaked')!;
+      expect(ev.data.amount.toString()).to.equal(whole(100, SKR_DECIMALS).toString());
+      expect(ev.data.total.toString()).to.equal(whole(200, SKR_DECIMALS).toString());
+    });
+
+    it('boosts a stake made one slot before the round closed, not one made at the close', async () => {
+      const p = await fundedPlayer();
+      await stake(p.kp, p.skrAta, whole(5_000, SKR_DECIMALS));
+      const stakeSlot = (await acc.player.fetch(playerPda(p.kp.publicKey))).stakeSlot.toNumber();
+      const deployed = zeros25();
+      deployed[6] = LAMPORTS_PER_SOL;
+      const mine = zeros25();
+      mine[6] = LAMPORTS_PER_SOL;
+
+      // Closed in the very slot the stake landed: the rule is strictly "before".
+      const atClose = 3_020;
+      await setBoard(atClose + 1);
+      await setRound({ id: atClose, deployed, winningSquare: 6, endSlot: stakeSlot });
+      await setMiner({ authority: p.kp.publicKey, roundId: atClose, deployed: mine });
+      await recordRound(p.kp.publicKey, atClose);
+      expect((await acc.player.fetch(playerPda(p.kp.publicKey))).points.toNumber()).to.equal(250);
+
+      // Closed one slot later, so the stake came one slot before the close.
+      const after = 3_030;
+      await setBoard(after + 1);
+      await setRound({ id: after, deployed, winningSquare: 6, endSlot: stakeSlot + 1 });
+      await setMiner({ authority: p.kp.publicKey, roundId: after, deployed: mine });
+      await recordRound(p.kp.publicKey, after);
+      expect((await acc.player.fetch(playerPda(p.kp.publicKey))).points.toNumber()).to.equal(250 + 312);
     });
   });
 

@@ -99,6 +99,10 @@ pub mod gali {
 
     pub fn init_config(ctx: Context<InitConfig>, args: ConfigArgs) -> Result<()> {
         require!(args.gear_prices_usd.len() <= MAX_GEAR, GaliError::BadConfig);
+        require!(
+            args.skr_price_micro > 0 && args.ore_price_micro > 0,
+            GaliError::BadAmount
+        );
         let c = &mut ctx.accounts.config;
         c.authority = ctx.accounts.authority.key();
         c.skr_mint = ctx.accounts.skr_mint.key();
@@ -154,40 +158,54 @@ pub mod gali {
     /// Change game settings. Only fields that are `Some` change. The SKR and ORE mints are fixed.
     pub fn update_config(ctx: Context<AdminConfig>, u: ConfigUpdate) -> Result<()> {
         let c = &mut ctx.accounts.config;
+        let new = u.clone();
+        // The previous value of every field this call changes, so an indexer can tell what moved.
+        let mut old = ConfigUpdate::default();
         if let Some(v) = u.base_points {
+            old.base_points = Some(c.base_points);
             c.base_points = v;
         }
         if let Some(v) = u.motherlode_points {
+            old.motherlode_points = Some(c.motherlode_points);
             c.motherlode_points = v;
         }
         if let Some(v) = u.boost_tier1 {
+            old.boost_tier1 = Some(c.boost_tier1);
             c.boost_tier1 = v;
         }
         if let Some(v) = u.boost_tier2 {
+            old.boost_tier2 = Some(c.boost_tier2);
             c.boost_tier2 = v;
         }
         if let Some(v) = u.ore_boost_tier1 {
+            old.ore_boost_tier1 = Some(c.ore_boost_tier1);
             c.ore_boost_tier1 = v;
         }
         if let Some(v) = u.ore_boost_tier2 {
+            old.ore_boost_tier2 = Some(c.ore_boost_tier2);
             c.ore_boost_tier2 = v;
         }
         if let Some(v) = u.gear_prices_usd {
             require!(v.len() <= MAX_GEAR, GaliError::BadConfig);
-            c.gear_prices_usd = v;
+            old.gear_prices_usd = Some(std::mem::replace(&mut c.gear_prices_usd, v));
         }
         if let Some(v) = u.price_max_age_secs {
+            old.price_max_age_secs = Some(c.price_max_age_secs);
             c.price_max_age_secs = v;
         }
         if let Some(v) = u.motherlode_pool_bps {
+            old.motherlode_pool_bps = Some(c.motherlode_pool_bps);
             c.motherlode_pool_bps = v;
         }
         if let Some(v) = u.ore_motherlode_bps {
+            old.ore_motherlode_bps = Some(c.ore_motherlode_bps);
             c.ore_motherlode_bps = v;
         }
         check_config(c)?;
         emit!(ConfigUpdated {
-            authority: c.authority
+            authority: c.authority,
+            old,
+            new,
         });
         Ok(())
     }
@@ -325,6 +343,7 @@ pub mod gali {
         fund_lamports: u64,
     ) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
+        require!(expires_at > now, GaliError::BadSession);
         require!(expires_at <= now + MAX_SESSION_SECS, GaliError::BadSession);
         let p = &mut ctx.accounts.player;
         p.session = session;
@@ -365,6 +384,10 @@ pub mod gali {
     ///
     /// Call it after ORE has checkpointed the miner and before they deploy again,
     /// which is the window in which ORE's miner account still holds that round.
+    /// Rounds are recorded in order: once round N is in, any round before N is
+    /// refused with `OreRoundAlreadyRecorded`, so a round missed before the next
+    /// deploy is forfeit. That is the price of one `last_ore_round` per player
+    /// instead of a receipt account per round.
     pub fn record_ore_round(ctx: Context<RecordOreRound>, round_id: u64) -> Result<()> {
         let cfg = &ctx.accounts.config;
         require!(!cfg.paused, GaliError::Paused);
@@ -450,6 +473,10 @@ pub mod gali {
     ///
     /// Signed by the player, because it moves value to them. Everything it decides
     /// comes out of ORE-owned accounts.
+    ///
+    /// Claims go in round order, like `record_ore_round`: claiming a later jackpot
+    /// first refuses every earlier one. The winner's SKR and ORE token accounts are
+    /// created here if they do not exist yet, paid for by the winner.
     pub fn claim_jackpot(ctx: Context<ClaimJackpot>, round_id: u64) -> Result<()> {
         require!(!ctx.accounts.config.paused, GaliError::Paused);
 
@@ -673,9 +700,9 @@ pub mod gali {
             amount,
             ctx.accounts.ore_mint.decimals,
         )?;
-        emit!(StakedOre {
+        emit!(UnstakedOre {
             owner: p.owner,
-            amount: 0,
+            amount,
             total: p.staked_ore
         });
         Ok(())
@@ -730,9 +757,9 @@ pub mod gali {
             amount,
             ctx.accounts.skr_mint.decimals,
         )?;
-        emit!(Staked {
+        emit!(Unstaked {
             owner: p.owner,
-            amount: 0,
+            amount,
             total: p.staked_skr
         });
         Ok(())
@@ -1124,9 +1151,19 @@ pub struct ClaimJackpot<'info> {
     pub motherlode: Box<InterfaceAccount<'info, TokenAccount>>,
     #[account(mut, seeds = [b"ore_motherlode"], bump)]
     pub ore_motherlode: Box<InterfaceAccount<'info, TokenAccount>>,
-    #[account(mut, token::mint = skr_mint, token::authority = owner, token::token_program = token_program)]
+    /// Created on the spot if the winner has never held SKR, so a hit is never lost to a missing account.
+    #[account(
+        init_if_needed, payer = owner,
+        associated_token::mint = skr_mint, associated_token::authority = owner,
+        associated_token::token_program = token_program
+    )]
     pub owner_skr: Box<InterfaceAccount<'info, TokenAccount>>,
-    #[account(mut, token::mint = ore_mint, token::authority = owner, token::token_program = token_program)]
+    /// The same for ORE.
+    #[account(
+        init_if_needed, payer = owner,
+        associated_token::mint = ore_mint, associated_token::authority = owner,
+        associated_token::token_program = token_program
+    )]
     pub owner_ore: Box<InterfaceAccount<'info, TokenAccount>>,
     /// CHECK: validated as an ORE-owned account of the right size and address.
     pub ore_board: UncheckedAccount<'info>,
@@ -1135,6 +1172,7 @@ pub struct ClaimJackpot<'info> {
     /// CHECK: validated as an ORE-owned account of the right size and derivation.
     pub ore_miner: UncheckedAccount<'info>,
     pub token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
 
@@ -1271,9 +1309,13 @@ pub struct TokenPricesSet {
     pub at: i64,
 }
 
+/// `new` is the update as sent (only changed fields are `Some`); `old` holds the
+/// value each of those fields had before, and `None` everywhere else.
 #[event]
 pub struct ConfigUpdated {
     pub authority: Pubkey,
+    pub old: ConfigUpdate,
+    pub new: ConfigUpdate,
 }
 
 #[event]
@@ -1307,6 +1349,14 @@ pub struct MotherlodeFunded {
 
 #[event]
 pub struct Staked {
+    pub owner: Pubkey,
+    pub amount: u64,
+    pub total: u64,
+}
+
+/// SKR taken back out of staking. `total` is what stays staked.
+#[event]
+pub struct Unstaked {
     pub owner: Pubkey,
     pub amount: u64,
     pub total: u64,
@@ -1361,20 +1411,20 @@ pub struct StakedOre {
     pub total: u64,
 }
 
+/// ORE taken back out of staking. `total` is what stays staked.
+#[event]
+pub struct UnstakedOre {
+    pub owner: Pubkey,
+    pub amount: u64,
+    pub total: u64,
+}
+
 #[error_code]
 pub enum GaliError {
     #[msg("Invalid config")]
     BadConfig,
     #[msg("That round isn't open")]
     WrongRound,
-    #[msg("This round is locked; wait for the next one")]
-    RoundLocked,
-    #[msg("Pick between 1 and 25 spots")]
-    BadMask,
-    #[msg("Round hasn't ended yet")]
-    RoundNotOver,
-    #[msg("No slot hash available")]
-    NoEntropy,
     #[msg("Invalid amount")]
     BadAmount,
     #[msg("Unknown gear item")]
@@ -1385,34 +1435,12 @@ pub enum GaliError {
     NotAuthorised,
     #[msg("Invalid session")]
     BadSession,
-    #[msg("This pot is already settled")]
-    AlreadySettled,
-    #[msg("Settle the pot first")]
-    NotSettled,
     #[msg("Gali is paused for maintenance")]
     Paused,
-    #[msg("You already have SOL on that spot this round")]
-    AlreadyOnBlock,
-    #[msg("This round's draw is already locked")]
-    AlreadyLocked,
-    #[msg("Lock the round before revealing it")]
-    NotLocked,
-    #[msg("The locked slot has expired; lock the round again")]
-    DrawExpired,
-    #[msg("This round is already revealed")]
-    AlreadyRevealed,
-    #[msg("Your staked SKR is boosting this round; unstake after it ends")]
-    StakeInPlay,
     #[msg("Only the program's upgrade authority can do this")]
     NotUpgradeAuthority,
     #[msg("Nothing to claim yet")]
     NothingToClaim,
-    #[msg("Too early to close this round")]
-    TooEarly,
-    #[msg("Some stakes in this round are not claimed yet")]
-    UnclaimedStakes,
-    #[msg("This round was abandoned and refunded")]
-    RoundAbandoned,
     #[msg("That is not the ORE account it claims to be")]
     BadOreAccount,
     #[msg("ORE's account layout has changed; Gali needs updating before it can read it")]

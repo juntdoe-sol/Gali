@@ -491,7 +491,11 @@
         "motherlode bonus is claimed separately by the player who earned it.",
         "",
         "Call it after ORE has checkpointed the miner and before they deploy again,",
-        "which is the window in which ORE's miner account still holds that round."
+        "which is the window in which ORE's miner account still holds that round.",
+        "Rounds are recorded in order: once round N is in, any round before N is",
+        "refused with `OreRoundAlreadyRecorded`, so a round missed before the next",
+        "deploy is forfeit. That is the price of one `last_ore_round` per player",
+        "instead of a receipt account per round."
       ],
       "discriminator": [
         140,
@@ -561,7 +565,11 @@
         "SKR and leave the ORE behind for someone else's share to grow into.",
         "",
         "Signed by the player, because it moves value to them. Everything it decides",
-        "comes out of ORE-owned accounts."
+        "comes out of ORE-owned accounts.",
+        "",
+        "Claims go in round order, like `record_ore_round`: claiming a later jackpot",
+        "first refuses every earlier one. The winner's SKR and ORE token accounts are",
+        "created here if they do not exist yet, paid for by the winner."
       ],
       "discriminator": [
         28,
@@ -606,10 +614,16 @@
         },
         {
           "name": "owner_skr",
+          "docs": [
+            "Created on the spot if the winner has never held SKR, so a hit is never lost to a missing account."
+          ],
           "writable": true
         },
         {
           "name": "owner_ore",
+          "docs": [
+            "The same for ORE."
+          ],
           "writable": true
         },
         {
@@ -623,6 +637,9 @@
         },
         {
           "name": "token_program"
+        },
+        {
+          "name": "associated_token_program"
         },
         {
           "name": "system_program"
@@ -1232,6 +1249,32 @@
         46
       ],
       "name": "TreasuryWithdrawn"
+    },
+    {
+      "discriminator": [
+        27,
+        179,
+        156,
+        215,
+        47,
+        71,
+        195,
+        7
+      ],
+      "name": "Unstaked"
+    },
+    {
+      "discriminator": [
+        102,
+        245,
+        70,
+        143,
+        70,
+        242,
+        88,
+        186
+      ],
+      "name": "UnstakedOre"
     }
   ],
   "errors": [
@@ -1247,166 +1290,91 @@
     },
     {
       "code": 6002,
-      "name": "RoundLocked",
-      "msg": "This round is locked; wait for the next one"
-    },
-    {
-      "code": 6003,
-      "name": "BadMask",
-      "msg": "Pick between 1 and 25 spots"
-    },
-    {
-      "code": 6004,
-      "name": "RoundNotOver",
-      "msg": "Round hasn't ended yet"
-    },
-    {
-      "code": 6005,
-      "name": "NoEntropy",
-      "msg": "No slot hash available"
-    },
-    {
-      "code": 6006,
       "name": "BadAmount",
       "msg": "Invalid amount"
     },
     {
-      "code": 6007,
+      "code": 6003,
       "name": "UnknownItem",
       "msg": "Unknown gear item"
     },
     {
-      "code": 6008,
+      "code": 6004,
       "name": "AlreadyOwned",
       "msg": "You already own this item"
     },
     {
-      "code": 6009,
+      "code": 6005,
       "name": "NotAuthorised",
       "msg": "Signer is not the player or an active session"
     },
     {
-      "code": 6010,
+      "code": 6006,
       "name": "BadSession",
       "msg": "Invalid session"
     },
     {
-      "code": 6011,
-      "name": "AlreadySettled",
-      "msg": "This pot is already settled"
-    },
-    {
-      "code": 6012,
-      "name": "NotSettled",
-      "msg": "Settle the pot first"
-    },
-    {
-      "code": 6013,
+      "code": 6007,
       "name": "Paused",
       "msg": "Gali is paused for maintenance"
     },
     {
-      "code": 6014,
-      "name": "AlreadyOnBlock",
-      "msg": "You already have SOL on that spot this round"
-    },
-    {
-      "code": 6015,
-      "name": "AlreadyLocked",
-      "msg": "This round's draw is already locked"
-    },
-    {
-      "code": 6016,
-      "name": "NotLocked",
-      "msg": "Lock the round before revealing it"
-    },
-    {
-      "code": 6017,
-      "name": "DrawExpired",
-      "msg": "The locked slot has expired; lock the round again"
-    },
-    {
-      "code": 6018,
-      "name": "AlreadyRevealed",
-      "msg": "This round is already revealed"
-    },
-    {
-      "code": 6019,
-      "name": "StakeInPlay",
-      "msg": "Your staked SKR is boosting this round; unstake after it ends"
-    },
-    {
-      "code": 6020,
+      "code": 6008,
       "name": "NotUpgradeAuthority",
       "msg": "Only the program's upgrade authority can do this"
     },
     {
-      "code": 6021,
+      "code": 6009,
       "name": "NothingToClaim",
       "msg": "Nothing to claim yet"
     },
     {
-      "code": 6022,
-      "name": "TooEarly",
-      "msg": "Too early to close this round"
-    },
-    {
-      "code": 6023,
-      "name": "UnclaimedStakes",
-      "msg": "Some stakes in this round are not claimed yet"
-    },
-    {
-      "code": 6024,
-      "name": "RoundAbandoned",
-      "msg": "This round was abandoned and refunded"
-    },
-    {
-      "code": 6025,
+      "code": 6010,
       "name": "BadOreAccount",
       "msg": "That is not the ORE account it claims to be"
     },
     {
-      "code": 6026,
+      "code": 6011,
       "name": "BadOreLayout",
       "msg": "ORE's account layout has changed; Gali needs updating before it can read it"
     },
     {
-      "code": 6027,
+      "code": 6012,
       "name": "OreRoundUnsettled",
       "msg": "That ORE round has not been drawn yet"
     },
     {
-      "code": 6028,
+      "code": 6013,
       "name": "OreRoundMismatch",
       "msg": "Your ORE miner account is on a different round"
     },
     {
-      "code": 6029,
+      "code": 6014,
       "name": "OreNotCheckpointed",
       "msg": "Checkpoint your ORE miner for this round first"
     },
     {
-      "code": 6030,
+      "code": 6015,
       "name": "OreRoundAlreadyRecorded",
       "msg": "This ORE round is already recorded"
     },
     {
-      "code": 6031,
+      "code": 6016,
       "name": "OreRoundStillLive",
       "msg": "That ORE round is still live"
     },
     {
-      "code": 6032,
+      "code": 6017,
       "name": "NotOnWinningSquare",
       "msg": "You were not on the winning square"
     },
     {
-      "code": 6033,
+      "code": 6018,
       "name": "PriceUnset",
       "msg": "No exchange rate is set for that token"
     },
     {
-      "code": 6034,
+      "code": 6019,
       "name": "PriceStale",
       "msg": "The exchange rate is stale; gear sales are paused until it is refreshed"
     }
@@ -1699,12 +1667,32 @@
       }
     },
     {
+      "docs": [
+        "`new` is the update as sent (only changed fields are `Some`); `old` holds the",
+        "value each of those fields had before, and `None` everywhere else."
+      ],
       "name": "ConfigUpdated",
       "type": {
         "fields": [
           {
             "name": "authority",
             "type": "pubkey"
+          },
+          {
+            "name": "old",
+            "type": {
+              "defined": {
+                "name": "ConfigUpdate"
+              }
+            }
+          },
+          {
+            "name": "new",
+            "type": {
+              "defined": {
+                "name": "ConfigUpdate"
+              }
+            }
           }
         ],
         "kind": "struct"
@@ -2138,6 +2126,52 @@
           },
           {
             "name": "amount",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "docs": [
+        "SKR taken back out of staking. `total` is what stays staked."
+      ],
+      "name": "Unstaked",
+      "type": {
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "total",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "docs": [
+        "ORE taken back out of staking. `total` is what stays staked."
+      ],
+      "name": "UnstakedOre",
+      "type": {
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "total",
             "type": "u64"
           }
         ],
