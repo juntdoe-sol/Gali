@@ -37,7 +37,7 @@ export function MapHint() {
   return (
     <Animated.View pointerEvents="none" style={[styles.pill, { bottom: fx.viewBottom + 6, opacity: fade }]}>
       <T v="bold" style={styles.text}>
-        Tap a spot to pick it in PRO · double tap to dive in
+        Tap a spot to pick it · double tap to dive in
       </T>
     </Animated.View>
   );

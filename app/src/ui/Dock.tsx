@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { chainReady, REFINING_FEE } from '../chain/light';
 import { BLOCKS, boostFor, COLORS, pointsFor } from '../game/constants';
 import { watchMotion } from '../game/motion';
-import { addToPot, fmtSol, maskOf, strikeRange, MIN_SOL_PER_BLOCK, smartPick, soloMask } from '../game/pot';
+import { addToPot, DEFAULT_SMART, fmtSol, maskOf, randomPick, strikeRange, MIN_SOL_PER_BLOCK, SMART_COUNTS, soloMask } from '../game/pot';
 import { useGame, type DockTab, type Preset } from '../game/store';
 import { fx } from '../pixel/fx';
 import { useView } from '../pixel/view';
@@ -28,7 +28,7 @@ export function Dock() {
   const compact = false;
   const inside = useView((s) => s.focus >= 0);
 
-  // shake the phone to Smart-pick the emptiest blocks
+  // shake the phone to Smart-pick a random set of spots
   useEffect(() => {
     let last = 0;
     return watchMotion(({ x, y, z }) => {
@@ -274,45 +274,71 @@ function RunButton({ ready, label, sub, onStart }: { ready: boolean; label: stri
   return <Btn kind={ready ? 'gold' : 'plain'} label={busy ?? label} sub={sub} onPress={start} disabled={!ready || Boolean(busy)} style={{ marginTop: 10, minHeight: 54 }} />;
 }
 
-/* ---------------- LITE: one round, All 25 or Smart, nothing else ---------------- */
-const SMART_COUNTS = [3, 5, 10];
+/** 4 / 8 / 15 / 20: tapping a count, even the one already on, rolls a fresh random set. */
+function SmartCounts({ value, onPick, disabled }: { value: number; onPick: (n: number) => void; disabled: boolean }) {
+  return (
+    <View style={[styles.lineRight, { marginTop: 6 }]}>
+      {SMART_COUNTS.map((c) => (
+        <Chip key={c} grow label={`${c}`} on={value === c} onPress={() => onPick(c)} disabled={disabled} />
+      ))}
+    </View>
+  );
+}
+
+/* ---------------- LITE: one round; All 25, Smart (random) or spots tapped on the map ---------------- */
 function LitePanel({ compact }: { compact: boolean }) {
   const { balance } = useBalance();
   const startRun = useGame((s) => s.startRun);
+  const mode = useGame((s) => s.liteMode);
   const smartN = useGame((s) => s.liteSmart);
-  const setSmart = useGame((s) => s.setLiteSmart);
+  const selected = useGame((s) => s.selected);
+  const { setLiteSmart, setLiteMode } = useGame.getState();
   const run = useGame((s) => s.run);
-  const pot = useGame((s) => s.pot);
   const [perSpot, setPerSpot] = useState('0.0004');
   const spot = Number(perSpot) || 0;
-  const n = smartN || BLOCKS;
+  const n = mode === 'all' ? BLOCKS : selected.length;
   const per = spot * n; // SOL this round
   const perBlockOk = spot >= MIN_SOL_PER_BLOCK;
   const enough = per <= balance + 1e-9;
-  const ready = per > 0 && perBlockOk && enough;
-  const mask = smartN ? maskOf(smartPick(pot.perBlock, smartN)) : (1 << BLOCKS) - 1;
+  const ready = n > 0 && per > 0 && perBlockOk && enough;
+  const mask = mode === 'all' ? (1 << BLOCKS) - 1 : maskOf(selected);
   const potWith = usePotWith(mask, spot);
   const range = potWith ? strikeRange(potWith, mask, spot) : null;
-  const label = !per ? 'ENTER AMOUNT' : !perBlockOk ? `MIN ${MIN_SOL_PER_BLOCK} SOL PER SPOT` : !enough ? 'NOT ENOUGH SOL' : `MINE THIS ROUND · ${fmtSol(per)} SOL`;
+  const label = !n
+    ? 'TAP SPOTS ON THE MAP'
+    : !per
+      ? 'ENTER AMOUNT'
+      : !perBlockOk
+        ? `MIN ${MIN_SOL_PER_BLOCK} SOL PER SPOT`
+        : !enough
+          ? 'NOT ENOUGH SOL'
+          : `MINE THIS ROUND · ${fmtSol(per)} SOL`;
+  const hint =
+    mode === 'pick' && !n ? 'Tap spots on the map to pick them' : range ? `If it strikes: ${fmtRange(range)} SOL` : mode === 'all' ? 'All 25: always on the gold spot' : '';
   return (
     <>
       {compact ? null : (
         <>
           <BalanceRow />
           <AmountBox value={perSpot} onChange={setPerSpot} hint="SOL per spot" suffix="per spot" />
-          <View style={[styles.lineRight, { marginTop: 10 }]}>
-            <Chip grow label="All 25" on={!smartN} onPress={() => setSmart(0)} disabled={Boolean(run)} />
-            <Chip grow label="Smart" on={Boolean(smartN)} onPress={() => setSmart(smartN || 5)} disabled={Boolean(run)} />
+          <Row
+            icon="▦"
+            label="Spots"
+            last
+            right={
+              <T v="black" style={{ fontSize: 15, color: n ? COLORS.text : COLORS.muted }}>
+                {n} selected
+              </T>
+            }
+          />
+          <View style={[styles.lineRight, { marginTop: 4 }]}>
+            <Chip grow label="All 25" on={mode === 'all'} onPress={() => setLiteMode('all')} disabled={Boolean(run)} />
+            <Chip grow label="Smart" on={mode === 'smart'} onPress={() => setLiteMode('smart')} disabled={Boolean(run)} />
+            <Chip grow label="Pick" on={mode === 'pick'} onPress={() => setLiteMode('pick')} disabled={Boolean(run)} />
           </View>
-          {smartN ? (
-            <View style={[styles.lineRight, { marginTop: 6 }]}>
-              {SMART_COUNTS.map((c) => (
-                <Chip key={c} grow label={`${c} spots`} on={smartN === c} onPress={() => setSmart(c)} disabled={Boolean(run)} />
-              ))}
-            </View>
-          ) : null}
+          {mode === 'smart' ? <SmartCounts value={smartN} onPick={setLiteSmart} disabled={Boolean(run)} /> : null}
           <T v="muted" style={{ fontSize: 12, textAlign: 'center', marginTop: 10 }}>
-            {range ? `If it strikes: ${fmtRange(range)} SOL` : smartN ? 'Smart takes the emptiest spots' : 'All 25: always on the gold spot'}
+            {hint}
           </T>
         </>
       )}
@@ -320,7 +346,9 @@ function LitePanel({ compact }: { compact: boolean }) {
         ready={ready}
         label={label}
         sub={ready ? `${fmtSol(spot, 5)} SOL × ${n} spots` : undefined}
-        onStart={() => void startRun({ kind: 'lite', perRound: per, perSpot: spot, blocks: smartN ? 'smart' : 'all', smartN: n, manualMask: 0, total: 1 })}
+        onStart={() =>
+          void startRun({ kind: 'lite', perRound: per, perSpot: spot, blocks: mode === 'all' ? 'all' : 'manual', smartN: n, manualMask: mode === 'all' ? 0 : mask, total: 1 })
+        }
       />
     </>
   );
@@ -333,7 +361,6 @@ function ProPanel({ compact }: { compact: boolean }) {
   const presets = useGame((s) => s.save.presets);
   const idx = useGame((s) => s.save.preset);
   const selected = useGame((s) => s.selected);
-  const pot = useGame((s) => s.pot);
   const pending = useGame((s) => s.pending);
   const run = useGame((s) => s.run);
   const { choosePreset, editPreset, startRun, selectAll, clearSelection } = useGame.getState();
@@ -342,10 +369,10 @@ function ProPanel({ compact }: { compact: boolean }) {
   const perSpotStr = p.perSpot ?? '0.001';
   const perSpotIn = Number(perSpotStr) || 0;
 
-  const pickSmart = () => {
-    const n = selected.length || p.smartN || 5;
+  const pickSmart = (count?: number) => {
+    const n = count ?? ((SMART_COUNTS as readonly number[]).includes(p.smartN) ? p.smartN : DEFAULT_SMART);
     editPreset({ blocks: 'smart', smartN: n });
-    useGame.setState({ selected: smartPick(pot.perBlock, n) });
+    useGame.setState({ selected: randomPick(n) });
   };
   const pickAll = () => {
     editPreset({ blocks: 'all', smartN: BLOCKS });
@@ -395,18 +422,19 @@ function ProPanel({ compact }: { compact: boolean }) {
           <Row
             icon="▦"
             label="Spots"
-            info="Tap spots on the map to pick them (double tap or hold one to dive in), take All 25, or Smart: the least-crowded spots, where your SOL buys the biggest share."
+            info="Tap spots on the map to pick them (double tap or hold one to dive in), take All 25, or Smart: 4, 8, 15 or 20 spots at random. Tap a count again for a new set; autopilot rolls new spots every round."
             right={
               <>
                 <T v="black" style={{ fontSize: 15, color: blocks ? COLORS.text : COLORS.muted, marginRight: 4 }}>
                   {blocks}
                 </T>
                 <Chip label="All" on={p.blocks === 'all'} onPress={pickAll} disabled={Boolean(run)} />
-                <Chip label="Smart" on={p.blocks === 'smart'} onPress={pickSmart} disabled={Boolean(run)} />
+                <Chip label="Smart" on={p.blocks === 'smart'} onPress={() => pickSmart()} disabled={Boolean(run)} />
                 {selected.length && p.blocks === 'manual' ? <Chip label="Clear" onPress={clearSelection} disabled={Boolean(run)} /> : null}
               </>
             }
           />
+          {p.blocks === 'smart' ? <SmartCounts value={p.smartN} onPick={(c) => pickSmart(c)} disabled={Boolean(run)} /> : null}
           <Row
             icon="🔁"
             label="Rounds"
