@@ -12,6 +12,7 @@ import { chainReady, CLUSTER, PROGRAM_ID_STR, short, SKR_MINT_STR, type BoardRou
 import { loadBoard, loadChain } from '../chain/lazy';
 import { ADMIN_FEE, fmtSol, POT_FEE, practiceMotherlode, practiceOreMotherlode, simPot, soloMask } from '../game/pot';
 import { UnclaimedRow } from './Dock';
+import { Market } from './Market';
 import { Bar, Btn, Card, Pill, T } from './kit';
 import { BAR_H, SHEET_TITLE, TabBar, type SheetTab } from './TabBar';
 
@@ -133,7 +134,31 @@ function PriceBtn({ g, pay, owner, skr, ore, shop, onBuy }: { g: Gear; pay: 'skr
   );
 }
 
+/** The Store tab: the Store itself, and a preview of the player-to-player Market. */
 function GearTab() {
+  const [mode, setMode] = useState<'store' | 'market'>('store');
+  return (
+    <>
+      <View style={styles.seg}>
+        {(
+          [
+            ['store', '🛒 Store'],
+            ['market', '🏪 Market · soon'],
+          ] as const
+        ).map(([id, label]) => (
+          <Pressable key={id} onPress={() => setMode(id)} style={[styles.segBtn, mode === id && styles.tabOn]} accessibilityRole="tab" accessibilityState={{ selected: mode === id }}>
+            <T v="bold" style={{ fontSize: 13, color: mode === id ? COLORS.text : COLORS.muted }}>
+              {label}
+            </T>
+          </Pressable>
+        ))}
+      </View>
+      {mode === 'store' ? <StoreList /> : <Market />}
+    </>
+  );
+}
+
+function StoreList() {
   const owned = useOwnedMask();
   const save = useGame((s) => s.save);
   const skr = useGame((s) => s.wallet.skr);
