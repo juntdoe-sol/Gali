@@ -149,9 +149,12 @@ export default function PixelMine() {
       last = now;
       const snap = snapshot();
       const json = JSON.stringify(snap);
-      if (json !== sent && ref.current) {
+      // On Android the ref is a proxy whose methods only exist once the WebView has
+      // loaded and registered them. Calling push before that crashed the app on start.
+      const push = ref.current?.push;
+      if (json !== sent && typeof push === 'function') {
         sent = json;
-        ref.current.push(snap);
+        push(snap);
       }
     }, 100);
     return () => {
@@ -162,7 +165,8 @@ export default function PixelMine() {
 
   useEffect(() => {
     if (request === null) return;
-    ref.current?.focus(request);
+    const focus = ref.current?.focus;
+    if (typeof focus === 'function') focus(request);
     useView.setState({ request: null });
   }, [request]);
 
