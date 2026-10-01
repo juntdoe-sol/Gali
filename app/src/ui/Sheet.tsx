@@ -1,13 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Linking, Modal, Pressable, ScrollView, StyleSheet, Switch, TextInput, View, Image } from 'react-native';
+import { Linking, Modal, Pressable, ScrollView, StyleSheet, Switch, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  ACHIEVEMENTS, BOOST_TIERS, COLORS, GEAR, GEAR_KINDS, levelFromXp, localDay, MOTHERLODE_ODDS, MOTHERLODE_POINTS,
-  BLOCKS, MOTHERLODE_POOL_SHARE, QUESTS, usd, RARITY_COLOR, SEASON, type Gear, type GearKind,
+  ACHIEVEMENTS, BOOST_TIERS, COLORS, levelFromXp, localDay, MOTHERLODE_ODDS, MOTHERLODE_POINTS,
+  BLOCKS, MOTHERLODE_POOL_SHARE, QUESTS, usd, SEASON,
 } from '../game/constants';
-import { GEAR_ICON as PIXEL_ICON } from './gearIcons';
-import { GEAR_ICON, ITEM_ICON } from './icons';
-import { fmtToken, isLive, isOnChain, orePrice, useGame, useLevelXp, useOwnedMask, usePoints } from '../game/store';
+import { isLive, isOnChain, useGame, useLevelXp, usePoints } from '../game/store';
 import { chainReady, CLUSTER, PROGRAM_ID_STR, short, SKR_MINT_STR, type BoardRound, type LeaderRow } from '../chain/light';
 import { loadBoard, loadChain } from '../chain/lazy';
 import { ADMIN_FEE, fmtSol, POT_FEE, practiceMotherlode, practiceOreMotherlode, simPot, soloMask } from '../game/pot';
@@ -103,123 +101,9 @@ function Quests() {
   );
 }
 
-function GearIcon({ g }: { g: Gear }) {
-  const px = PIXEL_ICON[g.key];
-  return (
-    <View style={[styles.gearIcon, { borderColor: RARITY_COLOR[g.rarity], backgroundColor: g.accent + '22' }]}>
-      {px ? (
-        <Image source={px} style={{ width: 40, height: 40 }} {...({ dataSet: { pixelart: '1' } } as object)} />
-      ) : (
-        <T style={{ fontSize: 24 }}>{ITEM_ICON[g.key] ?? GEAR_ICON[g.kind]}</T>
-      )}
-    </View>
-  );
-}
-
-/** The buy button in whichever token the player picked. ORE needs the config's rate, so it waits for a wallet. */
-function PriceBtn({ g, pay, owner, skr, ore, shop, onBuy }: { g: Gear; pay: 'skr' | 'ore'; owner: boolean; skr: number; ore: number; shop: ReturnType<typeof useGame.getState>['wallet']['shop']; onBuy: () => void }) {
-  if (pay === 'skr') {
-    return <Btn small kind="skr" label={`${g.priceSkr.toLocaleString()} SKR`} sub={usd(g.priceSkr)} disabled={!owner || skr < g.priceSkr} onPress={onBuy} />;
-  }
-  const price = orePrice(g, shop);
-  return (
-    <Btn
-      small
-      kind="skr"
-      label={price === null ? 'ORE' : `${fmtToken(price)} ORE`}
-      sub={price === null ? `${usd(g.priceSkr)} · connect` : usd(g.priceSkr)}
-      disabled={!owner || price === null || ore < price}
-      onPress={onBuy}
-    />
-  );
-}
-
-/** The Store tab: the Store itself, and a preview of the player-to-player Market. */
+/** The gear tab: the player-to-player NFT Market (a preview until it opens). */
 function GearTab() {
-  const [mode, setMode] = useState<'store' | 'market'>('store');
-  return (
-    <>
-      <View style={styles.seg}>
-        {(
-          [
-            ['store', '🛒 Store'],
-            ['market', '🏪 Market · soon'],
-          ] as const
-        ).map(([id, label]) => (
-          <Pressable key={id} onPress={() => setMode(id)} style={[styles.segBtn, mode === id && styles.tabOn]} accessibilityRole="tab" accessibilityState={{ selected: mode === id }}>
-            <T v="bold" style={{ fontSize: 13, color: mode === id ? COLORS.text : COLORS.muted }}>
-              {label}
-            </T>
-          </Pressable>
-        ))}
-      </View>
-      {mode === 'store' ? <StoreList /> : <Market />}
-    </>
-  );
-}
-
-function StoreList() {
-  const owned = useOwnedMask();
-  const save = useGame((s) => s.save);
-  const skr = useGame((s) => s.wallet.skr);
-  const ore = useGame((s) => s.wallet.ore);
-  const shop = useGame((s) => s.wallet.shop);
-  const owner = useGame((s) => s.wallet.owner);
-  const { buyGear, equip } = useGame.getState();
-  const [kind, setKind] = useState<GearKind>('pickaxe');
-  const [pay, setPay] = useState<'skr' | 'ore'>('skr');
-  const equipped = [save.pickaxe, save.helmet, save.outfit, save.pet];
-  const items = GEAR.filter((g) => g.kind === kind);
-  return (
-    <>
-      <T v="muted">
-        {GEAR.length} items, priced in dollars and payable in SKR or ORE, so neither token is the tax. Gear is cosmetic and never changes your odds. {Math.round(MOTHERLODE_POOL_SHARE * 100)}% of every SKR sale goes back into the motherlode players are chasing; the rest runs the game.
-      </T>
-      <View style={styles.seg}>
-        {GEAR_KINDS.map((k) => (
-          <Pressable key={k.kind} onPress={() => setKind(k.kind)} style={[styles.segBtn, kind === k.kind && styles.tabOn]}>
-            <T v="bold" style={{ fontSize: 12, color: kind === k.kind ? COLORS.text : COLORS.muted }}>
-              {GEAR_ICON[k.kind]} {k.label}
-            </T>
-          </Pressable>
-        ))}
-      </View>
-      <View style={[styles.seg, { alignItems: 'center' }]}>
-        <T v="bold" style={{ fontSize: 12, color: COLORS.muted, paddingHorizontal: 8 }}>
-          PAY WITH
-        </T>
-        {(['skr', 'ore'] as const).map((t) => (
-          <Pressable key={t} onPress={() => setPay(t)} style={[styles.segBtn, pay === t && styles.tabOn]} accessibilityRole="button" accessibilityLabel={`Pay with ${t.toUpperCase()}`}>
-            <T v="bold" style={{ fontSize: 12, color: pay === t ? COLORS.text : COLORS.muted }}>
-              {t === 'skr' ? '◈ SKR' : '◆ ORE'}
-              {owner ? ` · ${fmtToken(t === 'skr' ? skr : ore)}` : ''}
-            </T>
-          </Pressable>
-        ))}
-      </View>
-      {items.map((g) => {
-        const has = Boolean(owned & (1 << g.id));
-        const on = equipped.includes(g.key);
-        return (
-          <Card key={g.key} style={[styles.rowCard, { borderColor: RARITY_COLOR[g.rarity] + '99' }]}>
-            <GearIcon g={g} />
-            <View style={{ flex: 1 }}>
-              <T v="bold">{g.name}</T>
-              <T v="bold" style={{ fontSize: 11, color: RARITY_COLOR[g.rarity], textTransform: 'capitalize' }}>
-                {g.rarity} {g.kind}
-              </T>
-              <T v="muted">{g.perk}</T>
-            </View>
-            {has ? (
-              <Btn small label={on ? (g.kind === 'pet' ? 'Unequip' : 'Equipped') : 'Equip'} disabled={on && g.kind !== 'pet'} onPress={() => equip(g.key)} />
-            ) : (
-              <PriceBtn g={g} pay={pay} owner={Boolean(owner)} skr={skr} ore={ore} shop={shop} onBuy={() => void buyGear(g.key, pay)} />
-            )}
-          </Card>
-        );
-      })}
-    </>
-  );
+  return <Market />;
 }
 
 function MotherlodeCard() {
