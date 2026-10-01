@@ -7,13 +7,15 @@ import {
 } from '../game/constants';
 import { GEAR_ICON as PIXEL_ICON } from './gearIcons';
 import { GEAR_ICON, ITEM_ICON } from './icons';
-import { fmtToken, orePrice, useGame, useLevelXp, useOwnedMask, usePoints } from '../game/store';
+import { fmtToken, isLive, isOnChain, orePrice, useGame, useLevelXp, useOwnedMask, usePoints } from '../game/store';
 import { chainReady, CLUSTER, PROGRAM_ID_STR, short, SKR_MINT_STR, type BoardRound, type LeaderRow } from '../chain/light';
 import { loadBoard, loadChain } from '../chain/lazy';
 import { ADMIN_FEE, fmtSol, POT_FEE, practiceMotherlode, practiceOreMotherlode, simPot, soloMask } from '../game/pot';
 import { UnclaimedRow } from './Dock';
 import { Bar, Btn, Card, Pill, T } from './kit';
 import { BAR_H, SHEET_TITLE, TabBar, type SheetTab } from './TabBar';
+
+const ORE_PROGRAM_STR = 'oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv';
 
 /** One page per bottom-bar tab. The bar is drawn inside the sheet too, so switching pages is one tap. */
 export function Sheet({ tab, onTab }: { tab: SheetTab | null; onTab: (t: SheetTab | null) => void }) {
@@ -197,7 +199,9 @@ function GearTab() {
 
 function MotherlodeCard() {
   const owner = useGame((s) => s.wallet.owner);
-  const live = Boolean(owner && chainReady);
+  const live = useGame(isOnChain);
+  // ORE live mode before Gali's own program is deployed: there is no SKR pool on chain yet
+  const noPool = useGame(isLive) && !chainReady;
   const skrPool = useGame((s) => (live ? s.wallet.pool : practiceMotherlode(s.roundId)));
   const orePool = useGame((s) => (live ? s.wallet.orePool : practiceOreMotherlode(s.roundId)));
   const won = useGame((s) => s.wallet.player?.skrWon ?? 0);
@@ -215,10 +219,10 @@ function MotherlodeCard() {
         </View>
         <View>
           <T v="display" style={{ fontSize: 30, color: COLORS.gold }}>
-            {Math.floor(skrPool).toLocaleString()} SKR
+            {noPool ? 'SOON' : `${Math.floor(skrPool).toLocaleString()} SKR`}
           </T>
           <T v="muted" style={{ fontSize: 11 }}>
-            GALI&apos;S SKR POOL · ~{usd(skrPool)}
+            {noPool ? "GALI'S SKR POOL · NOT LIVE YET" : `GALI'S SKR POOL · ~${usd(skrPool)}`}
           </T>
         </View>
       </View>
@@ -339,7 +343,7 @@ function practiceRounds(before: number, n: number): BoardRound[] {
 function Rounds() {
   const owner = useGame((s) => s.wallet.owner);
   const roundId = useGame((s) => s.roundId);
-  const onChain = Boolean(owner && chainReady);
+  const onChain = useGame(isOnChain);
   const [rows, setRows] = useState<BoardRound[] | null>(null);
   const [at, setAt] = useState(0);
   useEffect(() => {
@@ -462,6 +466,7 @@ function Ranks() {
 function Me() {
   const w = useGame((s) => s.wallet);
   const save = useGame((s) => s.save);
+  const live = useGame(isLive);
   const { connect, disconnect, airdrop, setMute, refreshWallet, sweepSession } = useGame.getState();
   return (
     <>
@@ -470,12 +475,18 @@ function Me() {
         {w.owner ? (
           <>
             <T v="bold" style={{ marginTop: 4 }}>
-              {short(w.owner)} · {w.sol.toFixed(3)} SOL · {w.skr.toLocaleString()} SKR
+              {short(w.owner)} · {w.sol.toFixed(3)} SOL · {live ? `${w.ore.toFixed(4)} ORE` : `${w.skr.toLocaleString()} SKR`}
             </T>
-            <T v="muted" style={{ marginTop: 4 }}>
-              Session key: {w.sessionSol.toFixed(3)} SOL to deploy
-              {w.player?.sessionExpires ? ` · expires ${new Date(w.player.sessionExpires * 1000).toLocaleString()}` : ''}
-            </T>
+            {chainReady ? (
+              <T v="muted" style={{ marginTop: 4 }}>
+                Session key: {w.sessionSol.toFixed(3)} SOL to deploy
+                {w.player?.sessionExpires ? ` · expires ${new Date(w.player.sessionExpires * 1000).toLocaleString()}` : ''}
+              </T>
+            ) : (
+              <T v="muted" style={{ marginTop: 4 }}>
+                LIVE on Solana mainnet. Every deploy and claim is signed by your wallet.
+              </T>
+            )}
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
               <Btn small label="Refresh" onPress={() => void refreshWallet()} />
               {w.sessionSol > 0.001 ? <Btn small label="Return session SOL" onPress={() => void sweepSession()} /> : null}
@@ -511,12 +522,26 @@ function Me() {
         <T style={{ flex: 1 }}>Mute sound</T>
         <Switch id="mute" value={save.muted} onValueChange={setMute} trackColor={{ true: COLORS.teal, false: COLORS.card2 }} />
       </Card>
-      <T v="muted">How it works: each minute is a round on an island with 25 mining spots. Put SOL on 1 to 25 spots. One spot strikes gold. Its miners split the whole pot (the SOL on every spot, after a 1% fee and 10% of the losing spots) by their SOL on the gold spot; SOL on the other spots is lost. The gold spot also mines ORE, split the same way, or on one of the round's 10 solo spots (★) taken whole by one miner, with odds equal to their share. Fewer spots pay more points: 1,000 for a single spot, 40 for all 25. A 1-in-500 motherlode pays out the whole SKR Motherlode Pool on top. Everything lands in Unclaimed until you claim it. This is a game of chance: only play with SOL you can afford to lose.</T>
-      <Pressable onPress={() => Linking.openURL(`https://explorer.solana.com/address/${PROGRAM_ID_STR}?cluster=${CLUSTER}`)}>
-        <T v="muted" style={{ textDecorationLine: 'underline' }}>
-          Program {short(PROGRAM_ID_STR)} on Solana Explorer
+      {live ? (
+        <T v="muted">
+          Live mode: real rounds on ORE&apos;s mainnet board, about every 80 seconds. Put SOL on 1 to 25 spots and one strikes gold. ORE keeps 1% of every spot and 10% more of spots that miss; the rest comes back for you to claim. The gold spot mines the round&apos;s ORE, split by SOL there, or all to one miner on a ★ solo spot. Gali takes no cut and never holds your SOL. ORE is credited as the board Gali plays on; Gali is not affiliated with or endorsed by ORE. This is a game of chance with real money: 18+ only, and only play with SOL you can afford to lose.
         </T>
-      </Pressable>
+      ) : (
+      <T v="muted">How it works: each minute is a round on an island with 25 mining spots. Put SOL on 1 to 25 spots. One spot strikes gold. Its miners split the whole pot (the SOL on every spot, after a 1% fee and 10% of the losing spots) by their SOL on the gold spot; SOL on the other spots is lost. The gold spot also mines ORE, split the same way, or on one of the round's 10 solo spots (★) taken whole by one miner, with odds equal to their share. Fewer spots pay more points: 1,000 for a single spot, 40 for all 25. A 1-in-500 motherlode pays out the whole SKR Motherlode Pool on top. Everything lands in Unclaimed until you claim it. This is a game of chance: only play with SOL you can afford to lose.</T>
+      )}
+      {chainReady ? (
+        <Pressable onPress={() => Linking.openURL(`https://explorer.solana.com/address/${PROGRAM_ID_STR}?cluster=${CLUSTER}`)}>
+          <T v="muted" style={{ textDecorationLine: 'underline' }}>
+            Program {short(PROGRAM_ID_STR)} on Solana Explorer
+          </T>
+        </Pressable>
+      ) : live ? (
+        <Pressable onPress={() => Linking.openURL(`https://explorer.solana.com/address/${ORE_PROGRAM_STR}`)}>
+          <T v="muted" style={{ textDecorationLine: 'underline' }}>
+            ORE program {short(ORE_PROGRAM_STR)} on Solana Explorer
+          </T>
+        </Pressable>
+      ) : null}
     </>
   );
 }

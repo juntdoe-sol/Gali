@@ -2,10 +2,11 @@
 // Finds wallets two ways:
 //  - Wallet Standard (Jupiter, Phantom, Solflare, Backpack and most current extensions)
 //  - older injected providers (window.phantom.solana, window.solflare, window.backpack, window.solana)
-// Transactions are signed by the wallet and sent through our own devnet connection, so the
-// wallet's network setting doesn't matter for sending (switch it to devnet to see balances).
+// Transactions are signed by the wallet and sent through our own connection to CLUSTER, so the
+// wallet's network setting doesn't matter for sending (switch it to the same network to see balances).
 import './polyfill-web';
 import { PublicKey, Transaction } from '@solana/web3.js';
+import { CLUSTER } from './light';
 
 export interface WebWalletInfo {
   name: string;
@@ -37,7 +38,7 @@ interface StdWallet {
 
 const standard: StdWallet[] = [];
 const CHOICE_KEY = 'gali-web-wallet';
-const CHAIN = 'solana:devnet';
+const CHAIN = `solana:${CLUSTER}`;
 
 function registerStd(...wallets: StdWallet[]) {
   for (const w of wallets) {
@@ -95,7 +96,7 @@ function stdAdapter(w: StdWallet): Adapter {
         transaction: new Uint8Array(bytes),
         account,
       };
-      // only name the chain when the wallet lists devnet; some mainnet-only wallets reject unknown chains
+      // only name the chain when the wallet lists it; some mainnet-only wallets reject unknown chains
       if (w.chains?.includes(CHAIN)) input.chain = CHAIN;
       const [out] = await w.features['solana:signTransaction'].signTransaction(input);
       return Transaction.from(out.signedTransaction);

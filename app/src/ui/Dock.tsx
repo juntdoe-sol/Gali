@@ -1,11 +1,11 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { chainReady, REFINING_FEE } from '../chain/light';
+import { CLUSTER, LIVE_MAX_ROUND_SOL, REFINING_FEE } from '../chain/light';
 import { BLOCKS, boostFor, COLORS, pointsFor } from '../game/constants';
 import { watchMotion } from '../game/motion';
-import { addToPot, DEFAULT_SMART, fmtSol, maskOf, randomPick, strikeRange, MIN_SOL_PER_BLOCK, SMART_COUNTS, soloMask } from '../game/pot';
-import { useGame, type DockTab, type Preset } from '../game/store';
+import { addToPot, DEFAULT_SMART, fmtSol, liveReturn, maskOf, randomPick, strikeRange, MIN_SOL_PER_BLOCK, SMART_COUNTS } from '../game/pot';
+import { isLive, isOnChain, soloOf, useGame, type DockTab, type Preset } from '../game/store';
 import { fx } from '../pixel/fx';
 import { useView } from '../pixel/view';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -98,6 +98,9 @@ export function Dock() {
 const RETURN_INFO =
   "Only the gold spot gets paid. Its miners split the whole pot (their SOL plus the SOL on every other spot) by their share of the gold spot, after fees: 1% of every spot and 10% of the losing spots. SOL on the other spots is lost. Covering all 25 spots means you always hit, but you pay the losing spots' SOL to yourself and the others, so you only profit when others put less on the spot that strikes.";
 
+const LIVE_INFO =
+  "Only the gold spot mines ORE: split by SOL there, or all to one miner on a ★ solo spot, with odds equal to their share. ORE keeps 1% of every spot and 10% more of spots that miss. The rest of your SOL comes back to claim. One round in 500 also pays ORE's motherlode, split by SOL on the gold spot.";
+
 /** Pot as it will look with this deploy added (practice already includes a pending deploy). */
 function usePotWith(mask: number, perBlock: number) {
   const pot = useGame((s) => s.pot);
@@ -110,8 +113,7 @@ const fmtRange = (r: { lo: number; hi: number } | null) =>
 
 /** Unclaimed SOL and SKR from finished rounds, each with its own Claim button. */
 export function UnclaimedRow() {
-  const owner = useGame((s) => s.wallet.owner);
-  const onChain = Boolean(owner && chainReady);
+  const onChain = useGame(isOnChain);
   const sol = useGame((s) => (onChain ? s.wallet.unclaimed.sol : (s.save.practiceUnclaimedSol ?? 0)));
   const unrefined = useGame((s) => (onChain ? s.wallet.unclaimed.unrefined : (s.save.practiceUnclaimedSkr ?? 0)));
   const refined = useGame((s) => (onChain ? s.wallet.unclaimed.refined : (s.save.practiceRefinedSkr ?? 0)));
@@ -137,11 +139,11 @@ export function UnclaimedRow() {
       </View>
       <View style={styles.uRow}>
         <T v="muted" numberOfLines={1} style={{ flex: 1, fontSize: 11 }}>
-          {Math.floor(unrefined).toLocaleString()} unrefined · +{refined < 10 ? refined.toFixed(2) : Math.floor(refined).toLocaleString()} refined
-          {fee >= 1 ? ` · fee ${Math.floor(fee).toLocaleString()}` : ''}
+          {fmtAmt(unrefined)} unrefined · +{fmtAmt(refined)} refined
+          {fee > 0.00005 ? ` · fee ${fmtAmt(fee)}` : ''}
         </T>
         <T v="black" numberOfLines={1} style={{ fontSize: 13, color: COLORS.skr }}>
-          {(unrefined - fee + refined).toFixed(2)} ORE
+          {fmtAmt(unrefined - fee + refined)} ORE
         </T>
         <Chip label="CLAIM" on={unrefined + refined > 0} disabled={!(unrefined + refined > 0) || Boolean(busy)} onPress={() => void claim('skr')} />
       </View>
@@ -149,12 +151,19 @@ export function UnclaimedRow() {
   );
 }
 
+/** Small ORE amounts keep their decimals; big practice numbers stay whole. */
+const fmtAmt = (v: number) => (v >= 100 ? Math.floor(v).toLocaleString() : v.toFixed(v >= 1 ? 2 : 4));
+
+/** SOL kept back in live mode for fees and ORE's miner account rent. */
+const LIVE_FEE_SOL = 0.005;
+
 function useBalance() {
-  const owner = useGame((s) => s.wallet.owner);
   const sol = useGame((s) => s.wallet.sol + s.wallet.sessionSol);
   const practice = useGame((s) => s.save.practiceSol);
-  const onChain = Boolean(owner && chainReady);
-  return { onChain, balance: onChain ? sol : practice };
+  const onChain = useGame(isOnChain);
+  const live = useGame(isLive);
+  // live: what a round can use, after fees
+  return { onChain, live, balance: onChain ? Math.max(0, sol - (live ? LIVE_FEE_SOL : 0)) : practice };
 }
 
 function Info({ text }: { text: string }) {
@@ -194,7 +203,7 @@ function Chip({ label, on, onPress, disabled, grow }: { label: string; on?: bool
 }
 
 function BalanceRow({ onHalf, onAll }: { onHalf?: () => void; onAll?: () => void }) {
-  const { balance, onChain } = useBalance();
+  const { balance, onChain, live } = useBalance();
   const refill = useGame((s) => s.refillPractice);
   const airdrop = useGame((s) => s.airdrop);
   return (
@@ -204,8 +213,8 @@ function BalanceRow({ onHalf, onAll }: { onHalf?: () => void; onAll?: () => void
         <T v="bold" style={{ fontSize: 13 }}>
           {balance.toFixed(4)}
         </T>
-        <T v="muted">{onChain ? 'SOL' : 'practice SOL'}</T>
-        <Chip label={onChain ? '+1 devnet' : 'Refill'} onPress={onChain ? airdrop : refill} />
+        <T v="muted">{live ? 'SOL · mainnet' : onChain ? 'SOL' : 'practice SOL'}</T>
+        {!onChain ? <Chip label="Refill" onPress={refill} /> : CLUSTER === 'devnet' ? <Chip label="+1 devnet" onPress={airdrop} /> : null}
       </View>
       {onHalf && onAll ? (
         <View style={styles.lineRight}>
@@ -287,7 +296,7 @@ function SmartCounts({ value, onPick, disabled }: { value: number; onPick: (n: n
 
 /* ---------------- LITE: one round; All 25, Smart (random) or spots tapped on the map ---------------- */
 function LitePanel({ compact }: { compact: boolean }) {
-  const { balance } = useBalance();
+  const { balance, live } = useBalance();
   const startRun = useGame((s) => s.startRun);
   const mode = useGame((s) => s.liteMode);
   const smartN = useGame((s) => s.liteSmart);
@@ -300,7 +309,8 @@ function LitePanel({ compact }: { compact: boolean }) {
   const per = spot * n; // SOL this round
   const perBlockOk = spot >= MIN_SOL_PER_BLOCK;
   const enough = per <= balance + 1e-9;
-  const ready = n > 0 && per > 0 && perBlockOk && enough;
+  const capped = live && per > LIVE_MAX_ROUND_SOL + 1e-9;
+  const ready = n > 0 && per > 0 && perBlockOk && enough && !capped;
   const mask = mode === 'all' ? (1 << BLOCKS) - 1 : maskOf(selected);
   const potWith = usePotWith(mask, spot);
   const range = potWith ? strikeRange(potWith, mask, spot) : null;
@@ -312,9 +322,22 @@ function LitePanel({ compact }: { compact: boolean }) {
         ? `MIN ${MIN_SOL_PER_BLOCK} SOL PER SPOT`
         : !enough
           ? 'NOT ENOUGH SOL'
-          : `MINE THIS ROUND · ${fmtSol(per)} SOL`;
+          : capped
+            ? `MAX ${LIVE_MAX_ROUND_SOL} SOL A ROUND`
+            : `MINE THIS ROUND · ${fmtSol(per)} SOL`;
+  const back = live && n && spot > 0 ? liveReturn(n, spot) : null;
   const hint =
-    mode === 'pick' && !n ? 'Tap spots on the map to pick them' : range ? `If it strikes: ${fmtRange(range)} SOL` : mode === 'all' ? 'All 25: always on the gold spot' : '';
+    mode === 'pick' && !n
+      ? 'Tap spots on the map to pick them'
+      : back
+        ? n === BLOCKS
+          ? `Always on the gold spot · ${fmtSol(back.strike)} SOL back + ORE`
+          : `Strike: ${fmtSol(back.strike)} SOL back + ORE · miss: ${fmtSol(back.miss)} back`
+        : range
+          ? `If it strikes: ${fmtRange(range)} SOL`
+          : mode === 'all'
+            ? 'All 25: always on the gold spot'
+            : '';
   return (
     <>
       {compact ? null : (
@@ -357,7 +380,7 @@ function LitePanel({ compact }: { compact: boolean }) {
 /* ---------------- PRO: presets, block picking, manual rounds ---------------- */
 function ProPanel({ compact }: { compact: boolean }) {
   const staked = useGame((s) => s.wallet.player?.stakedSkr ?? 0);
-  const { balance } = useBalance();
+  const { balance, live } = useBalance();
   const presets = useGame((s) => s.save.presets);
   const idx = useGame((s) => s.save.preset);
   const selected = useGame((s) => s.selected);
@@ -382,9 +405,12 @@ function ProPanel({ compact }: { compact: boolean }) {
   const blocks = p.blocks === 'all' ? BLOCKS : p.blocks === 'smart' ? p.smartN : selected.length;
   const perBlock = blocks ? perSpotIn : 0;
   const per = perBlock * blocks; // SOL a round
-  const need = per * p.rounds;
+  // live rounds are signed one at a time, so no autopilot
+  const rounds = live ? 1 : p.rounds;
+  const need = per * rounds;
   const enough = need <= balance + 1e-9;
-  const ready = blocks > 0 && per > 0 && perBlock >= MIN_SOL_PER_BLOCK && enough && !pending;
+  const capped = live && per > LIVE_MAX_ROUND_SOL + 1e-9;
+  const ready = blocks > 0 && per > 0 && perBlock >= MIN_SOL_PER_BLOCK && enough && !pending && !capped;
   const label = !blocks
     ? 'NO CLAIMS SELECTED'
     : !per
@@ -393,11 +419,12 @@ function ProPanel({ compact }: { compact: boolean }) {
         ? `MIN ${MIN_SOL_PER_BLOCK} SOL PER SPOT`
         : !enough
           ? 'NOT ENOUGH SOL'
-          : pending
-            ? 'WAIT FOR THIS ROUND'
-            : `DEPLOY ${fmtSol(per)} SOL${p.rounds > 1 ? ` × ${p.rounds}` : ''}`;
-  const roundId = useGame((s) => s.roundId);
-  const solo = soloMask(roundId);
+          : capped
+            ? `MAX ${LIVE_MAX_ROUND_SOL} SOL A ROUND`
+            : pending
+              ? 'WAIT FOR THIS ROUND'
+              : `DEPLOY ${fmtSol(per)} SOL${rounds > 1 ? ` × ${rounds}` : ''}`;
+  const solo = useGame((s) => soloOf(s, s.roundId));
   const picked = p.blocks === 'manual' || p.blocks === 'smart' ? selected : [...Array(BLOCKS).keys()];
   const soloCount = picked.filter((i) => solo & (1 << i)).length;
   const proMask = p.blocks === 'all' ? (1 << BLOCKS) - 1 : maskOf(picked);
@@ -415,8 +442,8 @@ function ProPanel({ compact }: { compact: boolean }) {
             ))}
           </View>
           <BalanceRow
-            onHalf={() => editPreset({ perSpot: trim((balance - RESERVE) / 2 / Math.max(1, p.rounds) / Math.max(1, blocks)) })}
-            onAll={() => editPreset({ perSpot: trim((balance - RESERVE) / Math.max(1, p.rounds) / Math.max(1, blocks)) })}
+            onHalf={() => editPreset({ perSpot: trim((balance - RESERVE) / 2 / Math.max(1, rounds) / Math.max(1, blocks)) })}
+            onAll={() => editPreset({ perSpot: trim((Math.min(balance - RESERVE, live ? LIVE_MAX_ROUND_SOL : Infinity)) / Math.max(1, rounds) / Math.max(1, blocks)) })}
           />
           <AmountBox value={perSpotStr} onChange={(v) => editPreset({ perSpot: v })} hint="SOL per spot" suffix="per spot" />
           <Row
@@ -435,6 +462,8 @@ function ProPanel({ compact }: { compact: boolean }) {
             }
           />
           {p.blocks === 'smart' ? <SmartCounts value={p.smartN} onPick={(c) => pickSmart(c)} disabled={Boolean(run)} /> : null}
+          {live ? null : (
+            <>
           <Row
             icon="🔁"
             label="Rounds"
@@ -454,14 +483,16 @@ function ProPanel({ compact }: { compact: boolean }) {
               </>
             }
           />
+            </>
+          )}
           <Row
             icon="🏆"
             label="If it strikes"
-            info={`Only the gold spot gets paid. The ORE it mines is split by SOL there, unless it is one of this round's 10 solo spots (★ on the map): then one miner takes it all, with odds equal to their share. A 1-in-500 motherlode pays the whole SKR Motherlode Pool on top, split by SOL on the gold spot, plus 10,000 points. Points: 40 x 25 / spots covered. ${RETURN_INFO}`}
+            info={live ? LIVE_INFO : `Only the gold spot gets paid. The ORE it mines is split by SOL there, unless it is one of this round's 10 solo spots (★ on the map): then one miner takes it all, with odds equal to their share. A 1-in-500 motherlode pays the whole SKR Motherlode Pool on top, split by SOL on the gold spot, plus 10,000 points. Points: 40 x 25 / spots covered. ${RETURN_INFO}`}
             last
             right={
               <T v="black" style={{ fontSize: 13, color: COLORS.gold }}>
-                {blocks ? `+${pointsFor(blocks, false, boostFor(staked))} pts · ${Math.round((blocks / BLOCKS) * 100)}% odds · ${soloCount} ★` : '—'}
+                {!blocks ? '—' : live ? `${Math.round((blocks / BLOCKS) * 100)}% odds · ${soloCount} ★` : `+${pointsFor(blocks, false, boostFor(staked))} pts · ${Math.round((blocks / BLOCKS) * 100)}% odds · ${soloCount} ★`}
               </T>
             }
           />
@@ -470,7 +501,13 @@ function ProPanel({ compact }: { compact: boolean }) {
       <RunButton
         ready={ready}
         label={label}
-        sub={ready ? `${fmtSol(perBlock, 5)} SOL × ${blocks} spot${blocks > 1 ? 's' : ''} · if one strikes: ${fmtRange(proRange)} SOL` : undefined}
+        sub={
+          ready
+            ? `${fmtSol(perBlock, 5)} SOL × ${blocks} spot${blocks > 1 ? 's' : ''} · ${
+                live ? `strike: ${fmtSol(liveReturn(blocks, perBlock).strike)} SOL back + ORE` : `if one strikes: ${fmtRange(proRange)} SOL`
+              }`
+            : undefined
+        }
         onStart={() =>
           void startRun({
             kind: 'pro',
@@ -479,7 +516,7 @@ function ProPanel({ compact }: { compact: boolean }) {
             blocks: p.blocks,
             smartN: p.smartN,
             manualMask: maskOf(selected),
-            total: p.rounds,
+            total: rounds,
           })
         }
       />

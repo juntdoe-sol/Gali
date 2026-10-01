@@ -6,6 +6,7 @@ import { fmtSol } from '../game/pot';
 import { GEAR_ICON as PIXEL_ICON } from './gearIcons';
 import { GEAR_ICON } from './icons';
 import { play } from '../game/sfx';
+import { chainReady, CLUSTER, LIVE_MAX_ROUND_SOL, oreLive } from '../chain/light';
 import { useGame, type RoundResult } from '../game/store';
 import { Btn, T } from './kit';
 
@@ -43,9 +44,11 @@ export function ResultPop() {
                 <T v="display" style={{ fontSize: 30, color: '#eaffc4' }}>
                   +{(res.oreMotherlode ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} ORE
                 </T>
-                <T v="display" style={{ fontSize: 22, color: '#fff3c0' }}>
-                  {res.skr > 0 ? `+${res.skr.toLocaleString(undefined, { maximumFractionDigits: 2 })} SKR` : 'SKR pool was empty'}
-                </T>
+                {oreLive && !chainReady && res.onChain ? null : (
+                  <T v="display" style={{ fontSize: 22, color: '#fff3c0' }}>
+                    {res.skr > 0 ? `+${res.skr.toLocaleString(undefined, { maximumFractionDigits: 2 })} SKR` : 'SKR pool was empty'}
+                  </T>
+                )}
                 <SolLine res={res} dark={false} />
               </>
             ) : res.won ? (
@@ -62,7 +65,12 @@ export function ResultPop() {
                 </T>
                 {res.solIn ? (
                   <T v="display" style={{ fontSize: 22, color: COLORS.red }}>
-                    −{fmtSol(res.solIn)} SOL
+                    −{fmtSol(Math.max(0, res.solIn - res.solOut))} SOL
+                  </T>
+                ) : null}
+                {res.solOut > 0 ? (
+                  <T v="bold" style={{ fontSize: 14, color: COLORS.muted }}>
+                    {fmtSol(res.solOut)} SOL back to claim
                   </T>
                 ) : null}
               </>
@@ -80,7 +88,7 @@ function SolLine({ res, dark, big }: { res: RoundResult; dark: boolean; big?: bo
   return (
     <View style={{ alignItems: 'center' }}>
       <T v="display" style={{ fontSize: big ? 40 : 26, lineHeight: big ? 46 : 30, color: dark ? '#0b5a3a' : '#c8ffe6' }}>
-        +{fmtSol(res.solOut)} SOL
+        +{fmtSol(res.solOut)} SOL{res.onChain && oreLive && !chainReady ? ' back' : ''}
       </T>
       {res.oreMined ? (
         <T v="display" style={{ fontSize: big ? 24 : 18, color: dark ? '#3d5a00' : '#eaffc4' }}>
@@ -182,7 +190,7 @@ export function WalletPicker() {
             Connect a wallet
           </T>
           <T v="muted" style={{ marginBottom: 14 }}>
-            Switch the wallet to Solana devnet to see your test balances.
+            {CLUSTER === 'devnet' ? 'Switch the wallet to Solana devnet to see your test balances.' : 'Gali plays on Solana mainnet with real SOL.'}
           </T>
           {wallets.map((w) => (
             <Pressable
@@ -199,6 +207,36 @@ export function WalletPicker() {
             </Pressable>
           ))}
           <Btn kind="ghost" label="Cancel" onPress={close} />
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+/** Shown once, before the first wallet connect in a mainnet build: this is real money. */
+export function LiveNotice() {
+  const open = useGame((s) => Boolean(s.liveNotice));
+  const accept = useGame((s) => s.acceptLive);
+  const decline = useGame((s) => s.declineLive);
+  if (!open) return null;
+  return (
+    <Modal transparent visible animationType="fade" onRequestClose={decline}>
+      <View style={[styles.center, { backgroundColor: '#040817dd', padding: 16 }]}>
+        <View style={styles.intro}>
+          <T v="display" style={{ fontSize: 24, marginBottom: 6 }}>
+            Real SOL, real rounds
+          </T>
+          <T style={{ marginBottom: 8 }}>
+            With a wallet connected, you play live rounds on ORE&apos;s board on Solana mainnet with real SOL. ORE keeps 1% of every spot, plus 10% more of spots that miss. Only the gold spot mines ORE.
+          </T>
+          <T style={{ marginBottom: 8 }}>
+            Your wallet signs every deploy and every claim. Gali takes no cut and never holds your SOL. A round is capped at {LIVE_MAX_ROUND_SOL} SOL.
+          </T>
+          <T v="muted" style={{ marginBottom: 14 }}>
+            This is a game of chance. You must be 18 or older, and it must be legal where you live. Only play with SOL you can afford to lose. Without a wallet, practice mode stays free.
+          </T>
+          <Btn kind="skr" label="I'm 18+ · connect wallet" onPress={accept} />
+          <Btn kind="ghost" label="Keep practising" onPress={decline} />
         </View>
       </View>
     </Modal>

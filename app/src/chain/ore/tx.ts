@@ -13,7 +13,7 @@
  * is enforced by ORE rather than by us and ORE pays the key a fee for the work.
  */
 import '../polyfill-web';
-import { Keypair, LAMPORTS_PER_SOL, PublicKey, TransactionInstruction } from '@solana/web3.js';
+import { ComputeBudgetProgram, Keypair, LAMPORTS_PER_SOL, PublicKey, TransactionInstruction } from '@solana/web3.js';
 import { connection, sendWithKey, sendWithWallet } from '../client';
 import { AUTOMATION_STRATEGY, EXECUTOR_ADDRESS } from './consts';
 import { automateIx, checkpointIx, claimOreIx, claimSolIx, deployIx } from './ix';
@@ -72,19 +72,72 @@ export async function oreCheckpoint(
 }
 
 /**
+ * A small priority fee, so a wallet-signed transaction still lands when mainnet is
+ * busy. 20,000 micro-lamports per compute unit is about 0.000004 SOL per 200k units.
+ */
+export const PRIORITY_MICROLAMPORTS = 20_000;
+const priorityIx = () => ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_MICROLAMPORTS });
+
+/** A checkpoint for the finished round this miner still holds, or nothing. Signed by the owner. */
+async function checkpointFirst(owner: PublicKey): Promise<TransactionInstruction[]> {
+  const [clock, miner] = await Promise.all([fetchClock(connection), fetchOreMiner(connection, owner)]);
+  const pending = needsCheckpoint(miner, clock);
+  return pending === null ? [] : [checkpointIx({ signer: owner, authority: owner, roundId: pending })];
+}
+
+/**
+ * Slots before the end of mining when the app stops offering a deploy. A wallet
+ * approval takes a few seconds, and a deploy that lands after the round closes fails.
+ */
+export const LIVE_LOCK_SLOTS = 15;
+
+/**
+ * Deploy into the current ORE round, signed and paid by the player's own wallet.
+ * No session key and no Gali program: this is a plain ORE deploy, the same one
+ * ORE's own site sends. Checkpoints the previous round first when ORE needs it.
+ *
+ * Returns the round it deployed into, read at signing time, because ORE's round
+ * id is the board's and not something the app can work out from the clock.
+ */
+export async function oreDeployWithWallet(
+  squares: number[],
+  lamportsPerSquare: bigint,
+): Promise<{ sig: string; roundId: bigint }> {
+  let roundId = 0n;
+  const sig = await sendWithWallet(async (owner) => {
+    const [clock, miner] = await Promise.all([fetchClock(connection), fetchOreMiner(connection, owner)]);
+    if (clock.phase === 'intermission' || (clock.phase === 'mining' && clock.slotsLeft < LIVE_LOCK_SLOTS)) {
+      throw new Error('RoundLocked');
+    }
+    roundId = clock.roundId;
+    const ixs: TransactionInstruction[] = [priorityIx()];
+    const pending = needsCheckpoint(miner, clock);
+    if (pending !== null) ixs.push(checkpointIx({ signer: owner, authority: owner, roundId: pending }));
+    ixs.push(
+      deployIx({ signer: owner, authority: owner, roundId, amount: lamportsPerSquare, squares: squaresToMask(squares) }),
+    );
+    return ixs;
+  });
+  return { sig, roundId };
+}
+
+/**
  * Claim mined ORE to the player's own token account.
  *
  * `bps` is how much of the balance to take; 10,000 is all of it. ORE charges its
  * own 10% on the unrefined part. That is their mechanic and their fee, and the UI
  * shows it before the player signs rather than after.
+ *
+ * A round that finished but was never checkpointed is settled in the same
+ * transaction, so its rewards are part of the claim.
  */
 export async function oreClaimOre(bps = 10_000): Promise<string> {
-  return sendWithWallet(async (owner) => [claimOreIx({ authority: owner, bps })]);
+  return sendWithWallet(async (owner) => [priorityIx(), ...(await checkpointFirst(owner)), claimOreIx({ authority: owner, bps })]);
 }
 
-/** Claim SOL that ORE returned to the player. */
+/** Claim SOL that ORE returned to the player, checkpointing a finished round first. */
 export async function oreClaimSol(): Promise<string> {
-  return sendWithWallet(async (owner) => [claimSolIx({ authority: owner })]);
+  return sendWithWallet(async (owner) => [priorityIx(), ...(await checkpointFirst(owner)), claimSolIx({ authority: owner })]);
 }
 
 /**

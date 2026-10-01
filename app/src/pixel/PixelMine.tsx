@@ -8,11 +8,9 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { chainReady } from '../chain/light';
 import { BLOCKS, CAVE_IN_EVERY, GEAR, LOCK_MS, gearByKey, levelFromXp, type Gear } from '../game/constants';
-import { soloMask } from '../game/pot';
 import { play, type Sound } from '../game/sfx';
-import { roundEnd, useGame } from '../game/store';
+import { isLive, isOnChain, LIVE_LOCK_MS, roundEndsAt, soloOf, useGame } from '../game/store';
 import { clearBots, ensureBots, EMOTES, publishMe, startWorld, stopWorld, thinkBots, useWorld, type Avatar } from '../game/world';
 import { CLAIMS, openSpot } from '../engine/island';
 import type { EngineEvent, Look, PeerView, Snapshot } from '../engine/types';
@@ -80,8 +78,9 @@ function snapshot(): Snapshot {
     view: focus >= 0 ? { top: closeupView.top, bottom: closeupView.bottom } : { top: fx.viewTop, bottom: fx.viewBottom },
     phase: st.phase,
     roundId: st.roundId,
-    roundEndsAt: roundEnd(st.roundId) - st.offsetMs,
-    lockMs: LOCK_MS,
+    // a live round waiting for its first deploy has no end yet: hold it a full round away
+    roundEndsAt: (roundEndsAt(st) || Date.now() + st.offsetMs + 80_000) - st.offsetMs,
+    lockMs: isLive(st) ? LIVE_LOCK_MS : LOCK_MS,
     settleStartAt: st.settleStartAt,
     revealStartAt: st.revealStartAt,
     winner: st.phase === 'reveal' ? st.winning : null,
@@ -89,7 +88,7 @@ function snapshot(): Snapshot {
     caveIn: st.roundId % CAVE_IN_EVERY === 0,
     selected: st.selected,
     pending: pend?.mask ?? 0,
-    solo: soloMask(st.roundId),
+    solo: soloOf(st, st.roundId),
     perBlock: potNow ? potNow.perBlock.map((v) => Math.round(v * 1e5) / 1e5) : Array(BLOCKS).fill(0),
     mine,
     me: {
@@ -99,7 +98,7 @@ function snapshot(): Snapshot {
       name: 'You',
     },
     peers,
-    practice: !(st.wallet.owner && chainReady),
+    practice: !isOnChain(st),
     quality: 1,
     amounts: st.dockTab === 'pro',
   };
@@ -109,7 +108,7 @@ function snapshot(): Snapshot {
 function stepPeers(dt: number) {
   const st = useGame.getState();
   const world = useWorld.getState();
-  const practice = !(st.wallet.owner && chainReady);
+  const practice = !isOnChain(st);
   if (practice && world.status !== 'online') {
     ensureBots(STANDS);
     thinkBots(STANDS, () => openSpot());

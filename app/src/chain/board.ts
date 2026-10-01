@@ -12,9 +12,9 @@
  */
 import './polyfill-web';
 import { Keypair, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
-import { connection } from './client';
+import { connection, fetchOreBalance, fetchSolBalance } from './client';
 import { NOTHING_CLAIMABLE, REFINING_FEE, REFINING_FEE_BPS } from './light';
-import { ORE_SPLIT_ADDRESS_B58 } from './ore/consts';
+import { ORE_MINT, ORE_SPLIT_ADDRESS_B58 } from './ore/consts';
 import {
   fetchClock,
   fetchOreMiner,
@@ -24,7 +24,9 @@ import {
   ORE_REFINING_BPS,
   readRewards,
 } from './ore/read';
-import { oreCheckpoint, oreClaimOre, oreClaimSol, oreDeploy, toOre, toSol } from './ore/tx';
+import { oreCheckpoint, oreClaimOre, oreClaimSol, oreDeploy, oreDeployWithWallet, toOre, toSol } from './ore/tx';
+import { distributionMask, type OreMiner, type OreRound } from './ore/accounts';
+import { keccak_256 } from '@noble/hashes/sha3';
 
 export type { OreClock } from './ore/read';
 
@@ -72,17 +74,8 @@ export async function fetchBoardRound(roundId: number | bigint): Promise<BoardRo
 
   const perSquare = r.deployed.map((v) => Number(v) / LAMPORTS_PER_SOL);
   const total = perSquare.reduce((a, b) => a + b, 0);
-  const settled = r.slotHash.some((b) => b !== 0);
-
-  let winning: number | null = null;
-  if (settled) {
-    let rng = 0n;
-    for (let i = 0; i < 4; i++) {
-      const view = new DataView(r.slotHash.buffer, r.slotHash.byteOffset + i * 8, 8);
-      rng ^= view.getBigUint64(0, true);
-    }
-    winning = Number(rng % 25n);
-  }
+  const winning = winningOf(r);
+  const settled = rngOf(r) !== null;
 
   const top = r.topMiner.toBase58();
   const split = top === ORE_SPLIT_ADDRESS_B58;
@@ -139,17 +132,29 @@ export async function fetchClaimable(owner: PublicKey): Promise<Claimable> {
     fetchOreMiner(connection, owner),
   ]);
   const r = readRewards(miner, clock);
+  let sol = toSol(r.sol);
+  let unrefined = toOre(r.unrefined);
+  // A finished round ORE has not checkpointed yet is not in the miner's balances,
+  // but a claim checkpoints it first, so show what it paid as part of the claim.
+  const pending = needsCheckpoint(miner, clock);
+  if (pending !== null && miner) {
+    const round = await fetchOreRound(connection, pending).catch(() => null);
+    const out = round ? outcomeOf(round, miner, owner) : null;
+    if (out) {
+      sol += out.payout;
+      unrefined += out.oreMined + out.oreMotherlode;
+    }
+  }
   return {
-    sol: toSol(r.sol),
-    unrefined: toOre(r.unrefined),
+    sol,
+    unrefined,
     refined: toOre(r.refined),
-    fee: toOre(r.refiningFee),
+    fee: unrefined * REFINING_FEE,
     roundId: Number(r.roundId),
     settled: r.checkpointed,
   };
 }
 
-/** The live round, its phase, and how long is left in it. */
 /** Put SOL on squares in the live round, signed by the session key. */
 export async function deployToBoard(
   owner: PublicKey,
@@ -204,29 +209,56 @@ const squareAdmin = (total: bigint) => (total / 100n > 0n ? total / 100n : 1n);
 const squareProtocol = (rest: bigint) => (rest / 10n > 0n ? rest / 10n : 1n);
 
 /**
- * Settle a round for this player and work out what it paid them.
- *
- * The figures are recomputed here from the round and miner accounts rather than
- * read back as a balance change, because a balance delta cannot tell a round's
- * payout apart from anything else that touched the account in the same slot.
- * The arithmetic mirrors ORE's own checkpoint, fee for fee.
+ * A drawn round's random number, as ORE's Round::rng reads it: the four u64s of the
+ * slot hash XORed. Null before the draw. 'refund' when the hash is all 0xff, ORE's
+ * mark for a round that could not be drawn and refunds everyone in full.
  */
-export async function settleAndRead(
-  owner: PublicKey,
-  session: Keypair,
-  roundId: number,
-): Promise<RoundOutcome> {
-  await settleBoardRound(owner, session).catch(() => null);
+function rngOf(r: OreRound): bigint | null | 'refund' {
+  if (r.slotHash.every((b) => b === 0)) return null;
+  if (r.slotHash.every((b) => b === 0xff)) return 'refund';
+  let rng = 0n;
+  for (let i = 0; i < 4; i++) {
+    const view = new DataView(r.slotHash.buffer, r.slotHash.byteOffset + i * 8, 8);
+    rng ^= view.getBigUint64(0, true);
+  }
+  return rng;
+}
 
-  const [round, miner] = await Promise.all([
-    fetchOreRound(connection, BigInt(roundId)),
-    fetchOreMiner(connection, owner),
-  ]);
-  if (!round || !miner) throw new Error(`ORE round ${roundId} is gone; it expired before it was settled`);
+/** The winning square of a drawn round. Null before the draw and on a refunded round. */
+function winningOf(r: OreRound): number | null {
+  const rng = rngOf(r);
+  return typeof rng === 'bigint' ? Number(rng % 25n) : null;
+}
 
-  const view = await fetchBoardRound(roundId);
-  if (!view || view.winning === null) throw new Error(`ORE round ${roundId} has not been drawn`);
-  const w = view.winning;
+/** u64::reverse_bits, which ORE uses to sample the solo winner. */
+function reverseBits64(x: bigint): bigint {
+  let out = 0n;
+  for (let i = 0; i < 64; i++) {
+    out = (out << 1n) | (x & 1n);
+    x >>= 1n;
+  }
+  return out;
+}
+
+/**
+ * What a drawn round paid this miner, or null if it is not drawn yet or the miner
+ * account has moved on to a later round.
+ *
+ * The figures are recomputed from the round and miner accounts rather than read
+ * back as a balance change, because a balance delta cannot tell a round's payout
+ * apart from anything else that touched the account in the same slot. The
+ * arithmetic mirrors ORE's own checkpoint, fee for fee, so it is right whether or
+ * not the round has been checkpointed yet.
+ */
+function outcomeOf(round: OreRound, miner: OreMiner, owner: PublicKey): RoundOutcome | null {
+  const rng = rngOf(round);
+  if (rng === null || miner.roundId !== round.id) return null;
+  if (rng === 'refund') {
+    // ORE could not draw this round and gives every lamport back
+    const back = miner.deployed.reduce((a, b) => a + b, 0n);
+    return { roundId: Number(round.id), winning: -1, motherlode: false, split: true, lucky: false, payout: Number(back) / LAMPORTS_PER_SOL, oreMined: 0, oreMotherlode: 0, share: 0 };
+  }
+  const w = Number(rng % 25n);
 
   let lamports = 0n;
   for (let i = 0; i < 25; i++) {
@@ -239,6 +271,7 @@ export async function settleAndRead(
     lamports += (mine * returned) / total;
   }
 
+  const split = round.topMiner.toBase58() === ORE_SPLIT_ADDRESS_B58;
   const sqTotal = round.deployed[w];
   const mineOnWin = miner.deployed[w];
   const rewardGrams = round.rewards.reduce((a, b) => a + b, 0n);
@@ -246,10 +279,14 @@ export async function settleAndRead(
   let oreGrams = 0n;
   let lucky = false;
   if (sqTotal > 0n && mineOnWin > 0n) {
-    if (view.split) {
+    if (split) {
       oreGrams = (rewardGrams * mineOnWin) / sqTotal;
     } else {
-      lucky = round.topMiner.equals(owner);
+      // ORE's own rule: sample a point on the square and see whose slice it lands in.
+      // Reset usually writes the winner into top_miner, but checkpoint is the one that pays.
+      const sample = reverseBits64(rng) % sqTotal;
+      const cum = miner.cumulative[w];
+      lucky = round.topMiner.equals(owner) || (sample >= cum && sample < cum + mineOnWin);
       if (lucky) oreGrams = rewardGrams;
     }
   }
@@ -259,16 +296,73 @@ export async function settleAndRead(
       : 0n;
 
   return {
-    roundId,
+    roundId: Number(round.id),
     winning: w,
     motherlode: round.motherlode > 0n,
-    split: view.split,
+    split,
     lucky,
     payout: Number(lamports) / LAMPORTS_PER_SOL,
     oreMined: Number(oreGrams) / ORE_UNIT,
     oreMotherlode: Number(motherGrams) / ORE_UNIT,
     share: sqTotal > 0n ? Number(mineOnWin) / Number(sqTotal) : 0,
   };
+}
+
+/** Read what a round paid this player. Throws while it is not drawn, or once it is gone. */
+export async function readOutcome(owner: PublicKey, roundId: number): Promise<RoundOutcome> {
+  const [round, miner] = await Promise.all([
+    fetchOreRound(connection, BigInt(roundId)),
+    fetchOreMiner(connection, owner),
+  ]);
+  if (!round || !miner) throw new Error(`ORE round ${roundId} is gone; it expired before it was settled`);
+  if (miner.roundId !== BigInt(roundId)) throw new Error(`ORE round ${roundId} was replaced by a later deploy`);
+  const out = outcomeOf(round, miner, owner);
+  if (!out) throw new Error(`ORE round ${roundId} has not been drawn`);
+  return out;
+}
+
+/** Settle a round for this player with the session key, then read what it paid them. */
+export async function settleAndRead(
+  owner: PublicKey,
+  session: Keypair,
+  roundId: number,
+): Promise<RoundOutcome> {
+  await settleBoardRound(owner, session).catch(() => null);
+  return readOutcome(owner, roundId);
+}
+
+/** True once ORE has drawn this round (or marked it for a refund). */
+export async function isRoundDrawn(roundId: number): Promise<boolean> {
+  const r = await fetchOreRound(connection, BigInt(roundId));
+  return Boolean(r && rngOf(r) !== null);
+}
+
+/* ---------- live mode: ORE's mainnet board, signed by the player's wallet ---------- */
+
+/** ORE's board clock, for the live round timer. */
+export const fetchOreClock = () => fetchClock(connection);
+
+/**
+ * The round's ten solo squares as a bitmask (a set bit pays one miner the whole
+ * ORE). ORE's own Round::distribution_mask, so it is known before the draw.
+ */
+export const oreSoloMask = (roundId: number) => distributionMask(BigInt(roundId), keccak_256);
+
+/** Put SOL on squares in the live round, signed by the player's wallet. Returns the round it went into. */
+export async function deployLive(squares: number[], solPerSquare: number): Promise<number> {
+  const { roundId } = await oreDeployWithWallet(squares, BigInt(Math.floor(solPerSquare * LAMPORTS_PER_SOL)));
+  return Number(roundId);
+}
+
+/** Everything the wallet panel shows in live mode. Reads ORE and the wallet only. */
+export async function fetchLiveWallet(owner: PublicKey) {
+  const [sol, ore, orePool, unclaimed] = await Promise.all([
+    fetchSolBalance(owner),
+    fetchOreBalance(owner, ORE_MINT.toBase58()),
+    fetchOreMotherlode().catch(() => 0),
+    fetchClaimable(owner).catch(() => NOTHING_CLAIMABLE),
+  ]);
+  return { sol, ore, orePool, unclaimed };
 }
 
 /** Whole ORE waiting in ORE's motherlode right now. */
