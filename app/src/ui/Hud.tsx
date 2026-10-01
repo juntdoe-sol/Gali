@@ -7,6 +7,7 @@ import { roundEnd, useGame, useLevelXp, usePoints, useRoundReward } from '../gam
 const fmtOre = (v: number) => (v >= 10 ? Math.floor(v).toLocaleString() : v >= 1 ? v.toFixed(2) : v.toFixed(3));
 import { fmtSol, practiceMotherlode, practiceOreMotherlode } from '../game/pot';
 import { Bar, F, Frame, T } from './kit';
+import { TAB_ICON } from './TabBar';
 import { fx } from '../pixel/fx';
 import { useView } from '../pixel/view';
 import { useMinersHere } from './World';
@@ -60,10 +61,8 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
               </T>
             </Pressable>
           )}
-          <Pressable onPress={onMenu} style={styles.menu} accessibilityLabel="Open menu">
-            <T v="display" style={{ fontSize: 20 }}>
-              ☰
-            </T>
+          <Pressable onPress={onMenu} style={styles.menu} accessibilityRole="button" accessibilityLabel="Open your profile">
+            <Image source={TAB_ICON.me} style={{ width: 22, height: 22, tintColor: COLORS.gold }} />
           </Pressable>
         </View>
       </View>

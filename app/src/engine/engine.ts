@@ -106,7 +106,9 @@ export class Engine {
   private pressTimer: ReturnType<typeof setTimeout> | null = null;
   private moved = false;
   private longPressed = false;
-  private lastTap = { t: 0, x: 0, y: 0 };
+  private lastTap = { t: 0, x: 0, y: 0, hit: -1 };
+  /** A single tap on a spot waits this long for a second tap before it counts as a pick. */
+  private tapTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -140,6 +142,8 @@ export class Engine {
   }
   stop() {
     cancelAnimationFrame(this.raf);
+    this.cancelPress();
+    this.cancelTap();
   }
 
   push(s: Snapshot) {
@@ -1020,15 +1024,25 @@ export class Engine {
     if (this.pressTimer) clearTimeout(this.pressTimer);
     this.pressTimer = null;
   }
-  /** Press and hold a claim to pick it without diving in. */
+  private cancelTap() {
+    if (this.tapTimer) clearTimeout(this.tapTimer);
+    this.tapTimer = null;
+  }
+  /** Press and hold a spot to dive into it: the same as a double tap, for anyone who misses one. */
   private longPress(x: number, y: number) {
     this.pressTimer = null;
     if (this.moved || this.mode !== 'island') return;
     const [mx, my] = this.cam.toMap(x, y);
     const hit = claimForTap(mx, my);
-    const el = this.revealEl(Date.now());
-    if (hit < 0 || el >= 0) return;
+    if (hit < 0) return;
     this.longPressed = true;
+    this.cancelTap();
+    this.setFocus(hit);
+  }
+  /** A single tap on a spot picks or unpicks it. Ignored while a round is being revealed. */
+  private pick(hit: number) {
+    this.tapTimer = null;
+    if (this.mode !== 'island' || this.revealEl(Date.now()) >= 0) return;
     const cl = CLAIMS[hit];
     this.parts.burst('star', cl.cx, cl.cy, 8, 30, 20, ['#5ceeff', '#ffffff'], 0.6);
     this.emit({ t: 'toggle', claim: hit });
@@ -1050,9 +1064,15 @@ export class Engine {
     }
     if (this.mode !== 'island') return;
     const [mx, my] = this.cam.toMap(x, y);
-    // double tap zooms in or back out
+    // double tap: on a spot it dives in, anywhere else it zooms in or back out
     if (now - this.lastTap.t < 280 && Math.hypot(x - this.lastTap.x, y - this.lastTap.y) < 24) {
+      const prev = this.lastTap.hit;
       this.lastTap.t = 0;
+      this.cancelTap();
+      if (prev >= 0) {
+        this.setFocus(prev);
+        return;
+      }
       if (this.cam.userZoomed) this.cam.home(360);
       else {
         this.cam.userZoomed = true;
@@ -1060,7 +1080,7 @@ export class Engine {
       }
       return;
     }
-    this.lastTap = { t: now, x, y };
+    this.lastTap = { t: now, x, y, hit: -1 };
     const hitR = 11;
     // you, then other miners
     if (Math.abs(mx - this.me.x) < 8 && my < this.me.y + 2 && my > this.me.y - 24) return this.emit({ t: 'emote' });
@@ -1071,6 +1091,7 @@ export class Engine {
     const hit = claimForTap(mx, my);
     const el = this.revealEl(now);
     if (hit >= 0) {
+      this.lastTap.hit = hit;
       const mo = this.mole;
       if (mo.idx === hit && mo.bonkedAt < 0 && el < 0) {
         const cl = CLAIMS[hit];
@@ -1081,7 +1102,9 @@ export class Engine {
           return;
         }
       }
-      this.setFocus(hit);
+      // wait out the double-tap window, then count it as a pick
+      this.cancelTap();
+      this.tapTimer = setTimeout(() => this.pick(hit), 260);
       return;
     }
     // open ground or sea: walk to the nearest dry land

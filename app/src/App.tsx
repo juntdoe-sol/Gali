@@ -8,7 +8,8 @@ import { initAudio } from './game/sfx';
 import { useGame } from './game/store';
 import PixelMine from './pixel/PixelMine';
 import { useWorld } from './game/world';
-import { ChatButton, ChatSheet } from './ui/Chat';
+import { ChatSheet } from './ui/Chat';
+import { TabBar, type SheetTab } from './ui/TabBar';
 import { Dock } from './ui/Dock';
 import { RoundCard, Toasts, TopBar } from './ui/Hud';
 import { Busy, GearReveal, LevelUp, Onboarding, ResultPop, WalletPicker } from './ui/Modals';
@@ -57,7 +58,7 @@ async function scheduleDailyReminder() {
 
 export default function App() {
   const fontsLoaded = useAppFonts();
-  const [menu, setMenu] = useState(false);
+  const [sheet, setSheet] = useState<SheetTab | null>(null);
   const onboarded = useGame((s) => s.save.onboarded);
 
   useEffect(() => {
@@ -85,29 +86,29 @@ export default function App() {
       <View style={styles.root}>
         <StatusBar style="light" />
         <PixelMine />
-        {fontsLoaded ? <Ui menu={menu} setMenu={setMenu} /> : null}
+        {fontsLoaded ? <Ui sheet={sheet} setSheet={setSheet} /> : null}
         <Splash fontsLoaded={fontsLoaded} />
       </View>
     </SafeAreaProvider>
   );
 }
 
-function Ui({ menu, setMenu }: { menu: boolean; setMenu: (v: boolean) => void }) {
+function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTab | null) => void }) {
   return (
     <>
-        <TopBar onMenu={() => setMenu(true)} />
+        <TopBar onMenu={() => setSheet('me')} />
         <RoundCard />
         <Dock />
+        <TabBar active={sheet} onTab={setSheet} />
         <MapHint />
         <ClaimPanel />
-        <ChatButton />
         <PeerCard />
         <Toasts />
         <Busy />
         <ResultPop />
         <LevelUp />
         <GearReveal />
-        <Sheet open={menu} onClose={() => setMenu(false)} />
+        <Sheet tab={sheet} onTab={setSheet} />
         <ChatSheet />
         <Onboarding />
         <WalletPicker />

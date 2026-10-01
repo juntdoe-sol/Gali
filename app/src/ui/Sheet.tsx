@@ -13,34 +13,26 @@ import { loadBoard, loadChain } from '../chain/lazy';
 import { ADMIN_FEE, fmtSol, POT_FEE, practiceMotherlode, practiceOreMotherlode, simPot, soloMask } from '../game/pot';
 import { UnclaimedRow } from './Dock';
 import { Bar, Btn, Card, Pill, T } from './kit';
+import { BAR_H, SHEET_TITLE, TabBar, type SheetTab } from './TabBar';
 
-type Tab = 'quests' | 'rounds' | 'gear' | 'skr' | 'ranks' | 'me';
-const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'quests', label: 'Quests', icon: '📜' },
-  { id: 'rounds', label: 'Rounds', icon: '📋' },
-  { id: 'gear', label: 'Gear', icon: '⛏' },
-  { id: 'skr', label: 'SKR', icon: '◈' },
-  { id: 'ranks', label: 'Ranks', icon: '🏆' },
-  { id: 'me', label: 'Me', icon: '🙂' },
-];
-
-export function Sheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+/** One page per bottom-bar tab. The bar is drawn inside the sheet too, so switching pages is one tap. */
+export function Sheet({ tab, onTab }: { tab: SheetTab | null; onTab: (t: SheetTab | null) => void }) {
   const insets = useSafeAreaInsets();
-  const [tab, setTab] = useState<Tab>('quests');
+  const close = () => onTab(null);
   return (
-    <Modal visible={open} animationType="slide" transparent onRequestClose={onClose}>
-      <Pressable style={styles.scrim} onPress={onClose} />
-      <View style={[styles.sheet, { paddingBottom: insets.bottom + 8 }]}>
+    <Modal visible={tab !== null} animationType="slide" transparent onRequestClose={close}>
+      <Pressable style={styles.scrim} onPress={close} />
+      <View style={[styles.sheet, { paddingBottom: BAR_H + insets.bottom + 8 }]}>
         <View style={styles.grabber} />
-        <View style={styles.tabs}>
-          {TABS.map((t) => (
-            <Pressable key={t.id} onPress={() => setTab(t.id)} style={[styles.tab, tab === t.id && styles.tabOn]}>
-              <T style={{ fontSize: 18 }}>{t.icon}</T>
-              <T v="bold" style={{ fontSize: 11, color: tab === t.id ? COLORS.text : COLORS.muted }}>
-                {t.label}
-              </T>
-            </Pressable>
-          ))}
+        <View style={styles.sheetHead}>
+          <T v="display" style={{ fontSize: 24 }}>
+            {tab ? SHEET_TITLE[tab] : ''}
+          </T>
+          <Pressable onPress={close} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close">
+            <T v="display" style={{ fontSize: 20, color: COLORS.muted }}>
+              ✕
+            </T>
+          </Pressable>
         </View>
         <ScrollView contentContainerStyle={{ padding: 14, gap: 10 }}>
           {tab === 'quests' && <Quests />}
@@ -51,6 +43,7 @@ export function Sheet({ open, onClose }: { open: boolean; onClose: () => void })
           {tab === 'me' && <Me />}
         </ScrollView>
       </View>
+      <TabBar active={tab} onTab={onTab} inSheet />
     </Modal>
   );
 }
@@ -252,7 +245,6 @@ function SkrTab() {
   if (!w.owner)
     return (
       <>
-      <MotherlodeCard />
       <Card glow={COLORS.skr}>
         <T v="display" style={{ fontSize: 22 }}>
           Stake SKR, score harder
@@ -260,12 +252,12 @@ function SkrTab() {
         <T style={{ marginVertical: 8 }}>Stake SKR in the Gali vault to boost every win: 1.25x at 5,000 SKR (~$90), 1.5x at 50,000 SKR (~$900). Unstake any time.</T>
         <Btn kind="skr" label="Connect wallet" onPress={() => void connect()} />
       </Card>
+      <MotherlodeCard />
       </>
     );
   const n = Number(amt) || 0;
   return (
     <>
-      <MotherlodeCard />
       <Card glow={COLORS.skr}>
         <T v="label">Your boost</T>
         <T v="display" style={{ fontSize: 34, color: COLORS.skr }}>
@@ -310,6 +302,7 @@ function SkrTab() {
       <T v="muted">
         {CLUSTER === 'devnet' ? `Devnet build uses a test SKR mint (${short(SKR_MINT_STR)}). ` : ''}SKR is the native asset of the Solana Mobile ecosystem.
       </T>
+      <MotherlodeCard />
     </>
   );
 }
@@ -540,6 +533,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0,
   },
   grabber: { alignSelf: 'center', width: 44, height: 5, borderRadius: 3, backgroundColor: COLORS.line, marginTop: 8 },
+  sheetHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 8, borderBottomColor: COLORS.line, borderBottomWidth: 2 },
   tabs: { flexDirection: 'row', paddingHorizontal: 10, paddingTop: 8, gap: 4, borderBottomColor: COLORS.line, borderBottomWidth: 2, paddingBottom: 8 },
   tab: { flex: 1, alignItems: 'center', paddingVertical: 6, borderRadius: 12 },
   past: { padding: 10, borderRadius: 12, borderWidth: 1, borderColor: COLORS.line, backgroundColor: COLORS.card },

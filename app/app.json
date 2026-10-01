@@ -3,14 +3,14 @@
     "name": "Gali",
     "slug": "gali",
     "scheme": "gali",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#070d20",
     "android": {
       "package": "trade.aeonian.gali",
-      "versionCode": 2,
+      "versionCode": 3,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#070d20"
@@ -60,6 +60,9 @@
       "eas": {
         "projectId": "2c57960e-78e4-4b88-822e-275d5ade8706"
       }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
     }
   }
 }

@@ -176,9 +176,12 @@ export default function PixelMine() {
         useView.setState({ focus: e.claim });
         break;
       case 'toggle': {
-        const was = st.selected.includes(e.claim);
-        st.toggleBlock(e.claim);
-        play(was ? 'deselect' : 'select');
+        // picking spots by hand is a PRO thing; LITE plays All or Smart
+        if (st.dockTab === 'lite') {
+          st.toast('Switch to PRO to pick spots by hand', 'info');
+          break;
+        }
+        st.toggleBlock(e.claim); // plays its own select / deselect sound
         break;
       }
       case 'bonk':
