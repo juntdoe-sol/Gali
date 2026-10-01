@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CLUSTER, LIVE_MAX_ROUND_SOL, REFINING_FEE } from '../chain/light';
 import { BLOCKS, boostFor, COLORS, pointsFor } from '../game/constants';
 import { watchMotion } from '../game/motion';
-import { addToPot, DEFAULT_SMART, fmtSol, liveReturn, maskOf, randomPick, strikeRange, MIN_SOL_PER_BLOCK, SMART_COUNTS } from '../game/pot';
+import { DEFAULT_SMART, fmtSol, liveReturn, maskOf, randomPick, MIN_SOL_PER_BLOCK, SMART_COUNTS } from '../game/pot';
 import { isLive, isOnChain, soloOf, useGame, type DockTab, type Preset } from '../game/store';
 import { fx } from '../pixel/fx';
 import { useView } from '../pixel/view';
@@ -96,20 +96,10 @@ export function Dock() {
 
 /* ---------------- shared bits ---------------- */
 const RETURN_INFO =
-  "Only the gold spot gets paid. Its miners split the whole pot (their SOL plus the SOL on every other spot) by their share of the gold spot, after fees: 1% of every spot and 10% of the losing spots. SOL on the other spots is lost. Covering all 25 spots means you always hit, but you pay the losing spots' SOL to yourself and the others, so you only profit when others put less on the spot that strikes.";
+  "ORE keeps 1% of every spot and 10% more of spots that miss. The rest of your SOL comes back to claim. Covering all 25 spots means you always hit, so you mine every round, but you pay the 10% on the 24 spots that miss.";
 
 const LIVE_INFO =
   "Only the gold spot mines ORE: split by SOL there, or all to one miner on a ★ solo spot, with odds equal to their share. ORE keeps 1% of every spot and 10% more of spots that miss. The rest of your SOL comes back to claim. One round in 500 also pays ORE's motherlode, split by SOL on the gold spot.";
-
-/** Pot as it will look with this deploy added (practice already includes a pending deploy). */
-function usePotWith(mask: number, perBlock: number) {
-  const pot = useGame((s) => s.pot);
-  const pending = useGame((s) => s.pending);
-  if (!mask || !(perBlock > 0)) return null;
-  return pending ? pot : addToPot(pot, mask, perBlock);
-}
-const fmtRange = (r: { lo: number; hi: number } | null) =>
-  !r ? '—' : Math.abs(r.hi - r.lo) < 0.00005 ? fmtSol(r.lo) : `${fmtSol(r.lo)}–${fmtSol(r.hi)}`;
 
 /** Unclaimed SOL and SKR from finished rounds, each with its own Claim button. */
 export function UnclaimedRow() {
@@ -312,8 +302,6 @@ function LitePanel({ compact }: { compact: boolean }) {
   const capped = live && per > LIVE_MAX_ROUND_SOL + 1e-9;
   const ready = n > 0 && per > 0 && perBlockOk && enough && !capped;
   const mask = mode === 'all' ? (1 << BLOCKS) - 1 : maskOf(selected);
-  const potWith = usePotWith(mask, spot);
-  const range = potWith ? strikeRange(potWith, mask, spot) : null;
   const label = !n
     ? 'TAP SPOTS ON THE MAP'
     : !per
@@ -325,7 +313,7 @@ function LitePanel({ compact }: { compact: boolean }) {
           : capped
             ? `MAX ${LIVE_MAX_ROUND_SOL} SOL A ROUND`
             : `MINE THIS ROUND · ${fmtSol(per)} SOL`;
-  const back = live && n && spot > 0 ? liveReturn(n, spot) : null;
+  const back = n && spot > 0 ? liveReturn(n, spot) : null;
   const hint =
     mode === 'pick' && !n
       ? 'Tap spots on the map to pick them'
@@ -333,9 +321,7 @@ function LitePanel({ compact }: { compact: boolean }) {
         ? n === BLOCKS
           ? `Always on the gold spot · ${fmtSol(back.strike)} SOL back + ORE`
           : `Strike: ${fmtSol(back.strike)} SOL back + ORE · miss: ${fmtSol(back.miss)} back`
-        : range
-          ? `If it strikes: ${fmtRange(range)} SOL`
-          : mode === 'all'
+        : mode === 'all'
             ? 'All 25: always on the gold spot'
             : '';
   return (
@@ -427,9 +413,6 @@ function ProPanel({ compact }: { compact: boolean }) {
   const solo = useGame((s) => soloOf(s, s.roundId));
   const picked = p.blocks === 'manual' || p.blocks === 'smart' ? selected : [...Array(BLOCKS).keys()];
   const soloCount = picked.filter((i) => solo & (1 << i)).length;
-  const proMask = p.blocks === 'all' ? (1 << BLOCKS) - 1 : maskOf(picked);
-  const proPot = usePotWith(proMask, perBlock);
-  const proRange = proPot ? strikeRange(proPot, proMask, perBlock) : null;
 
   return (
     <>
@@ -488,7 +471,7 @@ function ProPanel({ compact }: { compact: boolean }) {
           <Row
             icon="🏆"
             label="If it strikes"
-            info={live ? LIVE_INFO : `Only the gold spot gets paid. The ORE it mines is split by SOL there, unless it is one of this round's 10 solo spots (★ on the map): then one miner takes it all, with odds equal to their share. A 1-in-500 motherlode pays the whole SKR Motherlode Pool on top, split by SOL on the gold spot, plus 10,000 points. Points: 40 x 25 / spots covered. ${RETURN_INFO}`}
+            info={live ? LIVE_INFO : `Only the gold spot mines ORE. The ORE is split by SOL there, unless it is one of this round's 10 solo spots (★ on the map): then one miner takes it all, with odds equal to their share. A 1-in-500 motherlode pays the whole SKR Motherlode Pool on top, split by SOL on the gold spot, plus 10,000 points. Points: 40 x 25 / spots covered. ${RETURN_INFO}`}
             last
             right={
               <T v="black" style={{ fontSize: 13, color: COLORS.gold }}>
@@ -504,7 +487,7 @@ function ProPanel({ compact }: { compact: boolean }) {
         sub={
           ready
             ? `${fmtSol(perBlock, 5)} SOL × ${blocks} spot${blocks > 1 ? 's' : ''} · ${
-                live ? `strike: ${fmtSol(liveReturn(blocks, perBlock).strike)} SOL back + ORE` : `if one strikes: ${fmtRange(proRange)} SOL`
+`strike: ${fmtSol(liveReturn(blocks, perBlock).strike)} SOL back + ORE`
               }`
             : undefined
         }
