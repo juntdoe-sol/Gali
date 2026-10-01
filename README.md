@@ -2,25 +2,26 @@
 
 A pixel-art mining game for Solana Seeker, played on [ORE](https://ore.supply)'s own board.
 
-ORE runs a 25-square mining round every 200 slots (about 80 seconds). Gali draws those 25 squares as spots on a pixel island. Players put SOL on the spots they want. When their spot strikes gold they take the losing spots' SOL and mine $ORE, and 1 round in 500 two jackpots pay at once: ORE's own motherlode and Gali's SKR pool.
+ORE runs a 25-square mining round every 200 slots (about 80 seconds). Gali draws those 25 squares as spots on a pixel island. Players put SOL on the spots they want. When their spot strikes gold they mine $ORE. ORE keeps a small fee each round and returns the rest of the SOL. 1 round in 500, two jackpots pay at once: ORE's own motherlode and Gali's SKR pool.
 
 Built for **CLOCK IN**, the Solana Mobile hackathon. Submissions close 8 Oct 2026 (9 Oct, 14:59 GMT+8).
 
 ![Gali island](docs/gali-island.jpg)
 
-- **Android APK:** [install from Expo](https://expo.dev/accounts/juntdoe/projects/gali/builds/88c6f500-8970-4708-a6a1-54d562bc7878)
-- **Demo video:** [YouTube](https://youtube.com/shorts/e-X-gOWoZo4)
-- **Web build:** [galiapp.bounded.page](https://galiapp.bounded.page)
+- **Play live (mainnet):** [galiisland.bounded.page](https://galiisland.bounded.page)
+- **Android APK (mainnet live, 1.3.0):** [install from Expo](https://expo.dev/accounts/juntdoe/projects/gali/builds/8eecdbc1-bb75-4a32-b965-977b70ccb6a6)
+- **Demo video:** [Google Drive](https://drive.google.com/drive/folders/19_kvuqSsrazUKYvtMH5y8XHekSgKrOQN?usp=sharing)
+- **Practice build (no wallet):** [galiapp.bounded.page](https://galiapp.bounded.page)
 - **Team:** Juntdoe (lead), Josh (community), Rax (socials and creative)
 
 ## Status
 
 Be clear about what runs today:
 
-- **Practice mode** is the default and runs the whole game offline: the island, rounds, picking and deploying, strikes, both motherlodes, gear, quests and the chat bots. No wallet needed.
-- **The Gali program** (`programs/gali`) is written for ORE's board and tested against a mock of ORE's accounts. It is not deployed yet.
-- **Live mode** runs in mainnet builds (`EXPO_PUBLIC_NETWORK=mainnet`). Connect a wallet and you play ORE's real board. Each deploy and claim is a plain ORE instruction signed by your own wallet: no Gali program, no session key, no autopilot. A round is capped at 0.5 SOL, and an 18+ real-money notice comes before the wallet opens.
-- **The app's on-chain mode** has the ORE client (deploy, checkpoint, claim, automation) and the Gali calls wired, and switches on once `app/src/chain/deployment.json` names a deployed program and SKR mint.
+- **Live mode is on Solana mainnet.** Connect a wallet at galiisland.bounded.page or in the 1.3.0 APK and you play ORE's real board. Each deploy and claim is a plain ORE instruction signed by your own wallet: no Gali program, no session key, no autopilot. A round is capped at 0.5 SOL, and an 18+ real-money notice comes before the wallet opens. Deploys and claims have been run with real SOL.
+- **Practice mode** needs no wallet and runs the whole game offline with the same rules: the island, rounds, picking and deploying, strikes, both motherlodes, quests and the chat bots.
+- **The Gali program** (`programs/gali`) adds points, streaks, the SKR jackpot, gear and staking. It is written for ORE's board and tested against a mock of ORE's accounts. It is not deployed yet, so those parts run in practice mode only.
+- **The Gear Market** is a design preview. It shows gear as tradeable NFTs with sample listings. Nothing in it is on chain.
 
 Gali mints nothing, takes no cut of a winner's SOL and never holds a player's ORE position. ORE is credited here as the board Gali plays on; Gali is not affiliated with or endorsed by ORE.
 
@@ -41,9 +42,9 @@ Gali mints nothing, takes no cut of a winner's SOL and never holds a player's OR
 
 ## How a round works
 
-1. **Pick.** Tap a spot on the map to pick it, or tap MINE and take All 25 or Smart (4, 8, 15 or 20 spots at random). LITE plays one round; PRO adds presets and autopilot. Double tap or hold a spot to dive into its mine. Shake the phone to Smart-pick.
-2. **Deploy.** One transaction into ORE's board. A session key funded once lets the app deploy every round without a wallet pop-up; it can deploy but never withdraw.
-3. **Strike.** ORE draws one winning square. Its miners split the losing squares' SOL (after ORE's 1% fee and 10% of the losing squares) by their SOL on the winner, and mine the round's 1 ORE. Ten squares a round are solo squares (★): on those, one miner takes the whole ORE, with odds equal to their share.
+1. **Pick.** Tap a spot on the map to pick it, or tap MINE and take All 25 or Smart (4, 8, 15 or 20 spots at random). LITE plays one round; PRO adds presets and, in practice mode, autopilot. Double tap or hold a spot to dive into its mine. Shake the phone to Smart-pick.
+2. **Deploy.** One transaction into ORE's board. In live mode your wallet signs it. With the Gali program deployed, a session key funded once will deploy every round without a wallet pop-up; it can deploy but never withdraw.
+3. **Strike.** ORE draws one winning square. ORE keeps 1% of every square and 10% of the rest on squares that miss, and returns everything else to the miner who deployed it. Nothing moves from the losing squares to the winners. The winning square mines the round's 1 ORE, split by SOL there. Ten squares a round are solo squares (★): on those, one miner takes the whole ORE, with odds equal to their share.
 4. **Motherlode.** ORE adds 0.2 ORE to its motherlode every round and pays the whole pool 1 round in 500, split by SOL on the winning square. When it hits, Gali pays its own jackpot to the same winners, split the same way, plus 10,000 points. That jackpot is Gali's SKR pool and its ORE pool, both filled by gear sales.
 5. **Record.** `record_ore_round` reads ORE's finished round and the player's miner account and awards points, wins, streaks and XP. It is permissionless, so a player who closed the app still gets credited.
 
@@ -100,8 +101,6 @@ EXPO_PUBLIC_NETWORK=mainnet EXPO_PUBLIC_RPC_URL=<your mainnet RPC> npm run build
 
 Live mode reads ORE's board clock every 2 seconds, so use a private RPC rather than the public endpoint. A web build carries the RPC URL in its JavaScript, so lock the key to your site's domain at the RPC provider. For an APK, set the same two variables in the EAS profile.
 
-In live mode ORE keeps 1% of every square and 10% more of squares that miss; the rest returns to the miner to claim. Only the winning square mines ORE.
-
 ### Program tests
 
 Needs the Solana CLI 2.1.21 and Node 20+. Anchor is optional.
@@ -155,7 +154,9 @@ Every sprite is original and drawn in code. `python3 scripts/pixel-art.py` rebui
 
 ## Known limitations
 
-- The program is not deployed and has not run against ORE's live program, only against `ore-mock`.
+- The Gali program is not deployed and has not run against ORE's live program, only against `ore-mock`. The app's ORE client has: live mode uses it on mainnet.
+- Live mode has no points, SKR jackpot, gear or autopilot until the Gali program is deployed.
+- The Gear Market is a preview with sample listings. Gear is not minted as NFTs yet.
 - Token rates are set by the admin, not an oracle. Use a multisig as admin and a published change policy before real money.
 - `init_player` grants the starter pickaxe only. The free starter helmet and outfit exist in the app but cannot be claimed on chain yet.
 - It is a game of chance with real SOL. A real-money launch needs age gating and a legal review per market.

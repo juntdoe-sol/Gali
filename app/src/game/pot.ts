@@ -113,55 +113,35 @@ export const practiceMotherlode = (roundId: number) => 1_500 + ((roundId * 7) % 
 /** Practice stand-in for ORE's motherlode: 0.2 ORE a round since a simulated last hit. */
 export const practiceOreMotherlode = (roundId: number) => ((roundId * 7) % MOTHERLODE_ODDS) * ORE_MOTHERLODE_PER_ROUND;
 
-/** SOL left for the winning spot's miners if spot `win` strikes: everything minus ORE's fees. */
-export function poolFor(pot: PotView, win: number) {
-  let fees = 0;
-  for (let i = 0; i < BLOCKS; i++) {
-    const d = pot.perBlock[i];
-    if (!d) continue;
-    fees += d * ADMIN_FEE + (i === win ? 0 : d * (1 - ADMIN_FEE) * POT_FEE);
-  }
-  return pot.perBlock[win] > 0 ? pot.total - fees : 0;
-}
-
 /**
- * What a round pays one player, the way ORE's checkpoint works it out. SOL: the winning spot's
- * miners split the whole pool (their SOL plus the losing spots' SOL, minus fees) by their SOL on
- * that spot; losing spots get nothing back. ORE: what the round mines is split the same way, or
- * on a solo spot goes whole to one miner (odds = their share, `luckyRoll` in [0, 1)).
- * A motherlode pays ORE's whole pool (`motherlodeOre`) and Gali's whole SKR pool (`motherlodeSkr`)
- * on top, both always split by SOL on the winning spot.
+ * What a round pays one player, the way ORE's checkpoint works it out. SOL: ORE keeps 1% of
+ * every spot and 10% of the rest on spots that miss, and returns everything else to the miner
+ * who put it there. Nothing moves from the losing spots to the winners. ORE: what the round
+ * mines is split by SOL on the winning spot, or on a solo spot goes whole to one miner
+ * (odds = their share, `luckyRoll` in [0, 1)). A motherlode pays ORE's whole pool
+ * (`motherlodeOre`) and Gali's whole SKR pool (`motherlodeSkr`) on top, split the same way.
  */
 export function payoutFor(pot: PotView, win: number, minePerBlock: number, mask: number, motherlodeSkr: number, motherlodeOre: number, split: boolean, luckyRoll: number) {
-  const mine = mask & (1 << win) ? minePerBlock : 0;
+  let covered = 0;
+  for (let i = 0; i < BLOCKS; i++) if (mask & (1 << i)) covered++;
+  const hit = (mask & (1 << win)) !== 0;
+  const back = liveReturn(covered, minePerBlock);
+  const sol = covered ? (hit ? back.strike : back.miss) : 0;
   const onWin = pot.perBlock[win];
-  if (!mine || !onWin) return { sol: 0, ore: 0, skrMotherlode: 0, oreMotherlode: 0, lucky: false };
-  const share = mine / onWin;
+  if (!hit || !onWin) return { sol, ore: 0, skrMotherlode: 0, oreMotherlode: 0, lucky: false };
+  const share = minePerBlock / onWin;
   const lucky = !split && luckyRoll < share;
-  return { sol: share * poolFor(pot, win), ore: split ? share * ROUND_REWARD_ORE : lucky ? ROUND_REWARD_ORE : 0, skrMotherlode: share * motherlodeSkr, oreMotherlode: share * motherlodeOre, lucky };
+  return { sol, ore: split ? share * ROUND_REWARD_ORE : lucky ? ROUND_REWARD_ORE : 0, skrMotherlode: share * motherlodeSkr, oreMotherlode: share * motherlodeOre, lucky };
 }
 
 /**
- * Live mode: what ORE's own checkpoint gives back on `n` spots of `perBlock` SOL.
+ * What ORE's own checkpoint gives back on `n` spots of `perBlock` SOL.
  * ORE keeps 1% of every spot and 10% of the rest on spots that miss; everything
  * else returns to the miner who put it there. Only the ORE reward depends on the strike.
  */
 export function liveReturn(n: number, perBlock: number) {
   const missKeep = (1 - ADMIN_FEE) * (1 - POT_FEE);
   return { strike: perBlock * (1 - ADMIN_FEE) + (n - 1) * perBlock * missKeep, miss: n * perBlock * missKeep };
-}
-
-/** Your SOL if a spot you cover strikes: the smallest and largest payout over your spots, given the pot so far (yours included). */
-export function strikeRange(pot: PotView, mask: number, perBlock: number) {
-  let lo = Infinity;
-  let hi = 0;
-  for (let i = 0; i < BLOCKS; i++) {
-    if (!(mask & (1 << i))) continue;
-    const v = (perBlock / pot.perBlock[i]) * poolFor(pot, i);
-    lo = Math.min(lo, v);
-    hi = Math.max(hi, v);
-  }
-  return hi > 0 ? { lo, hi } : null;
 }
 
 /** SOL per spot that spreads `amount` over OPTIMAL_ROUNDS rounds on all 25 spots (at least the minimum). */

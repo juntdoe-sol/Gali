@@ -1,8 +1,8 @@
 //! Gali: a mining game for Solana Seeker, played on ORE's board.
 //!
 //! Gali does not run a round. ORE does, on mainnet, in 200-slot rounds that start
-//! on their first deploy. Players deploy into ORE's board, win the losing squares'
-//! SOL and mine $ORE, and claim all of it from ORE's own program. Gali never sits
+//! on their first deploy. Players deploy into ORE's board, get their SOL back less
+//! ORE's fees, mine $ORE when their square wins, and claim from ORE's own program. Gali never sits
 //! between a player and that position, never custodies it, and takes no cut of it.
 //!
 //! What this program is, then, is the game around that:

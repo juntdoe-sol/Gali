@@ -88,7 +88,7 @@ function SolLine({ res, dark, big }: { res: RoundResult; dark: boolean; big?: bo
   return (
     <View style={{ alignItems: 'center' }}>
       <T v="display" style={{ fontSize: big ? 40 : 26, lineHeight: big ? 46 : 30, color: dark ? '#0b5a3a' : '#c8ffe6' }}>
-        +{fmtSol(res.solOut)} SOL{res.onChain && oreLive && !chainReady ? ' back' : ''}
+        +{fmtSol(res.solOut)} SOL back
       </T>
       {res.oreMined ? (
         <T v="display" style={{ fontSize: big ? 24 : 18, color: dark ? '#3d5a00' : '#eaffc4' }}>
@@ -256,7 +256,7 @@ export function Busy() {
 }
 
 const STEPS = [
-  { t: 'Deploy SOL. Strike gold.', b: 'Every minute a new round opens on an island with 25 mining spots. Put SOL on the spots you pick. One spot strikes gold, and its miners split 90% of the pot. Tap MINE to play.' },
+  { t: 'Deploy SOL. Strike gold.', b: 'Every minute a new round opens on an island with 25 mining spots. Put SOL on the spots you pick. One spot strikes gold and mines the round\u2019s ORE. Most of your SOL comes back each round: ORE keeps 1%, plus 10% on spots that miss. Tap MINE to play.' },
   { t: 'Mine ORE, chase two jackpots', b: 'Every round mines 1 ORE for the miners on the gold spot, split by their SOL there. On one of the round\u2019s 10 solo spots (\u2605), one miner takes it all, with odds equal to their share. 1 round in 500, ORE\u2019s motherlode hits and Gali\u2019s SKR pool pays the same winners. Shake your phone to Smart-pick.' },
   { t: 'Bring your Seeker wallet', b: 'Practice first with 2 play SOL, or connect with Mobile Wallet Adapter. Fund a 24h session once and PRO autopilot deploys every round for you. It is a game of chance: only use SOL you can afford to lose.' },
 ];
