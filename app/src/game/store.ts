@@ -260,8 +260,8 @@ export const roundEnd = (rid: number) => (rid + 1) * ROUND_SECS * 1000;
 export const LIVE_SPAN_MS = 80_000;
 /** Live deploys stop this long before ORE closes the round: a wallet approval takes a few seconds. */
 export const LIVE_LOCK_MS = 10_000;
-/** SOL kept back for fees and, on a first deploy, the rent of ORE's miner account. */
-const LIVE_FEE_SOL = 0.005;
+/** SOL kept back for fees and, on a first deploy, the rent of ORE's miner account (about 0.0061 SOL). */
+const LIVE_FEE_SOL = 0.008;
 
 type Clocked = Pick<GameState, 'wallet' | 'roundId' | 'liveClock'>;
 /** Live mode: a mainnet build with a wallet connected plays ORE's real board. */

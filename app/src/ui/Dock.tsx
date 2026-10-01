@@ -155,7 +155,7 @@ export function UnclaimedRow() {
 const fmtAmt = (v: number) => (v >= 100 ? Math.floor(v).toLocaleString() : v.toFixed(v >= 1 ? 2 : 4));
 
 /** SOL kept back in live mode for fees and ORE's miner account rent. */
-const LIVE_FEE_SOL = 0.005;
+const LIVE_FEE_SOL = 0.008;
 
 function useBalance() {
   const sol = useGame((s) => s.wallet.sol + s.wallet.sessionSol);
