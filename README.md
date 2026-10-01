@@ -138,6 +138,15 @@ Every sprite is original and drawn in code. `python3 scripts/pixel-art.py` rebui
 - `init_player` grants the starter pickaxe only. The free starter helmet and outfit exist in the app but cannot be claimed on chain yet.
 - It is a game of chance with real SOL. A real-money launch needs age gating and a legal review per market.
 
+## Security notes
+
+We ran an automated security review on commit `0c13d2a`. It confirmed no defect in Gali's own code. What it raised, and where we stand:
+
+- **Supabase key in the app.** `world.ts` and `chat.json` read the Supabase anon key, which is public by design. The chat tables have row level security on, with read-only policies, so writes go through the `chat-post` and `chat-admin` edge functions only.
+- **Program checks.** ORE accounts are refused unless the owner, length and address match (`programs/gali/src/ore.rs`). The admin hand-over needs the new wallet to sign, and unstaking cannot take more than was staked. `record_ore_round` is open to anyone on purpose.
+- **npm advisories.** `toml`, `bigint-buffer`, `stream-json` and `uuid` arrive through `@coral-xyz/anchor`, `@solana/spl-token` and `@solana/web3.js`. None has an upstream fix yet; npm's suggested fix is a downgrade that breaks the app. We will update when those libraries ship fixes. `serialize-javascript` comes in through `mocha` and runs in tests only.
+- **Token rates.** SKR and ORE rates are set by the admin, not an oracle. Before real money, the admin should be a multisig and `price_max_age_secs` should be set above 0 so stale rates are refused.
+
 ## License
 
 MIT, see [LICENSE](LICENSE).

@@ -3,6 +3,7 @@ name = "ore-mock"
 version = "0.1.0"
 edition = "2021"
 description = "Test-only stand-in for ORE's program, so Gali's readers can be tested offline"
+license = "MIT"
 publish = false
 
 [lib]
