@@ -41,6 +41,17 @@
       "android": {
         "buildType": "apk"
       }
+    },
+    "apk-live": {
+      "environment": "production",
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_NETWORK": "mainnet"
+      },
+      "android": {
+        "image": "latest",
+        "buildType": "apk"
+      }
     }
   },
   "submit": {

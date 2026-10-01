@@ -42,6 +42,8 @@ interface Listing {
   seller: string;
   price: number;
   unit: 'SKR' | 'SOL';
+  /** A new mint from Gali at the drop price, rather than a resale. */
+  drop?: boolean;
 }
 
 /** Stable pseudo-random numbers, so the sample listings look the same on every visit. */
@@ -57,21 +59,22 @@ const fakeKey = (seed: number) => {
   return `${s.slice(0, 4)}…${s.slice(4)}`;
 };
 
-/** Sample listings: one to three of each paid item, priced around its Store price. */
+/** Sample listings: Gali's drop of each paid item at its set price, plus one to three resales around it. */
 function sampleListings(): Listing[] {
   const out: Listing[] = [];
   for (const g of GEAR) {
     if (g.priceSkr === 0) continue;
+    out.push({ id: `${g.key}-drop`, gear: g, edition: 1 + (hash(g.id + 7) % 900), seller: 'Gali drop', price: g.priceSkr, unit: 'SKR', drop: true });
     const n = 1 + (hash(g.id) % 3);
     for (let k = 0; k < n; k++) {
       const h = hash(g.id * 97 + k);
-      const mult = 0.7 + (h % 90) / 100; // 0.7x to 1.6x the Store price
+      const mult = 0.7 + (h % 90) / 100; // 0.7x to 1.6x the drop price
       out.push({
         id: `${g.key}-${k}`,
         gear: g,
         edition: 1 + (h % 900),
         seller: fakeKey(h),
-        // samples are priced in SKR only, so they line up with the Store's prices
+        // samples are priced in SKR only, so they line up with the drop prices
         price: Math.round((g.priceSkr * mult) / 10) * 10,
         unit: 'SKR',
       });
@@ -92,9 +95,9 @@ export function Market() {
           <T v="label">🏪 Gear Market</T>
           <Pill text="COMING SOON" color={COLORS.gold} fg="#2a1a00" />
         </View>
-        <T>Every item you buy becomes an NFT in your wallet. Trade it with other miners for SOL or SKR.</T>
+        <T>Every gear item is an NFT in your wallet. Mint new gear from Gali&apos;s drops, or trade with other miners for SOL or SKR.</T>
         <T v="muted" style={{ marginTop: 6 }}>
-          A {ROYALTY_BPS / 100}% royalty on every resale goes {Math.round(POOL_SHARE * 100)}% to the SKR jackpot pool and {Math.round((1 - POOL_SHARE) * 100)}% to the treasury. Gear stays cosmetic: it never changes your odds.
+          Drops pay {Math.round(POOL_SHARE * 100)}% of the price into the SKR jackpot pool and {Math.round((1 - POOL_SHARE) * 100)}% to the treasury. Resales pay a {ROYALTY_BPS / 100}% royalty, split the same way. Gear stays cosmetic: it never changes your odds.
         </T>
       </Card>
       <View style={styles.seg}>
@@ -142,13 +145,13 @@ function Browse() {
   const [open, setOpen] = useState<string | null>(null);
   const shown = listings
     .filter((l) => kind === 'all' || l.gear.kind === kind)
-    .sort((a, b) => b.gear.priceSkr - a.gear.priceSkr);
-  const floor = (g: Gear) => Math.min(...listings.filter((l) => l.gear.id === g.id && l.unit === 'SKR').map((l) => l.price));
+    .sort((a, b) => Number(Boolean(b.drop)) - Number(Boolean(a.drop)) || b.gear.priceSkr - a.gear.priceSkr);
+  const floor = (g: Gear) => Math.min(...listings.filter((l) => l.gear.id === g.id && l.unit === 'SKR' && !l.drop).map((l) => l.price));
   return (
     <>
       <KindChips kind={kind} onKind={setKind} />
       <T v="muted" style={{ fontSize: 11 }}>
-        {shown.length} sample listings · rarest first
+        {shown.length} sample listings · Gali drops first, then resales, rarest first
       </T>
       {shown.map((l) => {
         const g = l.gear;
@@ -156,7 +159,7 @@ function Browse() {
         const fl = floor(g);
         return (
           <Pressable key={l.id} onPress={() => setOpen(on ? null : l.id)} accessibilityRole="button" accessibilityLabel={`${g.name} for ${fmtPrice(l)}`}>
-            <Card style={{ borderColor: RARITY_COLOR[g.rarity] + '99' }}>
+            <Card style={{ borderColor: RARITY_COLOR[g.rarity] + '99' }} glow={l.drop ? COLORS.gold : undefined}>
               <View style={styles.row}>
                 <GearIcon g={g} />
                 <View style={{ flex: 1 }}>
@@ -166,21 +169,21 @@ function Browse() {
                   <T v="bold" style={{ fontSize: 11, color: RARITY_COLOR[g.rarity], textTransform: 'capitalize' }}>
                     {g.rarity} {g.kind}
                   </T>
-                  <T v="muted" style={{ fontSize: 11 }}>
-                    Seller {l.seller}
+                  <T v="muted" style={{ fontSize: 11, color: l.drop ? COLORS.gold : COLORS.muted }}>
+                    {l.drop ? 'Gali drop · new mint' : `Seller ${l.seller}`}
                   </T>
                 </View>
-                <Btn small kind="skr" label={`Buy ${fmtPrice(l)}`} sub={l.unit === 'SKR' ? usd(l.price) : undefined} onPress={() => toast(SOON, 'info')} />
+                <Btn small kind="skr" label={`${l.drop ? 'Mint' : 'Buy'} ${fmtPrice(l)}`} sub={l.unit === 'SKR' ? usd(l.price) : undefined} onPress={() => toast(SOON, 'info')} />
               </View>
               {on ? (
                 <View style={styles.detail}>
                   <Trait k="Perk" v={g.perk} />
-                  <Trait k="Store price" v={`${g.priceSkr.toLocaleString()} SKR`} />
-                  <Trait k="Floor" v={Number.isFinite(fl) ? `${fl.toLocaleString()} SKR` : '—'} />
-                  <Trait k="Royalty" v={`${ROYALTY_BPS / 100}% · ${Math.round(POOL_SHARE * 100)}% to the SKR pool`} />
+                  <Trait k="Drop price" v={`${g.priceSkr.toLocaleString()} SKR`} />
+                  <Trait k="Resale floor" v={Number.isFinite(fl) ? `${fl.toLocaleString()} SKR` : '—'} />
+                  <Trait k={l.drop ? 'Drop split' : 'Royalty'} v={l.drop ? `${Math.round(POOL_SHARE * 100)}% to the SKR pool` : `${ROYALTY_BPS / 100}% · ${Math.round(POOL_SHARE * 100)}% to the SKR pool`} />
                   <Trait k="Standard" v="Metaplex Core NFT" />
                   <T v="muted" style={{ fontSize: 11, marginTop: 4 }}>
-                    Buying moves the NFT to your wallet, and it shows on your miner at once.
+                    {l.drop ? 'Minting creates the NFT in your wallet' : 'Buying moves the NFT to your wallet'}, and it shows on your miner at once.
                   </T>
                 </View>
               ) : null}
@@ -222,7 +225,7 @@ function MyItems() {
   return (
     <>
       <T v="muted" style={{ fontSize: 12 }}>
-        Starter gear is free and bound to your miner. Anything you buy in the Store can be listed here.
+        Starter gear is free and bound to your miner. Gear you mint or buy can be listed here.
       </T>
       {mine.map((g) => {
         const starter = g.priceSkr === 0;

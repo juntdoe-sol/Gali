@@ -1,5 +1,5 @@
 /**
- * The bottom menu: Quest, Rounds, Store, MINE, Boost, Ranks, Chat.
+ * The bottom menu: Quest, Rounds, Market, MINE, Boost, Ranks, Chat.
  *
  * MINE sits raised in the middle and opens or closes the LITE / PRO panel.
  * The other six open their page. It hides while you are inside a spot's mine,
@@ -34,7 +34,7 @@ export const TAB_ICON: Record<SheetTab | 'chat' | 'mine', ImageSourcePropType> =
 export const SHEET_TITLE: Record<SheetTab, string> = {
   quests: 'Quests',
   rounds: 'Rounds',
-  gear: 'Store',
+  gear: 'Market',
   skr: 'Boost',
   ranks: 'Ranks',
   me: 'Profile',
@@ -43,7 +43,7 @@ export const SHEET_TITLE: Record<SheetTab, string> = {
 const LEFT: { id: SheetTab; label: string }[] = [
   { id: 'quests', label: 'QUEST' },
   { id: 'rounds', label: 'ROUNDS' },
-  { id: 'gear', label: 'STORE' },
+  { id: 'gear', label: 'MARKET' },
 ];
 const RIGHT: { id: SheetTab | 'chat'; label: string }[] = [
   { id: 'skr', label: 'BOOST' },
