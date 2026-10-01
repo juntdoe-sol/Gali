@@ -169,5 +169,5 @@ export const optimalPerSpot = (amount: number) =>
   Math.max(MIN_SOL_PER_BLOCK, Math.floor((amount / OPTIMAL_ROUNDS / BLOCKS) * 1e5) / 1e5);
 
 /** SOL for display. Amounts under 0.01 keep 6 decimals, so 0.000356 does not round up to look like 0.0004. */
-export const fmtSol = (v: number, dp = 4) =>
+export const fmtSol = (v: number, dp = v > 0 && v < 0.01 ? 6 : 4) =>
   v >= 100 ? v.toFixed(1) : v.toFixed(v > 0 && v < 0.01 ? Math.max(dp, 6) : dp).replace(/0+$/, '').replace(/\.$/, '.0');
