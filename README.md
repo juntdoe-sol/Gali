@@ -29,7 +29,7 @@ Gali mints nothing, takes no cut of a winner's SOL and never holds a player's OR
 | --- | --- |
 | `programs/gali` | Anchor program: points and streaks read from ORE's rounds, the SKR jackpot, gear in SKR or ORE, staking, session keys, admin |
 | `programs/ore-mock` | Test-only stand-in for ORE's program, loaded at ORE's address on a local validator |
-| `tests/gali.ts` | Program tests against the mock (18 cases) |
+| `tests/gali.ts` | Program tests against the mock (27 cases) |
 | `app/` | Expo (React Native) app for Android and web. The island is a canvas engine in `app/src/engine` |
 | `admin/` | Admin page (Vite + React): balances, token prices, settings, pools, pause, admin hand-over, players, chat moderation |
 | `supabase/` | Chat server: tables plus the `chat-post` and `chat-admin` edge functions |
@@ -45,6 +45,16 @@ Gali mints nothing, takes no cut of a winner's SOL and never holds a player's OR
 3. **Strike.** ORE draws one winning square. Its miners split the losing squares' SOL (after ORE's 1% fee and 10% of the losing squares) by their SOL on the winner, and mine the round's 1 ORE. Ten squares a round are solo squares (★): on those, one miner takes the whole ORE, with odds equal to their share.
 4. **Motherlode.** ORE adds 0.2 ORE to its motherlode every round and pays the whole pool 1 round in 500, split by SOL on the winning square. When it hits, Gali pays its own jackpot to the same winners, split the same way, plus 10,000 points. That jackpot is Gali's SKR pool and its ORE pool, both filled by gear sales.
 5. **Record.** `record_ore_round` reads ORE's finished round and the player's miner account and awards points, wins, streaks and XP. It is permissionless, so a player who closed the app still gets credited.
+
+### Rounds go in order
+
+ORE's miner account only holds the last round a player deployed in, and Gali keeps one `last_ore_round` per player. Three rules follow:
+
+- **Record before the next deploy.** A round has to be recorded after ORE checkpoints the miner and before the player deploys again. A round missed in that window is forfeit for good: its points can never be credited.
+- **Earlier rounds are refused.** Once round N is recorded, any round before N fails with `OreRoundAlreadyRecorded`.
+- **Claim jackpots oldest first.** `claim_jackpot` keeps its own `jackpot_round` the same way, so claiming a later motherlode first forfeits an earlier one. Claims also need the miner account to still hold that round, so claim before deploying again.
+
+The tests pin all three as intended behaviour.
 
 Points: `40 x 25 / spots covered` for a win, times 1.25 or 1.5 with staked SKR or ORE (the better boost applies).
 
@@ -91,7 +101,7 @@ cargo-build-sbf --manifest-path programs/ore-mock/Cargo.toml
 bash scripts/test-local.sh
 ```
 
-`test-local.sh` starts a local validator with `ore-mock` at ORE's address and Gali as an upgradeable program, then runs the 18 tests. The `program` GitHub workflow does the same on every change to the programs, and the `ci` workflow type-checks and builds the app and the admin page.
+`test-local.sh` starts a local validator with `ore-mock` at ORE's address and Gali as an upgradeable program, then runs the 27 tests. The `program` GitHub workflow does the same on every change to the programs, and the `ci` workflow type-checks and builds the app and the admin page.
 
 ### Devnet deploy
 
@@ -144,6 +154,8 @@ We ran an automated security review on commit `0c13d2a`. It confirmed no defect 
 
 - **Supabase key in the app.** `world.ts` and `chat.json` read the Supabase anon key, which is public by design. The chat tables have row level security on, with read-only policies, so writes go through the `chat-post` and `chat-admin` edge functions only.
 - **Program checks.** ORE accounts are refused unless the owner, length and address match (`programs/gali/src/ore.rs`). The admin hand-over needs the new wallet to sign, and unstaking cannot take more than was staked. `record_ore_round` is open to anyone on purpose.
+- **Sanity checks on ORE's bytes.** A round whose `expires_at` sits more than 3 days of slots from the current slot, or whose motherlode is above ORE's 3,000,000 max supply, fails with `BadOreLayout`. If ORE moves a field, Gali stops instead of paying from a misread value.
+- **Input checks.** `init_config` refuses a zero SKR or ORE rate, and `set_session` refuses a session that has already expired. `claim_jackpot` creates the winner's SKR and ORE token accounts if they are missing, so a hit is never lost to a missing account.
 - **npm advisories.** `toml`, `bigint-buffer`, `stream-json` and `uuid` arrive through `@coral-xyz/anchor`, `@solana/spl-token` and `@solana/web3.js`. None has an upstream fix yet; npm's suggested fix is a downgrade that breaks the app. We will update when those libraries ship fixes. `serialize-javascript` comes in through `mocha` and runs in tests only.
 - **Token rates.** SKR and ORE rates are set by the admin, not an oracle. Before real money, the admin should be a multisig and `price_max_age_secs` should be set above 0 so stale rates are refused.
 

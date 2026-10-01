@@ -15,7 +15,6 @@
 //! Nothing in this module writes to an ORE account. Gali only ever reads.
 
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::keccak;
 
 use crate::GaliError;
 
@@ -49,7 +48,6 @@ mod miner_at {
     pub const AUTHORITY: usize = 0;
     pub const CHECKPOINT_ID: usize = 40;
     pub const DEPLOYED: usize = 56;
-    pub const CUMULATIVE: usize = 456;
     pub const ROUND_ID: usize = 656;
     pub const SIZE: usize = 744;
 }
@@ -111,6 +109,17 @@ pub struct OreRound {
 /// ORE sets a round's expiry one day of slots past the slot mining closed.
 const ONE_DAY_SLOTS: u64 = 24 * 60 * 200;
 
+/// How far a round's expiry may sit from the current slot, either way, before the
+/// bytes are treated as a layout change rather than a round. ORE writes
+/// `end_slot + ONE_DAY_SLOTS` on a round's first deploy (and `u64::MAX` before it),
+/// so a finished round sits about a day ahead; three days either way is loose.
+pub const MAX_EXPIRY_DRIFT_SLOTS: u64 = 3 * ONE_DAY_SLOTS;
+
+/// The most ORE a motherlode can hold: ORE's whole 3,000,000 max supply at 11
+/// decimals (`ore_mint_api::consts::MAX_SUPPLY`). Anything above it cannot be a
+/// real payout, only a misread field.
+pub const MAX_MOTHERLODE_GRAMS: u64 = 3_000_000 * 100_000_000_000;
+
 impl OreRound {
     /// The slot at which mining closed. Derived, because the round account keeps
     /// its expiry rather than its end, and the two differ by a fixed day.
@@ -145,14 +154,24 @@ impl OreRound {
         }
         let square = (rng % 25) as usize;
 
+        // Range checks: if ORE moves a field, these trip before a misread value pays anything.
+        let expires_at = u64_at(&data, round_at::EXPIRES_AT);
+        let slot = Clock::get()?.slot;
+        require!(
+            expires_at.abs_diff(slot) <= MAX_EXPIRY_DRIFT_SLOTS,
+            GaliError::BadOreLayout
+        );
+        let motherlode = u64_at(&data, round_at::MOTHERLODE);
+        require!(motherlode <= MAX_MOTHERLODE_GRAMS, GaliError::BadOreLayout);
+
         let top_miner = key_at(&data, round_at::TOP_MINER);
         Ok(Self {
             id,
             deployed: squares_at(&data, round_at::DEPLOYED),
             winning_square: Some(square),
             split: top_miner == ORE_SPLIT,
-            motherlode: u64_at(&data, round_at::MOTHERLODE),
-            expires_at: u64_at(&data, round_at::EXPIRES_AT),
+            motherlode,
+            expires_at,
         })
     }
 }
@@ -163,8 +182,6 @@ pub struct OreMiner {
     pub round_id: u64,
     /// Lamports this miner had on each square in `round_id`.
     pub deployed: [u64; 25],
-    /// The running total already on each square when they deployed there.
-    pub cumulative: [u64; 25],
 }
 
 impl OreMiner {
@@ -197,7 +214,6 @@ impl OreMiner {
             authority: *authority,
             round_id,
             deployed: squares_at(&data, miner_at::DEPLOYED),
-            cumulative: squares_at(&data, miner_at::CUMULATIVE),
         })
     }
 
@@ -211,62 +227,6 @@ impl OreMiner {
 pub fn board_round_id(info: &AccountInfo<'_>) -> Result<u64> {
     let data = ore_bytes(info, ORE_BOARD, board_at::SIZE)?;
     Ok(u64_at(&data, board_at::ROUND_ID))
-}
-
-/// ORE's solo/split mask for a round: a set bit marks a square that pays one winner.
-///
-/// This is ORE's own rule reimplemented, not a lookup: keccak the round id, use
-/// it to Fisher-Yates shuffle the 25 indices, and the first ten are solo. It has
-/// to match ORE exactly, so it is covered by `tests/ore-mask.ts` against real
-/// settled rounds.
-pub fn solo_mask_ore(round_id: u64) -> u32 {
-    let mut randomness = keccak::hashv(&[round_id.to_le_bytes().as_ref()]).0;
-    let mut offset = 0usize;
-
-    let mut indices = [0u8; 25];
-    for (i, slot) in indices.iter_mut().enumerate() {
-        *slot = i as u8;
-    }
-
-    for i in (1..25usize).rev() {
-        if offset + 2 > randomness.len() {
-            randomness = keccak::hashv(&[&randomness]).0;
-            offset = 0;
-        }
-        let r = u16::from_le_bytes([randomness[offset], randomness[offset + 1]]);
-        let j = (r as usize) % (i + 1);
-        indices.swap(i, j);
-        offset += 2;
-    }
-
-    let mut mask = 0u32;
-    for idx in indices.iter().take(10) {
-        mask |= 1 << *idx;
-    }
-    mask
-}
-
-/// True when the square's reward is shared rather than taken by one wallet.
-pub fn is_split_square(round_id: u64, square: usize) -> bool {
-    solo_mask_ore(round_id) & (1u32 << square) == 0
-}
-
-/// Whether this miner took the solo reward on the winning square.
-///
-/// ORE samples a point inside the square's total and gives it to whoever's
-/// `[cumulative, cumulative + deployed)` interval covers it. Odds are the size
-/// of your slice, not how early you deployed.
-pub fn is_solo_winner(round: &OreRound, miner: &OreMiner, entropy_rng: u64) -> bool {
-    let Some(square) = round.winning_square else {
-        return false;
-    };
-    let total = round.deployed[square];
-    if total == 0 || miner.deployed[square] == 0 {
-        return false;
-    }
-    let sample = entropy_rng.reverse_bits() % total;
-    sample >= miner.cumulative[square]
-        && sample < miner.cumulative[square].saturating_add(miner.deployed[square])
 }
 
 /// A miner's share of the winning square, in basis points of that square's total.

@@ -231,8 +231,6 @@ export const roundEnd = (rid: number) => (rid + 1) * ROUND_SECS * 1000;
 const errMsg = (e: unknown) => {
   const m = String((e as Error)?.message ?? e);
   if (/RoundLocked/.test(m)) return 'Round is locking. Try next round';
-  if (/AlreadyOnBlock/.test(m)) return 'You already have SOL on one of those spots this round';
-  if (/StakeInPlay/.test(m)) return 'Your staked SKR is boosting this round. Unstake after it ends';
   if (/Paused/.test(m)) return 'Gali is paused for maintenance. Try again soon';
   if (/insufficient|0x1\b/i.test(m)) return 'Not enough balance';
   if (/declined|cancel|rejected/i.test(m)) return 'Cancelled in wallet';
