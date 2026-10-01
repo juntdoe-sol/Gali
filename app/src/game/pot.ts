@@ -69,6 +69,20 @@ export function smartPick(perBlock: number[], n: number): number[] {
     .map((x) => x.i);
 }
 
+/** Smart's spot counts, in LITE and PRO alike. */
+export const SMART_COUNTS = [4, 8, 15, 20] as const;
+export const DEFAULT_SMART = 8;
+
+/** n spots at random (Fisher-Yates), in board order. This is what Smart picks. */
+export function randomPick(n: number): number[] {
+  const idx = [...Array(BLOCKS).keys()];
+  for (let i = idx.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [idx[i], idx[j]] = [idx[j], idx[i]];
+  }
+  return idx.slice(0, Math.max(1, Math.min(BLOCKS, n))).sort((a, b) => a - b);
+}
+
 export const maskOf = (idx: number[]) => idx.reduce((m, i) => m | (1 << i), 0);
 export const idxOf = (mask: number) => [...Array(BLOCKS).keys()].filter((i) => mask & (1 << i));
 

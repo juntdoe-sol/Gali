@@ -57,6 +57,7 @@ export function TabBar({ active, onTab, inSheet }: { active: SheetTab | null; on
   const dockOpen = useGame((s) => s.dockOpen);
   const run = useGame((s) => s.run);
   const unread = useChat((s) => s.unread);
+  const picked = useGame((s) => (s.dockTab === 'lite' && s.liteMode === 'all' ? 0 : s.selected.length));
   useEffect(() => {
     if (!inSheet) return startChatPolling();
   }, [inSheet]);
@@ -109,6 +110,13 @@ export function TabBar({ active, onTab, inSheet }: { active: SheetTab | null; on
         <T v="black" style={[styles.label, { color: COLORS.gold, marginTop: 2 }]}>
           {run ? 'MINING' : 'MINE'}
         </T>
+        {picked > 0 && !run && !mineOn ? (
+          <View style={styles.pickBadge} accessibilityLabel={`${picked} spots selected`}>
+            <T v="black" style={{ fontSize: 11, color: '#070d20' }}>
+              {picked}
+            </T>
+          </View>
+        ) : null}
       </Pressable>
       {RIGHT.map(item)}
     </View>
@@ -125,5 +133,6 @@ const styles = StyleSheet.create({
   mineRing: { marginTop: -30, width: 66, height: 66, borderRadius: 33, padding: 3, backgroundColor: '#070d20', borderWidth: 2, borderColor: COLORS.gold2 },
   mineRingOn: { borderColor: COLORS.gold },
   mineDisc: { flex: 1, borderRadius: 30, alignItems: 'center', justifyContent: 'center' },
+  pickBadge: { position: 'absolute', top: -30, right: 2, minWidth: 22, height: 22, borderRadius: 11, paddingHorizontal: 5, backgroundColor: COLORS.teal, borderWidth: 2, borderColor: '#070d20', alignItems: 'center', justifyContent: 'center' },
   mineIcon: { width: 44, height: 44, marginTop: -2 },
 });

@@ -23,7 +23,6 @@ export function ClaimPanel() {
   const phase = useGame((s) => s.phase);
   const pending = useGame((s) => s.pending);
   const run = useGame((s) => s.run);
-  const lite = useGame((s) => s.dockTab === 'lite');
   const roundId = useGame((s) => s.roundId);
   const pot = useGame((s) => s.pot);
   const winning = useGame((s) => s.winning);
@@ -53,8 +52,8 @@ export function ClaimPanel() {
   const secs = Math.max(0, Math.ceil((roundEnd(roundId) - now) / 1000));
   const clock = phase === 'mining' ? `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` : phase === 'settling' ? 'MINING' : 'STRIKE!';
 
-  let action = picked ? 'PICKED  ✓' : lite ? 'PICK IN PRO' : 'PICK THIS SPOT';
-  let sub = picked ? 'Tap to unpick. Deploy from the island.' : lite ? 'LITE plays All or Smart; this switches to PRO' : 'Adds it to your picks for this round';
+  let action = picked ? 'PICKED  ✓' : 'PICK THIS SPOT';
+  let sub = picked ? 'Tap to unpick. Deploy from the island.' : 'Adds it to your picks for this round';
   if (pending) {
     action = yours > 0 ? 'YOU ARE MINING HERE' : 'NOT IN THIS ROUND';
     sub = 'Your SOL is in for this round';
@@ -130,10 +129,7 @@ export function ClaimPanel() {
             kind={picked || pending ? 'plain' : 'gold'}
             disabled={locked && !struck}
             onPress={() => {
-              if (locked) return;
-              const st = useGame.getState();
-              if (lite && !picked) st.setDockTab('pro');
-              st.toggleBlock(focus);
+              if (!locked) useGame.getState().toggleBlock(focus);
             }}
           />
         </Frame>

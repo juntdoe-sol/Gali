@@ -9,7 +9,7 @@ import {
   ACHIEVEMENTS, BLOCKS, boostFor, FREE_GEAR_MASK, GEAR, LOCK_MS, localDay, levelFromXp, MOTHERLODE_ODDS,
   pointsFor, QUESTS, REVEAL_MIN_MS, ROUND_REWARD_ORE, ROUND_SECS, type Gear,
 } from './constants';
-import { addToPot, emptyPot, idxOf, maskOf, MIN_SOL_PER_BLOCK, payoutFor, practiceMotherlode, practiceOreMotherlode, PRACTICE_SOL, simPot, smartPick, soloMask, type PotView } from './pot';
+import { addToPot, emptyPot, idxOf, maskOf, MIN_SOL_PER_BLOCK, payoutFor, practiceMotherlode, practiceOreMotherlode, PRACTICE_SOL, randomPick, simPot, soloMask, DEFAULT_SMART, SMART_COUNTS, type PotView } from './pot';
 import { haptic, play, setMuted } from './sfx';
 import { loadJson, saveJson } from './storage';
 
@@ -40,13 +40,14 @@ export interface Preset {
   rounds: number;
 }
 const defaultPresets = (): Preset[] => [
-  { amount: '', perSpot: '0.001', blocks: 'manual', smartN: 5, rounds: 1 },
-  { amount: '', perSpot: '0.001', blocks: 'smart', smartN: 5, rounds: 5 },
-  { amount: '', perSpot: '0.0005', blocks: 'smart', smartN: 10, rounds: 10 },
+  { amount: '', perSpot: '0.001', blocks: 'manual', smartN: 8, rounds: 1 },
+  { amount: '', perSpot: '0.001', blocks: 'smart', smartN: 8, rounds: 5 },
+  { amount: '', perSpot: '0.0005', blocks: 'smart', smartN: 15, rounds: 10 },
   { amount: '', perSpot: '0.0002', blocks: 'all', smartN: 25, rounds: 20 },
 ];
 
 export type DockTab = 'lite' | 'pro';
+export type LiteMode = 'all' | 'smart' | 'pick';
 
 export interface Run {
   kind: 'lite' | 'pro';
@@ -173,7 +174,8 @@ interface GameState {
   potAt: number;
   run: Run | null;
   dockTab: DockTab;
-  /** LITE's spot choice: 0 plays all 25, otherwise Smart picks this many of the emptiest spots. */
+  /** LITE's spot choice: all 25, Smart (random liteSmart spots) or the spots picked by hand. */
+  liteMode: LiteMode;
   liteSmart: number;
   /** The LITE / PRO panel. Closed by default; the MINE button opens it. */
   dockOpen: boolean;
@@ -213,6 +215,7 @@ interface GameState {
   toast: (text: string, tone?: Toast['tone']) => void;
   setDockTab: (t: DockTab) => void;
   setLiteSmart: (n: number) => void;
+  setLiteMode: (m: LiteMode) => void;
   setDockOpen: (open: boolean) => void;
   startRun: (r: Omit<Run, 'left' | 'lastRound'>) => Promise<void>;
   stopRun: () => void;
@@ -477,10 +480,12 @@ export const useGame = create<GameState>((set, get) => {
     if (!run) return;
     const now = chainNow(st.offsetMs);
     const roundId = roundOf(now);
+    const first = run.lastRound < 0;
     set({ run: { ...run, lastRound: roundId } });
     let idx: number[];
     if (run.blocks === 'all') idx = [...Array(BLOCKS).keys()];
-    else if (run.blocks === 'smart') idx = smartPick(st.pot.roundId === roundId ? st.pot.perBlock : emptyPot(roundId).perBlock, run.smartN);
+    // Smart is random: the first round plays the spots on screen, autopilot rolls new ones each round
+    else if (run.blocks === 'smart') idx = first && st.selected.length === run.smartN ? [...st.selected] : randomPick(run.smartN);
     else idx = idxOf(run.manualMask);
     const stop = (msg: string) => {
       set({ run: null });
@@ -551,7 +556,8 @@ export const useGame = create<GameState>((set, get) => {
     potAt: 0,
     run: null,
     dockTab: 'lite',
-    liteSmart: 0,
+    liteMode: 'all',
+    liteSmart: DEFAULT_SMART,
     dockOpen: false,
     selected: [],
     lastResult: null,
@@ -634,15 +640,20 @@ export const useGame = create<GameState>((set, get) => {
       const st = get();
       if (st.phase !== 'mining' || st.pending || st.run) return;
       haptic.tap();
-      // tapping a tile by hand means "I pick": switch the PRO preset to manual
-      const cur = st.save.presets[st.save.preset];
-      if (cur && cur.blocks !== 'manual') get().editPreset({ blocks: 'manual' });
-      if (st.selected.includes(i)) {
+      // tapping a spot by hand means "I pick": LITE goes to Pick, the PRO preset to manual
+      if (st.dockTab === 'lite') {
+        if (st.liteMode !== 'pick') set({ liteMode: 'pick', selected: st.liteMode === 'smart' ? st.selected : [] });
+      } else {
+        const cur = st.save.presets[st.save.preset];
+        if (cur && cur.blocks !== 'manual') get().editPreset({ blocks: 'manual' });
+      }
+      const sel = get().selected;
+      if (sel.includes(i)) {
         play('deselect');
-        set({ selected: st.selected.filter((x) => x !== i) });
+        set({ selected: sel.filter((x) => x !== i) });
       } else {
         play('select');
-        set({ selected: [...st.selected, i] });
+        set({ selected: [...sel, i] });
       }
     },
     selectRandom: (n) => {
@@ -663,19 +674,19 @@ export const useGame = create<GameState>((set, get) => {
       const st = get();
       if (st.phase !== 'mining' || st.pending || st.run || st.wallet.busy) return;
       if (st.dockTab === 'lite') {
-        // LITE stays LITE: shaking switches it to Smart
-        const n = st.liteSmart || 5;
-        set({ liteSmart: n, selected: smartPick(st.pot.perBlock, n) });
+        // LITE stays LITE: shaking switches it to Smart and rolls new spots
+        set({ liteMode: 'smart', selected: randomPick(st.liteSmart) });
       } else {
-        const n = st.selected.length > 0 && st.selected.length < BLOCKS ? st.selected.length : 5;
-        set({ selected: smartPick(st.pot.perBlock, n) });
-        if (st.save.presets[st.save.preset]) get().editPreset({ blocks: 'smart', smartN: n });
+        const cur = st.save.presets[st.save.preset];
+        const n = cur && (SMART_COUNTS as readonly number[]).includes(cur.smartN) ? cur.smartN : DEFAULT_SMART;
+        set({ selected: randomPick(n) });
+        if (cur) get().editPreset({ blocks: 'smart', smartN: n });
       }
       const n = get().selected.length;
       play('select');
       haptic.thud();
       updateSave((s) => ({ ...s, questProgress: { ...s.questProgress, shake: 1 } }));
-      get().toast(`Shake! Smart-picked the ${n} emptiest spots`, 'good');
+      get().toast(`Shake! Smart picked ${n} spots`, 'good');
     },
 
     bonkMole: () => {
@@ -913,10 +924,16 @@ export const useGame = create<GameState>((set, get) => {
 
     setDockTab: (t) => set({ dockTab: t }),
     setDockOpen: (open) => set({ dockOpen: open }),
+    // picking a count (or the same count again) rolls a fresh random set
     setLiteSmart: (n) => {
+      if (get().run) return;
+      set({ liteMode: 'smart', liteSmart: n, selected: randomPick(n) });
+    },
+    setLiteMode: (m) => {
       const st = get();
-      if (st.run) return;
-      set({ liteSmart: n, selected: n ? smartPick(st.pot.perBlock, n) : [] });
+      if (st.run || m === st.liteMode) return;
+      if (m === 'smart') return get().setLiteSmart(st.liteSmart);
+      set({ liteMode: m, selected: [] });
     },
 
     startRun: async (r) => {
