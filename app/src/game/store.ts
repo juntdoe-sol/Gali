@@ -292,6 +292,13 @@ const errMsg = (e: unknown) => {
   if (/insufficient|0x1\b/i.test(m)) return 'Not enough balance';
   if (/declined|cancel|rejected/i.test(m)) return 'Cancelled in wallet';
   if (/found no installed|wallet/i.test(m) && /not found|no.*wallet/i.test(m)) return 'No Solana wallet app found';
+  // a failed simulation: keep the part that says which instruction failed and why
+  const ix = m.match(/Error processing Instruction (\d+): ([^\n]+?)(?:\.\s|\n|$)/);
+  if (ix) {
+    const logs = (e as { logs?: string[] })?.logs ?? [];
+    console.warn('[gali] transaction failed', m, logs);
+    return `Transaction failed at step ${Number(ix[1]) + 1}: ${ix[2].slice(0, 70)}`;
+  }
   return m.length > 90 ? `${m.slice(0, 90)}…` : m;
 };
 

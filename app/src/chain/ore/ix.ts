@@ -7,6 +7,11 @@
  * destructured positionally. Order is load-bearing: Steel never looks an account
  * up by name, so a list that is merely complete but out of order will fail in
  * confusing ways or, worse, pass the wrong account.
+ *
+ * Writable flags copy ore-api's own sdk.rs, not only what each handler writes.
+ * ClaimSOL and ClaimORE log through a CPI signed by the board, and that CPI needs
+ * the board writable. Marked read-only, a claim fails on mainnet with a privilege
+ * error on the claim instruction.
  */
 import '../polyfill-web';
 import { PublicKey, SystemProgram, TransactionInstruction } from '@solana/web3.js';
@@ -67,7 +72,7 @@ export function deployIx(args: {
       meta(args.authority, false, true),
       meta(automationPda(args.authority), false, true),
       meta(BOARD_ADDRESS, false, true),
-      meta(CONFIG_ADDRESS, false, false),
+      meta(CONFIG_ADDRESS, false, true),
       meta(minerPda(args.authority), false, true),
       meta(roundPda(args.roundId), false, true),
       meta(TREASURY_ADDRESS, false, true),
@@ -98,9 +103,9 @@ export function claimOreIx(args: { authority: PublicKey; bps?: number }): Transa
     data,
     keys: [
       meta(args.authority, true, true),
-      meta(BOARD_ADDRESS, false, false),
+      meta(BOARD_ADDRESS, false, true),
       meta(minerPda(args.authority), false, true),
-      meta(ORE_MINT, false, false),
+      meta(ORE_MINT, false, true),
       meta(recipient, false, true),
       meta(TREASURY_ADDRESS, false, true),
       meta(treasuryTokens, false, true),
@@ -119,7 +124,7 @@ export function claimSolIx(args: { authority: PublicKey }): TransactionInstructi
     data: Buffer.from([ORE_IX.ClaimSOL]),
     keys: [
       meta(args.authority, true, true),
-      meta(BOARD_ADDRESS, false, false),
+      meta(BOARD_ADDRESS, false, true),
       meta(minerPda(args.authority), false, true),
       meta(SystemProgram.programId, false, false),
       meta(ORE_PROGRAM_ID, false, false),
@@ -144,8 +149,8 @@ export function checkpointIx(args: {
     keys: [
       meta(args.signer, true, true),
       meta(args.authority, false, true),
-      meta(automationPda(args.authority), false, false),
-      meta(BOARD_ADDRESS, false, false),
+      meta(automationPda(args.authority), false, true),
+      meta(BOARD_ADDRESS, false, true),
       meta(minerPda(args.authority), false, true),
       meta(roundPda(args.roundId), false, true),
       meta(TREASURY_ADDRESS, false, true),
@@ -194,7 +199,7 @@ export function automateIx(args: {
     keys: [
       meta(args.authority, true, true),
       meta(automationPda(args.authority), false, true),
-      meta(args.executor, false, false),
+      meta(args.executor, false, true),
       meta(minerPda(args.authority), false, true),
       meta(SystemProgram.programId, false, false),
     ],
