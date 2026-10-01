@@ -1,9 +1,9 @@
 import type { ReactNode } from 'react';
 import { Image, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CAVE_IN_EVERY, COLORS, LOCK_MS, levelFromXp, MOTHERLODE_ODDS, ROUND_SECS, xpForLevel } from '../game/constants';
-import { chainReady, short } from '../chain/light';
-import { roundEnd, useGame, useLevelXp, usePoints, useRoundReward } from '../game/store';
+import { CAVE_IN_EVERY, COLORS, LOCK_MS, levelFromXp, MOTHERLODE_ODDS, xpForLevel } from '../game/constants';
+import { short } from '../chain/light';
+import { isLive, isOnChain, LIVE_LOCK_MS, roundEndsAt, roundSpanMs, useGame, useLevelXp, usePoints, useRoundReward } from '../game/store';
 const fmtOre = (v: number) => (v >= 10 ? Math.floor(v).toLocaleString() : v >= 1 ? v.toFixed(2) : v.toFixed(3));
 import { fmtSol, practiceMotherlode, practiceOreMotherlode } from '../game/pot';
 import { Bar, F, Frame, T } from './kit';
@@ -16,13 +16,15 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
   const insets = useSafeAreaInsets();
   const owner = useGame((s) => s.wallet.owner);
   const skr = useGame((s) => s.wallet.skr);
+  const ore = useGame((s) => s.wallet.ore);
+  const live = useGame(isLive);
   const connect = useGame((s) => s.connect);
   const disconnect = useGame((s) => s.disconnect);
   const xp = useLevelXp();
   const points = usePoints();
   const lvl = levelFromXp(xp);
   const pct = ((xp - xpForLevel(lvl)) / (xpForLevel(lvl + 1) - xpForLevel(lvl))) * 100;
-  const sol = useGame((s) => (s.wallet.owner && chainReady ? s.wallet.sol + s.wallet.sessionSol : s.save.practiceSol));
+  const sol = useGame((s) => (isOnChain(s) ? s.wallet.sol + s.wallet.sessionSol : s.save.practiceSol));
   const streak = useGame((s) => s.save.winStreak);
 
   return (
@@ -33,9 +35,19 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
           {owner ? (
             <>
               <Pressable onPress={onMenu} style={styles.chip}>
-                <View style={[styles.dot, { backgroundColor: COLORS.skr }]} />
+                {live ? (
+                  <View style={styles.liveTag} accessibilityLabel="Live on Solana mainnet">
+                    <T v="black" style={{ fontSize: 9, letterSpacing: 1, color: '#070d20' }}>
+                      LIVE
+                    </T>
+                  </View>
+                ) : (
+                  <View style={[styles.dot, { backgroundColor: COLORS.skr }]} />
+                )}
                 <T v="bold" style={{ fontSize: 13 }}>
-                  {skr.toLocaleString(undefined, { maximumFractionDigits: 0 })} SKR
+                  {live
+                    ? `${ore.toLocaleString(undefined, { maximumFractionDigits: ore < 1 ? 4 : 2 })} ORE`
+                    : `${skr.toLocaleString(undefined, { maximumFractionDigits: 0 })} SKR`}
                 </T>
                 <T v="muted" style={{ fontSize: 11 }}>
                   {short(owner)}
@@ -118,7 +130,7 @@ function BigStat({ icon, value, label, color }: { icon?: ReactNode; value: strin
 }
 
 /** Both jackpots in one cell: ORE's motherlode, and Gali's SKR pool that pays on the same hit. */
-function MotherlodeStat({ ore, skr }: { ore: number; skr: number }) {
+function MotherlodeStat({ ore, skr }: { ore: number; skr: number | null }) {
   return (
     <View style={styles.bigStat}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
@@ -135,9 +147,11 @@ function MotherlodeStat({ ore, skr }: { ore: number; skr: number }) {
       <T v="bold" numberOfLines={1} style={{ fontSize: 10, letterSpacing: 1, color: COLORS.muted }}>
         MOTHERLODE
       </T>
-      <T v="bold" numberOfLines={1} style={{ fontSize: 10, lineHeight: 12, color: COLORS.gold }}>
-        +{skr >= 1000 ? `${(skr / 1000).toFixed(1)}K` : Math.floor(skr)} SKR pool
-      </T>
+      {skr === null ? null : (
+        <T v="bold" numberOfLines={1} style={{ fontSize: 10, lineHeight: 12, color: COLORS.gold }}>
+          +{skr >= 1000 ? `${(skr / 1000).toFixed(1)}K` : Math.floor(skr)} SKR pool
+        </T>
+      )}
     </View>
   );
 }
@@ -149,7 +163,11 @@ export function RoundCard() {
   const phase = useGame((s) => s.phase);
   const pending = useGame((s) => s.pending);
   const boost = useGame((s) => s.pending?.boostBps ?? 10_000);
-  const onChain = useGame((s) => Boolean(s.wallet.owner && chainReady));
+  const onChain = useGame(isOnChain);
+  const liveMode = useGame(isLive);
+  const clockPhase = useGame((s) => (isLive(s) ? s.liveClock?.phase ?? 'waiting' : 'mining'));
+  const endsAt = useGame(roundEndsAt);
+  const span = useGame(roundSpanMs);
   const pool = useGame((s) => (onChain ? s.wallet.pool : practiceMotherlode(s.roundId)));
   const orePool = useGame((s) => (onChain ? s.wallet.orePool : practiceOreMotherlode(s.roundId)));
   const pot = useGame((s) => s.pot);
@@ -159,10 +177,12 @@ export function RoundCard() {
   const inside = useView((s) => s.focus >= 0);
   const live = pot.roundId === roundId;
   const miners = live ? pot.miners : 0;
-  const left = Math.max(0, roundEnd(roundId) - now);
+  const left = Math.max(0, endsAt - now);
   const secs = Math.ceil(left / 1000);
-  const cave = roundId % CAVE_IN_EVERY === 0;
-  const locking = phase === 'mining' && left < LOCK_MS;
+  const cave = !liveMode && roundId % CAVE_IN_EVERY === 0;
+  // live: ORE's round has not started, or is between rounds, so there is no countdown to show
+  const idle = liveMode && phase === 'mining' && clockPhase !== 'mining';
+  const locking = phase === 'mining' && !idle && left < (liveMode ? LIVE_LOCK_MS : LOCK_MS);
   const covered = pending ? pending.mask.toString(2).split('1').length - 1 : 0;
   // inside a claim the panel below carries the numbers; the scene gets the room
   if (inside) return null;
@@ -183,11 +203,15 @@ export function RoundCard() {
           color={COLORS.text}
         />
         <View style={styles.divider} />
-        <MotherlodeStat ore={orePool} skr={pool} />
+        <MotherlodeStat ore={orePool} skr={liveMode ? null : pool} />
         <View style={styles.divider} />
         <BigStat
           value={
-            phase === 'mining'
+            idle
+              ? clockPhase === 'waiting'
+                ? 'START'
+                : 'NEXT'
+              : phase === 'mining'
               ? `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`
               : phase === 'settling'
                 ? pending?.onChain
@@ -195,21 +219,21 @@ export function RoundCard() {
                   : 'MINING'
                 : 'STRIKE!'
           }
-          label={locking ? 'LOCKED' : 'TIME'}
-          color={phase !== 'mining' ? COLORS.gold : secs <= 5 || locking ? COLORS.red : COLORS.text}
+          label={idle ? (clockPhase === 'waiting' ? 'NOT STARTED' : 'ROUND SOON') : locking ? 'LOCKED' : 'TIME'}
+          color={phase !== 'mining' || idle ? COLORS.gold : secs <= 5 || locking ? COLORS.red : COLORS.text}
         />
       </View>
-      <Bar pct={phase === 'mining' ? (left / (ROUND_SECS * 1000)) * 100 : 0} height={4} />
+      <Bar pct={phase === 'mining' && !idle ? (left / span) * 100 : 0} height={4} />
       <View style={[styles.row, { marginTop: 4 }]}>
         <T v="bold" style={{ fontSize: 11, color: cave ? COLORS.red : COLORS.muted }} numberOfLines={1}>
-          #{(roundId % 100000).toLocaleString()} · {cave ? '⚠ CAVE-IN' : `Cave-in in ${CAVE_IN_EVERY - (roundId % CAVE_IN_EVERY)}`}
+          #{(roundId % 100000).toLocaleString()} · {liveMode ? 'ORE mainnet' : cave ? '⚠ CAVE-IN' : `Cave-in in ${CAVE_IN_EVERY - (roundId % CAVE_IN_EVERY)}`}
         </T>
         <T v="bold" style={{ fontSize: 11, color: COLORS.muted }} numberOfLines={1}>
           {pending ? `You: ${covered} spot${covered > 1 ? 's' : ''} · ${fmtSol(pending.total)} SOL` : `${fmtOre(reward)} ORE to mine · motherlode 1/${MOTHERLODE_ODDS}`}
         </T>
       </View>
-      <T v="muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 1, color: run ? COLORS.teal : pending && boost > 10_000 ? COLORS.skr : COLORS.muted }} numberOfLines={1}>
-        {run ? `Autopilot ${run.total - run.left}/${run.total} · ` : ''}⛏ {miners} miner{miners === 1 ? '' : 's'} this round · 👥 {here} on the map
+      <T v="muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 1, color: run && run.total > 1 ? COLORS.teal : pending && boost > 10_000 ? COLORS.skr : COLORS.muted }} numberOfLines={1}>
+        {run && run.total > 1 ? `Autopilot ${run.total - run.left}/${run.total} · ` : ''}⛏ {miners} miner{miners === 1 ? '' : 's'} this round · 👥 {here} on the map
         {pending && boost > 10_000 ? ` · ${boost / 10_000}x points` : ''}
       </T>
     </Frame>
@@ -257,6 +281,7 @@ const styles = StyleSheet.create({
     height: 38,
   },
   dot: { width: 9, height: 9, borderRadius: 2, transform: [{ rotate: '45deg' }] },
+  liveTag: { paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4, backgroundColor: COLORS.red },
   unplug: {
     width: 38,
     height: 38,

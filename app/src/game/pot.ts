@@ -141,6 +141,16 @@ export function payoutFor(pot: PotView, win: number, minePerBlock: number, mask:
   return { sol: share * poolFor(pot, win), ore: split ? share * ROUND_REWARD_ORE : lucky ? ROUND_REWARD_ORE : 0, skrMotherlode: share * motherlodeSkr, oreMotherlode: share * motherlodeOre, lucky };
 }
 
+/**
+ * Live mode: what ORE's own checkpoint gives back on `n` spots of `perBlock` SOL.
+ * ORE keeps 1% of every spot and 10% of the rest on spots that miss; everything
+ * else returns to the miner who put it there. Only the ORE reward depends on the strike.
+ */
+export function liveReturn(n: number, perBlock: number) {
+  const missKeep = (1 - ADMIN_FEE) * (1 - POT_FEE);
+  return { strike: perBlock * (1 - ADMIN_FEE) + (n - 1) * perBlock * missKeep, miss: n * perBlock * missKeep };
+}
+
 /** Your SOL if a spot you cover strikes: the smallest and largest payout over your spots, given the pot so far (yours included). */
 export function strikeRange(pot: PotView, mask: number, perBlock: number) {
   let lo = Infinity;

@@ -20,7 +20,7 @@ import idlJson from './idl.json';
 import deployment from './deployment.json';
 import { CLUSTER, MAX_SESSION_FUND_SOL, PROGRAM_ID_STR, RPC_URL, retryingFetch, SKR_MINT_STR } from './light';
 
-export { CLUSTER, RPC_URL, chainReady, isRateLimited, clockOffsetMs, MAX_SESSION_FUND_SOL, short, explorer } from './light';
+export { CLUSTER, RPC_URL, chainReady, oreLive, onChainMode, isRateLimited, clockOffsetMs, MAX_SESSION_FUND_SOL, short, explorer } from './light';
 // PublicKey for code outside src/chain, which reaches web3 only through this lazily loaded module.
 export { PublicKey };
 export const PROGRAM_ID = new PublicKey(PROGRAM_ID_STR);
@@ -28,7 +28,7 @@ export const SKR_MINT = new PublicKey(SKR_MINT_STR);
 export const SKR_DECIMALS = deployment.skrDecimals;
 export const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 export const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
-export const APP_IDENTITY = { name: 'Gali', uri: 'https://gali.bounded.page', icon: 'favicon.png' };
+export const APP_IDENTITY = { name: 'Gali', uri: 'https://galiapp.bounded.page', icon: 'favicon.png' };
 export const connection = new Connection(RPC_URL, { commitment: 'confirmed', fetch: retryingFetch, disableRetryOnRateLimit: true });
 const readOnlyWallet = {
   publicKey: Keypair.generate().publicKey,
@@ -205,6 +205,25 @@ export async function disconnectWallet() {
   if (saved) await transact((w) => w.deauthorize({ auth_token: saved })).catch(() => undefined);
 }
 
+/**
+ * Wait for a transaction to confirm by polling its status. web3's confirmTransaction
+ * waits on a websocket subscription and only checks the status once that socket is
+ * up, so an RPC without websockets (or a phone that drops the socket) hangs it until
+ * the blockhash expires. Polling works with any HTTP endpoint.
+ */
+export async function confirmSig(sig: string, lastValidBlockHeight: number): Promise<void> {
+  for (let i = 0; ; i++) {
+    const { value } = await connection.getSignatureStatuses([sig]);
+    const st = value[0];
+    if (st?.err) throw new Error(`Transaction failed: ${JSON.stringify(st.err)}`);
+    if (st && (st.confirmationStatus === 'confirmed' || st.confirmationStatus === 'finalized')) return;
+    if (i % 5 === 4 && (await connection.getBlockHeight('confirmed')) > lastValidBlockHeight) {
+      throw new Error('The transaction expired before it landed, so no SOL moved');
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+}
+
 export async function sendWithWallet(build: (owner: PublicKey) => Promise<TransactionInstruction[]>): Promise<string> {
   if (IS_WEB) {
     const owner = await webOwner();
@@ -213,7 +232,7 @@ export async function sendWithWallet(build: (owner: PublicKey) => Promise<Transa
     const tx = new Transaction({ feePayer: owner, blockhash, lastValidBlockHeight }).add(...ixs);
     const signed = await webSign(tx);
     const sig = await connection.sendRawTransaction(signed.serialize());
-    await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
+    await confirmSig(sig, lastValidBlockHeight);
     return sig;
   }
   return transact(async (wallet) => {
@@ -222,7 +241,7 @@ export async function sendWithWallet(build: (owner: PublicKey) => Promise<Transa
     const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
     const tx = new Transaction({ feePayer: owner, blockhash, lastValidBlockHeight }).add(...ixs);
     const [sig] = await wallet.signAndSendTransactions({ transactions: [tx] });
-    await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
+    await confirmSig(sig, lastValidBlockHeight);
     return sig;
   });
 }
@@ -232,7 +251,7 @@ export async function sendWithKey(signer: Keypair, ixs: TransactionInstruction[]
   const tx = new Transaction({ feePayer: signer.publicKey, blockhash, lastValidBlockHeight }).add(...ixs);
   tx.sign(signer);
   const sig = await connection.sendRawTransaction(tx.serialize());
-  await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
+  await confirmSig(sig, lastValidBlockHeight);
   return sig;
 }
 

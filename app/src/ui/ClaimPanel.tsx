@@ -6,8 +6,8 @@ import { useEffect } from 'react';
 import { BackHandler, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BLOCKS, COLORS } from '../game/constants';
-import { fmtSol, soloMask } from '../game/pot';
-import { roundEnd, useGame } from '../game/store';
+import { fmtSol } from '../game/pot';
+import { roundEndsAt, soloOf, useGame } from '../game/store';
 import { CLAIMS } from '../engine/island';
 import { closeupView } from '../pixel/PixelMine';
 import { useView } from '../pixel/view';
@@ -27,6 +27,8 @@ export function ClaimPanel() {
   const pot = useGame((s) => s.pot);
   const winning = useGame((s) => s.winning);
   const now = useGame((s) => s.now);
+  const endsAt = useGame(roundEndsAt);
+  const soloBits = useGame((s) => soloOf(s, s.roundId));
   const top = insets.top + 104;
   closeupView.top = top + 52;
 
@@ -45,12 +47,12 @@ export function ClaimPanel() {
   const total = pot.roundId === roundId ? pot.perBlock.reduce((a, b) => a + b, 0) : 0;
   const yours = pending && pending.mask & (1 << focus) ? pending.perBlock : 0;
   const picked = selected.includes(focus);
-  const solo = Boolean(soloMask(roundId) & (1 << focus));
+  const solo = Boolean(soloBits & (1 << focus));
   const share = total > 0 && onClaim > 0 ? Math.round((onClaim / total) * 100) : 0;
   const locked = phase !== 'mining' || Boolean(pending) || Boolean(run);
   const struck = phase === 'reveal' && winning === focus;
-  const secs = Math.max(0, Math.ceil((roundEnd(roundId) - now) / 1000));
-  const clock = phase === 'mining' ? `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` : phase === 'settling' ? 'MINING' : 'STRIKE!';
+  const secs = Math.max(0, Math.ceil((endsAt - now) / 1000));
+  const clock = phase === 'mining' && endsAt === 0 ? 'READY' : phase === 'mining' ? `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` : phase === 'settling' ? 'MINING' : 'STRIKE!';
 
   let action = picked ? 'PICKED  ✓' : 'PICK THIS SPOT';
   let sub = picked ? 'Tap to unpick. Deploy from the island.' : 'Adds it to your picks for this round';

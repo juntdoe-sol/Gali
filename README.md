@@ -19,6 +19,7 @@ Be clear about what runs today:
 
 - **Practice mode** is the default and runs the whole game offline: the island, rounds, picking and deploying, strikes, both motherlodes, gear, quests and the chat bots. No wallet needed.
 - **The Gali program** (`programs/gali`) is written for ORE's board and tested against a mock of ORE's accounts. It is not deployed yet.
+- **Live mode** runs in mainnet builds (`EXPO_PUBLIC_NETWORK=mainnet`). Connect a wallet and you play ORE's real board. Each deploy and claim is a plain ORE instruction signed by your own wallet: no Gali program, no session key, no autopilot. A round is capped at 0.5 SOL, and an 18+ real-money notice comes before the wallet opens.
 - **The app's on-chain mode** has the ORE client (deploy, checkpoint, claim, automation) and the Gali calls wired, and switches on once `app/src/chain/deployment.json` names a deployed program and SKR mint.
 
 Gali mints nothing, takes no cut of a winner's SOL and never holds a player's ORE position. ORE is credited here as the board Gali plays on; Gali is not affiliated with or endorsed by ORE.
@@ -89,6 +90,17 @@ npx expo start --web            # or: npx expo run:android
 ```
 
 Release APK: `npx eas-cli build -p android --profile apk`. Web build: `npm run build:web` writes `app/dist`, a static site.
+
+### Mainnet live build
+
+```bash
+cd app
+EXPO_PUBLIC_NETWORK=mainnet EXPO_PUBLIC_RPC_URL=<your mainnet RPC> npm run build:web
+```
+
+Live mode reads ORE's board clock every 2 seconds, so use a private RPC rather than the public endpoint. A web build carries the RPC URL in its JavaScript, so lock the key to your site's domain at the RPC provider. For an APK, set the same two variables in the EAS profile.
+
+In live mode ORE keeps 1% of every square and 10% more of squares that miss; the rest returns to the miner to claim. Only the winning square mines ORE.
 
 ### Program tests
 

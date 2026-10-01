@@ -5,17 +5,19 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { Animated, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../game/constants';
 import { useGame } from '../game/store';
-import { fx } from '../pixel/fx';
 import { useView } from '../pixel/view';
 import { T } from './kit';
+import { BAR_H } from './TabBar';
 
 export function MapHint() {
   const onboarded = useGame((s) => s.save.onboarded);
   const focus = useView((s) => s.focus);
   const picked = useGame((s) => s.selected.length);
   const dockOpen = useGame((s) => s.dockOpen);
+  const insets = useSafeAreaInsets();
   const [done, setDone] = useState(false);
   const fade = useRef(new Animated.Value(0)).current;
   const startPicked = useRef(picked);
@@ -35,7 +37,7 @@ export function MapHint() {
 
   if (!onboarded || dockOpen) return null;
   return (
-    <Animated.View pointerEvents="none" style={[styles.pill, { bottom: fx.viewBottom + 6, opacity: fade }]}>
+    <Animated.View pointerEvents="none" style={[styles.pill, { bottom: BAR_H + insets.bottom + 18, opacity: fade }]}>
       <T v="bold" style={styles.text}>
         Tap a spot to pick it · double tap to dive in
       </T>

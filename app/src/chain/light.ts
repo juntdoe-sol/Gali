@@ -16,13 +16,29 @@ import type { Claimable } from './board';
 export type { ChainPlayer, LeaderRow, ShopConfig, WebWalletInfo } from './client';
 export type { BoardRound, Claimable, OreClock, RoundOutcome } from './board';
 
-export const CLUSTER = deployment.cluster as 'devnet';
+/**
+ * Which network the build talks to. EXPO_PUBLIC_NETWORK=mainnet turns on ORE live
+ * mode: real rounds on ORE's mainnet board, each deploy and claim signed by the
+ * player's own wallet. Gali's program is not needed for that, so it stays off on
+ * mainnet until deployment.json names a mainnet deploy.
+ */
+export const NETWORK: 'devnet' | 'mainnet' = process.env.EXPO_PUBLIC_NETWORK === 'mainnet' ? 'mainnet' : 'devnet';
+export const oreLive = NETWORK === 'mainnet';
+export const CLUSTER: 'devnet' | 'mainnet' = oreLive ? 'mainnet' : (deployment.cluster as 'devnet');
 export const PROGRAM_ID_STR: string = deployment.programId;
 export const SKR_MINT_STR: string = deployment.skrMint;
-export const chainReady = deployment.skrMint !== '11111111111111111111111111111111';
+/** Gali's own program (points, SKR jackpot, gear) is deployed on the network this build uses. */
+export const chainReady =
+  deployment.skrMint !== '11111111111111111111111111111111' && (deployment.cluster as string) === CLUSTER;
+/** Anything on chain at all: Gali's program, or ORE's board in live mode. */
+export const onChainMode = chainReady || oreLive;
 
-// EXPO_PUBLIC_RPC_URL overrides the endpoint at build time (e.g. a private devnet RPC, or a local validator for tests).
-export const RPC_URL = process.env.EXPO_PUBLIC_RPC_URL || 'https://api.devnet.solana.com';
+/** Most SOL a live player may put on the board in one round. A guard against a slipped finger, not a limit on ORE. */
+export const LIVE_MAX_ROUND_SOL = 0.5;
+
+// EXPO_PUBLIC_RPC_URL overrides the endpoint at build time (a private RPC, or a local validator for tests).
+export const RPC_URL =
+  process.env.EXPO_PUBLIC_RPC_URL || (oreLive ? 'https://api.mainnet-beta.solana.com' : 'https://api.devnet.solana.com');
 
 /** True when an RPC turned us away for asking too often (public endpoints do this a lot). */
 export const isRateLimited = (e: unknown) => /\b429\b|rate limit|too many requests/i.test(String((e as Error)?.message ?? e));
@@ -83,7 +99,8 @@ export const NOTHING_CLAIMABLE: Claimable = {
 };
 
 export const short = (k: string) => `${k.slice(0, 4)}…${k.slice(-4)}`;
-export const explorer = (sig: string) => `https://explorer.solana.com/tx/${sig}?cluster=${CLUSTER}`;
+export const explorer = (sig: string) =>
+  `https://explorer.solana.com/tx/${sig}${CLUSTER === 'mainnet' ? '' : `?cluster=${CLUSTER}`}`;
 
 /** The web wallet picker error, recognised without loading the class that throws it. */
 export const isPickWalletError = (e: unknown): e is Error & { wallets: import('./client').WebWalletInfo[] } =>
