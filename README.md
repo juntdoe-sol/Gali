@@ -8,7 +8,7 @@ Built for **CLOCK IN**, the Solana Mobile hackathon. Submissions close 8 Oct 202
 
 ![Gali island](docs/gali-island.jpg)
 
-- **Android APK:** [install from Expo](https://expo.dev/accounts/juntdoe/projects/gali/builds/e3619d3c-c739-40ac-9ffe-503c04f7f8c3)
+- **Android APK:** [install from Expo](https://expo.dev/accounts/juntdoe/projects/gali/builds/ad89abff-7474-4e0f-aa6b-f7f78950e145)
 - **Demo video:** [YouTube](https://youtube.com/shorts/e-X-gOWoZo4)
 - **Web build:** [galiapp.bounded.page](https://galiapp.bounded.page)
 - **Team:** Juntdoe (lead), Josh (community), Rax (socials and creative)
