@@ -770,7 +770,7 @@ function coin(x: number, y: number, r: number, color: string) {
 }
 
 function sceneSteps(t: number) {
-  stepCard('01', 'PICK YOUR SPOTS', 'TAP A SPOT TO LOOK INSIDE · HOLD TO PICK', t, T.s1, T.s1Out);
+  stepCard('01', 'PICK YOUR SPOTS', 'TAP A SPOT TO PICK · DOUBLE TAP TO DIVE IN', t, T.s1, T.s1Out);
   // a finger on the glass, landing on the beat
   if (t > T.s1 && t < T.s2 + 0.2) {
     const path = PICKS.map((i) => onScreen(i));
@@ -868,7 +868,7 @@ function sceneSteps(t: number) {
     g.fillText('LOCKED', 0, 0);
     g.restore();
   }
-  stepCard('03', 'ONE SPOT STRIKES GOLD', 'ITS MINERS SPLIT THE POT BY THEIR SOL', t, T.s3, T.s3Out);
+  stepCard('03', 'ONE SPOT STRIKES GOLD', "YOUR SOL COMES BACK, LESS ORE'S FEES", t, T.s3, T.s3Out);
   // STRUCK GOLD, on the downbeat
   if (t >= T.strike - 0.05 && t < T.dive + 0.3) {
     const [x, y] = onScreen(WINNER);
@@ -900,11 +900,11 @@ function sceneSteps(t: number) {
     g.fillStyle = goldFill(-70 * U, 140 * U);
     g.fillText('STRUCK GOLD!', 0, 0);
     // the payout rolls up underneath, over one bar
-    const pay = 0.0377 * outCubic(prog(t, T.strike + b(0.75), T.strike + b(2.5)));
+    const pay = 0.0455 * outCubic(prog(t, T.strike + b(0.75), T.strike + b(2.5)));
     g.globalAlpha = prog(t, T.strike + b(0.6), T.strike + b(0.9));
     font(76 * U);
     g.fillStyle = SOLG;
-    g.fillText(`+${pay.toFixed(4)} SOL`, 0, 118 * U);
+    g.fillText(`${pay.toFixed(4)} SOL BACK`, 0, 118 * U);
     g.restore();
   }
   // the dive: lines rush inward toward the winning claim
@@ -1071,17 +1071,52 @@ function sceneGear(t: number) {
       g.imageSmoothingEnabled = false;
       const is = sz * 0.8;
       g.drawImage(GEAR[k], -is / 2, -is / 2, is, is);
+      // once the glint has passed, each item carries an NFT tag: gear is tradeable
+      const tag = outBack(prog(t, T.glint + i * b(0.125), T.glint + i * b(0.125) + 0.3), 2.4);
+      if (tag > 0) {
+        const tw = 46 * U * tag;
+        const th = 22 * U * tag;
+        g.imageSmoothingEnabled = true;
+        rr(sz / 2 - tw * 0.82, -sz / 2 - th * 0.35, tw, th, 6 * U);
+        g.fillStyle = GOLD;
+        g.fill();
+        font(15 * U * tag, BODY);
+        g.textAlign = 'center';
+        g.textBaseline = 'middle';
+        g.fillStyle = '#2a1a00';
+        g.fillText('NFT', sz / 2 - tw * 0.32, -sz / 2 + th * 0.18);
+      }
       g.restore();
     });
   });
   const ty = PORTRAIT ? gy - 120 * U : gy - 70 * U;
-  kinetic('GEAR UP', W / 2, ty, (PORTRAIT ? 130 : 100) * U, t, T.gear, { color: GOLD, shadow: '#3a1800', out: T.gearOut, stagger: 0.06, dur: 0.55 });
+  kinetic('GEAR MARKET', W / 2, ty, (PORTRAIT ? 104 : 100) * U, t, T.gear, { color: GOLD, shadow: '#3a1800', out: T.gearOut, stagger: 0.045, dur: 0.55 });
+  // "coming soon" sits over the title, so nobody takes the market for live
+  {
+    const a = prog(t, T.gear + b(1), T.gear + b(1.6)) * (1 - prog(t, T.gearOut, T.gearOut + 0.25));
+    if (a > 0) {
+      g.save();
+      g.globalAlpha = a;
+      font(24 * U, BODY);
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      const label = 'COMING SOON';
+      const pw = g.measureText(label).width + 36 * U;
+      const py = ty - (PORTRAIT ? 128 : 118) * U;
+      rr(W / 2 - pw / 2, py - 20 * U, pw, 40 * U, 10 * U);
+      g.fillStyle = GOLD;
+      g.fill();
+      g.fillStyle = '#2a1a00';
+      g.fillText(label, W / 2, py + 2 * U);
+      g.restore();
+    }
+  }
   g.save();
   g.globalAlpha = prog(t, T.gear + b(4.5), T.gear + b(5.2)) * (1 - prog(t, T.gearOut, T.gearOut + 0.25));
   font(28 * U, BODY);
   g.textAlign = 'center';
   g.fillStyle = MUTED;
-  g.fillText('21 PICKAXES, HELMETS, OUTFITS AND PETS · COSMETIC ONLY', W / 2, gy + rows * cell + 50 * U);
+  g.fillText('GEAR AS NFTS · MINT, TRADE, COLLECT · COSMETIC ONLY', W / 2, gy + rows * cell + 50 * U);
   g.restore();
 }
 
