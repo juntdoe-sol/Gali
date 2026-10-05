@@ -233,10 +233,34 @@ export function LiveNotice() {
             Your wallet signs every deploy and every claim. Gali takes no cut and never holds your SOL. A round is capped at {LIVE_MAX_ROUND_SOL} SOL.
           </T>
           <T v="muted" style={{ marginBottom: 14 }}>
-            This is a game of chance. You must be 18 or older, and it must be legal where you live. Only play with SOL you can afford to lose. Without a wallet, practice mode stays free.
+            This is a game of chance. You must be 18 or older, and it must be legal where you live. Only play with SOL you can afford to lose.
           </T>
           <Btn kind="skr" label="I'm 18+ · connect wallet" onPress={accept} />
-          <Btn kind="ghost" label="Keep practising" onPress={decline} />
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+/** Live build: nothing runs without a wallet, so the gate stays up until one connects. */
+export function WalletGate() {
+  const show = useGame((s) => oreLive && s.loaded && s.save.onboarded && !s.wallet.owner && !s.liveNotice && !s.walletPicker);
+  const connect = useGame((s) => s.connect);
+  if (!show) return null;
+  return (
+    <Modal transparent visible animationType="fade">
+      <View style={[styles.center, { backgroundColor: '#040817ee', padding: 20 }]}>
+        <View style={styles.intro}>
+          <Image source={require('../../assets/brand/wordmark.png')} style={{ width: 220, height: 97, alignSelf: 'center' }} resizeMode="contain" />
+          <T v="display" style={{ fontSize: 24, textAlign: 'center', marginTop: 6 }}>
+            Live on ORE&apos;s board
+          </T>
+          <T style={{ textAlign: 'center', marginTop: 8, lineHeight: 21, color: COLORS.muted }}>
+            Connect your wallet to mine. Every deploy and claim is signed by you on Solana mainnet.
+          </T>
+          <View style={{ marginTop: 18 }}>
+            <Btn kind="skr" label="Connect wallet" onPress={() => void connect()} />
+          </View>
         </View>
       </View>
     </Modal>
@@ -258,7 +282,7 @@ export function Busy() {
 const STEPS = [
   { t: 'Deploy SOL. Strike gold.', b: 'Every minute a new round opens on an island with 25 mining spots. Put SOL on the spots you pick. One spot strikes gold and mines the round\u2019s ORE. Most of your SOL comes back each round: ORE keeps 1%, plus 10% on spots that miss. Tap MINE to play.' },
   { t: 'Mine ORE, chase two jackpots', b: 'Every round mines 1 ORE for the miners on the gold spot, split by their SOL there. On one of the round\u2019s 10 solo spots (\u2605), one miner takes it all, with odds equal to their share. 1 round in 500, ORE\u2019s motherlode hits and Gali\u2019s SKR pool pays the same winners. Shake your phone to Smart-pick.' },
-  { t: 'Bring your Seeker wallet', b: 'Practice first with 2 play SOL, or connect with Mobile Wallet Adapter. Fund a 24h session once and PRO autopilot deploys every round for you. It is a game of chance: only use SOL you can afford to lose.' },
+  { t: 'Bring your Seeker wallet', b: oreLive ? 'Connect with Mobile Wallet Adapter to play ORE\u2019s live board on mainnet. Your wallet signs every deploy and claim. It is a game of chance: only use SOL you can afford to lose.' : 'Practice first with 2 play SOL, or connect with Mobile Wallet Adapter. Fund a 24h session once and PRO autopilot deploys every round for you. It is a game of chance: only use SOL you can afford to lose.' },
 ];
 
 export function Onboarding() {
@@ -295,7 +319,7 @@ export function Onboarding() {
                     void connect();
                   }}
                 />
-                <Btn kind="ghost" label="Practice first" onPress={finish} />
+                {oreLive ? null : <Btn kind="ghost" label="Practice first" onPress={finish} />}
               </>
             ) : (
               <Btn kind="gold" label="Next" onPress={() => setI(i + 1)} />
