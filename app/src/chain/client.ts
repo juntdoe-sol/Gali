@@ -186,11 +186,19 @@ const levelOf = (xp: number) => {
 /* ---------- wallet: Mobile Wallet Adapter on Android, injected browser wallet on web ---------- */
 export const IS_WEB = Platform.OS === 'web';
 const AUTH_KEY = 'gali-mwa-auth';
+let cachedOwner: PublicKey | null = null;
 async function authorize(wallet: Web3MobileWallet) {
   const saved = await AsyncStorage.getItem(AUTH_KEY);
-  const res = await wallet.authorize({ chain: `solana:${CLUSTER}`, identity: APP_IDENTITY, auth_token: saved ?? undefined });
+  const go = (auth_token?: string) => wallet.authorize({ chain: `solana:${CLUSTER}`, identity: APP_IDENTITY, auth_token });
+  // A stale token makes the wallet answer -1/authorization request failed: drop it, ask fresh.
+  const res = await go(saved ?? undefined).catch(async (e) => {
+    if (!saved) throw e;
+    await AsyncStorage.removeItem(AUTH_KEY);
+    return go();
+  });
   await AsyncStorage.setItem(AUTH_KEY, res.auth_token);
-  return new PublicKey(Buffer.from(res.accounts[0].address, 'base64'));
+  cachedOwner = new PublicKey(Buffer.from(res.accounts[0].address, 'base64'));
+  return cachedOwner;
 }
 
 /** `webWallet`: on web, the wallet the player picked from the list. */
@@ -202,6 +210,7 @@ export async function disconnectWallet() {
   if (IS_WEB) return webDisconnect();
   const saved = await AsyncStorage.getItem(AUTH_KEY);
   await AsyncStorage.removeItem(AUTH_KEY);
+  cachedOwner = null;
   if (saved) await transact((w) => w.deauthorize({ auth_token: saved })).catch(() => undefined);
 }
 
@@ -235,15 +244,25 @@ export async function sendWithWallet(build: (owner: PublicKey) => Promise<Transa
     await confirmSig(sig, lastValidBlockHeight);
     return sig;
   }
-  return transact(async (wallet) => {
+  // ponytail: with a cached owner, do all RPC work before opening the wallet session and confirm after
+  // it closes; Phantom drops idle MWA sessions (TimeoutException id=1). Cold start builds inside.
+  let prep: { ixs: TransactionInstruction[]; blockhash: string; lastValidBlockHeight: number } | null = null;
+  if (cachedOwner) {
+    const ixs = await build(cachedOwner);
+    prep = { ixs, ...(await connection.getLatestBlockhash()) };
+  }
+  const { sig, lastValidBlockHeight } = await transact(async (wallet) => {
     const owner = await authorize(wallet);
-    const ixs = await build(owner);
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-    const tx = new Transaction({ feePayer: owner, blockhash, lastValidBlockHeight }).add(...ixs);
+    const p = prep ?? { ixs: await build(owner), ...(await connection.getLatestBlockhash()) };
+    const tx = new Transaction({ feePayer: owner, blockhash: p.blockhash, lastValidBlockHeight: p.lastValidBlockHeight }).add(...p.ixs);
     const [sig] = await wallet.signAndSendTransactions({ transactions: [tx] });
-    await confirmSig(sig, lastValidBlockHeight);
-    return sig;
+    return { sig, lastValidBlockHeight: p.lastValidBlockHeight };
+  }).catch((e) => {
+    if (/Timed out waiting/i.test(String(e?.message ?? e))) throw new Error('Wallet did not respond. Open your wallet, then try again.');
+    throw e;
   });
+  await confirmSig(sig, lastValidBlockHeight);
+  return sig;
 }
 
 export async function sendWithKey(signer: Keypair, ixs: TransactionInstruction[]): Promise<string> {
