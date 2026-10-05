@@ -46,7 +46,8 @@
       "environment": "production",
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_NETWORK": "mainnet"
+        "EXPO_PUBLIC_NETWORK": "mainnet",
+        "EXPO_PUBLIC_RPC_URL": "https://mainnet.helius-rpc.com/?api-key=REDACTED"
       },
       "android": {
         "image": "latest",
