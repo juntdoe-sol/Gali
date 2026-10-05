@@ -28,7 +28,7 @@ export const SKR_MINT = new PublicKey(SKR_MINT_STR);
 export const SKR_DECIMALS = deployment.skrDecimals;
 export const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 export const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
-export const APP_IDENTITY = { name: 'Gali', uri: 'https://galiapp.bounded.page', icon: 'favicon.png' };
+export const APP_IDENTITY = { name: 'Gali', uri: 'https://galiisland.bounded.page', icon: 'favicon.png' };
 export const connection = new Connection(RPC_URL, { commitment: 'confirmed', fetch: retryingFetch, disableRetryOnRateLimit: true });
 const readOnlyWallet = {
   publicKey: Keypair.generate().publicKey,
