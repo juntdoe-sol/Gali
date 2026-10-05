@@ -12,7 +12,7 @@ import { ChatSheet } from './ui/Chat';
 import { TabBar, type SheetTab } from './ui/TabBar';
 import { Dock } from './ui/Dock';
 import { RoundCard, Toasts, TopBar } from './ui/Hud';
-import { Busy, GearReveal, LevelUp, LiveNotice, Onboarding, ResultPop, WalletPicker } from './ui/Modals';
+import { Busy, GearReveal, LevelUp, LiveNotice, Onboarding, ResultPop, WalletGate, WalletPicker } from './ui/Modals';
 import { Sheet } from './ui/Sheet';
 import { ClaimPanel } from './ui/ClaimPanel';
 import { MapHint } from './ui/MapHint';
@@ -110,6 +110,7 @@ function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTa
         <GearReveal />
         <Sheet tab={sheet} onTab={setSheet} />
         <ChatSheet />
+        <WalletGate />
         <Onboarding />
         <WalletPicker />
         <LiveNotice />
