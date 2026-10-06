@@ -639,10 +639,14 @@ export const useGame = create<GameState>((set, get) => {
   }
 
   /** Live mode: read ORE's board clock every couple of seconds. */
+  const LIVE_CLOCK_POLL_MS = 10_000;
+  const LIVE_POT_POLL_MS = 6_000;
   let clockAt = 0;
   let clockBusy = false;
+  let livePotBusy = false;
   function pollLiveClock() {
-    if (clockBusy || Date.now() - clockAt < 2000) return;
+    // Countdown advances locally from `endsAt`; chain reads only correct drift / round rollover.
+    if (clockBusy || Date.now() - clockAt < LIVE_CLOCK_POLL_MS) return;
     clockBusy = true;
     clockAt = Date.now();
     loadBoard()
@@ -696,9 +700,10 @@ export const useGame = create<GameState>((set, get) => {
       if (!p && c.roundId !== st.roundId) set({ roundId: c.roundId, pot: emptyPot(c.roundId) });
     }
     if (st.phase === 'mining' && !p) void retryUnsettled();
-    if (Date.now() - st.potAt > 3000) {
+    if (!livePotBusy && Date.now() - st.potAt > LIVE_POT_POLL_MS) {
       set({ potAt: Date.now() });
-      void get().refreshPot();
+      livePotBusy = true;
+      void get().refreshPot().finally(() => { livePotBusy = false; });
     }
     if (st.run && st.phase === 'mining' && !p && !st.wallet.busy && c && st.run.lastRound !== c.roundId && deployOpen(st, 0)) {
       void runRound();
