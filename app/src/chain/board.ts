@@ -26,7 +26,6 @@ import {
 } from './ore/read';
 import { oreCheckpoint, oreClaimOre, oreClaimSol, oreDeploy, oreDeployWithWallet, toOre, toSol } from './ore/tx';
 import { distributionMask, type OreMiner, type OreRound } from './ore/accounts';
-import { keccak_256 } from '@noble/hashes/sha3';
 
 export type { OreClock } from './ore/read';
 
@@ -346,7 +345,11 @@ export const fetchOreClock = () => fetchClock(connection);
  * The round's ten solo squares as a bitmask (a set bit pays one miner the whole
  * ORE). ORE's own Round::distribution_mask, so it is known before the draw.
  */
-export const oreSoloMask = (roundId: number) => distributionMask(BigInt(roundId), keccak_256);
+/** Optional display-only mask. Loaded lazily so hashing can never block the ORE clock/board on Android. */
+export async function oreSoloMask(roundId: number): Promise<number> {
+  const { keccak_256 } = await import('@noble/hashes/sha3');
+  return distributionMask(BigInt(roundId), keccak_256);
+}
 
 /** Put SOL on squares in the live round, signed by the player's wallet. Returns the round it went into. */
 export async function deployLive(squares: number[], solPerSquare: number, expectedOwner?: PublicKey): Promise<number> {
