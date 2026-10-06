@@ -1091,9 +1091,13 @@ export const useGame = create<GameState>((set, get) => {
       setWallet({ readError: 'Refreshing balances; last-known values may be stale' });
       if (isLive(get()) && !chainReady) {
         try {
-          const [board, owner] = await Promise.all([loadBoard(), ownerKey()]);
+          const [chain, board, owner] = await Promise.all([loadChain(), loadBoard(), ownerKey()]);
           if (!owner) return;
-          const w = await (await loadChain()).withTimeout(board.fetchLiveWallet(owner));
+          // SOL is the spend gate: publish it independently before optional ORE/reward reads.
+          const sol = await chain.withTimeout(chain.fetchSolBalance(owner));
+          if (get().wallet.owner !== owner.toBase58()) return;
+          setWallet({ sol });
+          const w = await chain.withTimeout(board.fetchLiveWallet(owner, sol));
           if (get().wallet.owner !== owner.toBase58()) return;
           setWallet({ ...w, player: null, skr: 0, sessionSol: 0, pool: 0, shop: null, readError: undefined });
         } catch {

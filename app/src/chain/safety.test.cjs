@@ -91,11 +91,11 @@ test('mainnet never creates or funds insecure sessions; existing key remains rec
   h.data.set(`gali-session-${A.publicKey.toBase58()}`, JSON.stringify(Array.from(B.secretKey)));
   assert.equal((await h.c.loadSession(A.publicKey)).publicKey.toBase58(), B.publicKey.toBase58());
 });
-function store(board = {}) {
+function store(board = {}, chainOverride = {}) {
   const constants = load('../game/constants.ts');
   const pot = load('../game/pot.ts', { './constants': constants });
   const sounds = [];
-  const c = client().c;
+  const c = { ...client().c, ...chainOverride };
   const s = load('../game/store.ts', {
     '../chain/lazy': { loadChain: async () => c, loadBoard: async () => board, loadOreTx: async () => ({}) },
     '../chain/light': { oreLive: true, chainReady: false, onChainMode: true, NOTHING_CLAIMABLE: { sol: 0, unrefined: 0, refined: 0, fee: 0 }, short: x => x, isRateLimited: () => false },
@@ -105,6 +105,17 @@ function store(board = {}) {
   }, { setTimeout: () => 0 });
   return { ...s, sounds };
 }
+test('SOL balance updates even when a secondary ORE/rewards read fails', async () => {
+  const h = store(
+    { fetchLiveWallet: async () => { throw new Error('ORE rewards unavailable'); } },
+    { fetchSolBalance: async () => 0.0523 },
+  );
+  const g = h.useGame;
+  g.setState({ wallet: { ...g.getState().wallet, owner: A.publicKey.toBase58(), sol: 0 } });
+  await g.getState().refreshWallet();
+  assert.equal(g.getState().wallet.sol, 0.0523, 'independent SOL read must survive secondary failure');
+  assert.match(g.getState().wallet.readError ?? '', /unavailable|stale/i);
+});
 test('wallet refresh outage preserves prior values and flags stale data', async () => {
   const h = store({ fetchLiveWallet: async () => { throw new Error('offline'); } });
   const g = h.useGame;
