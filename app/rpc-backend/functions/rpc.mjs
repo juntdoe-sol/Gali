@@ -86,7 +86,7 @@ export default async function rpc(req, ctx) {
     upstream.searchParams.set('api-key', key);
     const response = await fetch(upstream, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
-      redirect: 'error', signal: controller.signal,
+      redirect: 'manual', signal: controller.signal,
     });
     if (!response.ok) {
       await response.body?.cancel();
