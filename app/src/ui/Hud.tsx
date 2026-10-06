@@ -165,7 +165,9 @@ export function RoundCard() {
   const boost = useGame((s) => s.pending?.boostBps ?? 10_000);
   const onChain = useGame(isOnChain);
   const liveMode = useGame(isLive);
-  const clockPhase = useGame((s) => (isLive(s) ? s.liveClock?.phase ?? 'waiting' : 'mining'));
+  const liveClock = useGame((s) => s.liveClock);
+  const liveClockError = useGame((s) => s.liveClockError);
+  const clockPhase = liveMode ? liveClock?.phase : 'mining';
   const endsAt = useGame(roundEndsAt);
   const span = useGame(roundSpanMs);
   const pool = useGame((s) => (onChain ? s.wallet.pool : practiceMotherlode(s.roundId)));
@@ -181,7 +183,8 @@ export function RoundCard() {
   const secs = Math.ceil(left / 1000);
   const cave = !liveMode && roundId % CAVE_IN_EVERY === 0;
   // live: ORE's round has not started, or is between rounds, so there is no countdown to show
-  const idle = liveMode && phase === 'mining' && clockPhase !== 'mining';
+  const syncing = liveMode && !liveClock;
+  const idle = liveMode && Boolean(liveClock) && phase === 'mining' && clockPhase !== 'mining';
   const locking = phase === 'mining' && !idle && left < (liveMode ? LIVE_LOCK_MS : LOCK_MS);
   const covered = pending ? pending.mask.toString(2).split('1').length - 1 : 0;
   // inside a claim the panel below carries the numbers; the scene gets the room
@@ -207,7 +210,11 @@ export function RoundCard() {
         <View style={styles.divider} />
         <BigStat
           value={
-            idle
+            syncing
+              ? liveClockError
+                ? 'OFFLINE'
+                : 'SYNC'
+              : idle
               ? clockPhase === 'waiting'
                 ? 'START'
                 : 'NEXT'
@@ -219,17 +226,17 @@ export function RoundCard() {
                   : 'MINING'
                 : 'STRIKE!'
           }
-          label={idle ? (clockPhase === 'waiting' ? 'NOT STARTED' : 'ROUND SOON') : locking ? 'LOCKED' : 'TIME'}
-          color={phase !== 'mining' || idle ? COLORS.gold : secs <= 5 || locking ? COLORS.red : COLORS.text}
+          label={syncing ? (liveClockError ? 'BOARD OFFLINE' : 'SYNCING') : idle ? (clockPhase === 'waiting' ? 'WAITING FIRST DEPLOY' : 'ROUND SOON') : locking ? 'LOCKED' : 'TIME'}
+          color={liveClockError ? COLORS.red : phase !== 'mining' || idle || syncing ? COLORS.gold : secs <= 5 || locking ? COLORS.red : COLORS.text}
         />
       </View>
       <Bar pct={phase === 'mining' && !idle ? (left / span) * 100 : 0} height={4} />
       <View style={[styles.row, { marginTop: 4 }]}>
         <T v="bold" style={{ fontSize: 11, color: cave ? COLORS.red : COLORS.muted }} numberOfLines={1}>
-          #{(roundId % 100000).toLocaleString()} · {liveMode ? 'ORE mainnet' : cave ? '⚠ CAVE-IN' : `Cave-in in ${CAVE_IN_EVERY - (roundId % CAVE_IN_EVERY)}`}
+          {liveMode ? (liveClock ? `#${(roundId % 100000).toLocaleString()} · ORE mainnet` : 'ORE mainnet · retrying board sync') : `#${(roundId % 100000).toLocaleString()} · ${cave ? '⚠ CAVE-IN' : `Cave-in in ${CAVE_IN_EVERY - (roundId % CAVE_IN_EVERY)}`}`}
         </T>
         <T v="bold" style={{ fontSize: 11, color: COLORS.muted }} numberOfLines={1}>
-          {pending ? `You: ${covered} spot${covered > 1 ? 's' : ''} · ${fmtSol(pending.total)} SOL` : `${fmtOre(reward)} ORE to mine · motherlode 1/${MOTHERLODE_ODDS}`}
+          {syncing ? (liveClockError ? 'Board read failed · retrying automatically' : 'Reading ORE board…') : pending ? `You: ${covered} spot${covered > 1 ? 's' : ''} · ${fmtSol(pending.total)} SOL` : `${fmtOre(reward)} ORE to mine · motherlode 1/${MOTHERLODE_ODDS}`}
         </T>
       </View>
       <T v="muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 1, color: run && run.total > 1 ? COLORS.teal : pending && boost > 10_000 ? COLORS.skr : COLORS.muted }} numberOfLines={1}>
