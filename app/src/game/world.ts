@@ -11,6 +11,7 @@ import { create } from 'zustand';
 import { loadChain, loadedChain } from '../chain/lazy';
 import { short } from '../chain/light';
 import cfg from '../chain/chat.json';
+import { acceptScore, utcDay, type Expedition, type SharedScore } from './expedition';
 
 export type Pose = 'idle' | 'walk' | 'swing';
 export interface Avatar {
@@ -70,6 +71,8 @@ const color = (v: unknown, dflt: string) => (typeof v === 'string' && HEX.test(v
 
 interface WorldState {
   status: 'off' | 'connecting' | 'online';
+  expeditionScores: SharedScore[];
+  expeditionDelivery: 'offline' | 'sending' | 'sent' | 'failed';
   me: string;
   peers: Record<string, Avatar>;
   emotes: Record<string, { emoji: string; at: number }>;
@@ -80,6 +83,8 @@ interface WorldState {
 
 export const useWorld = create<WorldState>((set, get) => ({
   status: 'off',
+  expeditionScores: [],
+  expeditionDelivery: 'offline',
   me: rid(),
   peers: {},
   emotes: {},
@@ -126,6 +131,10 @@ function connect(RealtimeClientCtor: typeof RealtimeClient) {
   channel = client.channel('gali-world', { config: { broadcast: { self: false, ack: false } } });
   channel
     .on('broadcast', { event: 'state' }, ({ payload }) => onState(payload))
+    .on('broadcast', { event: 'expedition-score' }, ({ payload }) => {
+      if (payload?.id === useWorld.getState().me) return;
+      useWorld.setState((s) => ({ expeditionScores: acceptScore(s.expeditionScores, payload, utcDay()) }));
+    })
     .on('broadcast', { event: 'emote' }, ({ payload }) => {
       const id = typeof payload?.id === 'string' ? payload.id.slice(0, 16) : '';
       const e = payload?.e;
@@ -148,6 +157,12 @@ function connect(RealtimeClientCtor: typeof RealtimeClient) {
   pruneTimer = setInterval(() => {
     const now = Date.now();
     const { peers } = useWorld.getState();
+    const day = utcDay(now);
+    const scores = useWorld.getState().expeditionScores;
+    if (scores.some((s) => s.day !== day)) useWorld.setState({ expeditionScores: scores.filter((s) => s.day === day) });
+    // One bounded heartbeat contribution; late joiners receive currently connected sessions, not history.
+    const own = useWorld.getState().expeditionScores.filter((s) => s.id === useWorld.getState().me);
+    if (own.length) void sendExpeditionScore(own[scoreCursor++ % own.length]);
     const alive = Object.fromEntries(
       Object.entries(peers)
         .filter(([, p]) => p.bot || now - p.seen < STALE_MS)
@@ -276,6 +291,28 @@ export function publishMe(me: MeState, identity: { wallet: string | null; sessio
   lastSent = now;
   lastKey = key;
   void channel.send({ type: 'broadcast', event: 'state', payload });
+}
+
+// Unverified, nonfinancial session scores. No wallet identity or server verification implied.
+let scoreCursor = 0;
+async function sendExpeditionScore(payload: SharedScore) {
+  if (!channel || useWorld.getState().status !== 'online') {
+    useWorld.setState({ expeditionDelivery: 'offline' });
+    return;
+  }
+  try {
+    const result = await channel.send({ type: 'broadcast', event: 'expedition-score', payload });
+    useWorld.setState({ expeditionDelivery: result === 'ok' ? 'sent' : 'failed' });
+  } catch { useWorld.setState({ expeditionDelivery: 'failed' }); }
+}
+export function publishExpeditionScore(run: Expedition) {
+  if (run.status !== 'extracted' || run.day !== utcDay()) return;
+  const s = useWorld.getState();
+  const payload: SharedScore = { v: 1, day: run.day, id: s.me, mine: run.mine, challenge: run.challenge, score: run.score };
+  const expeditionScores = acceptScore(s.expeditionScores, payload, utcDay());
+  useWorld.setState({ expeditionScores, expeditionDelivery: 'sending' });
+  const best = expeditionScores.find((p) => p.id === s.me && p.mine === run.mine && p.challenge === run.challenge);
+  if (best) void sendExpeditionScore(best);
 }
 
 /* ---------------- practice bots ---------------- */
