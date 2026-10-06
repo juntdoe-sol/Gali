@@ -5,9 +5,7 @@
   },
   "build": {
     "base": {
-      "env": {
-        "EXPO_PUBLIC_RPC_URL": "https://api.devnet.solana.com"
-      },
+      "env": {},
       "android": {
         "image": "latest"
       }
@@ -46,8 +44,7 @@
       "environment": "production",
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_NETWORK": "mainnet",
-        "EXPO_PUBLIC_RPC_URL": "https://mainnet.helius-rpc.com/?api-key=REDACTED"
+        "EXPO_PUBLIC_NETWORK": "mainnet"
       },
       "android": {
         "image": "latest",

@@ -14,7 +14,7 @@
  */
 import '../polyfill-web';
 import { ComputeBudgetProgram, Keypair, LAMPORTS_PER_SOL, PublicKey, TransactionInstruction } from '@solana/web3.js';
-import { connection, sendWithKey, sendWithWallet } from '../client';
+import { assertSessionFundingAllowed, connection, sendWithKey, sendWithWallet } from '../client';
 import { AUTOMATION_STRATEGY, EXECUTOR_ADDRESS } from './consts';
 import { automateIx, checkpointIx, claimOreIx, claimSolIx, deployIx } from './ix';
 import { fetchClock, fetchOreMiner, needsCheckpoint } from './read';
@@ -102,6 +102,7 @@ export const LIVE_LOCK_SLOTS = 15;
 export async function oreDeployWithWallet(
   squares: number[],
   lamportsPerSquare: bigint,
+  expectedOwner?: PublicKey,
 ): Promise<{ sig: string; roundId: bigint }> {
   let roundId = 0n;
   const sig = await sendWithWallet(async (owner) => {
@@ -117,7 +118,7 @@ export async function oreDeployWithWallet(
       deployIx({ signer: owner, authority: owner, roundId, amount: lamportsPerSquare, squares: squaresToMask(squares) }),
     );
     return ixs;
-  });
+  }, expectedOwner);
   return { sig, roundId };
 }
 
@@ -131,13 +132,13 @@ export async function oreDeployWithWallet(
  * A round that finished but was never checkpointed is settled in the same
  * transaction, so its rewards are part of the claim.
  */
-export async function oreClaimOre(bps = 10_000): Promise<string> {
-  return sendWithWallet(async (owner) => [priorityIx(), ...(await checkpointFirst(owner)), claimOreIx({ authority: owner, bps })]);
+export async function oreClaimOre(bps = 10_000, expectedOwner?: PublicKey): Promise<string> {
+  return sendWithWallet(async (owner) => [priorityIx(), ...(await checkpointFirst(owner)), claimOreIx({ authority: owner, bps })], expectedOwner);
 }
 
 /** Claim SOL that ORE returned to the player, checkpointing a finished round first. */
-export async function oreClaimSol(): Promise<string> {
-  return sendWithWallet(async (owner) => [priorityIx(), ...(await checkpointFirst(owner)), claimSolIx({ authority: owner })]);
+export async function oreClaimSol(expectedOwner?: PublicKey): Promise<string> {
+  return sendWithWallet(async (owner) => [priorityIx(), ...(await checkpointFirst(owner)), claimSolIx({ authority: owner })], expectedOwner);
 }
 
 /**
@@ -184,6 +185,7 @@ export async function startOreAutomation(args: {
   /** Let any bot run it instead of Gali's key. */
   openExecutor?: boolean;
 }): Promise<string> {
+  assertSessionFundingAllowed();
   const mask = squaresToMask(args.squares);
   const feeBps = args.feeBps ?? EXECUTOR_FEE_BPS;
   const deployed = args.lamportsPerSquare * BigInt(args.squares.length);

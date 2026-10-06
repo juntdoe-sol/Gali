@@ -133,7 +133,7 @@ function connect(RealtimeClientCtor: typeof RealtimeClient) {
     .on('broadcast', { event: 'state' }, ({ payload }) => onState(payload))
     .on('broadcast', { event: 'expedition-score' }, ({ payload }) => {
       if (payload?.id === useWorld.getState().me) return;
-      useWorld.setState((s) => ({ expeditionScores: acceptScore(s.expeditionScores, payload, utcDay()) }));
+      useWorld.setState((s) => ({ expeditionScores: acceptScore(s.expeditionScores, payload, utcDay(), s.me) }));
     })
     .on('broadcast', { event: 'emote' }, ({ payload }) => {
       const id = typeof payload?.id === 'string' ? payload.id.slice(0, 16) : '';
@@ -152,7 +152,8 @@ function connect(RealtimeClientCtor: typeof RealtimeClient) {
         return { peers };
       });
     })
-    .subscribe((status) => useWorld.setState({ status: status === 'SUBSCRIBED' ? 'online' : 'connecting' }));
+    .subscribe((status) => useWorld.setState(status === 'SUBSCRIBED'
+      ? { status: 'online' } : { status: 'off', expeditionDelivery: 'offline' }));
   if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') window.addEventListener('pagehide', sayBye);
   pruneTimer = setInterval(() => {
     const now = Date.now();
@@ -189,7 +190,7 @@ export function stopWorld() {
   client = null;
   channel = null;
   pruneTimer = null;
-  useWorld.setState({ status: 'off' });
+  useWorld.setState({ status: 'off', expeditionDelivery: 'offline' });
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -300,19 +301,23 @@ async function sendExpeditionScore(payload: SharedScore) {
     useWorld.setState({ expeditionDelivery: 'offline' });
     return;
   }
+  const gen = startGen;
   try {
     const result = await channel.send({ type: 'broadcast', event: 'expedition-score', payload });
-    useWorld.setState({ expeditionDelivery: result === 'ok' ? 'sent' : 'failed' });
-  } catch { useWorld.setState({ expeditionDelivery: 'failed' }); }
+    if (gen === startGen) useWorld.setState({ expeditionDelivery: useWorld.getState().status !== 'online' ? 'offline' : result === 'ok' ? 'sent' : 'failed' });
+  } catch {
+    if (gen === startGen) useWorld.setState({ expeditionDelivery: useWorld.getState().status === 'online' ? 'failed' : 'offline' });
+  }
 }
 export function publishExpeditionScore(run: Expedition) {
   if (run.status !== 'extracted' || run.day !== utcDay()) return;
   const s = useWorld.getState();
   const payload: SharedScore = { v: 1, day: run.day, id: s.me, mine: run.mine, challenge: run.challenge, score: run.score };
-  const expeditionScores = acceptScore(s.expeditionScores, payload, utcDay());
+  const expeditionScores = acceptScore(s.expeditionScores, payload, utcDay(), s.me);
   useWorld.setState({ expeditionScores, expeditionDelivery: 'sending' });
   const best = expeditionScores.find((p) => p.id === s.me && p.mine === run.mine && p.challenge === run.challenge);
   if (best) void sendExpeditionScore(best);
+  else useWorld.setState({ expeditionDelivery: 'failed' });
 }
 
 /* ---------------- practice bots ---------------- */

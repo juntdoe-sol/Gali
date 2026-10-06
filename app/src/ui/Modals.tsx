@@ -181,6 +181,7 @@ export function GearReveal() {
 export function WalletPicker() {
   const wallets = useGame((s) => s.walletPicker);
   const close = useGame((s) => s.closeWalletPicker);
+  const busy = useGame((s) => s.wallet.busy);
   const connect = useGame((s) => s.connect);
   if (!wallets) return null;
   return (
@@ -197,6 +198,8 @@ export function WalletPicker() {
           {wallets.map((w) => (
             <Pressable
               key={w.name}
+              disabled={Boolean(busy)}
+              accessibilityState={{ disabled: Boolean(busy) }}
               onPress={() => void connect(w.name)}
               style={({ pressed }) => [styles.walletRow, pressed && { opacity: 0.7 }]}
               accessibilityRole="button"
@@ -208,6 +211,7 @@ export function WalletPicker() {
               </T>
             </Pressable>
           ))}
+          <WalletFeedback />
           <Btn kind="ghost" label="Cancel" onPress={close} />
         </View>
       </View>
@@ -247,6 +251,7 @@ export function LiveNotice() {
 /** Wagering remains wallet-gated. Free expeditions are a separate nonfinancial game. */
 export function WalletGate() {
   const expeditionOpen = useExpedition((s) => s.open);
+  const busy = useGame((s) => s.wallet.busy);
   const show = useGame((s) => oreLive && s.loaded && s.save.onboarded && !s.wallet.owner && !s.liveNotice && !s.walletPicker);
   const connect = useGame((s) => s.connect);
   if (!show || expeditionOpen) return null;
@@ -262,7 +267,8 @@ export function WalletGate() {
             Connect your wallet to mine. Every deploy and claim is signed by you on Solana mainnet.
           </T>
           <View style={{ marginTop: 18 }}>
-            <Btn kind="skr" label="Connect wallet" onPress={() => void connect()} />
+            <WalletFeedback />
+            <Btn kind="skr" label="Connect wallet" disabled={Boolean(busy)} onPress={() => void connect()} />
             <View style={{ marginTop: 12 }}><ExpeditionButton label="Free daily expedition" onPress={() => useExpedition.getState().show()} /></View>
             <T v="muted" style={{ textAlign: 'center', marginTop: 8 }}>No wallet, wager or token rewards. A separate excavation challenge.</T>
           </View>
@@ -270,6 +276,16 @@ export function WalletGate() {
       </View>
     </Modal>
   );
+}
+
+// Native Modals sit above ordinary app overlays; feedback must live in their tree.
+function WalletFeedback() {
+  const busy = useGame((s) => s.wallet.busy);
+  const error = useGame((s) => s.toasts.filter((t) => t.tone === 'bad').at(-1)?.text);
+  if (!busy && !error) return null;
+  return <View accessibilityRole={busy ? 'text' : 'alert'} accessibilityLiveRegion="polite" style={{ marginBottom: 12 }}>
+    <T v="bold" style={{ color: busy ? COLORS.skr : COLORS.red, textAlign: 'center' }}>{busy || error}</T>
+  </View>;
 }
 
 export function Busy() {
