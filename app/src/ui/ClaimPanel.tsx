@@ -12,6 +12,8 @@ import { CLAIMS } from '../engine/island';
 import { closeupView } from '../pixel/PixelMine';
 import { useView } from '../pixel/view';
 import { Btn, Frame, T } from './kit';
+import { useExpedition } from '../game/expeditionStore';
+import { ExpeditionButton } from './Expedition';
 
 const KIND: Record<string, string> = { cave: 'Cave mouth', scree: 'Scree slope', dig: 'Dig pit', gold: 'Gold stream' };
 
@@ -125,6 +127,11 @@ export function ClaimPanel() {
               ? '★ Solo spot this round: if it strikes, one wallet on it takes the ORE.'
               : 'If it strikes, everyone on it splits the ORE by the SOL they put in.'}
           </T>
+          <ExpeditionButton
+            label={pending?.onChain && yours > 0 ? 'Enter shaft expedition' : 'Free daily expedition'}
+            onPress={() => useExpedition.getState().show(pending?.onChain && yours > 0 ? focus : undefined)}
+          />
+          <T v="muted" style={styles.note}>Free excavation only. Does not affect your SOL/ORE round or claims.</T>
           <Btn
             label={action}
             sub={sub}

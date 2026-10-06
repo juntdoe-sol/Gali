@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { COLORS } from './game/constants';
+import { oreLive } from './chain/light';
 import { initAudio } from './game/sfx';
 import { useGame } from './game/store';
 import PixelMine from './pixel/PixelMine';
@@ -18,6 +19,7 @@ import { ClaimPanel } from './ui/ClaimPanel';
 import { MapHint } from './ui/MapHint';
 import { Splash } from './ui/Splash';
 import { PeerCard } from './ui/World';
+import { ExpeditionEntry, ExpeditionPanel } from './ui/Expedition';
 
 
 // lets browser tests watch the game state
@@ -94,26 +96,31 @@ export default function App() {
 }
 
 function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTab | null) => void }) {
+  const guest = useGame((s) => oreLive && !s.wallet.owner);
   return (
     <>
+      {!guest && <>
         <TopBar onMenu={() => setSheet('me')} />
         <RoundCard />
         <Dock />
         <TabBar active={sheet} onTab={setSheet} />
         <MapHint />
+        <ExpeditionEntry />
         <ClaimPanel />
         <PeerCard />
-        <Toasts />
-        <Busy />
         <ResultPop />
         <LevelUp />
         <GearReveal />
         <Sheet tab={sheet} onTab={setSheet} />
         <ChatSheet />
+      </>}
+        <Toasts />
+        <Busy />
         <WalletGate />
         <Onboarding />
         <WalletPicker />
         <LiveNotice />
+        <ExpeditionPanel />
     </>
   );
 }
