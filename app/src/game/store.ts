@@ -651,10 +651,16 @@ export const useGame = create<GameState>((set, get) => {
         if (!isLive(get())) return;
         const roundId = Number(c.roundId);
         const prev = get().liveClock;
-        const solo = prev?.roundId === roundId ? prev.solo : b.oreSoloMask(roundId);
+        // Commit the authoritative clock immediately. The display-only ★ mask is
+        // patched in asynchronously, so its crypto chunk can never discard the board.
+        const solo = prev?.roundId === roundId ? prev.solo : 0;
         const endsAt = c.phase === 'mining' ? chainNow(get().offsetMs) + c.msLeft : 0;
         const spanMs = c.phase === 'waiting' ? (prev?.spanMs ?? LIVE_SPAN_MS) : Math.max(1, Number(c.endSlot - c.startSlot)) * 400;
         set({ liveClock: { roundId, phase: c.phase, endsAt, solo, spanMs }, liveClockError: null });
+        if (prev?.roundId !== roundId) void b.oreSoloMask(roundId).then((mask) => {
+          const live = get().liveClock;
+          if (live?.roundId === roundId) set({ liveClock: { ...live, solo: mask } });
+        }).catch(() => undefined);
       })
       .catch((e) => {
         if (isLive(get())) set({ liveClockError: errMsg(e) });
