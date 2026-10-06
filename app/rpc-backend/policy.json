@@ -1,0 +1,13 @@
+{
+  "functions": {
+    "rpc": {
+      "auth": "true",
+      "entry": "functions/rpc.mjs",
+      "public": true,
+      "methods": ["POST"],
+      "cors": "app",
+      "timeout": 10,
+      "secrets": ["HELIUS_RPC_KEY"]
+    }
+  }
+}

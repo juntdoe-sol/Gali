@@ -8,6 +8,11 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview"
   },
+  "engines": { "node": ">=22.13.0" },
+  "overrides": {
+    "@coral-xyz/anchor": { "toml": "4.3.0" },
+    "jayson": { "uuid": "11.1.1" }
+  },
   "dependencies": {
     "@coral-xyz/anchor": "^0.31.1",
     "@solana/spl-token": "^0.4.15",

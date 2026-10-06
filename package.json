@@ -3,7 +3,15 @@
   "private": true,
   "scripts": {
     "setup:devnet": "ts-node scripts/setup-devnet.ts",
-    "test": "anchor test"
+    "test": "anchor test",
+    "check:secrets": "python3 scripts/check-secrets.py",
+    "check:dependencies": "node scripts/check-dependencies.cjs"
+  },
+  "engines": { "node": ">=22.13.0" },
+  "overrides": {
+    "@coral-xyz/anchor": { "toml": "4.3.0" },
+    "jayson": { "uuid": "11.1.1" },
+    "mocha": { "serialize-javascript": "7.0.7" }
   },
   "dependencies": {
     "@coral-xyz/anchor": "0.31.1",

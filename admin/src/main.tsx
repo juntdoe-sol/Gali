@@ -11,7 +11,7 @@ import './styles.css';
 // Wallets that support the Wallet Standard (Phantom, Solflare, Backpack…) are detected automatically.
 // VITE_BURNER=1 (local testing only) adds a throwaway in-browser wallet; production builds never include it.
 const wallets: Adapter[] = [];
-if (import.meta.env.VITE_BURNER === '1') {
+if (import.meta.env.DEV && import.meta.env.VITE_BURNER === '1') {
   const { UnsafeBurnerWalletAdapter } = await import('@solana/wallet-adapter-unsafe-burner');
   wallets.push(new UnsafeBurnerWalletAdapter());
 }

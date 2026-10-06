@@ -119,6 +119,9 @@ export function Btn({
   const radius = small ? 8 : 12;
   return (
     <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: Boolean(disabled) }}
       disabled={disabled}
       onPress={() => {
         haptic.tap();

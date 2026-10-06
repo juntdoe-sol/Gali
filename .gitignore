@@ -27,3 +27,22 @@ app/.bounded/
 app/bounded.json
 admin/dist/
 *.tsbuildinfo
+
+# Local credentials and alternate client exports
+.env.*
+!.env.example
+.bounded/
+bounded.json
+credentials.json
+*.keypair.json
+*-keypair.json
+*.key
+*.pem
+*.jks
+*.p8
+*.p12
+*.mobileprovision
+dist-*/
+dist_*/
+web-build/
+coverage/

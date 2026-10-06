@@ -59,7 +59,7 @@ export function parseProgress(raw: string | null): Progress {
   return { v: 1, best: { ...p.best } };
 }
 export type SharedScore = { v: 1; day: string; id: string; mine: Mine; challenge: Challenge; score: number };
-export function acceptScore(scores: SharedScore[], input: unknown, day: string): SharedScore[] {
+export function acceptScore(scores: SharedScore[], input: unknown, day: string, ownId?: string): SharedScore[] {
   const today = scores.filter((s) => s.day === day);
   if (!input || typeof input !== 'object' || Array.isArray(input)) return today;
   const p = input as SharedScore;
@@ -69,7 +69,8 @@ export function acceptScore(scores: SharedScore[], input: unknown, day: string):
     !Number.isInteger(p.score) || p.score < 0 || p.score > 288) return today;
   const index = today.findIndex((s) => s.id === p.id && s.mine === p.mine && s.challenge === p.challenge);
   if (index >= 0 && today[index].score >= p.score) return today;
-  if (index < 0 && today.length >= 180) return today;
+  // Own nine mine/challenge slots never compete with the bounded remote pool.
+  if (index < 0 && p.id !== ownId && today.filter((s) => s.id !== ownId).length >= 180) return today;
   const clean: SharedScore = { v: 1, day, id: p.id, mine: p.mine, challenge: p.challenge, score: p.score };
   if (index < 0) return [...today, clean];
   return today.map((s, i) => i === index ? clean : s);

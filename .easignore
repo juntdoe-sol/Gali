@@ -1,0 +1,57 @@
+# EAS uses the Git root and ignores ALL .gitignore files when this exists.
+# Keep source, app assets, package locks, target/idl and program sources.
+.git/
+node_modules/
+.anchor/
+target/*
+!target/idl/
+!target/deploy/
+target/deploy/*.json
+scripts/ore-layout/target/
+scripts/ore-layout.json.checked
+*.rs.bk
+__pycache__/
+*.pyc
+
+# Generated client/native outputs (app/.gitignore parity)
+app/android/
+app/ios/
+.expo/
+.kotlin/
+dist/
+dist-*/
+dist_*/
+web-build/
+coverage/
+expo-env.d.ts
+*.orig.*
+.metro-health-check*
+*.tsbuildinfo
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.DS_Store
+*.apk
+*.aab
+*.ipa
+video/out/
+video/public/main.js
+
+# Never upload local environment, deployment credentials or signing material.
+.env
+.env.*
+!.env.example
+.bounded/
+bounded.json
+credentials.json
+*.keypair.json
+*-keypair.json
+*.key
+*.pem
+*.keystore
+*.jks
+*.p8
+*.p12
+*.mobileprovision
+# Server-only RPC deployment is not part of the mobile binary.
+app/rpc-backend/

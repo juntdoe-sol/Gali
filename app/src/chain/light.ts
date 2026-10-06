@@ -36,9 +36,16 @@ export const onChainMode = chainReady || oreLive;
 /** Most SOL a live player may put on the board in one round. A guard against a slipped finger, not a limit on ORE. */
 export const LIVE_MAX_ROUND_SOL = 0.5;
 
-// EXPO_PUBLIC_RPC_URL overrides the endpoint at build time (a private RPC, or a local validator for tests).
+// Public transaction transport/local validator only. EXPO_PUBLIC_* is bundled;
+// never configure a credential-bearing provider URL here.
 export const RPC_URL =
   process.env.EXPO_PUBLIC_RPC_URL || (oreLive ? 'https://api.mainnet-beta.solana.com' : 'https://api.devnet.solana.com');
+// Enable only after the Bounded read proxy is deployed and verified. No secrets.
+const READ_RPC_URL = oreLive ? process.env.EXPO_PUBLIC_RPC_READ_URL : undefined;
+const PROXIED_READS = new Set([
+  'getSlot', 'getBlockTime', 'getBlockHeight', 'getLatestBlockhash',
+  'getBalance', 'getTokenAccountBalance', 'getAccountInfo', 'getSignatureStatuses',
+]);
 
 /** True when an RPC turned us away for asking too often (public endpoints do this a lot). */
 export const isRateLimited = (e: unknown) => /\b429\b|rate limit|too many requests/i.test(String((e as Error)?.message ?? e));
@@ -46,9 +53,16 @@ export const isRateLimited = (e: unknown) => /\b429\b|rate limit|too many reques
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Retries 429s with a growing pause, so a busy RPC slows the app down instead of breaking it. */
 export const retryingFetch: typeof fetch = async (input, init) => {
+  let target = input;
+  if (READ_RPC_URL && String(input) === RPC_URL && typeof init?.body === 'string') {
+    try {
+      const body = JSON.parse(init.body) as { method?: string };
+      if (body && typeof body.method === 'string' && PROXIED_READS.has(body.method)) target = READ_RPC_URL;
+    } catch { /* Leave malformed/non-JSON requests to their original transport. */ }
+  }
   let last: Response | undefined;
   for (let i = 0; i < 4; i++) {
-    const res = await fetch(input as RequestInfo, init as RequestInit);
+    const res = await fetch(target as RequestInfo, init as RequestInit);
     if (res.status !== 429) return res;
     last = res;
     await wait(400 * 2 ** i);
