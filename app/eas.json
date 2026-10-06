@@ -44,7 +44,8 @@
       "environment": "production",
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_NETWORK": "mainnet"
+        "EXPO_PUBLIC_NETWORK": "mainnet",
+        "EXPO_PUBLIC_RPC_READ_URL": "https://galiisland-api.bounded.page/rpc"
       },
       "android": {
         "image": "latest",
