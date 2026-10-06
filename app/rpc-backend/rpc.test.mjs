@@ -25,9 +25,17 @@ assert.equal(calls.length, 1);
 assert.equal(calls[0].url.origin, 'https://mainnet.helius-rpc.com');
 assert.equal(calls[0].url.pathname, '/');
 assert.equal(calls[0].url.searchParams.get('api-key'), ctx.env.HELIUS_RPC_KEY);
-assert.equal(calls[0].init.redirect, 'error');
+assert.equal(calls[0].init.redirect, 'manual', 'runtime rejects "error"; manual never follows a redirect');
 assert.deepEqual(JSON.parse(calls[0].init.body), message('getSlot', [{ commitment: 'confirmed' }]));
 console.log('RPC fixed-provider read passed');
+
+// A provider redirect must never be followed or relayed (would leak the key to another origin).
+globalThis.fetch = async () => new Response(null, { status: 302, headers: { location: 'https://evil.example/?x=1' } });
+const redirected = await rpc(request(message('getSlot')), ctx);
+assert.equal(redirected.status, 502);
+assert.ok(!(await redirected.text()).includes('evil.example'));
+globalThis.fetch = async (url, init) => { calls.push({ url: new URL(url), init }); return Response.json({ jsonrpc: '2.0', id: 1, result: 42 }); };
+console.log('RPC redirect refusal passed');
 
 const pubkey = '11111111111111111111111111111111';
 for (const [method, params] of [
