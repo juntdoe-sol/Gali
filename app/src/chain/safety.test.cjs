@@ -136,6 +136,20 @@ test('live clock uses measured 240-slot span rather than legacy 200', async () =
   const st = h.useGame.getState();
   assert.equal(h.roundSpanMs({ ...st, wallet: { ...st.wallet, owner: A.publicKey.toBase58() }, liveClock: { spanMs: 96_000 } }), 96_000);
 });
+test('Android solo-mask failure cannot discard a valid ORE clock', async () => {
+  const h = store({
+    fetchOreClock: async () => ({ roundId: 430166n, phase: 'mining', msLeft: 40_000, startSlot: 100n, endSlot: 340n }),
+    oreSoloMask: async () => { throw new Error('noble crypto subpath unavailable'); },
+    fetchBoardRound: async () => null,
+  });
+  const g = h.useGame;
+  g.setState({ wallet: { ...g.getState().wallet, owner: A.publicKey.toBase58() } });
+  g.getState().tick();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(g.getState().liveClock?.roundId, 430166);
+  assert.equal(g.getState().liveClock?.solo, 0);
+  assert.equal(g.getState().liveClockError, null);
+});
 test('disconnected mainnet never simulates a pot, runs or countdown audio', async () => {
   const h = store();
   const g = h.useGame;
