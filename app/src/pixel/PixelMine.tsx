@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { BLOCKS, CAVE_IN_EVERY, GEAR, LOCK_MS, gearByKey, levelFromXp, type Gear } from '../game/constants';
 import { play, type Sound } from '../game/sfx';
+import { oreLive } from '../chain/light';
 import { isLive, isOnChain, LIVE_LOCK_MS, roundEndsAt, soloOf, useGame } from '../game/store';
 import { clearBots, ensureBots, EMOTES, publishMe, startWorld, stopWorld, thinkBots, useWorld, type Avatar } from '../game/world';
 import { CLAIMS, openSpot } from '../engine/island';
@@ -108,6 +109,10 @@ function snapshot(): Snapshot {
 function stepPeers(dt: number) {
   const st = useGame.getState();
   const world = useWorld.getState();
+  if (oreLive && !st.wallet.owner) {
+    clearBots();
+    return;
+  }
   const practice = !isOnChain(st);
   if (practice && world.status !== 'online') {
     ensureBots(STANDS);
@@ -195,6 +200,7 @@ export default function PixelMine() {
         useWorld.getState().emote(EMOTES[Math.floor(Math.random() * EMOTES.length)]);
         break;
       case 'me': {
+        if (oreLive && !st.wallet.owner) break;
         const { pick, hat, fit, pet } = myGear();
         const session = st.session();
         const player = st.wallet.player;

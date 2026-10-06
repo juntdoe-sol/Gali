@@ -62,13 +62,20 @@ for (const bad of [null, [], { ...payload, v: 2 }, { ...payload, day: '2026-10-0
 let capped = [];
 for (let i = 0; i < 300; i++) capped = e.acceptScore(capped, { ...payload, id: `peer${i}` }, day);
 assert.equal(capped.length, 180, 'bounded peer memory');
+for (const mine of Object.keys(e.MINES)) for (const challenge of Object.keys(e.CHALLENGES)) {
+  capped = e.acceptScore(capped, { ...payload, id: 'myself01', mine, challenge }, day, 'myself01');
+}
+assert.equal(capped.filter(p => p.id === 'myself01').length, 9, 'reserve all own mine/challenge scores after remote saturation');
+assert.equal(capped.filter(p => p.id !== 'myself01').length, 180, 'remote cap remains bounded');
+for (let i = 300; i < 500; i++) capped = e.acceptScore(capped, { ...payload, id: `peer${i}` }, day, 'myself01');
+assert.equal(capped.length, 189, 'remote flood cannot evict own scores');
 assert.deepEqual(e.acceptScore(scores, null, '2026-10-07'), [], 'UTC rollover prunes old scores');
 console.log('PASS broadcast bounds, dates, version, dedupe, rollover');
 for (const file of ['../src/game/expeditionStore.ts', '../src/ui/Expedition.tsx']) assert.ok(fs.existsSync(path.join(__dirname, file)), `${file}: playable persisted UI must exist`);
 const read = (p) => fs.readFileSync(path.join(__dirname, '../src/', p), 'utf8');
 assert.match(read('App.tsx'), /<ExpeditionPanel/);
 assert.match(read('App.tsx'), /!guest && <>/, 'live guest must not see mock financial HUD');
-assert.match(read('App.tsx'), /<\/>}\s*<Toasts \/>\s*<Busy \/>/, 'connection errors and busy status remain visible to disconnected guests');
+// Modal visibility is exercised by tests/ui-browser.js, not JSX source order.
 assert.match(read('ui/Modals.tsx'), /Free daily expedition/);
 assert.match(read('ui/Expedition.tsx'), /setNow\(Date.now\(\)\); s.start/, 'start must refresh display clock after hidden-tab throttling');
 assert.match(read('ui/ClaimPanel.tsx'), /Enter shaft expedition/);
@@ -111,6 +118,7 @@ async function transportCheck() {
     b.publishExpeditionScore({ ...out, day: liveDay, mine: 'seam' });
     await until(() => a.useWorld.getState().expeditionScores.some(p => p.mine === 'seam'));
     a.stopWorld();
+    a.useWorld.setState({ expeditionScores: Array.from({ length: 180 }, (_, i) => ({ ...payload, day: liveDay, id: `peer${i}` })) });
     a.publishExpeditionScore({ ...out, day: liveDay, mine: 'tunnel' });
     assert.equal(a.useWorld.getState().expeditionDelivery, 'offline');
     assert.ok(a.useWorld.getState().expeditionScores.some(p => p.mine === 'tunnel'));

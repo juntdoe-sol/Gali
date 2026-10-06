@@ -5,7 +5,7 @@ import { COLORS } from '../game/constants';
 import { adjacent, bestKey, CHALLENGES, mastery, MINES, utcDay, type Challenge, type Mine, type Rock, type Tool } from '../game/expedition';
 import { useExpedition } from '../game/expeditionStore';
 import { useGame } from '../game/store';
-import { useWorld } from '../game/world';
+import { useWorld, worldReady } from '../game/world';
 import { useView } from '../pixel/view';
 import { T } from './kit';
 
@@ -107,7 +107,7 @@ export function ExpeditionPanel() {
           <T v="display" style={styles.title}>Shared daily survey</T>
           <T>{MINES[mine]} · {CHALLENGES[challenge].name} · {day} UTC</T>
           <T v="bold">{total} / 300 session score objective · {today.length} session contributions</T>
-          <T>{status === 'online' ? 'Realtime connected' : 'Offline / reconnecting · local play still works'} · {delivery === 'sent' ? 'broadcast sent (not verified)' : delivery === 'failed' ? 'send failed; retrying while connected' : delivery === 'sending' ? 'sending score' : 'local scores only'}</T>
+          <T>{!worldReady ? 'Shared survey unavailable · local play still works' : status === 'online' ? 'Realtime connected' : status === 'connecting' ? 'Connecting · local play still works' : 'Offline · local play still works'} · {delivery === 'sent' ? 'broadcast sent (not verified)' : delivery === 'failed' ? 'send failed; retrying while connected' : delivery === 'sending' ? 'sending score' : 'local scores only'}</T>
           <T v="muted">Unverified session scores; no prizes. Best per session/mine/challenge, not a global leaderboard. Receives connected peers; no server history. IDs are not verified people. Reload starts a new session; local bests remain.</T>
           {today.length ? [...today].sort((a, b) => b.score - a.score).slice(0, 8).map((p) => <T key={p.id}>{p.id === me ? 'You' : `Guest ${p.id}`} · {p.score}</T>) : <T v="muted">No contributions received for this survey yet. Extract to contribute.</T>}
         </View>

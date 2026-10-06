@@ -158,6 +158,8 @@ interface Wallet {
   shop: ShopConfig | null; // gear prices and token rates from the config
   unclaimed: Claimable;
   busy: string | null;
+  /** Present while balances/rewards are unavailable or last-known, never verified zero. */
+  readError?: string;
 }
 
 /** ORE's board clock, in live mode. `endsAt` is chain-time ms, 0 while the round waits for its first deploy. */
@@ -165,6 +167,7 @@ export interface LiveClock {
   roundId: number;
   phase: 'waiting' | 'mining' | 'intermission';
   endsAt: number;
+  spanMs: number;
   /** ORE's solo squares for this round, as a bitmask. */
   solo: number;
 }
@@ -256,8 +259,8 @@ const chainNow = (offset: number) => Date.now() + offset;
 const roundOf = (t: number) => Math.floor(t / 1000 / ROUND_SECS);
 export const roundEnd = (rid: number) => (rid + 1) * ROUND_SECS * 1000;
 
-/** ORE's mining window: 200 slots of about 400 ms. */
-export const LIVE_SPAN_MS = 80_000;
+/** Fallback only until ORE's actual start/end slots are available. */
+export const LIVE_SPAN_MS = 96_000;
 /** Live deploys stop this long before ORE closes the round: a wallet approval takes a few seconds. */
 export const LIVE_LOCK_MS = 10_000;
 /** SOL kept back for fees and, on a first deploy, the rent of ORE's miner account (about 0.0061 SOL). */
@@ -271,7 +274,7 @@ export const isOnChain = (s: Pick<GameState, 'wallet'>) => Boolean(s.wallet.owne
 /** When the current round's mining closes, in chain-time ms. 0 while a live round waits for its first deploy. */
 export const roundEndsAt = (s: Clocked) => (isLive(s) ? (s.liveClock?.roundId === s.roundId ? s.liveClock.endsAt : 0) : roundEnd(s.roundId));
 /** How long a round's mining window is, for the timer bar. */
-export const roundSpanMs = (s: Pick<GameState, 'wallet'>) => (isLive(s) ? LIVE_SPAN_MS : ROUND_SECS * 1000);
+export const roundSpanMs = (s: Pick<GameState, 'wallet' | 'liveClock'>) => (isLive(s) ? (s.liveClock?.spanMs || LIVE_SPAN_MS) : ROUND_SECS * 1000);
 /** The round's solo squares: ORE's real ones in live mode, the practice board's otherwise. */
 export const soloOf = (s: Pick<GameState, 'wallet' | 'liveClock'>, rid: number) =>
   isLive(s) ? (s.liveClock?.roundId === rid ? s.liveClock.solo : 0) : soloMask(rid);
@@ -586,7 +589,9 @@ export const useGame = create<GameState>((set, get) => {
         if (st.wallet.sol < total + LIVE_FEE_SOL) throw new Error('insufficient SOL');
         const [board, { maskToSquares }] = await Promise.all([loadBoard(), loadOreTx()]);
         setWallet({ busy: `Approve in your wallet: ${total.toFixed(4)} SOL on ORE's board` });
-        roundId = await board.deployLive(maskToSquares(mask), perBlock);
+        const displayed = await ownerKey();
+        if (!displayed) throw new Error('wallet disconnected');
+        roundId = await board.deployLive(maskToSquares(mask), perBlock, displayed);
         const cur = get().run;
         if (cur) set({ run: { ...cur, lastRound: roundId } });
       } else if (onChain) {
@@ -644,7 +649,8 @@ export const useGame = create<GameState>((set, get) => {
         const prev = get().liveClock;
         const solo = prev?.roundId === roundId ? prev.solo : b.oreSoloMask(roundId);
         const endsAt = c.phase === 'mining' ? chainNow(get().offsetMs) + c.msLeft : 0;
-        set({ liveClock: { roundId, phase: c.phase, endsAt, solo } });
+        const spanMs = c.phase === 'waiting' ? (prev?.spanMs ?? LIVE_SPAN_MS) : Math.max(1, Number(c.endSlot - c.startSlot)) * 400;
+        set({ liveClock: { roundId, phase: c.phase, endsAt, solo, spanMs } });
       })
       .catch(() => undefined)
       .finally(() => {
@@ -762,6 +768,7 @@ export const useGame = create<GameState>((set, get) => {
 
     tick: () => {
       const st = get();
+      if (oreLive && !st.wallet.owner) return;
       if (isLive(st)) return liveTick();
       // re-sync with the chain clock now and then (device clocks drift; so can the chain's)
       if (chainReady && Date.now() - lastClockSync > 30_000) {
@@ -1003,6 +1010,7 @@ export const useGame = create<GameState>((set, get) => {
 
     claimRewards: async (what) => {
       const st = get();
+      if (oreLive && !st.wallet.owner) return st.toast('Connect a wallet for live rewards', 'info');
       const fmtSkr = (v: number) => Math.floor(v).toLocaleString();
       if (!isOnChain(st)) {
         const { practiceUnclaimedSol: sol = 0, practiceUnclaimedSkr: unrefined = 0, practiceRefinedSkr: refined = 0 } = st.save;
@@ -1024,17 +1032,13 @@ export const useGame = create<GameState>((set, get) => {
       try {
         // only the wallet can move rewards out, so this one always asks for a signature
         setWallet({ busy: `Approve: claim your ${unit}` });
-        const board = await loadBoard();
-        await (what === 'sol' ? board.claimBoardSol() : board.claimBoardOre());
+        const [board, displayed] = await Promise.all([loadBoard(), ownerKey()]);
+        if (!displayed) throw new Error('wallet disconnected');
+        await (what === 'sol' ? board.claimBoardSol(displayed) : board.claimBoardOre(displayed));
         await get().refreshWallet();
         play('win');
         haptic.win();
-        if (what === 'sol') get().toast(`Claimed ${u.sol.toFixed(4)} SOL`, 'good');
-        else {
-          const fee = u.fee;
-          const f = isLive(st) ? (v: number) => Number(v.toPrecision(4)).toString() : fmtSkr;
-          get().toast(`Claimed ${f(u.unrefined - fee + u.refined)} ${unit} · ${f(fee)} refining fee`, 'good');
-        }
+        get().toast(`${unit} claim confirmed${get().wallet.readError ? '; balance refresh unavailable' : ''}. See transaction for exact amount`, 'good');
       } catch (e) {
         get().toast(`Claim failed: ${errMsg(e)}`, 'bad');
       } finally {
@@ -1062,16 +1066,18 @@ export const useGame = create<GameState>((set, get) => {
     },
 
     refreshWallet: async () => {
-      if (!get().wallet.owner) return;
+      const expectedOwner = get().wallet.owner;
+      if (!expectedOwner) return;
+      setWallet({ readError: 'Refreshing balances; last-known values may be stale' });
       if (isLive(get()) && !chainReady) {
         try {
           const [board, owner] = await Promise.all([loadBoard(), ownerKey()]);
           if (!owner) return;
-          const w = await board.fetchLiveWallet(owner);
+          const w = await (await loadChain()).withTimeout(board.fetchLiveWallet(owner));
           if (get().wallet.owner !== owner.toBase58()) return;
-          setWallet({ ...w, player: null, skr: 0, sessionSol: 0, pool: 0, shop: null });
+          setWallet({ ...w, player: null, skr: 0, sessionSol: 0, pool: 0, shop: null, readError: undefined });
         } catch {
-          /* offline */
+          if (get().wallet.owner === expectedOwner) setWallet({ readError: 'Balances unavailable; last-known values may be stale' });
         }
         return;
       }
@@ -1085,15 +1091,15 @@ export const useGame = create<GameState>((set, get) => {
           chain.fetchSolBalance(owner),
           chain.fetchSolBalance(session.publicKey),
           chain.fetchMotherlodePool(),
-          board.fetchOreMotherlode().catch(() => 0),
-          board.fetchClaimable(owner).catch(() => NO_UNCLAIMED),
+          board.fetchOreMotherlode(),
+          board.fetchClaimable(owner),
         ]);
-        const shop = await chain.fetchShopConfig().catch(() => null);
+        const shop = await chain.fetchShopConfig();
         const ore = shop ? await chain.fetchOreBalance(owner, shop.oreMint) : 0;
         if (get().wallet.owner !== owner.toBase58()) return; // disconnected or switched while loading
-        setWallet({ player, skr, sol, sessionSol, pool, orePool, unclaimed, ore, shop });
+        setWallet({ player, skr, sol, sessionSol, pool, orePool, unclaimed, ore, shop, readError: undefined });
       } catch {
-        /* offline */
+        if (get().wallet.owner === expectedOwner) setWallet({ readError: 'Balances unavailable; last-known values may be stale' });
       }
     },
 
@@ -1129,6 +1135,7 @@ export const useGame = create<GameState>((set, get) => {
 
     startRun: async (r) => {
       const st = get();
+      if (oreLive && !st.wallet.owner) return st.toast('Connect a wallet to deploy on ORE', 'info');
       if (st.run) return;
       if (st.wallet.owner && !onChainMode) return st.toast('On-chain mode is not deployed yet', 'bad');
       // live rounds are one at a time: every deploy is signed by the player
@@ -1148,6 +1155,7 @@ export const useGame = create<GameState>((set, get) => {
 
     refreshPot: async () => {
       const st = get();
+      if (oreLive && !st.wallet.owner) return;
       const now = chainNow(st.offsetMs);
       const rid = roundOf(now);
       if (st.phase !== 'mining') return; // keep the played round's board during the reveal

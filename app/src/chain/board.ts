@@ -349,8 +349,8 @@ export const fetchOreClock = () => fetchClock(connection);
 export const oreSoloMask = (roundId: number) => distributionMask(BigInt(roundId), keccak_256);
 
 /** Put SOL on squares in the live round, signed by the player's wallet. Returns the round it went into. */
-export async function deployLive(squares: number[], solPerSquare: number): Promise<number> {
-  const { roundId } = await oreDeployWithWallet(squares, BigInt(Math.floor(solPerSquare * LAMPORTS_PER_SOL)));
+export async function deployLive(squares: number[], solPerSquare: number, expectedOwner?: PublicKey): Promise<number> {
+  const { roundId } = await oreDeployWithWallet(squares, BigInt(Math.floor(solPerSquare * LAMPORTS_PER_SOL)), expectedOwner);
   return Number(roundId);
 }
 
@@ -359,8 +359,8 @@ export async function fetchLiveWallet(owner: PublicKey) {
   const [sol, ore, orePool, unclaimed] = await Promise.all([
     fetchSolBalance(owner),
     fetchOreBalance(owner, ORE_MINT.toBase58()),
-    fetchOreMotherlode().catch(() => 0),
-    fetchClaimable(owner).catch(() => NOTHING_CLAIMABLE),
+    fetchOreMotherlode(),
+    fetchClaimable(owner),
   ]);
   return { sol, ore, orePool, unclaimed };
 }
@@ -371,5 +371,5 @@ export async function fetchOreMotherlode(): Promise<number> {
   return Number(t.motherlode) / ORE_UNIT;
 }
 
-export const claimBoardSol = oreClaimSol;
-export const claimBoardOre = oreClaimOre;
+export const claimBoardSol = (expectedOwner?: PublicKey) => oreClaimSol(expectedOwner);
+export const claimBoardOre = (expectedOwner?: PublicKey) => oreClaimOre(10_000, expectedOwner);

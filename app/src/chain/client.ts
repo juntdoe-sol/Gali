@@ -106,10 +106,13 @@ export async function sweepSession(owner: PublicKey, session: Keypair) {
 
 export async function fetchSkrBalance(owner: PublicKey, mint = SKR_MINT): Promise<number> {
   try {
-    const b = await connection.getTokenAccountBalance(ata(owner, mint));
-    return Number(b.value.uiAmount ?? 0);
-  } catch {
-    return 0;
+    const b = await withTimeout(connection.getTokenAccountBalance(ata(owner, mint)));
+    return Number(b.value.uiAmountString ?? b.value.uiAmount ?? 0);
+  } catch (e) {
+    // A missing ATA is zero; transport/rate-limit/malformed-account failures are not.
+    if (/could not find account/i.test(String((e as Error)?.message ?? e)) &&
+      await withTimeout(connection.getAccountInfo(ata(owner, mint))) === null) return 0;
+    throw e;
   }
 }
 
@@ -190,9 +193,9 @@ let cachedOwner: PublicKey | null = null;
 async function authorize(wallet: Web3MobileWallet) {
   const saved = await AsyncStorage.getItem(AUTH_KEY);
   const go = (auth_token?: string) => wallet.authorize({ chain: `solana:${CLUSTER}`, identity: APP_IDENTITY, auth_token });
-  // A stale token makes the wallet answer -1/authorization request failed: drop it, ask fresh.
+  // Generic authorization failures include cancellation. Only an explicitly stale token permits one retry.
   const res = await go(saved ?? undefined).catch(async (e) => {
-    if (!saved) throw e;
+    if (!saved || !/auth(?:orization)?[_ ]token.*(?:expired|invalid)|(?:expired|invalid).*auth(?:orization)?[_ ]token/i.test(String(e?.message ?? e))) throw e;
     await AsyncStorage.removeItem(AUTH_KEY);
     return go();
   });
@@ -220,65 +223,140 @@ export async function disconnectWallet() {
  * up, so an RPC without websockets (or a phone that drops the socket) hangs it until
  * the blockhash expires. Polling works with any HTTP endpoint.
  */
+class VerifiedTransactionFailure extends Error {}
+export class PendingTransactionError extends Error {
+  constructor(public signature: string) {
+    super(`Transaction outcome unknown. Do not repeat. Check signature: ${signature}`);
+  }
+}
+const pendingKey = `gali-pending-tx-${CLUSTER}`;
+interface PendingTransaction { signature: string; owner: string; lastValidBlockHeight: number }
+let sending = false;
+
 export async function confirmSig(sig: string, lastValidBlockHeight: number): Promise<void> {
-  for (let i = 0; ; i++) {
-    const { value } = await connection.getSignatureStatuses([sig]);
-    const st = value[0];
-    if (st?.err) throw new Error(`Transaction failed: ${JSON.stringify(st.err)}`);
-    if (st && (st.confirmationStatus === 'confirmed' || st.confirmationStatus === 'finalized')) return;
-    if (i % 5 === 4 && (await connection.getBlockHeight('confirmed')) > lastValidBlockHeight) {
-      throw new Error('The transaction expired before it landed, so no SOL moved');
+  try {
+    for (let i = 0; i < 45; i++) {
+      const { value } = await withTimeout(connection.getSignatureStatuses([sig], { searchTransactionHistory: true }));
+      const st = value[0];
+      if (st && (st.confirmationStatus === 'confirmed' || st.confirmationStatus === 'finalized')) {
+        if (st.err) throw new VerifiedTransactionFailure(`Transaction failed on chain (network fee may apply): ${JSON.stringify(st.err)}`);
+        return;
+      }
+      if (i % 5 === 4 && (await withTimeout(connection.getBlockHeight('confirmed'))) > lastValidBlockHeight) break;
+      await new Promise((r) => setTimeout(r, 1000));
     }
-    await new Promise((r) => setTimeout(r, 1000));
+  } catch (e) {
+    if (e instanceof VerifiedTransactionFailure) throw e;
+  }
+  throw new PendingTransactionError(sig);
+}
+
+/** Reconcile only; never resubmit an uncertain transaction. Null status is not proof of failure. */
+export async function reconcilePendingTransaction(): Promise<void> {
+  const raw = await AsyncStorage.getItem(pendingKey);
+  if (!raw) return;
+  const pending: PendingTransaction = JSON.parse(raw);
+  let st;
+  try {
+    st = (await withTimeout(connection.getSignatureStatuses([pending.signature], { searchTransactionHistory: true }))).value[0];
+  } catch { throw new PendingTransactionError(pending.signature); }
+  if (!st || (st.confirmationStatus !== 'confirmed' && st.confirmationStatus !== 'finalized')) throw new PendingTransactionError(pending.signature);
+  await AsyncStorage.removeItem(pendingKey);
+  // Stop this invocation even when reconciliation succeeds: the user must review before choosing another action.
+  throw new Error(st.err ? 'Previous transaction failed on chain; network fee may apply. Review before retrying.' : 'Previous transaction confirmed. Refresh balances before another action.');
+}
+
+/** Persist the signature before waiting, so a crash or lost response cannot hide a possibly-landed tx. */
+async function trackAndConfirm(signature: string, owner: PublicKey, lastValidBlockHeight: number): Promise<string> {
+  await AsyncStorage.setItem(pendingKey, JSON.stringify({ signature, owner: owner.toBase58(), lastValidBlockHeight } satisfies PendingTransaction));
+  try {
+    await confirmSig(signature, lastValidBlockHeight);
+    await AsyncStorage.removeItem(pendingKey);
+    return signature;
+  } catch (e) {
+    if (e instanceof VerifiedTransactionFailure) { await AsyncStorage.removeItem(pendingKey); throw e; }
+    throw e instanceof PendingTransactionError ? e : new PendingTransactionError(signature);
   }
 }
 
-export async function sendWithWallet(build: (owner: PublicKey) => Promise<TransactionInstruction[]>): Promise<string> {
-  if (IS_WEB) {
-    const owner = await webOwner();
-    const ixs = await build(owner);
-    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-    const tx = new Transaction({ feePayer: owner, blockhash, lastValidBlockHeight }).add(...ixs);
-    const signed = await webSign(tx);
-    const sig = await connection.sendRawTransaction(signed.serialize());
-    await confirmSig(sig, lastValidBlockHeight);
-    return sig;
-  }
-  // ponytail: with a cached owner, do all RPC work before opening the wallet session and confirm after
-  // it closes; Phantom drops idle MWA sessions (TimeoutException id=1). Cold start builds inside.
-  let prep: { ixs: TransactionInstruction[]; blockhash: string; lastValidBlockHeight: number } | null = null;
-  if (cachedOwner) {
-    const ixs = await build(cachedOwner);
-    prep = { ixs, ...(await connection.getLatestBlockhash()) };
-  }
-  const { sig, lastValidBlockHeight } = await transact(async (wallet) => {
-    const owner = await authorize(wallet);
-    const p = prep ?? { ixs: await build(owner), ...(await connection.getLatestBlockhash()) };
-    const tx = new Transaction({ feePayer: owner, blockhash: p.blockhash, lastValidBlockHeight: p.lastValidBlockHeight }).add(...p.ixs);
-    const [sig] = await wallet.signAndSendTransactions({ transactions: [tx] });
-    return { sig, lastValidBlockHeight: p.lastValidBlockHeight };
-  }).catch((e) => {
-    if (/Timed out waiting/i.test(String(e?.message ?? e))) throw new Error('Wallet did not respond. Open your wallet, then try again.');
-    throw e;
-  });
-  await confirmSig(sig, lastValidBlockHeight);
-  return sig;
+async function broadcastSigned(tx: Transaction, owner: PublicKey, lastValidBlockHeight: number): Promise<string> {
+  if (!tx.signature || !tx.feePayer?.equals(owner) || !tx.verifySignatures()) throw new Error('Wallet returned an invalid signature');
+  const signature = utils.bytes.bs58.encode(tx.signature);
+  await AsyncStorage.setItem(pendingKey, JSON.stringify({ signature, owner: owner.toBase58(), lastValidBlockHeight } satisfies PendingTransaction));
+  // No automatic RPC resubmission; the durable signature is available even if the response is lost.
+  try { await withTimeout(connection.sendRawTransaction(tx.serialize(), { maxRetries: 0 })); }
+  catch { throw new PendingTransactionError(signature); }
+  return trackAndConfirm(signature, owner, lastValidBlockHeight);
+}
+
+export async function withTimeout<T>(work: Promise<T>, ms = 12_000): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([work, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Network read timed out')), ms); })]);
+  } finally { clearTimeout(timer); }
+}
+
+export async function sendWithWallet(build: (owner: PublicKey) => Promise<TransactionInstruction[]>, expectedOwner?: PublicKey): Promise<string> {
+  if (sending) throw new Error('A transaction is already pending');
+  sending = true;
+  try {
+    const savedOwner = JSON.parse((await AsyncStorage.getItem('gali-owner')) ?? '{}').owner;
+    if (!expectedOwner && !savedOwner) throw new Error('Connect a wallet before signing');
+    const displayed = expectedOwner ?? new PublicKey(savedOwner);
+    await reconcilePendingTransaction();
+    const prepare = async (owner: PublicKey) => {
+      if (!owner.equals(displayed)) throw new Error('Wallet changed; reconnect before signing');
+      // Fresh round and blockhash after authorization. A timeout cannot continue into signing.
+      const ixs = await withTimeout(build(owner));
+      const latest = await withTimeout(connection.getLatestBlockhash());
+      const tx = new Transaction({ feePayer: owner, ...latest }).add(...ixs);
+      return { tx, lastValidBlockHeight: latest.lastValidBlockHeight };
+    };
+    if (IS_WEB) {
+      const owner = await webOwner();
+      const { tx, lastValidBlockHeight } = await prepare(owner);
+      const message = tx.serializeMessage();
+      const signed = await webSign(tx);
+      if (!message.equals(signed.serializeMessage())) throw new Error('Wallet changed the transaction');
+      return await broadcastSigned(signed, owner, lastValidBlockHeight);
+    }
+    const sent = await transact(async (wallet) => {
+      const owner = await authorize(wallet);
+      const { tx, lastValidBlockHeight } = await prepare(owner);
+      // signAndSendTransactions is mandatory in MWA 2.0; signTransactions is deprecated and optional.
+      const [signature] = await wallet.signAndSendTransactions({ transactions: [tx] });
+      if (!signature) throw new Error('Wallet returned no signature');
+      await AsyncStorage.setItem(pendingKey, JSON.stringify({ signature, owner: owner.toBase58(), lastValidBlockHeight } satisfies PendingTransaction));
+      return { signature, owner, lastValidBlockHeight };
+    }).catch((e) => {
+      if (/Timed out waiting/i.test(String(e?.message ?? e))) throw new Error('Wallet did not respond. Check your wallet activity before trying again.');
+      throw e;
+    });
+    return await trackAndConfirm(sent.signature, sent.owner, sent.lastValidBlockHeight);
+  } finally { sending = false; }
 }
 
 export async function sendWithKey(signer: Keypair, ixs: TransactionInstruction[]): Promise<string> {
-  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-  const tx = new Transaction({ feePayer: signer.publicKey, blockhash, lastValidBlockHeight }).add(...ixs);
-  tx.sign(signer);
-  const sig = await connection.sendRawTransaction(tx.serialize());
-  await confirmSig(sig, lastValidBlockHeight);
-  return sig;
+  if (sending) throw new Error('A transaction is already pending');
+  sending = true;
+  try {
+    await reconcilePendingTransaction();
+    const { blockhash, lastValidBlockHeight } = await withTimeout(connection.getLatestBlockhash());
+    const tx = new Transaction({ feePayer: signer.publicKey, blockhash, lastValidBlockHeight }).add(...ixs);
+    tx.sign(signer);
+    return await broadcastSigned(tx, signer.publicKey, lastValidBlockHeight);
+  } finally { sending = false; }
 }
 
 /* ---------- session key: one wallet approval, then rounds are silent ---------- */
 const sessionKey = (owner: PublicKey) => `gali-session-${owner.toBase58()}`;
+export function assertSessionFundingAllowed() {
+  if (String(CLUSTER).startsWith('mainnet')) throw new Error('Session creation and funding are disabled on mainnet; existing keys remain available for recovery');
+}
 export async function loadSession(owner: PublicKey): Promise<Keypair> {
   const raw = await AsyncStorage.getItem(sessionKey(owner));
   if (raw) return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(raw)));
+  assertSessionFundingAllowed();
   const k = Keypair.generate();
   await AsyncStorage.setItem(sessionKey(owner), JSON.stringify(Array.from(k.secretKey)));
   return k;
@@ -289,6 +367,7 @@ export const SESSION_FUND_SOL = 0.05;
 
 /** `needSol`: SOL the session key should hold afterwards (for SOL deploys); topped up in the same approval. */
 export async function startSession(owner: PublicKey, session: Keypair, hasPlayer: boolean, needSol = 0) {
+  assertSessionFundingAllowed();
   const expires = Math.floor(Date.now() / 1000) + SESSION_HOURS * 3600;
   const bal = (await connection.getBalance(session.publicKey)) / LAMPORTS_PER_SOL;
   const want = Math.max(SESSION_FUND_SOL, needSol + 0.01);
