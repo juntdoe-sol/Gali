@@ -175,6 +175,8 @@ export interface LiveClock {
 interface GameState {
   loaded: boolean;
   liveClock: LiveClock | null;
+  /** Last ORE board-clock read failure. Never substitute the local practice round in live UI. */
+  liveClockError: string | null;
   /** The real-money notice is up. A string is the web wallet to connect once accepted. */
   liveNotice: boolean | string;
   save: Save;
@@ -652,9 +654,11 @@ export const useGame = create<GameState>((set, get) => {
         const solo = prev?.roundId === roundId ? prev.solo : b.oreSoloMask(roundId);
         const endsAt = c.phase === 'mining' ? chainNow(get().offsetMs) + c.msLeft : 0;
         const spanMs = c.phase === 'waiting' ? (prev?.spanMs ?? LIVE_SPAN_MS) : Math.max(1, Number(c.endSlot - c.startSlot)) * 400;
-        set({ liveClock: { roundId, phase: c.phase, endsAt, solo, spanMs } });
+        set({ liveClock: { roundId, phase: c.phase, endsAt, solo, spanMs }, liveClockError: null });
       })
-      .catch(() => undefined)
+      .catch((e) => {
+        if (isLive(get())) set({ liveClockError: errMsg(e) });
+      })
       .finally(() => {
         clockBusy = false;
       });
@@ -707,6 +711,7 @@ export const useGame = create<GameState>((set, get) => {
   return {
     loaded: false,
     liveClock: null,
+    liveClockError: null,
     liveNotice: false,
     save: freshSave(),
     wallet: { owner: null, player: null, skr: 0, sol: 0, sessionSol: 0, pool: 0, orePool: 0, ore: 0, shop: null, unclaimed: NO_UNCLAIMED, busy: null },
