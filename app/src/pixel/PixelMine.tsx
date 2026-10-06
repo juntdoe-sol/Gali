@@ -102,6 +102,7 @@ function snapshot(): Snapshot {
     practice: !isOnChain(st),
     quality: 1,
     amounts: st.dockTab === 'pro',
+    claimedAt: st.claimedAt,
   };
 }
 

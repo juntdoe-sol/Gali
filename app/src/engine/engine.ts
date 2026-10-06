@@ -11,6 +11,7 @@ import { ACTORS, ISLE, blit, draw, drawCanvas, has, makeCanvas, ctx2d, sprite, t
 import { drawMiner, drawPet, frameAt, HIT_FRAME, IMPACT, lampOf, moleNames, petFlies, petLight, POSES, stepBody, type Body } from './actors';
 import { Camera } from './camera';
 import { buildScene, drawScene, newVisit, paintUnderground, SCENE_CX, SH, type Scene, type Visit } from './closeup';
+import { landedSince, rumbleAmp, shouldCelebrate } from './juice';
 import { CLAIMS, MAP_H, MAP_W, REGIONS, claimForTap, shipAt, toLand } from './island';
 import { Particles } from './particles';
 import { findPath } from './path';
@@ -83,6 +84,12 @@ export class Engine {
   private planted = new Map<number, number>();
   private prevPending = 0;
   private celebrated = -1;
+  /** feed + claim juice (cosmetic): last pot read, its round, floating labels, last claim stamp */
+  private potPrev: number[] | null = null;
+  private potRound = -1;
+  private landed: { i: number; add: number; at: number }[] = [];
+  private claimSeen = 0;
+  private lastRumbleDust = 0;
   private punched = -1;
   private mole = { idx: -1, start: 0, nextAt: Date.now() + 5000, bonkedAt: -1 };
   private flocks = Array.from({ length: 5 }, (_, i) => ({ x: -60 + seeded(i * 3.1) * 480, y: -30 + seeded(i * 5.7) * 260, sp: 6 + seeded(i * 9.3) * 8, dir: seeded(i * 11.9) > 0.5 ? 1 : -1, n: 2 + Math.floor(seeded(i * 7.1) * 3) }));
@@ -293,6 +300,40 @@ export class Engine {
         this.planted.set(i, -at);
       }
     }
+    // live deploy feed: SOL other miners put on spots since the last pot read (cosmetic, 3 labels max)
+    if (s) {
+      if (s.roundId !== this.potRound) { this.potRound = s.roundId; this.potPrev = null; this.landed = []; }
+      const pot = s.perBlock;
+      if (this.potPrev === null || pot.some((v, i) => v !== this.potPrev![i])) {
+        for (const l of landedSince(this.potPrev, pot, pend)) {
+          // one label per spot: a second landing folds into the first instead of stacking
+          this.landed = this.landed.filter((x) => x.i !== l.i);
+          this.landed.push({ ...l, at: now });
+          const cl = CLAIMS[l.i];
+          this.parts.burst('dust', cl.cx + 8, cl.cy - 2, 3, 10, 8, ['#bfe9ff', '#8fb8ff'], 0.5);
+        }
+        this.landed = this.landed.slice(-3);
+        this.potPrev = pot.slice();
+      }
+    }
+    this.landed = this.landed.filter((l) => now - l.at < 2200);
+    // During the final lock window, one mine mouth occasionally coughs dust. Cosmetic only.
+    const lockAmp = s ? rumbleAmp(s.roundEndsAt - Date.now(), s.lockMs, s.phase, this.quality) : 0;
+    if (lockAmp > 0 && now - this.lastRumbleDust > 480) {
+      this.lastRumbleDust = now;
+      const i = Math.floor(seeded(now / 480 + (s?.roundId ?? 0)) * CLAIMS.length);
+      const cl = CLAIMS[i];
+      this.parts.burst('dust', cl.cx + 7, cl.cy - 2, 3, 9, 8, ['#d8c8a8', '#f2e6c8'], 0.55);
+    }
+    // claim confirmed in the app: one coin spray from your miner
+    if (shouldCelebrate(this.claimSeen, s?.claimedAt)) {
+      this.claimSeen = s!.claimedAt!;
+      if (this.mode === 'island') {
+        this.parts.burst('coin', me.x, me.y - 14, 36, 34, 70, ['#ffd24a', '#fff1a8', '#e0a020'], 1.4);
+        this.parts.burst('star', me.x, me.y - 22, 10, 30, 30, ['#ffffff', '#fff1a8'], 0.9);
+        this.emit({ t: 'sfx', name: 'pop' });
+      }
+    }
     const w = s?.winner ?? null;
     // the camera leans in on the strike, and eases back out when the next round opens
     if (w !== null && el > 2450 && this.punched !== s!.roundId && this.mode === 'island' && !this.cam.userZoomed) {
@@ -484,7 +525,13 @@ export class Engine {
     let shake = 0;
     if (el >= 0 && el < 1400) shake = (seeded(now / 50) - 0.5) * 2 * Math.min(1, el / 700);
     else if (el > 2500 && el < 2850) shake = (seeded(now / 40) - 0.5) * 3;
-    const OX = Math.round((cam.ox + shake * cam.z) * dpr);
+    // last seconds of a live round (the deploy lock window): a low rumble. Render-only, under 2px.
+    const msLeft = s ? s.roundEndsAt - Date.now() : 0;
+    const amp = s ? rumbleAmp(msLeft, s.lockMs, s.phase, this.quality) : 0;
+    // Existing strike shake is map-space. Lock rumble is added AFTER zoom/DPR, so it stays <2 physical screen px.
+    // Quantize after capping: strict ±1 physical canvas pixel, independent of zoom/DPR and base rounding.
+    const rumblePx = amp > 0 ? Math.max(-1, Math.min(1, Math.round((seeded(now / 45) - 0.5) * 2 * amp))) : 0;
+    const OX = Math.round((cam.ox + shake * cam.z) * dpr) + rumblePx;
     const OY = Math.round(cam.oy * dpr);
     const DW = this.canvas.width;
     const DH = this.canvas.height;
@@ -805,6 +852,24 @@ export class Engine {
         if (star) text(c, '*', X + w + 2 * fs, Y - 4 * fs, fs, '#ffd84a', '#3a1d00');
       }
     }
+    // live deploy feed labels: "+0.12" on a dark plate, rising over the spot for ~2s (readable on any terrain)
+    for (const l of this.landed) {
+      const age = now - l.at;
+      const cl = CLAIMS[l.i];
+      const k = Math.max(fs + 1, Math.round(fs * 1.6));
+      const t = `+${fmtAmt(l.add)}`;
+      const w = (textWidth(t) + 4) * k;
+      const h = 8 * k;
+      const X = Math.round(OX + (cl.cx + 6) * S - w / 2);
+      const Y = Math.round(OY + (cl.cy - 24) * S - Math.min(age, 1200) / 40 * fs);
+      c.globalAlpha = Math.max(0, Math.min(1, (2200 - age) / 700));
+      c.fillStyle = '#ffffff';
+      c.fillRect(X - k, Y - k, w + 2 * k, h + 2 * k);
+      c.fillStyle = 'rgba(7,13,32,0.95)';
+      c.fillRect(X, Y, w, h);
+      text(c, t, X + 2 * k, Y + Math.round(1.5 * k), k, '#7fe3ff', '#02050f');
+    }
+    c.globalAlpha = 1;
     // name tags
     const tag = (label: string, x: number, y: number, col: string, emoji: string | null) => {
       const w = (textWidth(label) + 4) * fs;

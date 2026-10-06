@@ -119,8 +119,17 @@ test('confirmed claim never promises stale estimated payout', async () => {
   const g = h.useGame;
   g.setState({ wallet: { ...g.getState().wallet, owner: A.publicKey.toBase58(), unclaimed: { sol: 123.45 } } });
   await g.getState().claimRewards('sol');
+  assert.ok(g.getState().claimedAt > 0, 'confirmed claim stamps the cosmetic event');
   assert.ok(g.getState().toasts.some(t => /confirmed/i.test(t.text)));
   assert.ok(g.getState().toasts.every(t => !t.text.includes('123.4500')));
+});
+test('failed or unknown claim never fires cosmetic claim juice', async () => {
+  const h = store({ claimBoardSol: async () => { throw new Error('Transaction outcome unknown. Do not repeat.'); } });
+  const g = h.useGame;
+  g.setState({ wallet: { ...g.getState().wallet, owner: A.publicKey.toBase58(), unclaimed: { sol: 1 } } });
+  await g.getState().claimRewards('sol');
+  assert.equal(g.getState().claimedAt, 0);
+  assert.ok(g.getState().toasts.some(t => /unknown/i.test(t.text)));
 });
 test('live clock uses measured 240-slot span rather than legacy 200', async () => {
   const h = store();

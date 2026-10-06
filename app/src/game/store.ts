@@ -202,6 +202,8 @@ interface GameState {
   lastResult: RoundResult | null;
   resultAt: number;
   toasts: Toast[];
+  /** ms timestamp of the last CONFIRMED claim; read only by the island for a cosmetic coin spray. */
+  claimedAt: number;
   levelUp: number | null;
   emote: number;
   gearReveal: string | null;
@@ -728,6 +730,7 @@ export const useGame = create<GameState>((set, get) => {
     lastResult: null,
     resultAt: 0,
     toasts: [],
+    claimedAt: 0,
     levelUp: null,
     emote: 0,
     gearReveal: null,
@@ -1038,6 +1041,7 @@ export const useGame = create<GameState>((set, get) => {
         await get().refreshWallet();
         play('win');
         haptic.win();
+        set({ claimedAt: Date.now() });
         get().toast(`${unit} claim confirmed${get().wallet.readError ? '; balance refresh unavailable' : ''}. See transaction for exact amount`, 'good');
       } catch (e) {
         get().toast(`Claim failed: ${errMsg(e)}`, 'bad');

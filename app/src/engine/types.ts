@@ -56,6 +56,8 @@ export interface Snapshot {
   quality: number;
   /** draw the SOL on every claim (PRO); otherwise only a heat tint */
   amounts: boolean;
+  /** Wall-clock ms of the latest confirmed claim; the island sprays coins once per new stamp. Cosmetic only. */
+  claimedAt?: number;
 }
 
 export type EngineEvent =
