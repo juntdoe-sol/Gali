@@ -358,9 +358,9 @@ export async function deployLive(squares: number[], solPerSquare: number, expect
 }
 
 /** Everything the wallet panel shows in live mode. Reads ORE and the wallet only. */
-export async function fetchLiveWallet(owner: PublicKey) {
+export async function fetchLiveWallet(owner: PublicKey, knownSol?: number) {
   const [sol, ore, orePool, unclaimed] = await Promise.all([
-    fetchSolBalance(owner),
+    knownSol === undefined ? fetchSolBalance(owner) : Promise.resolve(knownSol),
     fetchOreBalance(owner, ORE_MINT.toBase58()),
     fetchOreMotherlode(),
     fetchClaimable(owner),
