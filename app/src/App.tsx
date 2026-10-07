@@ -20,10 +20,12 @@ import { MapHint } from './ui/MapHint';
 import { Splash } from './ui/Splash';
 import { PeerCard } from './ui/World';
 import { CaveEntry, CaveScreen } from './ui/Cave';
+import { LobbyBack, LobbyScreen } from './ui/Lobby';
+import { useLobby } from './game/lobby';
 
 
 // lets browser tests watch the game state
-if (Platform.OS === 'web') Object.assign(globalThis, { __gali: useGame, __galiWorld: useWorld });
+if (Platform.OS === 'web') Object.assign(globalThis, { __gali: useGame, __galiWorld: useWorld, __galiLobbyStore: useLobby });
 // pixel art in the interface (gear icons) stays crisp when the browser scales it
 if (Platform.OS === 'web' && typeof document !== 'undefined' && !document.getElementById('gali-pixel-css')) {
   const el = document.createElement('style');
@@ -113,13 +115,15 @@ function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTa
         <TabBar active={sheet} onTab={setSheet} />
         <MapHint />
         <CaveEntry />
+        <LobbyBack />
         <ClaimPanel />
         <PeerCard />
         <ResultPop />
         <LevelUp />
         <GearReveal />
-        <Sheet tab={sheet} onTab={setSheet} />
         <ChatSheet />
+        <LobbyScreen onMarket={() => setSheet('gear')} />
+        <Sheet tab={sheet} onTab={setSheet} />
       </>}
         <Toasts />
         <Busy />

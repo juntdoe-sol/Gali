@@ -11,6 +11,8 @@ import { create } from 'zustand';
 import { loadChain, loadedChain } from '../chain/lazy';
 import { short } from '../chain/light';
 import cfg from '../chain/chat.json';
+import { useName } from './username';
+import { cleanName } from './lobbyMap';
 
 export type Pose = 'idle' | 'walk' | 'swing';
 export interface Avatar {
@@ -103,6 +105,9 @@ let starting = false;
 const MAX_PEERS = 60;
 const verified = new Map<string, string | null>(); // `${id}:${wallet}:${session}` -> wallet or null (pending/failed)
 
+/** The shared realtime connection, so the lobby rides the same socket instead of opening a second one. */
+export const worldClient = () => client;
+
 export function startWorld() {
   if (!worldReady || client || starting) return;
   starting = true;
@@ -186,7 +191,7 @@ function onState(p: any) {
   const y = clamp(p.y, 0, MAP_H);
   const av: Avatar = {
     id,
-    name: prev?.name ?? `Miner ${id.slice(0, 4)}`,
+    name: cleanName(p.nm) || (prev && !prev.wallet ? prev.name : '') || prev?.name || `Miner ${id.slice(0, 4)}`,
     wallet: prev?.wallet ?? null,
     // keep our smoothed position unless the sender jumped
     x: prev && Math.hypot(prev.x - x, prev.y - y) < 24 ? prev.x : x,
@@ -227,7 +232,7 @@ function onState(p: any) {
 }
 
 function setIdentity(id: string, wallet: string) {
-  useWorld.setState((s) => (s.peers[id] ? { peers: { ...s.peers, [id]: { ...s.peers[id], wallet, name: short(wallet) } } } : s));
+  useWorld.setState((s) => (s.peers[id] ? { peers: { ...s.peers, [id]: { ...s.peers[id], wallet, name: cleanName(s.peers[id].name) && !/^Miner [0-9a-z]{4}$/.test(s.peers[id].name) ? s.peers[id].name : short(wallet) } } } : s));
 }
 
 const claimMessage = (id: string, ts: number) => `gali-world:${id}:${ts}`;
@@ -258,6 +263,7 @@ export function publishMe(me: MeState, identity: { wallet: string | null; sessio
     lvl: me.lvl,
     hk: me.hk,
     pk: me.pk ?? null,
+    nm: useName.getState().name || undefined,
   };
   const key = JSON.stringify(payload);
   if (now - lastSent < SEND_MS || (key === lastKey && now - lastSent < BEAT_MS)) return;
