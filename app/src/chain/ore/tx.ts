@@ -75,9 +75,9 @@ export async function oreCheckpoint(
 
 /**
  * A small priority fee, so a wallet-signed transaction still lands when mainnet is
- * busy. 20,000 micro-lamports per compute unit is about 0.000004 SOL per 200k units.
+ * busy. 100,000 micro-lamports per compute unit is about 0.00002 SOL per 200k units.
  */
-export const PRIORITY_MICROLAMPORTS = 20_000;
+export const PRIORITY_MICROLAMPORTS = 100_000;
 const priorityIx = () => ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_MICROLAMPORTS });
 
 /** A checkpoint for the finished round this miner still holds, or nothing. Signed by the owner. */

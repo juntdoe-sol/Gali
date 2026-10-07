@@ -117,9 +117,15 @@ export default async function rpc(req, ctx) {
       const result = JSON.parse(text);
       const sanitized = JSON.stringify(result);
       if (sanitized.includes(p.key) || sanitized.includes(encodeURIComponent(p.key)) || !object(result) ||
-          result.jsonrpc !== '2.0' || result.id !== body.id || result.error || !Object.hasOwn(result, 'result')) {
+          result.jsonrpc !== '2.0' || result.id !== body.id) {
         continue;
       }
+      // A node refusing a transaction (simulation failed) is an answer, not an outage: pass the reason on so the app can say why.
+      if (body.method === 'sendTransaction' && object(result.error) && typeof result.error.message === 'string') {
+        const code = Number.isInteger(result.error.code) ? result.error.code : -32002;
+        return Response.json({ jsonrpc: '2.0', id: body.id, error: { code, message: result.error.message.slice(0, 600) } }, { headers });
+      }
+      if (result.error || !Object.hasOwn(result, 'result')) continue;
       return Response.json({ jsonrpc: '2.0', id: body.id, result: result.result }, { headers });
     } catch { /* this provider failed: try the next */ }
     finally { clearTimeout(timeout); }
