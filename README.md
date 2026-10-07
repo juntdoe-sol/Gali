@@ -11,7 +11,7 @@ Built for **CLOCK IN**, the Solana Mobile hackathon. Submissions close 8 Oct 202
 ![Gali island](docs/gali-island.jpg)
 
 - **Play live (mainnet):** [galiisland.bounded.page](https://galiisland.bounded.page)
-- **Android APK (mainnet live, 1.3.0):** [install from Expo](https://expo.dev/accounts/juntdoe/projects/gali/builds/8eecdbc1-bb75-4a32-b965-977b70ccb6a6)
+- **Android APK (mainnet live):** [install from Expo](https://expo.dev/accounts/juntdoe/projects/gali/builds/8eecdbc1-bb75-4a32-b965-977b70ccb6a6)
 - **Demo video:** [Google Drive](https://drive.google.com/drive/folders/19_kvuqSsrazUKYvtMH5y8XHekSgKrOQN?usp=sharing)
 - **Team:** Juntdoe (lead), Josh (community), Rax (socials and creative)
 
@@ -20,7 +20,7 @@ Built for **CLOCK IN**, the Solana Mobile hackathon. Submissions close 8 Oct 202
 Be clear about what runs today:
 
 - **Gali is live on Solana mainnet.** Connect a wallet at galiisland.bounded.page or in the APK and you play ORE's real board. Each deploy and claim is a plain ORE instruction signed by your own wallet: no Gali program, no session key, no autopilot. A round is capped at 0.5 SOL, and an 18+ real-money notice comes before the wallet opens. Deploys and claims have been run with real SOL.
-- **The Cave Run mini-game** needs no wallet. It is a separate dig-and-extract challenge with three tools. It has no wager, no token rewards and no effect on ORE odds or payouts.
+- **Cave Run** is a mini-game you play after connecting a wallet. You walk your miner through a lantern-lit cave, break rocks, dodge bats and climb deeper. It pays miner XP only: no wager, no token rewards, no effect on ORE odds or payouts.
 - **Chain reads go through a read-only proxy** (`app/rpc-backend`) that allows eight RPC methods. If the proxy is rate-limited or down, the app reads from the direct endpoint instead.
 - **The Gali program** (`programs/gali`) adds points, streaks, the SKR jackpot, gear and staking. It is written for ORE's board and tested against a mock of ORE's accounts. It is not deployed yet, so those parts are not live.
 - **The Gear Market** is a design preview. It shows gear as tradeable NFTs with sample listings. Nothing in it is on chain.
