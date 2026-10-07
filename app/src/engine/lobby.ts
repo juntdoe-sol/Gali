@@ -132,6 +132,9 @@ export class LobbyEngine {
     (globalThis as unknown as { __galiLobby?: LobbyEngine }).__galiLobby = this;
   }
 
+  setLook(l: Look) {
+    this.look = l;
+  }
   setOpts(o: Partial<LobbyOpts>) {
     this.opts = { ...this.opts, ...o };
   }

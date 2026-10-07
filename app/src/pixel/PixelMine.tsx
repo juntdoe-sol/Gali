@@ -6,6 +6,7 @@
  * picture needs into a Snapshot and pushes it if anything changed. The engine
  * sends back taps, sounds and where your miner is. Nothing here draws.
  */
+import { useName } from '../game/username';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { BLOCKS, CAVE_IN_EVERY, GEAR, LOCK_MS, gearByKey, levelFromXp, type Gear } from '../game/constants';
@@ -37,6 +38,7 @@ function lookOfPeer(p: Avatar): Look {
     handle: pick?.color ?? '#6b4a32',
     pet: p.pk ?? (p.pet ? byColor('pet', p.pet)?.key ?? 'pet-mole' : null),
     glow: pick ? GLOW[pick.rarity] : 'none',
+    sex: p.sx === 'f' ? 'f' : 'm',
   };
 }
 
@@ -52,7 +54,7 @@ function myGear() {
 /** Your miner as the canvas draws it, for anything else that shows the same miner. */
 export function myLook(): Look {
   const { pick, hat, fit, pet } = myGear();
-  return { hat: hat.key, fit: fit.color, pick: pick.accent, handle: pick.color, pet: pet?.key ?? null, glow: GLOW[pick.rarity] };
+  return { hat: hat.key, fit: fit.color, pick: pick.accent, handle: pick.color, pet: pet?.key ?? null, glow: GLOW[pick.rarity], sex: useName.getState().sex };
 }
 
 function snapshot(): Snapshot {
@@ -99,7 +101,7 @@ function snapshot(): Snapshot {
     perBlock: potNow ? potNow.perBlock.map((v) => Math.round(v * 1e5) / 1e5) : Array(BLOCKS).fill(0),
     mine,
     me: {
-      look: { hat: hat.key, fit: fit.color, pick: pick.accent, handle: pick.color, pet: pet?.key ?? null, glow: GLOW[pick.rarity] },
+      look: { hat: hat.key, fit: fit.color, pick: pick.accent, handle: pick.color, pet: pet?.key ?? null, glow: GLOW[pick.rarity], sex: useName.getState().sex },
       emoji: emo(world.me),
       emoteAt: st.emote,
       name: 'You',
@@ -214,7 +216,7 @@ export default function PixelMine() {
         const lvl = levelFromXp(player ? player.xp + st.save.bonusXp : st.save.xp);
         const pose = e.pose === 'walk' || e.pose === 'swing' ? e.pose : 'idle';
         publishMe(
-          { x: e.x, y: e.y, tx: e.tx, ty: e.ty, facing: e.facing, pose, hat: hat.color, fit: fit.color, pick: pick.accent, pet: pet?.color ?? null, lvl, hk: hat.key, pk: pet?.key ?? null },
+          { x: e.x, y: e.y, tx: e.tx, ty: e.ty, facing: e.facing, pose, hat: hat.color, fit: fit.color, pick: pick.accent, pet: pet?.color ?? null, lvl, hk: hat.key, pk: pet?.key ?? null, sx: useName.getState().sex },
           { wallet: st.wallet.owner, session, sessionValid: Boolean(player && session && player.session === session.publicKey.toBase58() && player.sessionExpires * 1000 > Date.now()) },
         );
         break;

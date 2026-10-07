@@ -38,13 +38,44 @@ HEAD_LEGEND = {
     'E': ('eye', 0), 'e': ('eye', 0), 'w': ('white', 0),
     'm': ('mouth', 0), 'M': ('mouth', 1), 't': ('mouth', 2),
 }
+# The girl miner: the same skull, helmet line and eye, a clean jaw instead of the beard,
+# and a ponytail (HAIR_TAIL) hanging behind the head, tied with a red band.
+HEAD_F = [
+    "....hhhh....",
+    "..hhHHHHhh..",
+    ".hHHHJJJHHh.",
+    ".hHHHHHHHHh.",
+    ".hHHsSSLLLL.",
+    ".hHsSSSSSSL.",
+    ".hsdsSSwESLl",
+    ".hssSSSsESlL",
+    "..sSSSSSSLs.",
+    "..sSSSSSSSL.",
+    "...sSSSSLs..",
+    ".....sSSs...",
+]
+HAIR_TAIL = [
+    "..hh",
+    ".hHH",
+    "hHHh",
+    "hHJh",
+    "hHHh",
+    "hHHh",
+    ".hHh",
+    "..hh",
+]
 HEAD_W = len(HEAD[0])
 HEAD_TOP_CX = 6        # skull-top centre column within the stamp
 EYE = (8, 6)           # upper eye pixel within the stamp (2 px tall)
 
 
-def draw_head(f, ox, oy, eyes='open', mouth=None):
-    f.stamp(HEAD, ox, oy, HEAD_LEGEND, part='head')
+def draw_head(f, ox, oy, eyes='open', mouth=None, female=False):
+    if female:
+        f.stamp(HAIR_TAIL, ox - 3, oy + 3, HEAD_LEGEND, part='head')
+        f.put(ox - 1, oy + 4, 'red', 2, 'head')  # hair band
+        f.stamp(HEAD_F, ox, oy, HEAD_LEGEND, part='head')
+    else:
+        f.stamp(HEAD, ox, oy, HEAD_LEGEND, part='head')
     ex, ey = ox + EYE[0], oy + EYE[1]
     if eyes != 'open':
         f.put(ex - 1, ey, 'skin', 2, 'head')
@@ -318,7 +349,7 @@ def draw_sack(f, J, sway):
     f.put(cx + 1.6, cy + 1.6, 'sack', 0, 'sack')
 
 
-def draw_frame(p):
+def draw_frame(p, female=False):
     f = Frame(W, H)
     body = p['body']
     squash = p.get('squash', 0)
@@ -341,7 +372,7 @@ def draw_frame(p):
         if z == 'front':
             draw_pick(f, grip, J, buried=p.get('buried'))
         draw_arm(f, sf, grip, 'arm-f')
-    draw_head(f, hx, hy, p.get('eyes', 'open'), p.get('mouth'))
+    draw_head(f, hx, hy, p.get('eyes', 'open'), p.get('mouth'), female)
     if armz == 'front':
         if z == 'front':
             draw_pick(f, grip, J, buried=p.get('buried'))
@@ -375,3 +406,15 @@ def build_miner():
             frames[pose].append(f.render())
             heads[pose].append([int(ha[0]), int(ha[1])])
     return frames, heads
+
+
+def build_miner_f():
+    """The girl miner's body layer per pose and frame: {pose: [base image]}. Her overalls, pick and hat layers
+    are the boy's, so only the base (skin, hair, boots) is drawn again."""
+    out = {}
+    for pose, seq in pose_frames().items():
+        out[pose] = []
+        for p in seq:
+            f, _ = draw_frame(p, True)
+            out[pose].append(f.render()['base'])
+    return out

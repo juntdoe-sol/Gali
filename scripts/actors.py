@@ -65,6 +65,10 @@ def build(atlas):
                 atlas.add(f'miner-{pose}-{t}-{name}', layers[name], M.AX, M.AY)
         poses[pose] = {'n': len(seq), 'ms': M.POSES[pose], 'loop': LOOP[pose]}
 
+    for pose, seq in M.build_miner_f().items():
+        for t, base in enumerate(seq):
+            atlas.add(f'minerf-{pose}-{t}-base', base, M.AX, M.AY)
+
     # ---- helmets
     hats = actors_hats.build_hats()
     hat_meta = {}
