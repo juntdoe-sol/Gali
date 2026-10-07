@@ -53,7 +53,7 @@ export const SPAWNS: Record<'start' | DoorId, [number, number]> = {
 
 /** Things with a shape of their own: a tent, a stall, the lighthouse. The engine draws each; the tiles under them block. */
 export interface Structure {
-  kind: 'tent' | 'fire' | 'cart' | 'crates' | 'barrel' | 'stall-red' | 'stall-teal' | 'lighthouse' | 'rack' | 'boulder';
+  kind: 'tent' | 'fire' | 'cart' | 'crates' | 'barrel' | 'stall-red' | 'stall-teal' | 'lighthouse' | 'rack' | 'boulder' | 'sol-crystal' | 'ore-vein';
   /** tiles that block: x, y, width, height */
   at: [number, number, number, number];
 }
@@ -74,6 +74,10 @@ export const STRUCTURES: Structure[] = [
   { kind: 'lighthouse', at: [59, 17, 1, 1] },
   { kind: 'crates', at: [63, 26, 1, 1] },
   { kind: 'barrel', at: [63, 28, 1, 1] },
+  { kind: 'sol-crystal', at: [30, 28, 1, 1] },
+  { kind: 'sol-crystal', at: [42, 24, 1, 1] },
+  { kind: 'ore-vein', at: [41, 30, 1, 1] },
+  { kind: 'ore-vein', at: [14, 17, 1, 1] },
 ];
 
 export interface Tree {
