@@ -669,6 +669,11 @@ export const useGame = create<GameState>((set, get) => {
   let clockAt = 0;
   let clockBusy = false;
   let livePotBusy = false;
+  // A hidden browser tab with no autopilot running polls the chain 3x less often (saves RPC credits).
+  function idleFactor() {
+    const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+    return hidden && !get().run ? 3 : 1;
+  }
   function pollLiveClock() {
     // Countdown advances locally from `endsAt`; chain reads only correct drift / round rollover.
     // With no clock yet, or after a failed read, try again every 3 s instead of every 10.
@@ -676,7 +681,7 @@ export const useGame = create<GameState>((set, get) => {
     const since = Date.now() - clockAt;
     // A read that has not answered in 20 s is abandoned, so one stuck request can never freeze the board.
     if (clockBusy && since < LIVE_CLOCK_STUCK_MS) return;
-    if (since < (have ? LIVE_CLOCK_POLL_MS : LIVE_CLOCK_RETRY_MS)) return;
+    if (since < (have ? LIVE_CLOCK_POLL_MS * idleFactor() : LIVE_CLOCK_RETRY_MS)) return;
     clockBusy = true;
     clockAt = Date.now();
     const started = clockAt;
@@ -746,7 +751,7 @@ export const useGame = create<GameState>((set, get) => {
       if (!p && c.roundId !== st.roundId) set({ roundId: c.roundId, pot: emptyPot(c.roundId) });
     }
     if (st.phase === 'mining' && !p) void retryUnsettled();
-    if (!livePotBusy && Date.now() - st.potAt > LIVE_POT_POLL_MS) {
+    if (!livePotBusy && Date.now() - st.potAt > LIVE_POT_POLL_MS * idleFactor()) {
       set({ potAt: Date.now() });
       livePotBusy = true;
       void get().refreshPot().finally(() => { livePotBusy = false; });
