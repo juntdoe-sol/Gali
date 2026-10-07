@@ -11,7 +11,6 @@ import { create } from 'zustand';
 import { loadChain, loadedChain } from '../chain/lazy';
 import { short } from '../chain/light';
 import cfg from '../chain/chat.json';
-import { acceptScore, utcDay, type Expedition, type SharedScore } from './expedition';
 
 export type Pose = 'idle' | 'walk' | 'swing';
 export interface Avatar {
@@ -71,8 +70,6 @@ const color = (v: unknown, dflt: string) => (typeof v === 'string' && HEX.test(v
 
 interface WorldState {
   status: 'off' | 'connecting' | 'online';
-  expeditionScores: SharedScore[];
-  expeditionDelivery: 'offline' | 'sending' | 'sent' | 'failed';
   me: string;
   peers: Record<string, Avatar>;
   emotes: Record<string, { emoji: string; at: number }>;
@@ -83,8 +80,6 @@ interface WorldState {
 
 export const useWorld = create<WorldState>((set, get) => ({
   status: 'off',
-  expeditionScores: [],
-  expeditionDelivery: 'offline',
   me: rid(),
   peers: {},
   emotes: {},
@@ -131,10 +126,6 @@ function connect(RealtimeClientCtor: typeof RealtimeClient) {
   channel = client.channel('gali-world', { config: { broadcast: { self: false, ack: false } } });
   channel
     .on('broadcast', { event: 'state' }, ({ payload }) => onState(payload))
-    .on('broadcast', { event: 'expedition-score' }, ({ payload }) => {
-      if (payload?.id === useWorld.getState().me) return;
-      useWorld.setState((s) => ({ expeditionScores: acceptScore(s.expeditionScores, payload, utcDay(), s.me) }));
-    })
     .on('broadcast', { event: 'emote' }, ({ payload }) => {
       const id = typeof payload?.id === 'string' ? payload.id.slice(0, 16) : '';
       const e = payload?.e;
@@ -152,18 +143,11 @@ function connect(RealtimeClientCtor: typeof RealtimeClient) {
         return { peers };
       });
     })
-    .subscribe((status) => useWorld.setState(status === 'SUBSCRIBED'
-      ? { status: 'online' } : { status: 'off', expeditionDelivery: 'offline' }));
+    .subscribe((status) => useWorld.setState({ status: status === 'SUBSCRIBED' ? 'online' : 'off' }));
   if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') window.addEventListener('pagehide', sayBye);
   pruneTimer = setInterval(() => {
     const now = Date.now();
     const { peers } = useWorld.getState();
-    const day = utcDay(now);
-    const scores = useWorld.getState().expeditionScores;
-    if (scores.some((s) => s.day !== day)) useWorld.setState({ expeditionScores: scores.filter((s) => s.day === day) });
-    // One bounded heartbeat contribution; late joiners receive currently connected sessions, not history.
-    const own = useWorld.getState().expeditionScores.filter((s) => s.id === useWorld.getState().me);
-    if (own.length) void sendExpeditionScore(own[scoreCursor++ % own.length]);
     const alive = Object.fromEntries(
       Object.entries(peers)
         .filter(([, p]) => p.bot || now - p.seen < STALE_MS)
@@ -190,7 +174,7 @@ export function stopWorld() {
   client = null;
   channel = null;
   pruneTimer = null;
-  useWorld.setState({ status: 'off', expeditionDelivery: 'offline' });
+  useWorld.setState({ status: 'off' });
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -294,31 +278,6 @@ export function publishMe(me: MeState, identity: { wallet: string | null; sessio
   void channel.send({ type: 'broadcast', event: 'state', payload });
 }
 
-// Unverified, nonfinancial session scores. No wallet identity or server verification implied.
-let scoreCursor = 0;
-async function sendExpeditionScore(payload: SharedScore) {
-  if (!channel || useWorld.getState().status !== 'online') {
-    useWorld.setState({ expeditionDelivery: 'offline' });
-    return;
-  }
-  const gen = startGen;
-  try {
-    const result = await channel.send({ type: 'broadcast', event: 'expedition-score', payload });
-    if (gen === startGen) useWorld.setState({ expeditionDelivery: useWorld.getState().status !== 'online' ? 'offline' : result === 'ok' ? 'sent' : 'failed' });
-  } catch {
-    if (gen === startGen) useWorld.setState({ expeditionDelivery: useWorld.getState().status === 'online' ? 'failed' : 'offline' });
-  }
-}
-export function publishExpeditionScore(run: Expedition) {
-  if (run.status !== 'extracted' || run.day !== utcDay()) return;
-  const s = useWorld.getState();
-  const payload: SharedScore = { v: 1, day: run.day, id: s.me, mine: run.mine, challenge: run.challenge, score: run.score };
-  const expeditionScores = acceptScore(s.expeditionScores, payload, utcDay(), s.me);
-  useWorld.setState({ expeditionScores, expeditionDelivery: 'sending' });
-  const best = expeditionScores.find((p) => p.id === s.me && p.mine === run.mine && p.challenge === run.challenge);
-  if (best) void sendExpeditionScore(best);
-  else useWorld.setState({ expeditionDelivery: 'failed' });
-}
 
 /* ---------------- practice bots ---------------- */
 const BOT_NAMES = ['Bot Ayu', 'Bot Raj', 'Bot Mei', 'Bot Tomi'];

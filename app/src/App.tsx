@@ -19,7 +19,7 @@ import { ClaimPanel } from './ui/ClaimPanel';
 import { MapHint } from './ui/MapHint';
 import { Splash } from './ui/Splash';
 import { PeerCard } from './ui/World';
-import { ExpeditionEntry, ExpeditionPanel } from './ui/Expedition';
+import { DigEntry, DigPanel } from './ui/Dig';
 
 
 // lets browser tests watch the game state
@@ -112,7 +112,7 @@ function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTa
         <Dock />
         <TabBar active={sheet} onTab={setSheet} />
         <MapHint />
-        <ExpeditionEntry />
+        <DigEntry />
         <ClaimPanel />
         <PeerCard />
         <ResultPop />
@@ -127,7 +127,7 @@ function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTa
         <Onboarding />
         <WalletPicker />
         <LiveNotice />
-        <ExpeditionPanel />
+        {!guest && <DigPanel />}
     </>
   );
 }
