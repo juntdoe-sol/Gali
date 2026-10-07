@@ -6,10 +6,9 @@
  * where the spot panel owns the bottom of the screen.
  */
 import { LinearGradient } from 'expo-linear-gradient';
-import { useEffect } from 'react';
 import { Image, Pressable, StyleSheet, View, type ImageSourcePropType } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { startChatPolling, useChat } from '../game/chat';
+import { useLobby } from '../game/lobby';
 import { COLORS } from '../game/constants';
 import { useGame } from '../game/store';
 import { useView } from '../pixel/view';
@@ -51,32 +50,41 @@ const RIGHT: { id: SheetTab | 'chat'; label: string }[] = [
   { id: 'chat', label: 'CHAT' },
 ];
 
-export function TabBar({ active, onTab, inSheet }: { active: SheetTab | null; onTab: (t: SheetTab | null) => void; inSheet?: boolean }) {
+/** The lobby's version of the bar: same tabs, but the middle button is quick travel and CHAT opens the lobby chat. */
+export interface LobbyBar {
+  navOpen: boolean;
+  onNav: () => void;
+}
+
+export function TabBar({ active, onTab, inSheet, lobby }: { active: SheetTab | null; onTab: (t: SheetTab | null) => void; inSheet?: boolean; lobby?: LobbyBar }) {
   const insets = useSafeAreaInsets();
   const inside = useView((s) => s.focus >= 0);
   const dockOpen = useGame((s) => s.dockOpen);
   const run = useGame((s) => s.run);
-  const unread = useChat((s) => s.unread);
+  // one chat for the whole app: the same box and the same unread count in the lobby and on the island
+  const unread = useLobby((s) => s.unread);
   const picked = useGame((s) => (s.dockTab === 'lite' && s.liteMode === 'all' ? 0 : s.selected.length));
-  useEffect(() => {
-    if (!inSheet) return startChatPolling();
-  }, [inSheet]);
 
   const press = (id: SheetTab | 'chat') => {
     if (id === 'chat') {
       onTab(null);
-      useChat.getState().setOpen(true);
+      useLobby.getState().setChatOpen(true);
       return;
     }
     useGame.getState().setDockOpen(false);
     onTab(active === id ? null : id);
   };
   const mine = () => {
+    if (lobby) {
+      onTab(null);
+      lobby.onNav();
+      return;
+    }
     onTab(null);
     const st = useGame.getState();
     st.setDockOpen(inSheet ? true : !st.dockOpen);
   };
-  const mineOn = dockOpen && !active;
+  const mineOn = lobby ? lobby.navOpen : dockOpen && !active;
 
   const item = (t: { id: SheetTab | 'chat'; label: string }) => {
     const on = t.id === active;
@@ -98,19 +106,30 @@ export function TabBar({ active, onTab, inSheet }: { active: SheetTab | null; on
   };
 
   return (
-    <View style={[styles.bar, { height: BAR_H + insets.bottom, paddingBottom: insets.bottom }, inside && !inSheet && { display: 'none' }]}>
+    <View style={[styles.bar, { height: BAR_H + insets.bottom, paddingBottom: insets.bottom }, inside && !inSheet && !lobby && { display: 'none' }]}>
       <LinearGradient colors={['#101c40', '#070d20']} style={[StyleSheet.absoluteFill, styles.barBg]} />
       {LEFT.map(item)}
-      <Pressable onPress={mine} style={styles.item} accessibilityRole="button" accessibilityLabel={dockOpen ? 'Close the mine panel' : 'Open the mine panel'}>
-        <View style={[styles.mineRing, mineOn && styles.mineRingOn, run && { borderColor: COLORS.teal }]}>
+      <Pressable
+        onPress={mine}
+        style={styles.item}
+        accessibilityRole="button"
+        accessibilityLabel={lobby ? 'Quick travel: island, cave or market' : dockOpen ? 'Close the mine panel' : 'Open the mine panel'}
+      >
+        <View style={[styles.mineRing, mineOn && styles.mineRingOn, !lobby && run && { borderColor: COLORS.teal }]}>
           <LinearGradient colors={['#1d3170', '#0a1430']} style={styles.mineDisc}>
-            <Image source={TAB_ICON.mine} style={styles.mineIcon} />
+            {lobby ? (
+              <T v="display" style={{ fontSize: 22, color: COLORS.gold, letterSpacing: 1 }}>
+                GO
+              </T>
+            ) : (
+              <Image source={TAB_ICON.mine} style={styles.mineIcon} />
+            )}
           </LinearGradient>
         </View>
         <T v="black" style={[styles.label, { color: COLORS.gold, marginTop: 2 }]}>
-          {run ? 'MINING' : 'MINE'}
+          {lobby ? 'TRAVEL' : run ? 'MINING' : 'MINE'}
         </T>
-        {picked > 0 && !run && !mineOn ? (
+        {!lobby && picked > 0 && !run && !mineOn ? (
           <View style={styles.pickBadge} accessibilityLabel={`${picked} spots selected`}>
             <T v="black" style={{ fontSize: 11, color: '#070d20' }}>
               {picked}

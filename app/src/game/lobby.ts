@@ -48,12 +48,18 @@ interface LobbyState {
   /** the way back in: you appear at the door you walked out of */
   spawn: 'start' | DoorId;
   status: 'off' | 'joining' | 'online' | 'full';
+  /** the shared chat room, joined for as long as the app is open (lobby and island both use it) */
+  chatStatus: 'off' | 'joining' | 'online';
   me: string;
   peers: Record<string, LobbyPeer>;
   msgs: LobbyMsg[];
   /** my own speech bubble and emote, for the engine to draw */
   mySay: Say | null;
   myEmoji: { e: string; at: number } | null;
+  /** the lobby chat sheet, and how many lines arrived while it was closed */
+  chatOpen: boolean;
+  unread: number;
+  setChatOpen: (open: boolean) => void;
   go: (where: Where, spawn?: 'start' | DoorId) => void;
   say: (text: string) => boolean;
   emote: (e: string) => void;
@@ -80,11 +86,15 @@ export const useLobby = create<LobbyState>((set, get) => ({
   where: 'lobby',
   spawn: 'start',
   status: 'off',
+  chatStatus: 'off',
   me: rid(),
   peers: {},
   msgs: [],
   mySay: null,
   myEmoji: null,
+  chatOpen: false,
+  unread: 0,
+  setChatOpen: (open) => set(open ? { chatOpen: true, unread: 0 } : { chatOpen: false }),
   go: (where, spawn) => set({ where, spawn: spawn ?? get().spawn }),
   say: (raw) => {
     const text = cleanChat(raw);
@@ -97,7 +107,7 @@ export const useLobby = create<LobbyState>((set, get) => ({
       mySay: { t: text, at: now },
       msgs: [...s.msgs, { id: msgId++, from: s.me, name, text, at: now, mine: true }].slice(-MAX_MSGS),
     });
-    void channel?.send({ type: 'broadcast', event: 'chat', payload: { id: s.me, nm: name, t: text } });
+    void chatChannel?.send({ type: 'broadcast', event: 'chat', payload: { id: s.me, nm: name, t: text } });
     return true;
   },
   emote: (e) => {
@@ -109,6 +119,8 @@ export const useLobby = create<LobbyState>((set, get) => ({
 
 /* ---------------- transport ---------------- */
 let channel: RealtimeChannel | null = null;
+let chatChannel: RealtimeChannel | null = null;
+let chatJoining = false;
 let joining = false;
 let pruneTimer: ReturnType<typeof setInterval> | null = null;
 let joinedAt = 0;
@@ -168,6 +180,7 @@ function onChat(p: any) {
   useLobby.setState((st) => ({
     peers: peer ? { ...st.peers, [p.id]: { ...peer, say: { t: text, at: now } } } : st.peers,
     msgs: [...st.msgs, { id: msgId++, from: p.id, name, text, at: now }].slice(-MAX_MSGS),
+    unread: st.chatOpen ? 0 : Math.min(99, st.unread + 1),
   }));
 }
 
@@ -213,7 +226,6 @@ export function joinLobby() {
   useLobby.setState({ status: 'joining', peers: {} });
   const ch = client.channel('gali-lobby', { config: { broadcast: { self: false, ack: false } } });
   ch.on('broadcast', { event: 'state' }, ({ payload }) => onState(payload))
-    .on('broadcast', { event: 'chat' }, ({ payload }) => onChat(payload))
     .on('broadcast', { event: 'emote' }, ({ payload }) => onEmote(payload))
     .on('broadcast', { event: 'bye' }, ({ payload }) => onBye(payload))
     .subscribe((st) => {
@@ -241,6 +253,36 @@ export function joinLobby() {
     }
     useLobby.setState({ peers: alive });
   }, 1500);
+}
+
+/**
+ * Join the shared chat room. One room for the whole app: the lobby and the island's CHAT tab show the same
+ * messages. Safe to call again; it waits for the world's realtime connection.
+ */
+export function joinChat() {
+  if (chatChannel || chatJoining || !worldReady) return;
+  const client = worldClient();
+  if (!client) {
+    useLobby.setState({ chatStatus: 'joining' });
+    const un = useWorld.subscribe((w) => {
+      if (w.status === 'online' && worldClient()) {
+        un();
+        joinChat();
+      }
+    });
+    return;
+  }
+  chatJoining = true;
+  useLobby.setState({ chatStatus: 'joining' });
+  const ch = client.channel('gali-chat', { config: { broadcast: { self: false, ack: false } } });
+  ch.on('broadcast', { event: 'chat' }, ({ payload }) => onChat(payload)).subscribe((st) => {
+    if (st === 'SUBSCRIBED') useLobby.setState({ chatStatus: 'online' });
+    else if (st === 'CLOSED' || st === 'CHANNEL_ERROR' || st === 'TIMED_OUT') {
+      if (chatChannel === ch) useLobby.setState({ chatStatus: 'off' });
+    }
+  });
+  chatChannel = ch;
+  chatJoining = false;
 }
 
 export function leaveLobby() {

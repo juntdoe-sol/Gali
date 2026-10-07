@@ -3,7 +3,7 @@ import { useEffect } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../game/constants';
-import { useChat } from '../game/chat';
+import { useLobby } from '../game/lobby';
 import { useGame } from '../game/store';
 import { EMOTES, useWorld } from '../game/world';
 import { fx } from '../pixel/fx';
@@ -52,26 +52,13 @@ export function PeerCard() {
         ))}
       </View>
       <View style={[styles.row, { marginTop: 10 }]}>
-        {peer.wallet && owner && peer.wallet !== owner ? (
-          <Btn
-            small
-            kind="skr"
-            label="Send SKR"
-            style={{ flex: 1 }}
-            onPress={() => {
-              close();
-              useChat.getState().setOpen(true);
-              useChat.getState().setTipTarget(peer.wallet);
-            }}
-          />
-        ) : null}
         <Btn
           small
           label="Open chat"
           style={{ flex: 1 }}
           onPress={() => {
             close();
-            useChat.getState().setOpen(true);
+            useLobby.getState().setChatOpen(true);
           }}
         />
       </View>
