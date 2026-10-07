@@ -37,12 +37,29 @@ function client(options = {}) {
     '@solana/web3.js': { ...web3, Connection: class { constructor() { return rpc; } } },
     '@noble/curves/ed25519.js': { ed25519: {} },
     '@react-native-async-storage/async-storage': { getItem: async k => data.get(k) ?? null, setItem: async (k,v) => data.set(k,v), removeItem: async k => data.delete(k) },
+    './secure': { getSecret: async k => data.get(k) ?? null, setSecret: async (k,v) => { data.set(k,v); }, removeSecret: async k => { data.delete(k); } },
     'react-native': { Platform: { OS: 'android' } },
     './webWallet': {}, './idl.json': { accounts: [{ name: 'Player', discriminator: [] }] }, './deployment.json': { skrDecimals: 6 },
     './ore/consts': { ORE_MINT: A.publicKey }, './light': { CLUSTER: 'mainnet-beta', PROGRAM_ID_STR: web3.PublicKey.default.toBase58(), SKR_MINT_STR: A.publicKey.toBase58(), TIP_LIMITS: {}, TIP_SKR_MINT: '', MAX_SESSION_FUND_SOL: .1 },
   }, options.globals);
   return { c, data, rpc, authorized: () => authorized, authCalls: () => authCalls, signs: () => signs, sends: () => sends };
 }
+test('secure storage migrates a legacy plain-storage key, never loses it when encryption fails', async () => {
+  const plain = new Map([['k', 'old']]), vault = new Map();
+  let broken = false;
+  const mk = () => load('secure.ts', {
+    '@react-native-async-storage/async-storage': { getItem: async k => plain.get(k) ?? null, setItem: async (k, v) => plain.set(k, v), removeItem: async k => plain.delete(k) },
+    'expo-secure-store': { getItemAsync: async k => { if (broken) throw new Error('x'); return vault.get(k) ?? null; }, setItemAsync: async (k, v) => { if (broken) throw new Error('x'); vault.set(k, v); }, deleteItemAsync: async k => vault.delete(k) },
+  });
+  let s = mk();
+  assert.equal(await s.getSecret('k'), 'old');
+  assert.equal(vault.get('k'), 'old'); assert.equal(plain.has('k'), false);
+  await s.setSecret('k2', 'v'); assert.equal(vault.get('k2'), 'v'); assert.equal(plain.has('k2'), false);
+  broken = true;
+  await s.setSecret('k3', 'z'); assert.equal(plain.get('k3'), 'z');
+  assert.equal(await s.getSecret('k3'), 'z');
+  broken = false; await s.removeSecret('k2'); assert.equal(vault.has('k2'), false);
+});
 const transfer = owner => [web3.SystemProgram.transfer({ fromPubkey: owner, toPubkey: B.publicKey, lamports: 1 })];
 test('cold restored displayed owner A cannot authorize and spend B', async () => {
   const h = client({ owner: B.publicKey });

@@ -3,14 +3,14 @@
     "name": "Gali",
     "slug": "gali",
     "scheme": "gali",
-    "version": "1.4.0",
+    "version": "1.4.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#070d20",
     "android": {
       "package": "trade.aeonian.gali",
-      "versionCode": 8,
+      "versionCode": 9,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#070d20"
