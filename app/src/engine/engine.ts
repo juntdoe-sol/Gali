@@ -90,6 +90,8 @@ export class Engine {
   private landed: { i: number; add: number; at: number }[] = [];
   private claimSeen = 0;
   private lastRumbleDust = 0;
+  private lastStep = 0;
+  private nextFish = 0;
   private punched = -1;
   private mole = { idx: -1, start: 0, nextAt: Date.now() + 5000, bonkedAt: -1 };
   private flocks = Array.from({ length: 5 }, (_, i) => ({ x: -60 + seeded(i * 3.1) * 480, y: -30 + seeded(i * 5.7) * 260, sp: 6 + seeded(i * 9.3) * 8, dir: seeded(i * 11.9) > 0.5 ? 1 : -1, n: 2 + Math.floor(seeded(i * 7.1) * 3) }));
@@ -367,6 +369,10 @@ export class Engine {
     const winner = s?.winner ?? null;
     const won = winner !== null && pend & (1 << winner) && el > 2600;
     if (me.path.length) {
+      if (this.mode === 'island' && now - this.lastStep > 190) {
+        this.lastStep = now;
+        this.parts.spawn('dust', me.x - 2 * me.facing, me.y, { vx: -6 * me.facing, vz: 8, life: 0.45, c: '#e8d4b0' });
+      }
       const arrived = stepBody(me, dt, won ? 40 : 52, now);
       if (won && me.pose === 'walk') me.pose = 'carry';
       if (me.target >= 0 && !work.includes(me.target)) {
@@ -489,6 +495,18 @@ export class Engine {
       if (this.sky.night > 0.5 && Math.random() < dt * 2) {
         const pr = this.props[Math.floor(Math.random() * this.props.length)];
         if (pr) this.parts.spawn('fly', pr.x + (Math.random() - 0.5) * 16, pr.y - 4 - Math.random() * 6, { vx: Math.random() * 9, vy: Math.random() * 9, life: 5, c: '#e6ff9a' });
+      }
+      if (now > this.nextFish) {
+        this.nextFish = now + 3500 + Math.random() * 5000;
+        const fx0 = FIT_X + Math.random() * FIT_W;
+        const fy0 = FIT_Y + FIT_H + 6 + Math.random() * 30;
+        this.parts.spawn('ring', fx0, fy0, { life: 0.9, c: '#cfe6ff' });
+        this.parts.burst('splash', fx0, fy0, 5, 14, 34, ['#ffffff', '#bfe9ff'], 0.6);
+        this.parts.spawn('coin', fx0, fy0, { vz: 44, life: 0.7, c: '#ffb86b' });
+      }
+      for (const p of s?.peers ?? []) {
+        const d = this.peers.get(p.id);
+        if (d && d.pose === 'walk' && Math.random() < dt * 4) this.parts.spawn('dust', d.x - 2 * p.facing, d.y, { vx: -5 * p.facing, vz: 7, life: 0.4, c: '#e8d4b0' });
       }
       if (this.sky.rain > 0.3 && this.water && Math.random() < dt * 10 * this.sky.rain) {
         this.parts.spawn('ring', FIT_X + Math.random() * FIT_W, FIT_Y + Math.random() * FIT_H, { life: 0.7, c: '#cfe6ff' });
@@ -680,6 +698,7 @@ export class Engine {
     const look = s?.me.look ?? DEFAULT_LOOK;
     const mf = frameAt(me.pose, me.since, now);
     items.push({ z: me.y, f: () => drawMiner(c, look, me.pose, mf, OX + me.x * S, OY + me.y * S, S, me.facing) });
+    items.push({ z: me.y + 1000, f: () => { if (!s?.pending && !s?.selected.length) draw(c, 'fx-sparkle-' + (Math.floor(now / 120) % 3), OX + me.x * S, OY + (me.y - 30 + Math.sin(now / 220) * 2) * S, S * 0.55, false, 0.8); } });
     if (look.pet) items.push({ z: this.petPos.y + (petFlies(look.pet) ? 16 : 0), f: () => drawPet(c, look.pet!, now, OX + this.petPos.x * S, OY + this.petPos.y * S, S, me.facing) });
     for (const p of s?.peers ?? []) {
       const d = this.peers.get(p.id);

@@ -49,6 +49,12 @@ function myGear() {
   return { pick, hat, fit, pet };
 }
 
+/** Your miner as the canvas draws it, for anything else that shows the same miner. */
+export function myLook(): Look {
+  const { pick, hat, fit, pet } = myGear();
+  return { hat: hat.key, fit: fit.color, pick: pick.accent, handle: pick.color, pet: pet?.key ?? null, glow: GLOW[pick.rarity] };
+}
+
 function snapshot(): Snapshot {
   const st = useGame.getState();
   const world = useWorld.getState();
