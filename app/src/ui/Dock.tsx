@@ -495,7 +495,7 @@ function ProPanel({ compact }: { compact: boolean }) {
             last
             right={
               <T v="black" style={{ fontSize: 13, color: COLORS.gold }}>
-                {!blocks ? '—' : live ? `${Math.round((blocks / BLOCKS) * 100)}% odds · ${soloCount} ★` : `+${pointsFor(blocks, false, boostFor(staked))} pts · ${Math.round((blocks / BLOCKS) * 100)}% odds · ${soloCount} ★`}
+                {!blocks ? '—' : live ? `+${pointsFor(blocks, false, 10_000)} pts · ${Math.round((blocks / BLOCKS) * 100)}% odds · ${soloCount} ★` : `+${pointsFor(blocks, false, boostFor(staked))} pts · ${Math.round((blocks / BLOCKS) * 100)}% odds · ${soloCount} ★`}
               </T>
             }
           />
