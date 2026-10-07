@@ -187,6 +187,9 @@ export const isPickWalletError = (e: unknown): e is Error & { wallets: import('.
   (e as Error)?.name === 'PickWalletError' && Array.isArray((e as { wallets?: unknown }).wallets);
 
 /** The SKR token's mint, for lobby tips. Set EXPO_PUBLIC_SKR_MINT at build time; with none, the SKR tip option is hidden. */
-const SKR_TIP = (process.env.EXPO_PUBLIC_SKR_MINT ?? '').trim();
+const SKR_TIP = (process.env.EXPO_PUBLIC_SKR_MINT ?? 'SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3').trim();
 export const TIP_SKR_MINT: string = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(SKR_TIP) ? SKR_TIP : '';
 export const TIP_LIMITS = { SOL: [0.001, 0.005, 0.01], ORE: [0.01, 0.05, 0.1], SKR: [10, 50, 100] } as const;
+
+/** The arcade house (a Bounded function next to the RPC proxy). Set EXPO_PUBLIC_GAMES_URL, or it sits beside the read proxy as /games. */
+export const ARCADE_URL: string = (process.env.EXPO_PUBLIC_GAMES_URL ?? '').trim() || (READ_RPC_URL ?? '').replace(/\/rpc\/?$/, '/games');

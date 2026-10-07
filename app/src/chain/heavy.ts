@@ -11,5 +11,6 @@ import './polyfill-web';
 import * as client from './client';
 import * as board from './board';
 import * as oreTx from './ore/tx';
+import * as arcade from './arcade';
 
-export { board, client, oreTx };
+export { arcade, board, client, oreTx };
