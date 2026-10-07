@@ -13,6 +13,7 @@ import {
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { Buffer } from 'buffer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getSecret, removeSecret, setSecret } from './secure';
 import { Platform } from 'react-native';
 import { webConnect, webDisconnect, webOwner, webSign } from './webWallet';
 export { listWebWallets, PickWalletError, type WebWalletInfo } from './webWallet';
@@ -192,7 +193,7 @@ export const IS_WEB = Platform.OS === 'web';
 const AUTH_KEY = 'gali-mwa-auth';
 let cachedOwner: PublicKey | null = null;
 async function authorize(wallet: Web3MobileWallet) {
-  const saved = await AsyncStorage.getItem(AUTH_KEY);
+  const saved = await getSecret(AUTH_KEY);
   const go = (auth_token?: string) => wallet.authorize({ chain: `solana:${CLUSTER}`, identity: APP_IDENTITY, auth_token });
   // A wallet that no longer accepts the saved token answers "-1/authorization request failed" (Phantom does this
   // often). Drop the token and ask once more with no token, which shows a normal approval prompt. A person who
@@ -202,10 +203,10 @@ async function authorize(wallet: Web3MobileWallet) {
     const staleToken = /auth(?:orization)?[_ ]token.*(?:expired|invalid)|(?:expired|invalid).*auth(?:orization)?[_ ]token/i.test(text);
     const refused = /authorization request failed/i.test(text) && !/cancel|declin|denied|reject/i.test(text);
     if (!saved || !(staleToken || refused)) throw e;
-    await AsyncStorage.removeItem(AUTH_KEY);
+    await removeSecret(AUTH_KEY);
     return go();
   });
-  await AsyncStorage.setItem(AUTH_KEY, res.auth_token);
+  await setSecret(AUTH_KEY, res.auth_token);
   cachedOwner = new PublicKey(Buffer.from(res.accounts[0].address, 'base64'));
   return cachedOwner;
 }
@@ -217,8 +218,8 @@ export async function connectWallet(webWallet?: string): Promise<PublicKey> {
 
 export async function disconnectWallet() {
   if (IS_WEB) return webDisconnect();
-  const saved = await AsyncStorage.getItem(AUTH_KEY);
-  await AsyncStorage.removeItem(AUTH_KEY);
+  const saved = await getSecret(AUTH_KEY);
+  await removeSecret(AUTH_KEY);
   cachedOwner = null;
   if (saved) await transact((w) => w.deauthorize({ auth_token: saved })).catch(() => undefined);
 }
@@ -437,11 +438,11 @@ export function assertSessionFundingAllowed() {
   if (String(CLUSTER).startsWith('mainnet')) throw new Error('Session creation and funding are disabled on mainnet; existing keys remain available for recovery');
 }
 export async function loadSession(owner: PublicKey): Promise<Keypair> {
-  const raw = await AsyncStorage.getItem(sessionKey(owner));
+  const raw = await getSecret(sessionKey(owner));
   if (raw) return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(raw)));
   assertSessionFundingAllowed();
   const k = Keypair.generate();
-  await AsyncStorage.setItem(sessionKey(owner), JSON.stringify(Array.from(k.secretKey)));
+  await setSecret(sessionKey(owner), JSON.stringify(Array.from(k.secretKey)));
   return k;
 }
 

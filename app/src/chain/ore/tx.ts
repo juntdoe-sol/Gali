@@ -13,7 +13,7 @@
  * is enforced by ORE rather than by us and ORE pays the key a fee for the work.
  */
 import '../polyfill-web';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getSecret, setSecret } from '../secure';
 import { ComputeBudgetProgram, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, TransactionInstruction } from '@solana/web3.js';
 import { assertSessionFundingAllowed, connection, sendWithKey, sendWithWallet } from '../client';
 import { LIVE_AUTOPILOT_MAX_SOL } from '../light';
@@ -241,11 +241,11 @@ const execKey = (owner: PublicKey) => `gali-ore-exec-${owner.toBase58()}`;
 
 /** The device key that runs this player's automation. Created on first use, kept on the device. */
 export async function loadExecutor(owner: PublicKey, create = false): Promise<Keypair | null> {
-  const raw = await AsyncStorage.getItem(execKey(owner));
+  const raw = await getSecret(execKey(owner));
   if (raw) return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(raw)));
   if (!create) return null;
   const k = Keypair.generate();
-  await AsyncStorage.setItem(execKey(owner), JSON.stringify(Array.from(k.secretKey)));
+  await setSecret(execKey(owner), JSON.stringify(Array.from(k.secretKey)));
   return k;
 }
 
