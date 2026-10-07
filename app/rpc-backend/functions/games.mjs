@@ -1,6 +1,6 @@
 // Gali arcade house: Tunnel Collapse, Gold Rush Pot and Crash Cart with real ORE and SKR.
 //
-// Stateless by design. Rounds are 30 s slots of the server clock. A player's bet is an SPL transfer to the
+// Stateless by design. Rounds are 40 s slots of the server clock. A player's bet is an SPL transfer to the
 // house token account carrying a memo "gali1|<game>|<token>|<round>|<choice>". Nothing is stored here: the
 // chain is the ledger. Settling a round re-reads the chain, so any caller (and any number of callers at once)
 // computes the same outcome, and each payout batch is protected on chain by a one-time "mutex" account, so a
@@ -10,9 +10,9 @@
 // The round's seed is SHA256(secret | round | every valid bet signature, sorted). The secret is revealed with the
 // result, so anyone can recompute the seed and the outcome.
 
-const ROUND_MS = 30_000;
-const BET_MS = 24_000; // bets must land on chain before this point of the round
-const SETTLE_AFTER_MS = 36_000; // results are final this long after the round starts
+export const ROUND_MS = 40_000;
+export const BET_MS = 30_000; // stakes must land on chain before this point of the round
+export const SETTLE_AFTER_MS = 46_000; // results are final this long after the round starts
 const LATE_SCAN_MS = 10 * 60_000; // how far back late or malformed deposits are still refunded
 const FEE_BPS = 500n; // 5% of the redistributed pot (Crash Cart: 5% built into the multiplier)
 const CAP_MULT = 5n; // one wallet may stake at most 5 x the top chip per round

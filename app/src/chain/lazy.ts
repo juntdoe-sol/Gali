@@ -29,6 +29,7 @@ const loadHeavy = (): Promise<HeavyMod> =>
     },
   ));
 
+export const loadArcade = () => loadHeavy().then((m) => m.arcade);
 export const loadChain = (): Promise<ChainMod> => loadHeavy().then((m) => m.client);
 export const loadBoard = (): Promise<BoardMod> => loadHeavy().then((m) => m.board);
 export const loadOreTx = (): Promise<OreTxMod> => loadHeavy().then((m) => m.oreTx);

@@ -26,6 +26,10 @@ import { myLook } from '../pixel/PixelMine';
 import { useView } from '../pixel/view';
 import { Btn, F, T } from './kit';
 import { BAR_H, TabBar, type SheetTab } from './TabBar';
+import { Arcade } from './Arcade';
+import { GAME_IDS, GAME_META, useArcade, type GameId } from '../game/arcade';
+
+const GAME_SHORT: Record<GameId, string> = { tunnel: 'TUNNEL', pot: 'GOLD RUSH', crash: 'CRASH CART' };
 
 const DOOR_UI: { id: DoorId; label: string; color: string }[] = [
   { id: 'island', label: 'ISLAND', color: '#3de0c8' },
@@ -159,6 +163,17 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
     else enter(id);
   }, [enter]);
 
+  /** The game buttons in the travel menu open a game screen over the lobby. */
+  const openGame = useCallback((g: GameId) => {
+    setNavOpen(false);
+    if (!useGame.getState().wallet.owner) useGame.getState().toast('Connect a wallet to play', 'info');
+    useArcade.getState().open(g);
+  }, []);
+  // stakes saved by an earlier visit are settled and paid when the lobby opens again
+  useEffect(() => {
+    useArcade.getState().resume();
+  }, []);
+
   const onEvent = useCallback((e: LobbyEvent) => {
     switch (e.t) {
       case 'me':
@@ -280,14 +295,26 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
       {navOpen ? (
         <>
           <Pressable style={styles.navScrim} onPress={() => setNavOpen(false)} accessibilityLabel="Close travel menu" />
-          <View style={[styles.nav, { bottom: bottomInset + BAR_H + 84 }]} pointerEvents="box-none">
-            {DOOR_UI.filter((d) => d.id !== 'market').map((d) => (
-              <Pressable key={d.id} onPress={() => walkTo(d.id)} style={[styles.navBtn, { borderColor: d.color }]} accessibilityRole="button" accessibilityLabel={`Go to ${d.label}`}>
-                <T v="display" style={{ fontSize: 15, color: d.color, letterSpacing: 0.5 }}>
-                  {d.label}
-                </T>
-              </Pressable>
-            ))}
+          <View style={[styles.navCol, { bottom: bottomInset + BAR_H + 84 }]} pointerEvents="box-none">
+            <View style={styles.nav} pointerEvents="box-none">
+              {GAME_IDS.map((g) => (
+                <Pressable key={g} onPress={() => openGame(g)} style={[styles.navBtn, { borderColor: GAME_META[g].color }]} accessibilityRole="button" accessibilityLabel={`Play ${GAME_META[g].name}`}>
+                  <T style={{ fontSize: 16 }}>{GAME_META[g].icon}</T>
+                  <T v="display" style={{ fontSize: 12, color: GAME_META[g].color, letterSpacing: 0.3 }} numberOfLines={1}>
+                    {GAME_SHORT[g]}
+                  </T>
+                </Pressable>
+              ))}
+            </View>
+            <View style={styles.nav} pointerEvents="box-none">
+              {DOOR_UI.filter((d) => d.id !== 'market').map((d) => (
+                <Pressable key={d.id} onPress={() => walkTo(d.id)} style={[styles.navBtn, { borderColor: d.color }]} accessibilityRole="button" accessibilityLabel={`Go to ${d.label}`}>
+                  <T v="display" style={{ fontSize: 15, color: d.color, letterSpacing: 0.5 }}>
+                    {d.label}
+                  </T>
+                </Pressable>
+              ))}
+            </View>
           </View>
         </>
       ) : null}
@@ -304,6 +331,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
       <ActivityFeed top={topH + 10} />
       {tipTo ? <TipSheet to={tipTo} onClose={() => setTipTo(null)} /> : null}
       {howTo ? <HowToPlay onClose={closeHowTo} /> : null}
+      <Arcade />
 
       {nameReady && (!name || editing) ? <NamePrompt first={!name} onDone={() => setEditing(false)} /> : null}
     </View>
@@ -359,6 +387,10 @@ function actText(a: Act): { icon: string; text: string; color: string } {
       return { icon: '🏆', text: `${a.n} won${a.sol > 0 ? ` ${a.sol} SOL` : ''}${a.pts > 0 ? ` · +${a.pts} pts` : ''}`, color: COLORS.gold };
     case 'tip':
       return { icon: '🎁', text: a.toMe ? `${a.n} tipped you ${a.a} ${a.tk}` : `${a.mine ? 'You' : a.n} tipped ${a.tn} ${a.a} ${a.tk}`, color: '#ff8fd8' };
+    case 'play': {
+      const game = a.g === 'tunnel' ? 'Tunnel Collapse' : a.g === 'pot' ? 'Gold Rush Pot' : 'Crash Cart';
+      return { icon: a.win ? '💎' : '⛏', text: a.win ? `${a.mine ? 'You' : a.n} won ${a.a} ${a.tk} in ${game}` : `${a.mine ? 'You' : a.n} staked ${a.a} ${a.tk} in ${game}`, color: a.win ? COLORS.gold : '#7fe3ff' };
+    }
     case 'xp':
       return { icon: '⭐', text: `${a.n} earned ${a.xp} XP`, color: '#7fe3ff' };
     default:
@@ -732,7 +764,8 @@ const styles = StyleSheet.create({
   dot: { width: 8, height: 8, borderRadius: 4 },
   bottom: { position: 'absolute', left: 0, right: 0, paddingHorizontal: 12, gap: 6 },
   navScrim: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 },
-  nav: { position: 'absolute', left: 12, right: 12, flexDirection: 'row', gap: 8, justifyContent: 'center' },
+  navCol: { position: 'absolute', left: 12, right: 12, gap: 8 },
+  nav: { flexDirection: 'row', gap: 8, justifyContent: 'center' },
   navBtn: { flex: 1, maxWidth: 140, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#070d20f2', borderWidth: 2 },
   full: { backgroundColor: '#070d20ee', borderRadius: 10, padding: 8, borderWidth: 1, borderColor: COLORS.red },
   log: { minHeight: 8, gap: 2 },
