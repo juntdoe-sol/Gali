@@ -1142,7 +1142,7 @@ export class LobbyEngine {
   private structSprite(kind: string): HTMLCanvasElement {
     const hit = this.structCache.get(kind);
     if (hit) return hit;
-    const dims: Record<string, [number, number]> = { tent: [50, 40], fire: [20, 8], cart: [44, 26], crates: [20, 22], barrel: [14, 18], 'stall-red': [52, 46], 'stall-teal': [52, 46], rack: [36, 24], boulder: [30, 22], lighthouse: [1, 1] };
+    const dims: Record<string, [number, number]> = { tent: [50, 40], fire: [20, 8], cart: [44, 26], crates: [20, 22], barrel: [14, 18], 'stall-red': [52, 46], 'stall-teal': [52, 46], rack: [36, 24], boulder: [30, 22], 'sol-crystal': [30, 54], 'ore-vein': [34, 26], lighthouse: [1, 1] };
     const [w, h] = dims[kind] ?? [16, 16];
     const cv = makeCanvas(w, h);
     const g = ctx2d(cv);
@@ -1227,6 +1227,34 @@ export class LobbyEngine {
       const sp = sprite('prop-boulder-b-0');
       const r = rect('prop-boulder-b-0');
       if (sp && r) g.drawImage(sp, 0, 0, r[2], r[3], 0, 0, 30, 22);
+    } else if (kind === 'sol-crystal') {
+      // our own crystal pillar: a stone plinth under a tall faceted shard, violet at the root, green at the tip
+      P(3, 46, 24, 8, '#4a4458');
+      P(3, 46, 24, 2, '#6a6480');
+      P(6, 42, 18, 4, '#3b3544');
+      const rows = 40;
+      for (let y = 0; y < rows; y++) {
+        const t = y / (rows - 1);
+        const hw = y < 8 ? 2 + y : 10 - Math.round(Math.max(0, y - 24) * 0.3);
+        const r = Math.round(150 - 110 * (1 - t)), gg = Math.round(60 + 170 * (1 - t)), b = Math.round(240 - 40 * (1 - t));
+        for (let x = -hw; x < hw; x++) {
+          const sh = x > 2 ? 0.72 : x < -5 ? 1.12 : 1;
+          P(15 + x, 2 + y, 1, 1, `rgb(${Math.min(255, Math.round(r * sh))},${Math.min(255, Math.round(gg * sh))},${Math.min(255, Math.round(b * sh))})`);
+        }
+      }
+      P(14, 4, 2, 24, 'rgba(255,255,255,0.35)');
+      P(15, 0, 1, 3, '#d8fff4');
+    } else if (kind === 'ore-vein') {
+      // a dark rock with warm ore running through it
+      for (let y = 0; y < 22; y++) {
+        const hw = Math.round(5 + Math.sin((y / 21) * Math.PI) * 11);
+        for (let x = -hw; x < hw; x++) P(17 + x, 2 + y, 1, 1, x > 3 ? '#3b3544' : y < 6 ? '#6a6480' : '#4a4458');
+      }
+      for (const [x, y, c] of [[9, 8, '#ffd24a'], [14, 14, '#f2a020'], [21, 9, '#ffe27a'], [24, 16, '#ffd24a'], [17, 5, '#fff3b0']] as [number, number, string][]) {
+        P(x, y, 4, 4, c);
+        P(x, y, 4, 1, 'rgba(255,255,255,0.7)');
+      }
+      P(2, 24, 30, 2, 'rgba(0,0,0,0.25)');
     }
     this.structCache.set(kind, cv);
     return cv;
@@ -1260,6 +1288,18 @@ export class LobbyEngine {
       lights.push({ x: X * this.dpr, y: (Y - 6 * z) * this.dpr, r: 70 * z * this.dpr, c: '#ff9a3d', k: 0.85 + 0.15 * Math.sin(now / 90) });
     } else if (kind === 'stall-red' || kind === 'stall-teal') {
       lights.push({ x: X * this.dpr, y: (Y - 30 * z) * this.dpr, r: 40 * z * this.dpr, c: '#ffcf80', k: 1 });
+    } else if (kind === 'sol-crystal') {
+      const k = 0.8 + 0.2 * Math.sin(now / 420 + X);
+      lights.push({ x: X * this.dpr, y: (Y - 30 * z) * this.dpr, r: 58 * z * this.dpr, c: '#9a6bff', k });
+      c.fillStyle = '#7ff5c8';
+      for (let i = 0; i < 3; i++) {
+        const t = (now / 1800 + i / 3) % 1;
+        c.globalAlpha = 1 - t;
+        c.fillRect(Math.round(X + Math.sin(i * 2.4 + now / 900) * 9 * z), Math.round(Y - (20 + t * 40) * z), 2 * z, 2 * z);
+      }
+      c.globalAlpha = 1;
+    } else if (kind === 'ore-vein') {
+      lights.push({ x: X * this.dpr, y: (Y - 12 * z) * this.dpr, r: 34 * z * this.dpr, c: '#ffcf60', k: 0.7 + 0.3 * Math.sin(now / 300 + Y) });
     } else if (kind === 'tent') {
       lights.push({ x: X * this.dpr, y: (Y - 8 * z) * this.dpr, r: 26 * z * this.dpr, c: '#ffb870', k: 0.9 });
     }
