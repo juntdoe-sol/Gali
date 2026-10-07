@@ -18,7 +18,7 @@ import { drawMiner, drawPet, frameAt, lampOf, stepBody, type Body } from './acto
 import { Particles } from './particles';
 import { Sky } from './sky';
 import type { Look, Pose } from './types';
-import { CLIFF, DOORS, STRUCTURES, doorAt, GRASS, HALL, LCOLS, LH, LROWS, LT, LW, lidx, lobbyMap, lobbyPath, PLANK, PLAZA, ROAD, SAND, SPAWNS, standable, tileCentre, tileOf, WATER, type DoorId } from '../game/lobbyMap';
+import { CLIFF, DOORS, PAVILIONS, STRUCTURES, doorAt, GRASS, HALL, LCOLS, LH, LROWS, LT, LW, lidx, lobbyMap, lobbyPath, PLANK, PLAZA, ROAD, SAND, SPAWNS, standable, tileCentre, tileOf, WATER, type DoorId } from '../game/lobbyMap';
 
 export type LobbyEvent =
   | { t: 'ready' }
@@ -59,7 +59,7 @@ const seeded = (n: number) => {
   const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
   return x - Math.floor(x);
 };
-const DOOR_COLOR: Record<DoorId, string> = { island: '#3de0c8', cave: '#ff9a3d', market: '#b86bff' };
+const DOOR_COLOR: Record<DoorId, string> = { island: '#3de0c8', cave: '#ff9a3d', market: '#b86bff', tunnel: '#ff9a3d', pot: '#ffcf4a', crash: '#3de0c8' };
 
 interface Walker extends Body {
   tx: number;
@@ -260,6 +260,8 @@ export class LobbyEngine {
     // pier
     this.paintPier(g, px);
     this.paintPlaces(g, px);
+    // the games row
+    this.paintGames(g, px);
     // plaza: a ring round the fountain, and the name in the stone
     this.paintPlaza(g, px);
 
@@ -530,6 +532,91 @@ export class LobbyEngine {
     }
   }
 
+  /** The three mini game pavilions, each 3 tiles wide, 4 tall, with the door at the foot of the middle. */
+  private paintGames(g: Ctx, px: (x: number, y: number, w: number, h: number, c: string) => void) {
+    const theme: Record<string, { roof: string; roofDark: string; roofLight: string; trim: string; icon: string }> = {
+      tunnel: { roof: '#d9731f', roofDark: '#a24d12', roofLight: '#f5a04a', trim: '#f4eadb', icon: 'ui-tunnel' },
+      pot: { roof: '#e7b422', roofDark: '#a97b12', roofLight: '#ffe27a', trim: '#7a3fc4', icon: 'ui-pot' },
+      crash: { roof: '#1fb5a3', roofDark: '#12786c', roofLight: '#7ff0de', trim: '#f4eadb', icon: 'ui-cart' },
+    };
+    // a plank walk along the front, and shadows on the ground
+    for (const pv of PAVILIONS) {
+      const t = theme[pv.id];
+      const x0 = pv.x * LT;
+      const y0 = pv.y * LT;
+      const w = pv.w * LT;
+      const h = pv.h * LT;
+      g.fillStyle = 'rgba(0,0,0,0.22)';
+      g.beginPath();
+      g.ellipse(x0 + w / 2 + 2, y0 + h + 1, w / 2 + 8, 6, 0, 0, Math.PI * 2);
+      g.fill();
+      // the back wall: planks
+      px(x0, y0 + 22, w, h - 22, '#8a6238');
+      for (let y = y0 + 22; y < y0 + h; y += 6) px(x0, y, w, 1, '#6f4c2a');
+      for (let x = x0 + 6; x < x0 + w; x += 12) px(x, y0 + 22, 1, h - 22, '#7a5530');
+      px(x0, y0 + h - 4, w, 4, '#5e4126');
+      // the doorway, warm inside
+      px(x0 + 14, y0 + h - 26, 20, 26, '#2a1608');
+      px(x0 + 16, y0 + h - 24, 16, 24, '#4a2a12');
+      px(x0 + 20, y0 + h - 20, 8, 20, '#ffb347');
+      px(x0 + 22, y0 + h - 18, 4, 18, '#ffe9a8');
+      px(x0 + 12, y0 + h - 28, 24, 3, t.roofDark);
+      px(x0 + 12, y0 + h - 28, 24, 1, t.roofLight);
+      // a hanging sign with the game's icon
+      px(x0 + 8, y0 + 18, 2, 6, '#4a2e18');
+      px(x0 + w - 10, y0 + 18, 2, 6, '#4a2e18');
+      px(x0 + 6, y0 + 22, w - 12, 18, '#2a1a0e');
+      px(x0 + 7, y0 + 23, w - 14, 16, '#f2e3c0');
+      px(x0 + 7, y0 + 23, w - 14, 2, '#fff6dc');
+      const ic = sprite(t.icon);
+      if (ic) g.drawImage(ic, x0 + w / 2 - 16, y0 + 23, 32, 16);
+      // posts at the corners
+      for (const sx of [x0 - 2, x0 + w - 2]) {
+        px(sx, y0 + 16, 4, h - 16, '#5e4126');
+        px(sx, y0 + 16, 1, h - 16, '#8b6a42');
+      }
+      // the roof: a hip, with stripes and a scalloped edge
+      const rt = y0 - 6;
+      for (let r = 0; r < 24; r++) {
+        const inset = Math.max(0, 10 - Math.floor(r * 0.7));
+        const rx = x0 - 6 + inset;
+        const rw = w + 12 - inset * 2;
+        for (let x = 0; x < rw; x += 1) {
+          const stripe = Math.floor((x + inset) / 8) % 2 === 0;
+          const col = r < 3 ? t.roofLight : stripe ? t.roof : t.trim;
+          px(rx + x, rt + r, 1, 1, r > 20 ? (stripe ? t.roofDark : '#cfc4b0') : col);
+        }
+      }
+      for (let x = 0; x < w + 12; x += 8) {
+        const stripe = Math.floor(x / 8) % 2 === 0;
+        px(x0 - 6 + x + 1, rt + 24, 6, 2, stripe ? t.roof : t.trim);
+        px(x0 - 6 + x + 2, rt + 26, 4, 1, stripe ? t.roofDark : '#cfc4b0');
+      }
+      px(x0 + w / 2 - 2, rt - 5, 4, 6, '#5e4126');
+      // a little pennant on top
+      px(x0 + w / 2 + 2, rt - 9, 7, 5, t.roof);
+      px(x0 + w / 2 + 2, rt - 9, 7, 1, t.roofLight);
+      px(x0 + w / 2 - 1, rt - 11, 2, 7, '#5e4126');
+    }
+    // game extras: stacked lanterns by the tunnel, gold by the pot, a cart on rails by the crash booth
+    const gold = (x: number, y: number) => {
+      px(x, y + 2, 7, 3, '#d9961e');
+      px(x + 1, y, 5, 3, '#ffd24a');
+      px(x + 2, y, 2, 1, '#fff3b0');
+    };
+    gold(34 * LT + 2, 42 * LT - 6);
+    gold(38 * LT + 8, 42 * LT - 6);
+    gold(38 * LT + 12, 42 * LT - 2);
+    // rails into the tunnel pavilion
+    for (let y = 42 * LT; y < 44 * LT; y += 5) px(26 * LT + 12, y + 1, 24, 2, '#6b4a2b');
+    px(26 * LT + 16, 42 * LT, 2, 2 * LT, '#8a8a96');
+    px(26 * LT + 30, 42 * LT, 2, 2 * LT, '#8a8a96');
+    // a crash chart on the wall of the third pavilion: a rising line
+    const cx = 44 * LT + 4;
+    const cy = 38 * LT + 22;
+    for (let k = 0; k < 14; k++) px(cx + 3 + k * 3, cy + 12 - Math.round(Math.pow(k / 13, 2.2) * 10), 3, 2, '#3de0c8');
+  }
+
   private paintPlaza(g: Ctx, px: (x: number, y: number, w: number, h: number, c: string) => void) {
     // fountain basin
     const cx = 36 * LT + 8;
@@ -585,6 +672,8 @@ export class LobbyEngine {
       }
     g.fillStyle = '#2f6a2f';
     for (const t of m.trees) g.fillRect(t.x, t.y, 1, 1);
+    g.fillStyle = '#e7b422';
+    for (const pv of PAVILIONS) g.fillRect(pv.x, pv.y, pv.w, pv.h);
     this.mini = cv;
   }
 
@@ -1474,12 +1563,15 @@ export class LobbyEngine {
       y = by - 6 * fs;
     }
     if (emoji) {
-      c.font = `${Math.round(13 * z * 0.8 + 6)}px serif`;
-      c.textAlign = 'center';
-      c.textBaseline = 'middle';
-      c.globalAlpha = Math.max(0, 1 - emojiAge / 3000);
-      c.fillText(emoji, X, y - 4 * fs - Math.min(10, emojiAge / 160) * fs);
-      c.globalAlpha = 1;
+      const ic = sprite(`ui-${emoji}`);
+      if (ic) {
+        // a pixel icon, a whole number of device pixels per art pixel so it stays crisp
+        const s = Math.max(1, Math.round(Math.max(1.6, z * 0.9) * this.dpr)) / this.dpr;
+        const bob = Math.min(10, emojiAge / 160) * fs;
+        c.globalAlpha = Math.max(0, 1 - emojiAge / 3000);
+        c.drawImage(ic, Math.round(X - 8 * s), Math.round(y - 4 * fs - bob - 8 * s), 16 * s, 16 * s);
+        c.globalAlpha = 1;
+      }
     }
   }
 
@@ -1491,7 +1583,7 @@ export class LobbyEngine {
     const bottom = H - this.opts.bottom - 6;
     for (const d of DOORS) {
       const wx = (d.x + d.w / 2) * LT;
-      const wy = d.id === 'cave' ? d.y * LT - 20 : d.id === 'market' ? d.y * LT - 66 : d.y * LT - 34;
+      const wy = d.id === 'cave' ? d.y * LT - 20 : d.id === 'market' ? d.y * LT - 66 : d.id === 'tunnel' || d.id === 'pot' || d.id === 'crash' ? d.y * LT - 4 * LT - 22 : d.y * LT - 34;
       const X = sx(wx);
       const Y = sy(wy) + Math.sin(now / 420 + d.x) * 2;
       const near = Math.hypot(this.me.x - wx, this.me.y - d.y * LT) < 110;
@@ -1526,7 +1618,7 @@ export class LobbyEngine {
         c.strokeStyle = col;
         c.lineWidth = 2;
         c.stroke();
-        textCentered(c, d.id === 'island' ? 'I' : d.id === 'cave' ? 'C' : 'M', ex, ey - 3 * fs, fs, col);
+        textCentered(c, { island: 'I', cave: 'C', market: 'M', tunnel: 'T', pot: 'G', crash: 'X' }[d.id], ex, ey - 3 * fs, fs, col);
       }
     }
   }
@@ -1571,7 +1663,7 @@ export class LobbyEngine {
 
   private minimap(c: Ctx, W: number, now: number) {
     if (!this.mini) return;
-    const k = 1.7;
+    const k = 2;
     const w = Math.round(LCOLS * k);
     const h = Math.round(LROWS * k);
     const x = W - w - 10;
@@ -1586,10 +1678,30 @@ export class LobbyEngine {
     c.lineWidth = 1;
     c.strokeRect(x - 1.5, y - 1.5, w + 3, h + 3);
     const to = (wx: number, wy: number): [number, number] => [x + (wx / LW) * w, y + (wy / LH) * h];
-    for (const d of DOORS) {
-      const [dx, dy] = to((d.x + d.w / 2) * LT, d.y * LT);
-      c.fillStyle = DOOR_COLOR[d.id];
-      c.fillRect(Math.round(dx) - 2, Math.round(dy) - 2, 5, 5);
+    // landmarks: a pixel icon and a name for every place worth walking to
+    const marks: [number, number, string, string, string][] = [
+      [15.5, 8.2, 'ui-pick', 'CAVE', DOOR_COLOR.cave],
+      [52.5, 7.4, 'ui-gift', 'MARKET', DOOR_COLOR.market],
+      [64, 26.5, 'ui-gem', 'ISLAND', DOOR_COLOR.island],
+      [36.5, 39.6, 'ui-cart', 'GAMES', DOOR_COLOR.pot],
+      [36.5, 25.2, 'ui-star', 'PLAZA', '#ffe27a'],
+      [8.5, 17.5, 'ui-fire', 'CAMP', '#ff9a3d'],
+    ];
+    const ms = 10;
+    for (const [tx, ty, icon, label, col] of marks) {
+      const [dx, dy] = to(tx * LT, ty * LT);
+      const sp = sprite(icon);
+      const ix = Math.round(dx - ms / 2);
+      const iy = Math.round(dy - ms / 2);
+      c.fillStyle = 'rgba(7,13,32,0.78)';
+      c.fillRect(ix - 1, iy - 1, ms + 2, ms + 2);
+      if (sp) c.drawImage(sp, ix, iy, ms, ms);
+      const lw = textWidth(label);
+      const lx = Math.round(dx - lw / 2);
+      const ly = iy + ms + 2;
+      c.fillStyle = 'rgba(7,13,32,0.78)';
+      c.fillRect(lx - 1, ly - 1, lw + 2, 7);
+      text(c, label, lx, ly, 1, col);
     }
     c.fillStyle = '#ffffff';
     for (const p of this.peers.values()) {

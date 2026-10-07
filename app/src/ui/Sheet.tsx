@@ -477,7 +477,7 @@ function Me() {
 }
 
 const styles = StyleSheet.create({
-  scrim: { flex: 1, backgroundColor: '#040817aa' },
+  scrim: { flex: 1, backgroundColor: '#04081733' },
   sheet: {
     maxHeight: '82%',
     backgroundColor: COLORS.bg2,

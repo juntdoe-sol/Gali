@@ -30,7 +30,12 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
   return (
     <View style={[styles.top, { paddingTop: insets.top + 6 }]} pointerEvents="box-none">
       <View style={styles.row}>
-        <Image source={require('../../assets/brand/wordmark.png')} style={styles.logo} resizeMode="contain" />
+        <View style={{ alignItems: 'center' }}>
+          <Image source={require('../../assets/brand/wordmark.png')} style={[styles.logo, { width: 90, height: 38 }]} resizeMode="contain" />
+          <T v="display" style={{ fontSize: 11, color: COLORS.gold, letterSpacing: 1.4, marginTop: -3 }}>
+            ORE MINING
+          </T>
+        </View>
         <View style={{ flexDirection: 'row', gap: 8 }}>
           {owner ? (
             <>
@@ -280,7 +285,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#0a1636ee',
+    backgroundColor: 'rgba(10,22,54,0.66)',
     borderColor: COLORS.trim,
     borderWidth: 1.5,
     borderRadius: 10,
@@ -303,7 +308,7 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 10,
-    backgroundColor: '#132a5aee',
+    backgroundColor: 'rgba(19,42,90,0.7)',
     borderColor: COLORS.trim,
     borderWidth: 1.5,
     alignItems: 'center',
@@ -314,7 +319,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#0a1636e6',
+    backgroundColor: 'rgba(10,22,54,0.62)',
     borderColor: COLORS.line,
     borderWidth: 1,
     borderRadius: 8,
@@ -342,5 +347,5 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   toasts: { position: 'absolute', left: 24, right: 24, alignItems: 'center', gap: 6 },
-  toast: { backgroundColor: '#0f1c3ff2', borderWidth: 1.5, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, fontFamily: F.bold },
+  toast: { backgroundColor: 'rgba(15,28,63,0.82)', borderWidth: 1.5, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8, fontFamily: F.bold },
 });

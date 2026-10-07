@@ -1,0 +1,270 @@
+"""Small pixel icons for the emote bar, the games and the activity feed.
+
+Each icon is drawn as a 14x14 picture in text, given a 1px dark outline and a 16x16 canvas.
+They go in the atlas as ui-<name> (the engine draws them over players' heads and on the game
+pavilions) and, 4x nearest neighbour, to app/assets/icons/<name>.png for the React Native UI.
+"""
+import os
+
+from PIL import Image
+
+from actors_kit import hexrgb, outline_img
+
+PAL = {
+    'w': '#ffffff', 'y': '#ffd24a', 'Y': '#d9961e', 'r': '#ee4a3c', 'R': '#a42a30', 'p': '#ff8fd8', 'P': '#c85ab0',
+    's': '#f6c294', 'S': '#cf8f5e', 'b': '#4aa8ff', 'B': '#2a62c8', 'c': '#9aeaff', 'g': '#c4c9d6', 'G': '#6f768a',
+    'n': '#9a6636', 'N': '#5e3a1e', 'u': '#b86bff', 'U': '#7a3fc4', 'k': '#ff9a3d', 'K': '#d9601e', 'e': '#62d56e', 'E': '#2f8a46',
+    'd': '#2a1c36', 'o': '#2a1c36', 'l': '#fff3b0',
+}
+
+ART = {
+    'heart': """
+..rrr....rrr..
+.rwwrr..rrrrr.
+rwwrrrrrrrrrrR
+rwrrrrrrrrrrrR
+rrrrrrrrrrrrrR
+rrrrrrrrrrrrRR
+.rrrrrrrrrrRR.
+..rrrrrrrrRR..
+...rrrrrrRR...
+....rrrrRR....
+.....rrRR.....
+......RR......
+""",
+    'fire': """
+......k.......
+.....kk.......
+.....kkk...k..
+....kkkk..kk..
+....kkyk..kkk.
+...kkkyykkkkk.
+...kkyyyykkkK.
+..kkkyyyyykkK.
+..kkkyyywyykK.
+..kkyyywwyykK.
+..kkyyywwyykK.
+...kkyyyyykK..
+....KkkkkkK...
+......KKK.....
+""",
+    'pick': """
+....gggggg....
+..ggwwwwgggG..
+.gwGG...GGgG..
+.gG......nGg..
+........nnG...
+.......nnN....
+......nnN.....
+.....nnN......
+....nnN.......
+...nnN........
+..nnN.........
+.nnN..........
+.nN...........
+""",
+    'gem': """
+...bbbbbbbb...
+..bcwwccccbb..
+.bcwwccccccbB.
+bbbbbbbbbbbbbB
+.bcccccccccbB.
+..bcccccccbB..
+...bcccccbB...
+....bcccbB....
+.....bcbB.....
+......bB......
+""",
+    'wave': """
+.....ss.......
+....ssSs.ss...
+....ssSsssSs..
+.ss.ssSsssSs..
+.sSsssssssSs..
+..sSsssssssS..
+..sSsssssssS..
+...sssssssSS..
+...sssssssS...
+....ssssssS...
+.....sssSS....
+""",
+    'laugh': """
+....yyyyyy....
+..yyyyyyyyyy..
+.yyyyyyyyyyyY.
+.yyodyyyyodyyY
+yyyyodyyodyyyY
+yyyyyyyyyyyyyY
+yydddddddddyyY
+yydwwwwwwwwdyY
+.ydwrrrrrrwdY.
+.yyddrrrrddyY.
+..yyyddddyyY..
+....YYYYYY....
+""",
+    'note': """
+.......ppppp..
+.......pPPPpP.
+.......pP.....
+.......pP.....
+.......pP.....
+...ppp.pP.....
+..pPPPp.P.....
+..pPPPp.......
+..pPPPp.......
+...ppp........
+""",
+    'trophy': """
+.yyyyyyyyyyyy.
+yylyyyyyyyyyyY
+y.lyyyyyyyyY.Y
+y.yyyyyyyyyY.Y
+.yyyyyyyyyyYY.
+..yyyyyyyyYY..
+...yyyyyyYY...
+.....yyYY.....
+.....yyYY.....
+....yyyyYY....
+...YYYYYYYY...
+""",
+    'gift': """
+.....rr.rr....
+....rr....rr..
+....r.yyyy.r..
+rrrrrryyyyrrrR
+rwwrrryyyyrrrR
+rwrrrryyyyrrrR
+rrrrrryyyyrrrR
+yyyyyyyyyyyyyY
+rrrrrryyyyrrrR
+rrrrrryyyyrrrR
+rrrrrryyyyrrrR
+RRRRRRYYYYRRRR
+""",
+    'star': """
+......yy......
+......yy......
+.....yyyy.....
+.....yllY.....
+yyyyyyllyyyyyy
+.yyyyyyyyyyyY.
+..yyyyyyyyYY..
+...yyyyyyYY...
+...yyyyyyYY...
+..yyyYYyyyYY..
+..yyY...yyYY..
+.yY.......YY..
+""",
+    'chat': """
+wwwwwwwwwwwwww
+wggggggggggggG
+wgwwwwwwwwwwgG
+wgwwwwwwwwwwgG
+wgwwGwwGwwGwgG
+wgwwwwwwwwwwgG
+wgwwwwwwwwwwgG
+wggggggggggggG
+wwwwgGGGGGGGGG
+.wwgG.........
+..wG..........
+...G..........
+""",
+    'tunnel': """
+.....nnnnnn...
+...nnnNNNNnn..
+..nnNddddddNn.
+.nnNddddddddNn
+.nNdddddlddddN
+.nNddddddddddN
+.nNdddddddkddN
+.nNddddddkykdN
+.nNddddddkkkdN
+.nNdddddddddN.
+ggGGGGGGGGGGgg
+gGggGggGggGggG
+""",
+    'pot': """
+.....yyyy.....
+....yyllyy....
+.....nnnn.....
+....nnnnnn....
+...nnnnnnnn...
+..nnnyyyynnN..
+..nnnyYYYnnN..
+..nnnyyyynnN..
+..nnnnnnnnnN..
+...nnnnnnnN...
+yy..NNNNNN..yy
+yYy.yyy.yyy.yY
+""",
+    'cart': """
+...........rr.
+..........rRr.
+.....yyy.yyy..
+...yyylyyyyyY.
+..yylyyyyyyyYY
+ggggggggggggggG
+gwwwwwwwwwwwwgG
+gwggggggggggggG
+.gggggggggggggG
+.GGGGGGGGGGGGG.
+..dddd..dddd..
+.dgggGd.dgggGd
+.dgdgGd.dgdgGd
+..dGGd...dGGd.
+""",
+    'lock': """
+...gggggg.....
+..gG....gG....
+..gG....gG....
+.yyyyyyyyyy...
+.yyyyddyyyY...
+.yyyyddyyyY...
+.yyyyyddyyY...
+.yyyyyyyyyY...
+.YYYYYYYYYY...
+""",
+    'check': """
+..............
+............ee
+...........ee.
+..........ee..
+.ee......ee...
+..ee....ee....
+...ee..ee.....
+....eeee......
+.....ee.......
+""",
+}
+
+ORDER = list(ART)
+
+
+def icon(name):
+    rows = [r for r in ART[name].strip('\n').split('\n')]
+    w, h = 14, 14
+    img = Image.new('RGBA', (16, 16), (0, 0, 0, 0))
+    px = img.load()
+    off_y = 1 + (h - len(rows)) // 2
+    for y, row in enumerate(rows):
+        row = row.ljust(w, '.')[:w]
+        for x, ch in enumerate(row):
+            if ch != '.':
+                px[1 + x, off_y + y] = (*hexrgb(PAL[ch]), 255)
+    return outline_img(img, (30, 18, 44))
+
+
+def build(atlas, root):
+    out = os.path.join(root, 'app/assets/icons')
+    os.makedirs(out, exist_ok=True)
+    names = []
+    for n in ORDER:
+        im = icon(n)
+        atlas.add(f'ui-{n}', im, 8, 8)
+        im.resize((64, 64), Image.NEAREST).save(os.path.join(out, f'{n}.png'))
+        names.append(n)
+    lines = ['// Generated by scripts/ui_icons.py. React Native needs literal require() paths.', 'export const PIX = {']
+    lines += [f"  {n}: require('../../assets/icons/{n}.png')," for n in names]
+    lines += ['} as const;', 'export type PixName = keyof typeof PIX;', '']
+    with open(os.path.join(root, 'app/src/ui/pixIcons.ts'), 'w') as f:
+        f.write('\n'.join(lines))

@@ -13,6 +13,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import actors  # noqa: E402
 import island  # noqa: E402  the board itself; see scripts/island.py
+import ui_icons  # noqa: E402
 from atlas import Atlas  # noqa: E402
 from font import font_sprites  # noqa: E402
 from pixkit import *  # noqa: E402,F401,F403
@@ -124,6 +125,7 @@ def main():
         atlas.add(f'fx-dust-{i}', cv.img, 10, 9)
     atlas.add('fx-beam-0', beam().img, 10, 90)
     atlas.add('fx-rock-0', falling_rock().img, 4, 4)
+    ui_icons.build(atlas, ROOT)
     font_meta = font_sprites(atlas)
     rects, size = atlas.pack(os.path.join(OUT, 'atlas.png'))
     # the web build serves a copy from /pixel/atlas.png so index.html can preload it

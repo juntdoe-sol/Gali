@@ -145,7 +145,7 @@ const styles = StyleSheet.create({
     paddingRight: 8,
     height: 42,
     borderRadius: 21,
-    backgroundColor: '#070d20e6',
+    backgroundColor: 'rgba(7,13,32,0.6)',
     borderWidth: 1.5,
     borderColor: COLORS.gold2,
   },
