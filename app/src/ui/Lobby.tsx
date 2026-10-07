@@ -151,6 +151,14 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
     [onMarket],
   );
 
+  /** The travel buttons: your miner walks to the door, and goes through it on arrival. */
+  const walkTo = useCallback((id: DoorId) => {
+    setNavOpen(false);
+    const go = ref.current?.goTo;
+    if (typeof go === 'function') go(id);
+    else enter(id);
+  }, [enter]);
+
   const onEvent = useCallback((e: LobbyEvent) => {
     switch (e.t) {
       case 'me':
@@ -273,8 +281,8 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
         <>
           <Pressable style={styles.navScrim} onPress={() => setNavOpen(false)} accessibilityLabel="Close travel menu" />
           <View style={[styles.nav, { bottom: bottomInset + BAR_H + 84 }]} pointerEvents="box-none">
-            {DOOR_UI.map((d) => (
-              <Pressable key={d.id} onPress={() => enter(d.id)} style={[styles.navBtn, { borderColor: d.color }]} accessibilityRole="button" accessibilityLabel={`Go to ${d.label}`}>
+            {DOOR_UI.filter((d) => d.id !== 'market').map((d) => (
+              <Pressable key={d.id} onPress={() => walkTo(d.id)} style={[styles.navBtn, { borderColor: d.color }]} accessibilityRole="button" accessibilityLabel={`Go to ${d.label}`}>
                 <T v="display" style={{ fontSize: 15, color: d.color, letterSpacing: 0.5 }}>
                   {d.label}
                 </T>
