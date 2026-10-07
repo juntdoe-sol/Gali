@@ -193,9 +193,14 @@ let cachedOwner: PublicKey | null = null;
 async function authorize(wallet: Web3MobileWallet) {
   const saved = await AsyncStorage.getItem(AUTH_KEY);
   const go = (auth_token?: string) => wallet.authorize({ chain: `solana:${CLUSTER}`, identity: APP_IDENTITY, auth_token });
-  // Generic authorization failures include cancellation. Only an explicitly stale token permits one retry.
+  // A wallet that no longer accepts the saved token answers "-1/authorization request failed" (Phantom does this
+  // often). Drop the token and ask once more with no token, which shows a normal approval prompt. A person who
+  // declines that prompt gets the error straight away, so cancelling never loops.
   const res = await go(saved ?? undefined).catch(async (e) => {
-    if (!saved || !/auth(?:orization)?[_ ]token.*(?:expired|invalid)|(?:expired|invalid).*auth(?:orization)?[_ ]token/i.test(String(e?.message ?? e))) throw e;
+    const text = String(e?.message ?? e);
+    const staleToken = /auth(?:orization)?[_ ]token.*(?:expired|invalid)|(?:expired|invalid).*auth(?:orization)?[_ ]token/i.test(text);
+    const refused = /authorization request failed/i.test(text) && !/cancel|declin|denied|reject/i.test(text);
+    if (!saved || !(staleToken || refused)) throw e;
     await AsyncStorage.removeItem(AUTH_KEY);
     return go();
   });
@@ -329,9 +334,14 @@ export async function sendWithWallet(build: (owner: PublicKey) => Promise<Transa
       if (!message.equals(signed.serializeMessage())) throw new Error('Wallet changed the transaction');
       return await broadcastSigned(signed, owner, lastValidBlockHeight);
     }
+    // Which step the wallet link was on, so a failure says where it happened.
+    let step = 'opening wallet';
     const sent = await transact(async (wallet) => {
+      step = 'wallet authorization';
       const owner = await authorize(wallet);
+      step = 'building transaction';
       const { tx, lastValidBlockHeight } = await prepare(owner);
+      step = 'wallet approval';
       // signAndSendTransactions is mandatory in MWA 2.0; signTransactions is deprecated and optional.
       const [signature] = await wallet.signAndSendTransactions({ transactions: [tx] });
       if (!signature) throw new Error('Wallet returned no signature');
@@ -339,6 +349,7 @@ export async function sendWithWallet(build: (owner: PublicKey) => Promise<Transa
       return { signature, owner, lastValidBlockHeight };
     }).catch((e) => {
       if (/Timed out waiting/i.test(String(e?.message ?? e))) throw new Error('Wallet did not respond. Check your wallet activity before trying again.');
+      if (e instanceof Error && !/\(at: /.test(e.message)) e.message = `${e.message} (at: ${step})`;
       throw e;
     });
     return await trackAndConfirm(sent.signature, sent.owner, sent.lastValidBlockHeight);
