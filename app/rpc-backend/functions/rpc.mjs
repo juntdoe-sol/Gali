@@ -87,30 +87,42 @@ export default async function rpc(req, ctx) {
   }
   if (!Object.hasOwn(validators, body.method)) return error(400, -32601, 'Method not allowed', body.id);
   if (!validators[body.method](body.params)) return error(400, -32602, 'Invalid params', body.id);
-  const key = ctx.env?.HELIUS_RPC_KEY;
-  if (typeof key !== 'string' || !key || key.length > 256) return error(503, -32000, 'RPC unavailable', body.id);
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8000);
-  try {
-    const upstream = new URL('https://mainnet.helius-rpc.com/');
-    upstream.searchParams.set('api-key', key);
-    const response = await fetch(upstream, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
-      redirect: 'manual', signal: controller.signal,
-    });
-    if (!response.ok) {
-      await response.body?.cancel();
-      return error(response.status === 429 ? 429 : 502, -32000, 'RPC unavailable', body.id);
-    }
-    const text = await boundedText(response, 262144);
-    // Never relay provider diagnostics or reflected secrets, even in successful JSON.
-    const result = JSON.parse(text);
-    const sanitized = JSON.stringify(result);
-    if (sanitized.includes(key) || sanitized.includes(encodeURIComponent(key)) || !object(result) ||
-        result.jsonrpc !== '2.0' || result.id !== body.id || result.error || !Object.hasOwn(result, 'result')) {
-      return error(502, -32000, 'RPC unavailable', body.id);
-    }
-    return Response.json({ jsonrpc: '2.0', id: body.id, result: result.result }, { headers });
-  } catch { return error(502, -32000, 'RPC unavailable', body.id); }
-  finally { clearTimeout(timeout); }
+  // Helius first, Alchemy as the second path. Each key lives only in the function's secrets.
+  const providers = [];
+  const hk = ctx.env?.HELIUS_RPC_KEY;
+  if (typeof hk === 'string' && hk && hk.length <= 256) {
+    providers.push({ key: hk, url: () => { const u = new URL('https://mainnet.helius-rpc.com/'); u.searchParams.set('api-key', hk); return u; } });
+  }
+  const ak = ctx.env?.ALCHEMY_RPC_KEY;
+  if (typeof ak === 'string' && /^[A-Za-z0-9_-]{8,128}$/.test(ak)) {
+    providers.push({ key: ak, url: () => new URL(`https://solana-mainnet.g.alchemy.com/v2/${ak}`) });
+  }
+  if (!providers.length) return error(503, -32000, 'RPC unavailable', body.id);
+  let status = 502;
+  for (const [i, p] of providers.entries()) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), providers.length > 1 && i === 0 ? 4500 : 8000);
+    try {
+      const response = await fetch(p.url(), {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+        redirect: 'manual', signal: controller.signal,
+      });
+      if (!response.ok) {
+        await response.body?.cancel();
+        if (response.status === 429) status = 429;
+        continue;
+      }
+      const text = await boundedText(response, 262144);
+      // Never relay provider diagnostics or reflected secrets, even in successful JSON.
+      const result = JSON.parse(text);
+      const sanitized = JSON.stringify(result);
+      if (sanitized.includes(p.key) || sanitized.includes(encodeURIComponent(p.key)) || !object(result) ||
+          result.jsonrpc !== '2.0' || result.id !== body.id || result.error || !Object.hasOwn(result, 'result')) {
+        continue;
+      }
+      return Response.json({ jsonrpc: '2.0', id: body.id, result: result.result }, { headers });
+    } catch { /* this provider failed: try the next */ }
+    finally { clearTimeout(timeout); }
+  }
+  return error(status, -32000, 'RPC unavailable', body.id);
 }
