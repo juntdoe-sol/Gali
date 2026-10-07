@@ -476,9 +476,11 @@ export const useGame = create<GameState>((set, get) => {
         const practiceWin = !pending.onChain && won;
         return {
           ...s,
-          xp: pending.onChain ? s.xp : s.xp + (practiceWin ? 50 : 0),
-          points: pending.onChain ? s.points : s.points + points,
-          wins: pending.onChain ? s.wins : s.wins + (practiceWin ? 1 : 0),
+          // Live (ORE) rounds score on this device: Gali has no program of its own to keep points in now.
+          // XP is 10 + the spots you covered for playing, and 50 more for a win, the same as every round.
+          xp: pending.onChain ? s.xp + 10 + covered + (won ? 50 : 0) : s.xp + (practiceWin ? 50 : 0),
+          points: s.points + points,
+          wins: s.wins + (won ? 1 : 0),
           practiceUnclaimedSol: pending.onChain ? s.practiceUnclaimedSol : (s.practiceUnclaimedSol ?? 0) + solOut,
           // ORE pays a motherlode share as unrefined ORE, the same as the round's mining reward
           practiceUnclaimedSkr: pending.onChain ? s.practiceUnclaimedSkr : (s.practiceUnclaimedSkr ?? 0) + oreMined + oreMotherlode,
