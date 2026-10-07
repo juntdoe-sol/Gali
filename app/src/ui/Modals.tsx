@@ -9,8 +9,6 @@ import { play } from '../game/sfx';
 import { chainReady, CLUSTER, LIVE_MAX_ROUND_SOL, oreLive } from '../chain/light';
 import { useGame, type RoundResult } from '../game/store';
 import { Btn, T } from './kit';
-import { useExpedition } from '../game/expeditionStore';
-import { ExpeditionButton } from './Expedition';
 
 function usePop(trigger: unknown) {
   const v = useRef(new Animated.Value(0)).current;
@@ -248,13 +246,12 @@ export function LiveNotice() {
   );
 }
 
-/** Wagering remains wallet-gated. Free expeditions are a separate nonfinancial game. */
+/** The live game is wallet-gated: nothing plays until a wallet is connected. */
 export function WalletGate() {
-  const expeditionOpen = useExpedition((s) => s.open);
   const busy = useGame((s) => s.wallet.busy);
   const show = useGame((s) => oreLive && s.loaded && s.save.onboarded && !s.wallet.owner && !s.liveNotice && !s.walletPicker);
   const connect = useGame((s) => s.connect);
-  if (!show || expeditionOpen) return null;
+  if (!show) return null;
   return (
     <Modal transparent visible animationType="fade">
       <View style={[styles.center, { backgroundColor: '#040817ee', padding: 20 }]}>
@@ -269,8 +266,6 @@ export function WalletGate() {
           <View style={{ marginTop: 18 }}>
             <WalletFeedback />
             <Btn kind="skr" label="Connect wallet" disabled={Boolean(busy)} onPress={() => void connect()} />
-            <View style={{ marginTop: 12 }}><ExpeditionButton label="Free daily expedition" onPress={() => useExpedition.getState().show()} /></View>
-            <T v="muted" style={{ textAlign: 'center', marginTop: 8 }}>No wallet, wager or token rewards. A separate excavation challenge.</T>
           </View>
         </View>
       </View>
@@ -330,7 +325,6 @@ export function Onboarding() {
           </T>
           <T style={{ textAlign: 'center', marginTop: 8, lineHeight: 21, color: COLORS.muted }}>{s.b}</T>
           <View style={{ gap: 8, marginTop: 18 }}>
-            <ExpeditionButton label="Free daily expedition" onPress={() => { finish(); useExpedition.getState().show(); }} />
             {last ? (
               <>
                 <Btn
