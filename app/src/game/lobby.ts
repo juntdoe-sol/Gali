@@ -14,6 +14,9 @@ import { cleanChat, cleanName, LH, LOBBY_CAP, LW, SPAWNS, type DoorId } from './
 import { useName } from './username';
 import { useWorld, worldClient, worldReady } from './world';
 
+export type LobbyPose = 'idle' | 'walk' | 'cheer' | 'dance1' | 'dance2' | 'dance3';
+const POSE_OK = ['walk', 'cheer', 'dance1', 'dance2', 'dance3'];
+export const asPose = (v: unknown): LobbyPose => (typeof v === 'string' && POSE_OK.includes(v) ? (v as LobbyPose) : 'idle');
 export type Where = 'lobby' | 'island';
 export type Say = { t: string; at: number };
 
@@ -25,7 +28,7 @@ export interface LobbyPeer {
   tx: number;
   ty: number;
   facing: 1 | -1;
-  pose: 'idle' | 'walk' | 'cheer';
+  pose: LobbyPose;
   look: Look;
   lvl: number;
   /** the wallet they play with, if they connected one (for tips). It is their claim: the tip sheet shows it before you send. */
@@ -70,6 +73,9 @@ interface LobbyState {
   /** my own speech bubble and emote, for the engine to draw */
   mySay: Say | null;
   myEmoji: { e: string; at: number } | null;
+  /** which dance I am doing (0 = none). Walking stops it. */
+  myDance: 0 | 1 | 2 | 3;
+  setDance: (n: 0 | 1 | 2 | 3) => void;
   /** the lobby chat sheet, and how many lines arrived while it was closed */
   chatOpen: boolean;
   unread: number;
@@ -125,6 +131,8 @@ export const useLobby = create<LobbyState>((set, get) => ({
     void chatChannel?.send({ type: 'broadcast', event: 'chat', payload: { id: s.me, nm: name, t: text } });
     return true;
   },
+  myDance: 0,
+  setDance: (n) => set({ myDance: n }),
   emote: (e) => {
     if (!(LOBBY_EMOTES as readonly string[]).includes(e)) return;
     set({ myEmoji: { e, at: Date.now() } });
@@ -171,7 +179,7 @@ function onState(p: any) {
     tx: num(p.tx, 0, LW),
     ty: num(p.ty, 0, LH),
     facing: p.f === -1 ? -1 : 1,
-    pose: p.p === 'walk' || p.p === 'cheer' ? p.p : 'idle',
+    pose: asPose(p.p),
     look,
     lvl: Math.floor(num(p.lvl, 1, 999)),
     wallet: typeof p.w === 'string' && B58.test(p.w) ? p.w : null,
@@ -395,7 +403,7 @@ export function publishLobbyMe(m: { x: number; y: number; tx: number; ty: number
     tx: r(m.tx),
     ty: r(m.ty),
     f: m.facing,
-    p: m.pose === 'walk' || m.pose === 'cheer' ? m.pose : 'idle',
+    p: asPose(m.pose),
     h: m.look.hat,
     c: m.look.fit,
     k: m.look.pick,

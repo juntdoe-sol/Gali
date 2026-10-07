@@ -39,7 +39,8 @@ import actors_miner as M
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LAYERS = ['base', 'fit', 'fit-shade', 'pick', 'pick-shade']
-LOOP = {'idle': True, 'walk': True, 'swing': False, 'cheer': False, 'carry': True}
+LOOP = {'idle': True, 'walk': True, 'swing': False, 'cheer': False, 'carry': True,
+        'dance1': True, 'dance2': True, 'dance3': True}
 
 
 def impact_point(frames):
