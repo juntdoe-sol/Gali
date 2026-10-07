@@ -11,16 +11,16 @@ Built for **CLOCK IN**, the Solana Mobile hackathon. Submissions close 8 Oct 202
 - **Play live (mainnet):** [galiisland.bounded.page](https://galiisland.bounded.page)
 - **Android APK (mainnet live, 1.3.0):** [install from Expo](https://expo.dev/accounts/juntdoe/projects/gali/builds/8eecdbc1-bb75-4a32-b965-977b70ccb6a6)
 - **Demo video:** [Google Drive](https://drive.google.com/drive/folders/19_kvuqSsrazUKYvtMH5y8XHekSgKrOQN?usp=sharing)
-- **Practice build (no wallet):** [galiapp.bounded.page](https://galiapp.bounded.page)
 - **Team:** Juntdoe (lead), Josh (community), Rax (socials and creative)
 
 ## Status
 
 Be clear about what runs today:
 
-- **Live mode is on Solana mainnet.** Connect a wallet at galiisland.bounded.page or in the 1.3.0 APK and you play ORE's real board. Each deploy and claim is a plain ORE instruction signed by your own wallet: no Gali program, no session key, no autopilot. A round is capped at 0.5 SOL, and an 18+ real-money notice comes before the wallet opens. Deploys and claims have been run with real SOL.
-- **Practice mode** needs no wallet and runs the whole game offline with the same rules: the island, rounds, picking and deploying, strikes, both motherlodes, quests and the chat bots.
-- **The Gali program** (`programs/gali`) adds points, streaks, the SKR jackpot, gear and staking. It is written for ORE's board and tested against a mock of ORE's accounts. It is not deployed yet, so those parts run in practice mode only.
+- **Gali is live on Solana mainnet.** Connect a wallet at galiisland.bounded.page or in the APK and you play ORE's real board. Each deploy and claim is a plain ORE instruction signed by your own wallet: no Gali program, no session key, no autopilot. A round is capped at 0.5 SOL, and an 18+ real-money notice comes before the wallet opens. Deploys and claims have been run with real SOL.
+- **The free daily expedition** needs no wallet. It is a separate dig-and-extract challenge with three tools. It has no wager, no token rewards and no effect on ORE odds or payouts.
+- **Chain reads go through a read-only proxy** (`app/rpc-backend`) that allows eight RPC methods. If the proxy is rate-limited or down, the app reads from the direct endpoint instead.
+- **The Gali program** (`programs/gali`) adds points, streaks, the SKR jackpot, gear and staking. It is written for ORE's board and tested against a mock of ORE's accounts. It is not deployed yet, so those parts are not live.
 - **The Gear Market** is a design preview. It shows gear as tradeable NFTs with sample listings. Nothing in it is on chain.
 
 Gali mints nothing, takes no cut of a winner's SOL and never holds a player's ORE position. ORE is credited here as the board Gali plays on; Gali is not affiliated with or endorsed by ORE.
@@ -42,7 +42,7 @@ Gali mints nothing, takes no cut of a winner's SOL and never holds a player's OR
 
 ## How a round works
 
-1. **Pick.** Tap a spot on the map to pick it, or tap MINE and take All 25 or Smart (4, 8, 15 or 20 spots at random). LITE plays one round; PRO adds presets and, in practice mode, autopilot. Double tap or hold a spot to dive into its mine. Shake the phone to Smart-pick.
+1. **Pick.** Tap a spot on the map to pick it, or tap MINE and take All 25 or Smart (4, 8, 15 or 20 spots at random). LITE and PRO both play one round at a time on mainnet; PRO adds presets. Double tap or hold a spot to dive into its mine. Shake the phone to Smart-pick.
 2. **Deploy.** One transaction into ORE's board. In live mode your wallet signs it. With the Gali program deployed, a session key funded once will deploy every round without a wallet pop-up; it can deploy but never withdraw.
 3. **Strike.** ORE draws one winning square. ORE keeps 1% of every square and 10% of the rest on squares that miss, and returns everything else to the miner who deployed it. Nothing moves from the losing squares to the winners. The winning square mines the round's 1 ORE, split by SOL there. Ten squares a round are solo squares (★): on those, one miner takes the whole ORE, with odds equal to their share.
 4. **Motherlode.** ORE adds 0.2 ORE to its motherlode every round and pays the whole pool 1 round in 500, split by SOL on the winning square. When it hits, Gali pays its own jackpot to the same winners, split the same way, plus 10,000 points. That jackpot is Gali's SKR pool and its ORE pool, both filled by gear sales.
@@ -80,26 +80,19 @@ Neither SKR nor ORE has a Pyth feed. The admin sets both rates on chain (`set_to
 
 ## Run it
 
-### App (practice mode)
+### App (mainnet)
 
-Needs Node 20+.
+Needs Node 22+.
 
 ```bash
 cd app
 npm install --legacy-peer-deps
-npx expo start --web            # or: npx expo run:android
+EXPO_PUBLIC_NETWORK=mainnet npx expo start --web
 ```
 
-Release APK: `npx eas-cli build -p android --profile apk`. Web build: `npm run build:web` writes `app/dist`, a static site.
+Release APK: `npx eas-cli build -p android --profile apk-live`. Web build: `EXPO_PUBLIC_NETWORK=mainnet npm run build:web` writes `app/dist`, a static site.
 
-### Mainnet live build
-
-```bash
-cd app
-EXPO_PUBLIC_NETWORK=mainnet EXPO_PUBLIC_RPC_URL=<your mainnet RPC> npm run build:web
-```
-
-Live mode reads ORE's board clock every 2 seconds, so use a private RPC rather than the public endpoint. A web build carries the RPC URL in its JavaScript, so lock the key to your site's domain at the RPC provider. For an APK, set the same two variables in the EAS profile.
+The app reads ORE's board clock every 10 seconds and counts down locally in between. Set `EXPO_PUBLIC_RPC_READ_URL` to a deployed read proxy (`app/rpc-backend`) so no RPC key ships in the app. `EXPO_PUBLIC_RPC_URL` is the direct endpoint for sending transactions and for fallback reads; anything in it is public, so never put a secret key there.
 
 ### Program tests
 
