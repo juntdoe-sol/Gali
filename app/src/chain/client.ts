@@ -260,7 +260,16 @@ export async function reconcilePendingTransaction(): Promise<void> {
   try {
     st = (await withTimeout(connection.getSignatureStatuses([pending.signature], { searchTransactionHistory: true }))).value[0];
   } catch { throw new PendingTransactionError(pending.signature); }
-  if (!st || (st.confirmationStatus !== 'confirmed' && st.confirmationStatus !== 'finalized')) throw new PendingTransactionError(pending.signature);
+  if (!st) {
+    // No record even in history, and its blockhash has expired: it never landed and never can.
+    // Without this an unsent or dropped transaction would lock the wallet out for good.
+    let height: number;
+    try { height = await withTimeout(connection.getBlockHeight('finalized')); }
+    catch { throw new PendingTransactionError(pending.signature); }
+    if (height > pending.lastValidBlockHeight) { await AsyncStorage.removeItem(pendingKey); return; }
+    throw new PendingTransactionError(pending.signature);
+  }
+  if (st.confirmationStatus !== 'confirmed' && st.confirmationStatus !== 'finalized') throw new PendingTransactionError(pending.signature);
   await AsyncStorage.removeItem(pendingKey);
   // Stop this invocation even when reconciliation succeeds: the user must review before choosing another action.
   throw new Error(st.err ? 'Previous transaction failed on chain; network fee may apply. Review before retrying.' : 'Previous transaction confirmed. Refresh balances before another action.');
