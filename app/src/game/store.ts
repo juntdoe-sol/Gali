@@ -222,6 +222,8 @@ interface GameState {
   clearSelection: () => void;
   shakePick: () => void;
   bonkMole: () => void;
+  /** XP from the dig game. Local game XP only: it feeds the miner level and nothing else. */
+  gainXp: (n: number) => void;
   doEmote: () => void;
   claimQuest: (id: string) => void;
   equip: (key: string) => void;
@@ -917,6 +919,11 @@ export const useGame = create<GameState>((set, get) => {
         questProgress: { ...s.questProgress, mole3: (s.questProgress.mole3 ?? 0) + 1 },
       }));
       get().toast('Bonk! +3 XP', 'good');
+    },
+
+    gainXp: (n) => {
+      const add = Math.max(0, Math.min(100, Math.floor(n)));
+      if (add) updateSave((s) => ({ ...s, xp: s.xp + add, bonusXp: s.bonusXp + add }));
     },
 
     doEmote: () => {

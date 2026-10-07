@@ -18,7 +18,6 @@
   check(window.__gali && window.__galiWorld, 'Run against the Gali local preview');
   const close = document.querySelector('[aria-modal="true"] [aria-label="Close"]');
   if (close) { close.click(); await wait(); }
-  __galiWorld.setState({ expeditionScores: [], expeditionDelivery: 'offline' });
   __gali.setState(s => ({ loaded: true, save: { ...s.save, onboarded: true }, liveNotice: false, walletPicker: null,
     wallet: { ...s.wallet, owner: null, busy: 'Audit pending wallet' }, toasts: [{ id: 999, text: 'Audit wallet connection failed', tone: 'bad' }] }));
   await wait();
@@ -29,19 +28,7 @@
   const connect = [...document.querySelectorAll('[role="button"]')].find(e => e.textContent === 'Connect wallet');
   check(connect && connect.getAttribute('aria-disabled') !== 'true', 'Connection can be retried');
   check(!Object.values(__galiWorld.getState().peers).some(p => p.bot), 'Mainnet guests must not simulate practice bots');
-  click('Free daily expedition'); await wait();
-  const unavailable = leaf('Shared survey unavailable · local play still works · local scores only');
-  check(unavailable, 'Missing configuration must say unavailable, not reconnecting');
-  unavailable.scrollIntoView({ block: 'center' }); await wait(); check(visible(unavailable), 'Unavailable status visible');
-  click('Start Crystal cavern'); await wait();
-  const tile = [...document.querySelectorAll('[role="button"]')].find(e => /^Row 4 column 3,/.test(e.getAttribute('aria-label') || ''));
-  check(tile && tile.getAttribute('aria-disabled') !== 'true', 'Adjacent tile playable without wallet');
-  tile.scrollIntoView({ block: 'center' }); tile.click(); await wait();
-  click('Extract now · bank game score'); await wait();
-  check(document.body.innerText.includes('Extracted safely. Game score only; no tokens or prizes.'), 'Guest expedition extracted');
-  check(__galiWorld.getState().expeditionDelivery === 'offline', 'Offline score delivery settles');
-  click('Close'); await wait();
-  check(leaf("Live on ORE's board"), 'Closing expedition restores wallet gate');
+  check(!document.body.innerText.includes('expedition') && ![...document.querySelectorAll('[role="button"]')].some(e => /dig/i.test(e.getAttribute('aria-label') || '')), 'Dig game must not be offered before a wallet connects');
   __gali.setState(s => ({ wallet: { ...s.wallet, busy: null }, toasts: [] }));
-  return 'PASS browser: modal busy/error visibility, retry, no guest bots, unavailable service, free dig/extract, offline delivery, close';
+  return 'PASS browser: modal busy/error visibility, retry, no guest bots, no dig game before wallet connect';
 })()
