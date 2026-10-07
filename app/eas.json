@@ -45,7 +45,9 @@
       "distribution": "internal",
       "env": {
         "EXPO_PUBLIC_NETWORK": "mainnet",
-        "EXPO_PUBLIC_RPC_READ_URL": "https://galiisland-api.bounded.page/rpc"
+        "EXPO_PUBLIC_RPC_READ_URL": "https://galiisland-api.bounded.page/rpc",
+        "EXPO_PUBLIC_WORLD_URL": "wss://rckvfpwtdyvvvjqqlffn.supabase.co/realtime/v1",
+        "EXPO_PUBLIC_WORLD_KEY": "sb_publishable_Kyd6aSVrdTjDRkUK3bw5bA_GIM_5PFh"
       },
       "android": {
         "image": "latest",
