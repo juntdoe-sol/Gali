@@ -1,7 +1,7 @@
 import { useAppFonts } from './fonts';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { AppState, Platform, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { COLORS } from './game/constants';
 import { oreLive } from './chain/light';
@@ -75,7 +75,14 @@ export default function App() {
     } else initAudio();
     void useGame.getState().boot();
     const id = setInterval(() => useGame.getState().tick(), 100);
-    return () => clearInterval(id);
+    // Back from a wallet approval or the home screen: re-read the live board and wallet at once.
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') useGame.getState().resumeLive();
+    });
+    return () => {
+      clearInterval(id);
+      sub.remove();
+    };
   }, []);
 
   useEffect(() => {
