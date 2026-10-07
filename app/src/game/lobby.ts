@@ -12,7 +12,7 @@ import { create } from 'zustand';
 import type { Look } from '../engine/types';
 import { cleanChat, cleanName, LH, LOBBY_CAP, LW, SPAWNS, type DoorId } from './lobbyMap';
 import { useName } from './username';
-import { useWorld, worldClient } from './world';
+import { useWorld, worldClient, worldReady } from './world';
 
 export type Where = 'lobby' | 'island';
 export type Say = { t: string; at: number };
@@ -192,6 +192,11 @@ function onBye(p: any) {
 /** Join the lobby room. Safe to call again: it joins once and waits for the world's connection. */
 export function joinLobby() {
   if (channel || joining) return;
+  // no realtime server configured in this build: say so, instead of waiting for ever
+  if (!worldReady) {
+    useLobby.setState({ status: 'off' });
+    return;
+  }
   const client = worldClient();
   if (!client) {
     // the world connection is still starting; try again when it is up

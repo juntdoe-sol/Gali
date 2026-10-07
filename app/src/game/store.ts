@@ -58,6 +58,8 @@ export interface Run {
   smartN: number;
   manualMask: number;
   total: number; // rounds planned
+  /** live: rounds run from an ORE automation, signed by the device key (no wallet pop-up per round) */
+  automated?: boolean;
   left: number;
   lastRound: number;
 }
@@ -196,6 +198,8 @@ interface GameState {
   pot: PotView;
   potAt: number;
   run: Run | null;
+  /** live: the player's ORE automation (autopilot), when one exists */
+  autopilot: { balance: number; perSpot: number; runnable: boolean } | null;
   dockTab: DockTab;
   /** LITE's spot choice: all 25, Smart (random liteSmart spots) or the spots picked by hand. */
   liteMode: LiteMode;
@@ -238,6 +242,8 @@ interface GameState {
   closeWalletPicker: () => void;
   disconnect: () => Promise<void>;
   refreshWallet: () => Promise<void>;
+  /** live: close the autopilot and take its balance back (one wallet approval) */
+  stopAutopilot: () => Promise<void>;
   airdrop: () => Promise<void>;
   setMute: (m: boolean) => void;
   finishOnboarding: () => void;
@@ -298,6 +304,7 @@ const deployOpen = (s: Clocked & Pick<GameState, 'offsetMs'>, marginMs: number) 
 const errMsg = (e: unknown) => {
   const m = String((e as Error)?.message ?? e);
   if (/RoundLocked/.test(m)) return 'Round is locking. Try next round';
+  if (/AutopilotOn/.test(m)) return 'Autopilot is running. Stop it first to pick by hand';
   if (/LiveCap/.test(m)) return `Live rounds are capped at ${LIVE_MAX_ROUND_SOL} SOL`;
   if (/Paused/.test(m)) return 'Gali is paused for maintenance. Try again soon';
   if (/insufficient|0x1\b/i.test(m)) return 'Not enough balance';
@@ -582,7 +589,8 @@ export const useGame = create<GameState>((set, get) => {
     const stop = (msg: string) => {
       set({ run: null });
       setWallet({ busy: null });
-      get().toast(msg, 'bad');
+      get().toast(run.automated ? `${msg}. Autopilot funds are still in ORE: stop autopilot in the wallet panel to take them back` : msg, 'bad');
+      if (run.automated) void get().refreshWallet();
     };
     if (!idx.length) return stop('Pick spots on the map first');
     const perBlock = run.perSpot ?? Math.floor((run.perRound / idx.length) * 1e9) / 1e9;
@@ -594,12 +602,19 @@ export const useGame = create<GameState>((set, get) => {
     try {
       if (live) {
         if (total > LIVE_MAX_ROUND_SOL + 1e-9) throw new Error('LiveCap');
-        if (st.wallet.sol < total + LIVE_FEE_SOL) throw new Error('insufficient SOL');
+        if (!run.automated && st.wallet.sol < total + LIVE_FEE_SOL) throw new Error('insufficient SOL');
         const [board, { maskToSquares }] = await Promise.all([loadBoard(), loadOreTx()]);
-        setWallet({ busy: `Approve in your wallet: ${total.toFixed(4)} SOL on ORE's board` });
         const displayed = await ownerKey();
         if (!displayed) throw new Error('wallet disconnected');
-        roundId = await board.deployLive(maskToSquares(mask), perBlock, displayed);
+        if (run.automated) {
+          // autopilot: the device key deploys from the player's ORE automation, no pop-up
+          setWallet({ busy: `Autopilot: ${total.toFixed(4)} SOL on ORE's board` });
+          roundId = await board.deployAutopilot(displayed, maskToSquares(mask), perBlock);
+        } else {
+          if (get().autopilot) throw new Error('AutopilotOn');
+          setWallet({ busy: `Approve in your wallet: ${total.toFixed(4)} SOL on ORE's board` });
+          roundId = await board.deployLive(maskToSquares(mask), perBlock, displayed);
+        }
         const cur = get().run;
         if (cur) set({ run: { ...cur, lastRound: roundId } });
       } else if (onChain) {
@@ -765,6 +780,7 @@ export const useGame = create<GameState>((set, get) => {
     pot: emptyPot(roundOf(Date.now())),
     potAt: 0,
     run: null,
+    autopilot: null,
     dockTab: 'lite',
     liteMode: 'all',
     liteSmart: DEFAULT_SMART,
@@ -1134,6 +1150,12 @@ export const useGame = create<GameState>((set, get) => {
           const w = await chain.withTimeout(board.fetchLiveWallet(owner, sol));
           if (get().wallet.owner !== owner.toBase58()) return;
           setWallet({ ...w, player: null, skr: 0, sessionSol: 0, pool: 0, shop: null, readError: undefined });
+          try {
+            const a = await chain.withTimeout(board.readAutopilot(owner));
+            if (get().wallet.owner === owner.toBase58()) set({ autopilot: a ? { balance: a.balance, perSpot: a.perSpot, runnable: a.runnable } : null });
+          } catch {
+            /* keep what we last knew */
+          }
         } catch {
           if (get().wallet.owner === expectedOwner) setWallet({ readError: 'Balances unavailable; last-known values may be stale' });
         }
@@ -1196,8 +1218,28 @@ export const useGame = create<GameState>((set, get) => {
       if (oreLive && !st.wallet.owner) return st.toast('Connect a wallet to deploy on ORE', 'info');
       if (st.run) return;
       if (st.wallet.owner && !onChainMode) return st.toast('On-chain mode is not deployed yet', 'bad');
-      // live rounds are one at a time: every deploy is signed by the player
-      const run = isLive(st) ? { ...r, total: 1 } : r;
+      let run = r;
+      if (isLive(st) && r.total > 1) {
+        // live autopilot: ORE's own automation. One wallet approval funds it; the device key runs each round.
+        if (st.autopilot) return st.toast('Autopilot is already on. Stop it first', 'info');
+        const n = r.blocks === 'all' ? BLOCKS : r.blocks === 'smart' ? r.smartN : idxOf(r.manualMask).length;
+        const per = r.perSpot ?? 0;
+        if (!n || per < MIN_SOL_PER_BLOCK) return st.toast(`Pick spots and at least ${MIN_SOL_PER_BLOCK} SOL per spot`, 'bad');
+        const deposit = per * n * r.total;
+        if (st.wallet.sol < deposit + LIVE_FEE_SOL + 0.01) return st.toast('Not enough SOL to fund autopilot', 'bad');
+        try {
+          const [board, owner] = await Promise.all([loadBoard(), ownerKey()]);
+          if (!owner) throw new Error('wallet disconnected');
+          setWallet({ busy: `Approve autopilot in your wallet: ${deposit.toFixed(4)} SOL for ${r.total} rounds` });
+          await board.startAutopilot(per, n, r.total, owner);
+          setWallet({ busy: null });
+          run = { ...r, automated: true };
+          void get().refreshWallet();
+        } catch (e) {
+          setWallet({ busy: null });
+          return get().toast(errMsg(e), 'bad');
+        }
+      } else if (isLive(st)) run = { ...r, total: 1 };
       set({ run: { ...run, left: run.total, lastRound: -1 } });
       play('select');
       const open = deployOpen(st, 2000);
@@ -1206,9 +1248,29 @@ export const useGame = create<GameState>((set, get) => {
     },
 
     stopRun: () => {
-      if (!get().run) return;
+      const run = get().run;
+      if (!run) return;
       set({ run: null });
-      get().toast('Autopilot stopped', 'info');
+      get().toast(run.automated ? 'Autopilot paused. Funds stay in ORE until you stop autopilot in the wallet panel' : 'Autopilot stopped', 'info');
+    },
+
+    stopAutopilot: async () => {
+      const st = get();
+      if (st.wallet.busy) return;
+      try {
+        const [board, owner] = await Promise.all([loadBoard(), ownerKey()]);
+        if (!owner) throw new Error('wallet disconnected');
+        set({ run: null });
+        setWallet({ busy: 'Approve in your wallet to close autopilot and take your SOL back' });
+        await board.stopAutopilot(owner);
+        set({ autopilot: null });
+        get().toast('Autopilot closed. Your balance is back in your wallet', 'good');
+      } catch (e) {
+        get().toast(errMsg(e), 'bad');
+      } finally {
+        setWallet({ busy: null });
+        void get().refreshWallet();
+      }
     },
 
     refreshPot: async () => {
