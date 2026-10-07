@@ -264,7 +264,7 @@ export function WalletGate() {
   if (!show) return null;
   return (
     <Modal transparent visible animationType="fade">
-      <View style={[styles.center, { backgroundColor: '#040817ee', padding: 20 }]}>
+      <View style={[styles.center, { backgroundColor: '#040817b0', padding: 20 }]}>
         <View style={styles.intro}>
           <Image source={require('../../assets/brand/wordmark.png')} style={{ width: 220, height: 97, alignSelf: 'center' }} resizeMode="contain" />
           <T v="display" style={{ fontSize: 18, textAlign: 'center', marginTop: 2, color: COLORS.gold, letterSpacing: 1.5 }}>
@@ -325,7 +325,7 @@ export function Onboarding() {
   const last = i === STEPS.length - 1;
   return (
     <Modal transparent visible animationType="fade">
-      <View style={[styles.center, { backgroundColor: '#040817ee', padding: 20 }]}>
+      <View style={[styles.center, { backgroundColor: '#040817b0', padding: 20 }]}>
         <View style={styles.intro}>
           <Image source={require('../../assets/brand/wordmark.png')} style={{ width: 220, height: 97, alignSelf: 'center' }} resizeMode="contain" />
           <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 6, marginVertical: 10 }}>
@@ -396,6 +396,6 @@ const styles = StyleSheet.create({
     backfaceVisibility: 'hidden',
   },
   orb: { width: 110, height: 110, borderRadius: 55, alignItems: 'center', justifyContent: 'center', shadowOpacity: 1, shadowRadius: 24, elevation: 10 },
-  busy: { position: 'absolute', alignSelf: 'center', top: '52%', backgroundColor: '#070d20ee', borderColor: COLORS.skr, borderWidth: 2, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 8 },
+  busy: { position: 'absolute', alignSelf: 'center', top: '52%', backgroundColor: 'rgba(7,13,32,0.78)', borderColor: COLORS.skr, borderWidth: 2, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 8 },
   intro: { width: '100%', maxWidth: 420, backgroundColor: COLORS.card, borderColor: COLORS.line, borderWidth: 3, borderRadius: 28, padding: 22 },
 });

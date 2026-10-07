@@ -146,9 +146,10 @@ export const localDay = (t = Date.now()) => {
 export const COLORS = {
   // arena theme: deep navy panels, gold trim, cyan energy
   bg: '#070d20',
-  bg2: '#0c1734',
-  card: '#0f1c3f',
-  card2: '#172b58',
+  // the three panel colours are see-through, so the lobby or island stays visible behind every card and sheet
+  bg2: 'rgba(12,23,52,0.78)',
+  card: 'rgba(15,28,63,0.66)',
+  card2: 'rgba(23,43,88,0.7)',
   line: '#2a4480',
   trim: '#c9a24e',
   trimHi: '#ffe7a3',

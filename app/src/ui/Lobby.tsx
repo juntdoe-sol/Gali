@@ -27,15 +27,18 @@ import { useView } from '../pixel/view';
 import { Btn, F, T } from './kit';
 import { BAR_H, TabBar, type SheetTab } from './TabBar';
 import { Arcade } from './Arcade';
+import { PixIcon } from './PixIcon';
+import type { PixName } from './pixIcons';
 import { GAME_IDS, GAME_META, useArcade, type GameId } from '../game/arcade';
 
 const GAME_SHORT: Record<GameId, string> = { tunnel: 'TUNNEL', pot: 'GOLD RUSH', crash: 'CRASH CART' };
 
-const DOOR_UI: { id: DoorId; label: string; color: string }[] = [
-  { id: 'island', label: 'ISLAND', color: '#3de0c8' },
-  { id: 'cave', label: 'CAVE', color: '#ff9a3d' },
-  { id: 'market', label: 'MARKET', color: '#b86bff' },
+const DOOR_UI: { id: DoorId; label: string; sub: string; color: string }[] = [
+  { id: 'island', label: 'ISLAND', sub: 'Mine ORE', color: '#3de0c8' },
+  { id: 'cave', label: 'CAVE', sub: 'Dig for XP', color: '#ff9a3d' },
+  { id: 'market', label: 'MARKET', sub: 'Gear and items', color: '#b86bff' },
 ];
+const EMOTE_NAME: Record<string, string> = { wave: 'Wave', laugh: 'Laugh', heart: 'Love', fire: 'Fire', pick: 'Pickaxe', gem: 'Gem' };
 
 /** The spot a Cave Run from the lobby opens under: the one you are mining, else one you picked. */
 function homeSpot(): number {
@@ -147,7 +150,12 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
     (id: DoorId) => {
       setNavOpen(false);
       if (id === 'island') useLobby.getState().go('island', 'island');
-      else if (id === 'cave') {
+      else if (id === 'tunnel' || id === 'pot' || id === 'crash') {
+        // walking into a pavilion: the miner steps back out to its front and the game opens over the lobby
+        useLobby.setState({ spawn: id });
+        if (!useGame.getState().wallet.owner) useGame.getState().toast('Connect a wallet to play', 'info');
+        useArcade.getState().open(id);
+      } else if (id === 'cave') {
         useLobby.setState({ spawn: 'cave' });
         useCave.getState().show(homeSpot());
       } else {
@@ -291,34 +299,51 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
         </Pressable>
         <View style={styles.emotes}>
           {LOBBY_EMOTES.map((e) => (
-            <Pressable key={e} onPress={() => useLobby.getState().emote(e)} style={styles.emote} accessibilityRole="button" accessibilityLabel={`Emote ${e}`}>
-              <T style={{ fontSize: 18 }}>{e}</T>
+            <Pressable key={e} onPress={() => useLobby.getState().emote(e)} style={({ pressed }) => [styles.emote, pressed ? styles.emotePressed : null]} accessibilityRole="button" accessibilityLabel={`Emote ${EMOTE_NAME[e] ?? e}`}>
+              <PixIcon name={e} size={32} />
             </Pressable>
           ))}
-          <Pressable onPress={() => setDanceOpen((o) => !o)} style={[styles.emote, myDance ? styles.emoteOn : null]} accessibilityRole="button" accessibilityLabel="Dance">
-            <T style={{ fontSize: 18 }}>🕺</T>
+          <View style={styles.emoteSep} />
+          <Pressable onPress={() => setDanceOpen((o) => !o)} style={({ pressed }) => [styles.emote, myDance || danceOpen ? styles.emoteOn : null, pressed ? styles.emotePressed : null]} accessibilityRole="button" accessibilityLabel="Dance">
+            <PixIcon name="note" size={32} />
           </Pressable>
         </View>
         {danceOpen ? (
-          <View style={styles.danceRow}>
-            {([1, 2, 3] as const).map((n) => (
-              <Pressable
-                key={n}
-                onPress={() => {
-                  useLobby.getState().setDance(myDance === n ? 0 : n);
-                  setDanceOpen(false);
-                }}
-                style={[styles.danceBtn, myDance === n ? styles.emoteOn : null]}
-                accessibilityRole="button"
-                accessibilityLabel={`Dance ${DANCE_NAMES[n - 1]}`}>
-                <T v="black" style={{ fontSize: 11 }}>{DANCE_NAMES[n - 1]}</T>
-              </Pressable>
-            ))}
-            {myDance ? (
-              <Pressable onPress={() => { useLobby.getState().setDance(0); setDanceOpen(false); }} style={styles.danceBtn} accessibilityRole="button" accessibilityLabel="Stop dancing">
-                <T v="black" style={{ fontSize: 11 }}>STOP</T>
-              </Pressable>
-            ) : null}
+          <View style={styles.danceCard}>
+            <T v="label" style={{ fontSize: 10, color: COLORS.muted, letterSpacing: 1.2 }}>
+              DANCE
+            </T>
+            <View style={styles.danceRow}>
+              {([1, 2, 3] as const).map((n) => (
+                <Pressable
+                  key={n}
+                  onPress={() => {
+                    useLobby.getState().setDance(myDance === n ? 0 : n);
+                    setDanceOpen(false);
+                  }}
+                  style={({ pressed }) => [styles.danceBtn, myDance === n ? styles.danceBtnOn : null, pressed ? styles.emotePressed : null]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Dance ${DANCE_NAMES[n - 1]}`}>
+                  <T v="black" style={{ fontSize: 12, color: myDance === n ? '#2b1600' : COLORS.text, letterSpacing: 0.6 }}>
+                    {DANCE_NAMES[n - 1]}
+                  </T>
+                </Pressable>
+              ))}
+              {myDance ? (
+                <Pressable
+                  onPress={() => {
+                    useLobby.getState().setDance(0);
+                    setDanceOpen(false);
+                  }}
+                  style={({ pressed }) => [styles.danceBtn, { borderColor: '#ff6b6b88' }, pressed ? styles.emotePressed : null]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Stop dancing">
+                  <T v="black" style={{ fontSize: 12, color: '#ff8f8f', letterSpacing: 0.6 }}>
+                    STOP
+                  </T>
+                </Pressable>
+              ) : null}
+            </View>
           </View>
         ) : null}
       </View>
@@ -326,25 +351,44 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
       {navOpen ? (
         <>
           <Pressable style={styles.navScrim} onPress={() => setNavOpen(false)} accessibilityLabel="Close travel menu" />
-          <View style={[styles.navCol, { bottom: bottomInset + BAR_H + 84 }]} pointerEvents="box-none">
-            <View style={styles.nav} pointerEvents="box-none">
-              {GAME_IDS.map((g) => (
-                <Pressable key={g} onPress={() => openGame(g)} style={[styles.navBtn, { borderColor: GAME_META[g].color }]} accessibilityRole="button" accessibilityLabel={`Play ${GAME_META[g].name}`}>
-                  <T style={{ fontSize: 16 }}>{GAME_META[g].icon}</T>
-                  <T v="display" style={{ fontSize: 12, color: GAME_META[g].color, letterSpacing: 0.3 }} numberOfLines={1}>
-                    {GAME_SHORT[g]}
-                  </T>
-                </Pressable>
-              ))}
-            </View>
-            <View style={styles.nav} pointerEvents="box-none">
-              {DOOR_UI.filter((d) => d.id !== 'market').map((d) => (
-                <Pressable key={d.id} onPress={() => walkTo(d.id)} style={[styles.navBtn, { borderColor: d.color }]} accessibilityRole="button" accessibilityLabel={`Go to ${d.label}`}>
-                  <T v="display" style={{ fontSize: 15, color: d.color, letterSpacing: 0.5 }}>
-                    {d.label}
-                  </T>
-                </Pressable>
-              ))}
+          <View style={[styles.navCol, { bottom: bottomInset + BAR_H + 128 }]} pointerEvents="box-none">
+            <View style={styles.navCard}>
+              <T v="label" style={styles.navHead}>
+                PLACES
+              </T>
+              <View style={styles.nav}>
+                {DOOR_UI.filter((d) => d.id !== 'market').map((d) => (
+                  <Pressable key={d.id} onPress={() => walkTo(d.id)} style={({ pressed }) => [styles.navTile, pressed ? styles.navTilePressed : null]} accessibilityRole="button" accessibilityLabel={`Go to ${d.label}`}>
+                    <View style={[styles.navAccent, { backgroundColor: d.color }]} />
+                    <View style={styles.navTxt}>
+                      <T v="display" style={{ fontSize: 15, color: d.color, letterSpacing: 0.5 }} numberOfLines={1}>
+                        {d.label}
+                      </T>
+                      <T v="muted" style={{ fontSize: 10 }} numberOfLines={1}>
+                        {d.sub}
+                      </T>
+                    </View>
+                  </Pressable>
+                ))}
+              </View>
+              <T v="label" style={styles.navHead}>
+                MINI GAMES
+              </T>
+              <View style={styles.nav}>
+                {GAME_IDS.map((g) => (
+                  <Pressable key={g} onPress={() => walkTo(g)} style={({ pressed }) => [styles.navTile, pressed ? styles.navTilePressed : null]} accessibilityRole="button" accessibilityLabel={`Go to ${GAME_META[g].name}`}>
+                    <View style={[styles.navAccent, { backgroundColor: GAME_META[g].color }]} />
+                    <View style={styles.navTxt}>
+                      <T v="display" style={{ fontSize: 12, color: GAME_META[g].color, letterSpacing: 0.3 }} numberOfLines={1}>
+                        {GAME_SHORT[g]}
+                      </T>
+                      <T v="muted" style={{ fontSize: 10 }} numberOfLines={1}>
+                        ORE · SKR
+                      </T>
+                    </View>
+                  </Pressable>
+                ))}
+              </View>
             </View>
           </View>
         </>
@@ -371,14 +415,19 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
 
 const HOWTO_KEY = 'gali-lobby-howto-v1';
 
-const HOWTO: { icon: string; title: string; body: string }[] = [
-  { icon: '🕹', title: 'Walk around', body: 'Use the joystick, tap or drag on the map, or WASD on a keyboard. Pinch or scroll to zoom. Other players are real people in the lobby right now.' },
-  { icon: '💬', title: 'Talk and react', body: 'Pick a name, then use CHAT in the bar to message everyone. Tap an emoji to wave, laugh or show off.' },
-  { icon: '🏝', title: 'Island: mine ORE', body: 'Walk onto the jetty, or tap GO then ISLAND. Pick spots on the map, deploy SOL, and win ORE when your spot is the gold one. Your wallet approves every deploy. Only play with SOL you can afford to lose.' },
-  { icon: '⛏', title: 'Cave: Cave Run', body: 'Go into the cave for the Cave Run mini game. It earns XP and does not spend SOL.' },
-  { icon: '🏪', title: 'Market: gear', body: 'Walk into the shop to see pickaxes, hats and pets for your miner.' },
-  { icon: '🤖', title: 'Autopilot', body: 'On the island, open MINE, then PRO and set Rounds above 1. One wallet approval funds ORE automation, and your rounds then deploy by themselves while the app is open. STOP gets the unused SOL back.' },
-  { icon: '↩', title: 'Back to the lobby', body: 'Every place has a LOBBY button. The GO button in the bar jumps straight to the island, cave or market.' },
+const HOWTO: { icon: PixName; title: string; body: string }[] = [
+  { icon: 'star', title: 'Walk around', body: 'Use the joystick, tap or drag on the map, or WASD on a keyboard. Pinch or scroll to zoom. Other players are real people in the lobby right now.' },
+  { icon: 'chat', title: 'Talk and react', body: 'Pick a name, then use CHAT in the bar to message everyone. Tap an icon to wave, laugh or show off, or the note to dance.' },
+  { icon: 'gem', title: 'Island: mine ORE', body: 'Walk onto the jetty, or tap GO then ISLAND. Pick spots on the map, deploy SOL, and win ORE when your spot is the gold one. Your wallet approves every deploy. Only play with SOL you can afford to lose.' },
+  { icon: 'cart', title: 'Mini games', body: 'South of the plaza are three pavilions: Tunnel Collapse, Gold Rush Pot and Crash Cart. Walk into one, or tap GO then its name, to open it. Each has an ORE table and an SKR table, with a new round every 40 seconds shared by everyone.' },
+  { icon: 'tunnel', title: 'Tunnel Collapse', body: 'Pick one of five tunnels. One caves in. Miners in the other four split the stakes of the collapsed one, minus a 5% fee.' },
+  { icon: 'pot', title: 'Gold Rush Pot', body: 'Buy in with a stake. One miner is drawn to take the whole pot minus 5%. Bigger stakes hold more tickets, so better odds.' },
+  { icon: 'cart', title: 'Crash Cart', body: 'Pick a cash-out from 1.2x to 10x. If the cart climbs that high before it crashes you win your stake times the cash-out. If it crashes first the stake is lost.' },
+  { icon: 'lock', title: 'Staking safely', body: 'Stakes are real ORE or SKR sent from your wallet, and your wallet approves each one. Winners are paid automatically, and every round can be checked with the hash shown in the game. 18+ only. Stake only what you can afford to lose.' },
+  { icon: 'pick', title: 'Cave: Cave Run', body: 'Go into the cave for the Cave Run mini game. It earns XP and does not spend SOL.' },
+  { icon: 'gift', title: 'Market: gear', body: 'Walk into the shop to see pickaxes, hats and pets for your miner.' },
+  { icon: 'fire', title: 'Autopilot', body: 'On the island, open MINE, then PRO and set Rounds above 1. One wallet approval funds ORE automation, and your rounds then deploy by themselves while the app is open. STOP gets the unused SOL back.' },
+  { icon: 'wave', title: 'Back to the lobby', body: 'Every place has a LOBBY button. The GO button in the bar jumps straight to the island, cave, games or market.' },
 ];
 
 /** A short guide for new players, shown once and always one tap away from the lobby header. */
@@ -393,7 +442,7 @@ function HowToPlay({ onClose }: { onClose: () => void }) {
         <ScrollView style={{ flexGrow: 0 }} contentContainerStyle={{ gap: 10, paddingVertical: 8 }} showsVerticalScrollIndicator={false}>
           {HOWTO.map((h) => (
             <View key={h.title} style={styles.howRow}>
-              <T style={{ fontSize: 24, width: 34, textAlign: 'center' }}>{h.icon}</T>
+              <PixIcon name={h.icon} size={32} style={{ marginRight: 2 }} />
               <View style={{ flex: 1 }}>
                 <T v="black" style={{ fontSize: 14, color: COLORS.gold }}>
                   {h.title}
@@ -412,20 +461,20 @@ function HowToPlay({ onClose }: { onClose: () => void }) {
 }
 
 /* ---------------- activity feed ---------------- */
-function actText(a: Act): { icon: string; text: string; color: string } {
+function actText(a: Act): { icon: PixName; text: string; color: string } {
   switch (a.k) {
     case 'win':
-      return { icon: '🏆', text: `${a.n} won${a.sol > 0 ? ` ${a.sol} SOL` : ''}${a.pts > 0 ? ` · +${a.pts} pts` : ''}`, color: COLORS.gold };
+      return { icon: 'trophy', text: `${a.n} won${a.sol > 0 ? ` ${a.sol} SOL` : ''}${a.pts > 0 ? ` · +${a.pts} pts` : ''}`, color: COLORS.gold };
     case 'tip':
-      return { icon: '🎁', text: a.toMe ? `${a.n} tipped you ${a.a} ${a.tk}` : `${a.mine ? 'You' : a.n} tipped ${a.tn} ${a.a} ${a.tk}`, color: '#ff8fd8' };
+      return { icon: 'gift', text: a.toMe ? `${a.n} tipped you ${a.a} ${a.tk}` : `${a.mine ? 'You' : a.n} tipped ${a.tn} ${a.a} ${a.tk}`, color: '#ff8fd8' };
     case 'play': {
       const game = a.g === 'tunnel' ? 'Tunnel Collapse' : a.g === 'pot' ? 'Gold Rush Pot' : 'Crash Cart';
-      return { icon: a.win ? '💎' : '⛏', text: a.win ? `${a.mine ? 'You' : a.n} won ${a.a} ${a.tk} in ${game}` : `${a.mine ? 'You' : a.n} staked ${a.a} ${a.tk} in ${game}`, color: a.win ? COLORS.gold : '#7fe3ff' };
+      return { icon: a.win ? 'gem' : 'pick', text: a.win ? `${a.mine ? 'You' : a.n} won ${a.a} ${a.tk} in ${game}` : `${a.mine ? 'You' : a.n} staked ${a.a} ${a.tk} in ${game}`, color: a.win ? COLORS.gold : '#7fe3ff' };
     }
     case 'xp':
-      return { icon: '⭐', text: `${a.n} earned ${a.xp} XP`, color: '#7fe3ff' };
+      return { icon: 'star', text: `${a.n} earned ${a.xp} XP`, color: '#7fe3ff' };
     default:
-      return { icon: '👋', text: `${a.n} entered the lobby`, color: '#9ff0a8' };
+      return { icon: 'wave', text: `${a.n} entered the lobby`, color: '#9ff0a8' };
   }
 }
 
@@ -442,7 +491,7 @@ function ActItem({ a }: { a: Act }) {
   const t = actText(a);
   return (
     <Animated.View style={[styles.act, { opacity: v, borderColor: t.color, transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [-6, 0] }) }] }]}>
-      <T style={{ fontSize: 14 }}>{t.icon}</T>
+      <PixIcon name={t.icon} size={16} />
       <T v="bold" style={{ fontSize: 12, flexShrink: 1 }} numberOfLines={2}>
         {t.text}
       </T>
@@ -608,8 +657,8 @@ export function SharedChat() {
           />
           <View style={cs.emoteRow}>
             {LOBBY_EMOTES.map((e) => (
-              <Pressable key={e} onPress={() => useLobby.getState().emote(e)} style={cs.emote} accessibilityRole="button" accessibilityLabel={`Emote ${e}`}>
-                <T style={{ fontSize: 18 }}>{e}</T>
+              <Pressable key={e} onPress={() => useLobby.getState().emote(e)} style={cs.emote} accessibilityRole="button" accessibilityLabel={`Emote ${EMOTE_NAME[e] ?? e}`}>
+                <PixIcon name={e} size={32} />
               </Pressable>
             ))}
           </View>
@@ -677,7 +726,7 @@ const cs = StyleSheet.create({
   bubble: { maxWidth: '82%', backgroundColor: COLORS.card, borderColor: COLORS.line, borderWidth: 2, borderRadius: 16, borderTopLeftRadius: 4, paddingHorizontal: 12, paddingVertical: 7 },
   bubbleMine: { backgroundColor: COLORS.gold, borderColor: '#ffe08a', borderTopLeftRadius: 16, borderTopRightRadius: 4 },
   emoteRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
-  emote: { width: 46, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: '#00000044', borderWidth: 1, borderColor: COLORS.line },
+  emote: { width: 46, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: '#00000044', borderWidth: 1, borderColor: COLORS.line },
   inputRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
   input: { flex: 1, height: 44, borderRadius: 14, borderWidth: 2, borderColor: COLORS.line, backgroundColor: '#00000044', color: COLORS.text, paddingHorizontal: 12, fontFamily: F.body },
 });
@@ -784,7 +833,7 @@ const DANCE_NAMES = ['DISCO', 'POGO', 'WIGGLE'] as const;
 
 const styles = StyleSheet.create({
   feed: { position: 'absolute', left: 12, maxWidth: '62%', gap: 6, alignItems: 'flex-start' },
-  act: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#0b1226e6', borderWidth: 1.5, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5 },
+  act: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(11,18,38,0.62)', borderWidth: 1.5, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5 },
   tipRow: { flexDirection: 'row', gap: 8, justifyContent: 'center' },
   tipChip: { minWidth: 70, alignItems: 'center', paddingVertical: 9, paddingHorizontal: 12, borderRadius: 14, borderWidth: 2, borderColor: COLORS.line, backgroundColor: COLORS.card },
   tipOn: { backgroundColor: COLORS.gold, borderColor: COLORS.gold },
@@ -793,30 +842,39 @@ const styles = StyleSheet.create({
   headRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   titleBox: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   logo: { width: 96, height: 30 },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 34, paddingHorizontal: 11, borderRadius: 17, backgroundColor: '#070d20e6', borderWidth: 1.5, borderColor: COLORS.gold2, maxWidth: 220 },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 34, paddingHorizontal: 11, borderRadius: 17, backgroundColor: 'rgba(7,13,32,0.6)', borderWidth: 1.5, borderColor: COLORS.gold2, maxWidth: 220 },
   dot: { width: 8, height: 8, borderRadius: 4 },
   bottom: { position: 'absolute', left: 0, right: 0, paddingHorizontal: 12, gap: 6 },
   navScrim: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 },
-  navCol: { position: 'absolute', left: 12, right: 12, gap: 8 },
+  navCol: { position: 'absolute', left: 12, right: 12 },
+  navCard: { gap: 6, padding: 10, borderRadius: 18, backgroundColor: 'rgba(7,13,32,0.62)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)' },
+  navHead: { fontSize: 10, letterSpacing: 1.6, color: '#9fb0e8', marginLeft: 4 },
   nav: { flexDirection: 'row', gap: 8, justifyContent: 'center' },
-  navBtn: { flex: 1, maxWidth: 140, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#070d20f2', borderWidth: 2 },
-  full: { backgroundColor: '#070d20ee', borderRadius: 10, padding: 8, borderWidth: 1, borderColor: COLORS.red },
+  navTile: { flex: 1, height: 46, borderRadius: 12, flexDirection: 'row', alignItems: 'center', overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' },
+  navTilePressed: { backgroundColor: 'rgba(255,255,255,0.2)', transform: [{ scale: 0.97 }] },
+  navAccent: { width: 4, alignSelf: 'stretch' },
+  navTxt: { flex: 1, paddingHorizontal: 8, justifyContent: 'center' },
+  full: { backgroundColor: 'rgba(7,13,32,0.72)', borderRadius: 10, padding: 8, borderWidth: 1, borderColor: COLORS.red },
   log: { minHeight: 8, gap: 2 },
   line: { flexDirection: 'row', gap: 6, backgroundColor: '#070d20b3', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
   doors: { flexDirection: 'row', gap: 8 },
-  door: { flex: 1, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: '#070d20e6', borderWidth: 2 },
-  emotes: { flexDirection: 'row', justifyContent: 'space-between' },
-  emote: { width: 40, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: '#070d20cc', borderWidth: 1, borderColor: '#2f5499' },
-  emoteOn: { borderColor: COLORS.gold, backgroundColor: '#3a2a0acc' },
-  danceRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 6, marginTop: 6 },
-  danceBtn: { paddingHorizontal: 12, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: '#070d20cc', borderWidth: 1, borderColor: '#2f5499' },
+  door: { flex: 1, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(7,13,32,0.6)', borderWidth: 2 },
+  emotes: { flexDirection: 'row', alignItems: 'center', alignSelf: 'center', gap: 4, paddingHorizontal: 6, paddingVertical: 5, borderRadius: 26, backgroundColor: 'rgba(7,13,32,0.55)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)' },
+  emote: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
+  emotePressed: { backgroundColor: 'rgba(255,255,255,0.22)', transform: [{ scale: 0.92 }] },
+  emoteOn: { borderColor: COLORS.gold, backgroundColor: 'rgba(255,210,74,0.22)' },
+  emoteSep: { width: 1, height: 24, backgroundColor: 'rgba(255,255,255,0.2)', marginHorizontal: 2 },
+  danceCard: { alignSelf: 'center', marginTop: 6, gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, backgroundColor: 'rgba(7,13,32,0.62)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)', alignItems: 'center' },
+  danceRow: { flexDirection: 'row', gap: 6 },
+  danceBtn: { paddingHorizontal: 14, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)' },
+  danceBtnOn: { backgroundColor: COLORS.gold, borderColor: COLORS.gold },
   inputRow: { flexDirection: 'row', gap: 8 },
   input: { flex: 1, height: 40, borderRadius: 10, paddingHorizontal: 12, backgroundColor: '#0c1634', color: COLORS.text, borderWidth: 1.5, borderColor: '#2f5499', fontSize: 14 },
   sendBtn: { height: 40, paddingHorizontal: 16, borderRadius: 10, backgroundColor: COLORS.gold, alignItems: 'center', justifyContent: 'center' },
-  promptCard: { width: '88%', maxWidth: 380, gap: 10, padding: 16, borderRadius: 16, backgroundColor: '#0f1b45', borderWidth: 2, borderColor: COLORS.gold2 },
-  howCard: { width: '92%', maxWidth: 420, gap: 8, padding: 16, borderRadius: 16, backgroundColor: '#0f1b45', borderWidth: 2, borderColor: COLORS.gold2 },
+  promptCard: { width: '88%', maxWidth: 380, gap: 10, padding: 16, borderRadius: 16, backgroundColor: 'rgba(15,27,69,0.74)', borderWidth: 2, borderColor: COLORS.gold2 },
+  howCard: { width: '92%', maxWidth: 420, gap: 8, padding: 16, borderRadius: 16, backgroundColor: 'rgba(15,27,69,0.74)', borderWidth: 2, borderColor: COLORS.gold2 },
   howRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
   promptScrim: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: '#070d20cc', alignItems: 'center', justifyContent: 'center' },
   backWrap: { position: 'absolute', left: 12 },
-  back: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 42, paddingHorizontal: 14, borderRadius: 21, backgroundColor: '#070d20e6', borderWidth: 1.5, borderColor: COLORS.gold2 },
+  back: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 42, paddingHorizontal: 14, borderRadius: 21, backgroundColor: 'rgba(7,13,32,0.6)', borderWidth: 1.5, borderColor: COLORS.gold2 },
 });

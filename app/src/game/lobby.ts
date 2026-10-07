@@ -85,7 +85,9 @@ interface LobbyState {
   emote: (e: string) => void;
 }
 
-export const LOBBY_EMOTES = ['👋', '😂', '❤️', '🔥', '⛏️', '💎'] as const;
+/** Emotes are pixel icons: each is a key into the icon set (ui-<key> in the atlas, assets/icons/<key>.png). */
+export const LOBBY_EMOTES = ['wave', 'laugh', 'heart', 'fire', 'pick', 'gem'] as const;
+const LEGACY_EMOTE: Record<string, string> = { '👋': 'wave', '😂': 'laugh', '❤️': 'heart', '🔥': 'fire', '⛏️': 'pick', '💎': 'gem' };
 
 const rid = () => Math.random().toString(36).slice(2, 10);
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -270,9 +272,10 @@ function onChat(p: any) {
 
 function onEmote(p: any) {
   const s = useLobby.getState();
-  if (!p || typeof p.id !== 'string' || !(LOBBY_EMOTES as readonly string[]).includes(p.e)) return;
+  const key = typeof p?.e === 'string' ? LEGACY_EMOTE[p.e] ?? p.e : '';
+  if (!p || typeof p.id !== 'string' || !(LOBBY_EMOTES as readonly string[]).includes(key)) return;
   const peer = s.peers[p.id];
-  if (peer) useLobby.setState({ peers: { ...s.peers, [p.id]: { ...peer, emoji: p.e, emojiAt: Date.now() } } });
+  if (peer) useLobby.setState({ peers: { ...s.peers, [p.id]: { ...peer, emoji: key, emojiAt: Date.now() } } });
 }
 
 function onBye(p: any) {
