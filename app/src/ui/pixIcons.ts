@@ -15,6 +15,7 @@ export const PIX = {
   pot: require('../../assets/icons/pot.png'),
   cart: require('../../assets/icons/cart.png'),
   lock: require('../../assets/icons/lock.png'),
+  bot: require('../../assets/icons/bot.png'),
   check: require('../../assets/icons/check.png'),
 } as const;
 export type PixName = keyof typeof PIX;
