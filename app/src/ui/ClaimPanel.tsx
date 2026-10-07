@@ -12,7 +12,7 @@ import { CLAIMS } from '../engine/island';
 import { closeupView } from '../pixel/PixelMine';
 import { useView } from '../pixel/view';
 import { Btn, Frame, T } from './kit';
-import { useDig } from '../game/digStore';
+import { useCave } from '../game/caveStore';
 
 const KIND: Record<string, string> = { cave: 'Cave mouth', scree: 'Scree slope', dig: 'Dig pit', gold: 'Gold stream' };
 
@@ -28,7 +28,7 @@ export function ClaimPanel() {
   const pot = useGame((s) => s.pot);
   const winning = useGame((s) => s.winning);
   const now = useGame((s) => s.now);
-  const swings = useDig((s) => s.dig.swings);
+  const runs = useCave((s) => s.save.runs);
   const endsAt = useGame(roundEndsAt);
   const soloBits = useGame((s) => soloOf(s, s.roundId));
   const top = insets.top + 104;
@@ -127,7 +127,7 @@ export function ClaimPanel() {
               ? '★ Solo spot this round: if it strikes, one wallet on it takes the ORE.'
               : 'If it strikes, everyone on it splits the ORE by the SOL they put in.'}
           </T>
-          <Btn kind="ghost" label={`⛏ DIG HERE · ${swings} SWINGS`} sub="Break rocks for XP while the round runs" onPress={() => useDig.getState().show(focus)} />
+          <Btn kind="ghost" label={`⛏ ENTER THE CAVE · ${runs} ${runs === 1 ? 'RUN' : 'RUNS'}`} sub="Walk your miner in, dig for gold, dodge the bats" onPress={() => useCave.getState().show(focus)} />
           <Btn
             label={action}
             sub={sub}

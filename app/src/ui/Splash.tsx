@@ -4,7 +4,7 @@
  * bundled with the app; the rest is plain Views. Then it lifts away.
  */
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Image, StyleSheet, View } from 'react-native';
+import { Animated, Image, StyleSheet, Text, View } from 'react-native';
 import { useView } from '../pixel/view';
 
 const GLYPHS: Record<string, string[]> = {
@@ -51,6 +51,7 @@ export function Splash({ fontsLoaded }: { fontsLoaded: boolean }) {
     <Animated.View pointerEvents={done ? 'none' : 'auto'} style={[StyleSheet.absoluteFill, styles.root, { opacity: fade }]}>
       <Image source={require('../../assets/brand/logo.png')} style={styles.logo} accessibilityLabel="Gali" />
       <Word word="GALI" />
+      <Text style={styles.tag}>THE ORE MINING GAME</Text>
       <View style={styles.track}>
         <Animated.View style={[styles.bar, { width: fill.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) }]} />
       </View>
@@ -61,6 +62,7 @@ export function Splash({ fontsLoaded }: { fontsLoaded: boolean }) {
 const styles = StyleSheet.create({
   root: { backgroundColor: '#070d20', alignItems: 'center', justifyContent: 'center', gap: 22 },
   logo: { width: 168, height: 168 },
+  tag: { color: '#ffcf4a', fontFamily: 'Jersey15_400Regular', fontSize: 20, letterSpacing: 3, marginTop: -8 },
   track: { width: 180, height: 10, borderWidth: 2, borderColor: '#2a4480', backgroundColor: '#0c1734' },
   bar: { height: '100%', backgroundColor: '#ffcf4a' },
 });

@@ -222,7 +222,7 @@ interface GameState {
   clearSelection: () => void;
   shakePick: () => void;
   bonkMole: () => void;
-  /** XP from the dig game. Local game XP only: it feeds the miner level and nothing else. */
+  /** XP from Cave Run. Local game XP only: it feeds the miner level and nothing else. */
   gainXp: (n: number) => void;
   doEmote: () => void;
   claimQuest: (id: string) => void;

@@ -257,7 +257,10 @@ export function WalletGate() {
       <View style={[styles.center, { backgroundColor: '#040817ee', padding: 20 }]}>
         <View style={styles.intro}>
           <Image source={require('../../assets/brand/wordmark.png')} style={{ width: 220, height: 97, alignSelf: 'center' }} resizeMode="contain" />
-          <T v="display" style={{ fontSize: 24, textAlign: 'center', marginTop: 6 }}>
+          <T v="display" style={{ fontSize: 18, textAlign: 'center', marginTop: 2, color: COLORS.gold, letterSpacing: 1.5 }}>
+            THE ORE MINING GAME
+          </T>
+          <T v="display" style={{ fontSize: 24, textAlign: 'center', marginTop: 8 }}>
             Live on ORE&apos;s board
           </T>
           <T style={{ textAlign: 'center', marginTop: 8, lineHeight: 21, color: COLORS.muted }}>
