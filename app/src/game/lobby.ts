@@ -49,6 +49,7 @@ export type Act =
   | { id: number; at: number; k: 'win'; n: string; sol: number; pts: number }
   | { id: number; at: number; k: 'tip'; n: string; tn: string; a: number; tk: 'SOL' | 'ORE' | 'SKR'; toMe: boolean; mine?: boolean }
   | { id: number; at: number; k: 'xp'; n: string; xp: number }
+  | { id: number; at: number; k: 'play'; n: string; g: 'tunnel' | 'pot' | 'crash'; a: number; tk: 'ORE' | 'SKR'; win: boolean; mine?: boolean }
   | { id: number; at: number; k: 'join'; n: string };
 export const ACT_LIFE_MS = 5200;
 const B58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -206,6 +207,9 @@ function onAct(p: any) {
   else if (p.k === 'xp') {
     const xp = Math.floor(amt(p.xp, 1e5));
     if (xp > 0) pushAct({ k: 'xp', n, xp });
+  } else if (p.k === 'play' && (p.tk === 'ORE' || p.tk === 'SKR') && (p.g === 'tunnel' || p.g === 'pot' || p.g === 'crash')) {
+    const a = amt(p.a, 1e6);
+    if (a > 0) pushAct({ k: 'play', n, g: p.g, a, tk: p.tk, win: p.win === true });
   } else if (p.k === 'tip' && (p.tk === 'SOL' || p.tk === 'ORE' || p.tk === 'SKR')) {
     const tn = cleanName(p.tn);
     const a = amt(p.a, 1e6);
@@ -213,12 +217,13 @@ function onAct(p: any) {
   }
 }
 /** Tell the lobby what this player just did. Cosmetic: a feed line shows to everyone, and nothing here moves money. */
-export function announce(a: { k: 'win'; sol: number; pts: number } | { k: 'xp'; xp: number } | { k: 'tip'; to: string; tn: string; a: number; tk: 'SOL' | 'ORE' | 'SKR' }) {
+export function announce(a: { k: 'win'; sol: number; pts: number } | { k: 'xp'; xp: number } | { k: 'play'; g: 'tunnel' | 'pot' | 'crash'; a: number; tk: 'ORE' | 'SKR'; win: boolean } | { k: 'tip'; to: string; tn: string; a: number; tk: 'SOL' | 'ORE' | 'SKR' }) {
   const name = useName.getState().name;
   if (!name) return;
   const me = useLobby.getState().me;
   if (a.k === 'win') pushAct({ k: 'win', n: name, sol: a.sol, pts: a.pts });
   else if (a.k === 'xp') pushAct({ k: 'xp', n: name, xp: a.xp });
+  else if (a.k === 'play') pushAct({ k: 'play', n: name, g: a.g, a: a.a, tk: a.tk, win: a.win, mine: true });
   else pushAct({ k: 'tip', n: name, tn: a.tn, a: a.a, tk: a.tk, toMe: false, mine: true });
   void chatChannel?.send({ type: 'broadcast', event: 'act', payload: { id: me, nm: name, ...(a.k === 'tip' ? { k: 'tip', to: a.to, tn: a.tn, a: a.a, tk: a.tk } : a) } });
 }
