@@ -693,6 +693,7 @@ export const useGame = create<GameState>((set, get) => {
         const endsAt = c.phase === 'mining' ? chainNow(get().offsetMs) + c.msLeft : 0;
         const spanMs = c.phase === 'waiting' ? (prev?.spanMs ?? LIVE_SPAN_MS) : Math.max(1, Number(c.endSlot - c.startSlot)) * 400;
         set({ liveClock: { roundId, phase: c.phase, endsAt, solo, spanMs }, liveClockError: null });
+        void loadChain().then((ch) => ch.warmBlockhash()).catch(() => {});
         if (prev?.roundId !== roundId) void b.oreSoloMask(roundId).then((mask) => {
           const live = get().liveClock;
           if (live?.roundId === roundId) set({ liveClock: { ...live, solo: mask } });
