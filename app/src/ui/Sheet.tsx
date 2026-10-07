@@ -13,6 +13,7 @@ import { UnclaimedRow } from './Dock';
 import { Market } from './Market';
 import { Bar, Btn, Card, Pill, T } from './kit';
 import { BAR_H, SHEET_TITLE, TabBar, type SheetTab } from './TabBar';
+import { BackPill } from './Lobby';
 
 const ORE_PROGRAM_STR = 'oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv';
 
@@ -29,6 +30,7 @@ export function Sheet({ tab, onTab }: { tab: SheetTab | null; onTab: (t: SheetTa
           <T v="display" style={{ fontSize: 24 }}>
             {tab ? SHEET_TITLE[tab] : ''}
           </T>
+          {tab === 'gear' ? <BackPill door="market" onBefore={close} /> : null}
           <Pressable onPress={close} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close">
             <T v="display" style={{ fontSize: 20, color: COLORS.muted }}>
               ✕

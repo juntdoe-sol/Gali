@@ -20,6 +20,7 @@ import { useView } from '../pixel/view';
 import { GEAR_ICON } from './gearIcons';
 import { T } from './kit';
 import { BAR_H } from './TabBar';
+import { BackPill } from './Lobby';
 
 const PIXEL = { dataSet: { pixelart: '1' } } as object;
 const SFX: Record<string, Sound> = { hit: 'hit', crack: 'crack', pop: 'pop', gem: 'mint', hurt: 'bonk', descend: 'dig', over: 'lose', start: 'select', tick: 'tick', oil: 'claim' };
@@ -126,6 +127,9 @@ export function CaveScreen() {
             dom={{ style: { flex: 1, backgroundColor: '#0a0810' }, scrollEnabled: false, bounces: false, overScrollMode: 'never' } as never}
           />
         ) : null}
+        <View style={[styles.caveBack, { top: insets.top + 8 }]} pointerEvents="box-none">
+          <BackPill door="cave" onBefore={() => useCave.getState().close()} />
+        </View>
       </View>
     </Modal>
   );
@@ -147,4 +151,5 @@ const styles = StyleSheet.create({
   },
   entryCount: { minWidth: 24, height: 24, borderRadius: 12, paddingHorizontal: 6, backgroundColor: COLORS.gold, alignItems: 'center', justifyContent: 'center' },
   screen: { flex: 1, backgroundColor: '#0a0810' },
+  caveBack: { position: 'absolute', left: 12 },
 });

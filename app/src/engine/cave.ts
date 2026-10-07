@@ -1012,11 +1012,11 @@ export class CaveEngine {
     if (runs > 0) {
       this.panel(c, lines, [
         { t: `START RUN - ${runs} LEFT TODAY`, gold: true, go: () => this.begin() },
-        { t: 'BACK TO THE ISLAND', go: () => this.emit({ t: 'close' }) },
+        { t: 'BACK', go: () => this.emit({ t: 'close' }) },
       ]);
     } else {
       this.panel(c, [...lines.slice(0, 1), { t: ' ', c: '#fff' }, { t: 'NO RUNS LEFT TODAY', c: '#ff8a70' }, { t: 'MINE A ROUND FOR +1 RUN', c: '#ffffff' }, { t: '3 FREE RUNS EVERY DAY', c: '#cfd6e6' }], [
-        { t: 'BACK TO THE ISLAND', gold: true, go: () => this.emit({ t: 'close' }) },
+        { t: 'BACK', gold: true, go: () => this.emit({ t: 'close' }) },
       ]);
     }
   }
@@ -1033,6 +1033,6 @@ export class CaveEngine {
     ];
     const again = runs > 0 ? [{ t: `RUN AGAIN - ${runs} LEFT`, gold: true, go: () => this.begin() }] : [];
     if (!runs) lines.push({ t: 'MINE A ROUND FOR +1 RUN', c: '#ffffff' });
-    this.panel(c, lines, [...again, { t: 'BACK TO THE ISLAND', gold: !runs, go: () => this.emit({ t: 'close' }) }]);
+    this.panel(c, lines, [...again, { t: 'BACK', gold: !runs, go: () => this.emit({ t: 'close' }) }]);
   }
 }

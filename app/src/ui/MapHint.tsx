@@ -1,6 +1,6 @@
 /**
  * A one-line coach mark over the map, for the first few seconds of a visit:
- * how to pick a spot and how to dive into one. It goes as soon as you do
+ * how to pick a spot. It goes as soon as you do
  * either, and doesn't come back until the next visit.
  */
 import { useEffect, useRef, useState } from 'react';
@@ -39,7 +39,7 @@ export function MapHint() {
   return (
     <Animated.View pointerEvents="none" style={[styles.pill, { bottom: BAR_H + insets.bottom + 18, opacity: fade }]}>
       <T v="bold" style={styles.text}>
-        Tap a spot to pick it · double tap to dive in
+        Tap a spot to pick it
       </T>
     </Animated.View>
   );
