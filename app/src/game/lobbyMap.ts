@@ -38,7 +38,7 @@ export interface Door {
 }
 
 export const DOORS: Door[] = [
-  { id: 'island', x: 65, y: 26, w: 3, h: 2, label: 'GALI ISLAND', sub: 'Mine ORE' },
+  { id: 'island', x: 66, y: 26, w: 3, h: 3, label: 'GALI ISLAND', sub: 'Mine ORE' },
   { id: 'cave', x: 14, y: 10, w: 3, h: 1, label: 'CAVE RUN', sub: 'Dig for XP' },
   { id: 'market', x: 51, y: 9, w: 3, h: 1, label: 'MARKET', sub: 'Gear and items' },
 ];
@@ -46,10 +46,35 @@ export const DOORS: Door[] = [
 /** Where you appear, as a tile, for each way into the lobby. */
 export const SPAWNS: Record<'start' | DoorId, [number, number]> = {
   start: [36, 35],
-  island: [61, 26],
+  island: [61, 27],
   cave: [15, 13],
   market: [52, 12],
 };
+
+/** Things with a shape of their own: a tent, a stall, the lighthouse. The engine draws each; the tiles under them block. */
+export interface Structure {
+  kind: 'tent' | 'fire' | 'cart' | 'crates' | 'barrel' | 'stall-red' | 'stall-teal' | 'lighthouse' | 'rack' | 'boulder';
+  /** tiles that block: x, y, width, height */
+  at: [number, number, number, number];
+}
+export const STRUCTURES: Structure[] = [
+  { kind: 'tent', at: [8, 14, 3, 2] },
+  { kind: 'fire', at: [12, 15, 1, 1] },
+  { kind: 'tent', at: [5, 17, 3, 2] },
+  { kind: 'cart', at: [19, 12, 2, 1] },
+  { kind: 'crates', at: [11, 12, 1, 1] },
+  { kind: 'rack', at: [20, 14, 2, 1] },
+  { kind: 'stall-red', at: [46, 11, 3, 1] },
+  { kind: 'stall-teal', at: [56, 11, 3, 1] },
+  { kind: 'barrel', at: [49, 10, 1, 1] },
+  { kind: 'barrel', at: [55, 10, 1, 1] },
+  { kind: 'crates', at: [60, 12, 1, 1] },
+  { kind: 'boulder', at: [12, 12, 1, 1] },
+  { kind: 'boulder', at: [18, 12, 1, 1] },
+  { kind: 'lighthouse', at: [59, 17, 1, 1] },
+  { kind: 'crates', at: [63, 26, 1, 1] },
+  { kind: 'barrel', at: [63, 28, 1, 1] },
+];
 
 export interface Tree {
   x: number;
@@ -128,7 +153,7 @@ export function lobbyMap(): Lobby {
   rect(13, 10, 5, 2, ROAD, 0); // the gap you walk through
   // the market hall
   rect(45, 2, 15, 7, HALL, 1);
-  rect(48, 9, 9, 3, PLAZA, 0); // its apron
+  rect(45, 9, 15, 4, PLAZA, 0); // its square
 
   // the plaza, with the fountain in the middle
   for (let y = 19; y <= 38; y++)
@@ -146,18 +171,21 @@ export function lobbyMap(): Lobby {
   };
   road(28, 24, 15, 12); // to the cave: west, then north
   road(40, 20, 52, 12); // to the market: east, then north
-  road(46, 28, 60, 28, 1); // toward the pier
+  road(46, 27, 60, 27, 1); // toward the pier
   // the pier
-  rect(57, 26, 11, 2, PLANK, 0);
+  rect(57, 26, 13, 3, PLANK, 0);
   // little paths for the shore and the pond
   road(36, 38, 36, 46, 1);
+
+  for (const st of STRUCTURES) rect(st.at[0], st.at[1], st.at[2], st.at[3], terrain[lidx(st.at[0], st.at[1])], 1);
 
   // trees: a thick wood round the edge, thinner inside, never on a road, the plaza or a door
   const keep: [number, number, number][] = [
     [36, 28, 14], // plaza
-    [15, 11, 6],
-    [52, 10, 6],
-    [64, 27, 5],
+    [15, 12, 7],
+    [10, 15, 7],
+    [52, 11, 9],
+    [65, 27, 6],
   ];
   const trees: Tree[] = [];
   const decor: Decor[] = [];
@@ -194,7 +222,7 @@ export function lobbyMap(): Lobby {
   rect(31, 22, 2, 1, PLAZA, 1);
   const lamps: [number, number][] = [
     [28, 24], [44, 24], [28, 33], [44, 33], [36, 19], [36, 38],
-    [14, 13], [17, 13], [50, 12], [55, 12], [57, 25], [57, 28], [36, 44],
+    [14, 13], [17, 13], [44, 13], [60, 13], [64, 26], [64, 28], [36, 44],
   ];
   for (const [x, y] of lamps) if (linside(x, y) && !block[lidx(x, y)] && terrain[lidx(x, y)] !== WATER) block[lidx(x, y)] = 1;
 
