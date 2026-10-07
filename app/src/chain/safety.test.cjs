@@ -54,6 +54,13 @@ test('wallet cancellation never opens a second authorization prompt', async () =
   await assert.rejects(h.c.connectWallet(), /cancelled/);
   assert.equal(h.authCalls(), 1);
 });
+test('a stale saved token ("authorization request failed") retries once without the token', async () => {
+  const h = client({ authError: Object.assign(new Error('authorization request failed'), { code: -1 }) });
+  const owner = await h.c.connectWallet();
+  assert.equal(owner.toBase58(), A.publicKey.toBase58());
+  assert.equal(h.authCalls(), 2);
+  assert.equal(h.data.get('gali-mwa-auth'), 'fresh');
+});
 test('cached wallet rebuilds against fresh round after authorization', async () => {
   const h = client();
   await h.c.connectWallet();
