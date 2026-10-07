@@ -432,7 +432,7 @@ function ProPanel({ compact }: { compact: boolean }) {
           <Row
             icon="▦"
             label="Spots"
-            info="Tap spots on the map to pick them (double tap or hold one to dive in), take All 25, or Smart: 4, 8, 15 or 20 spots at random. Tap a count again for a new set; autopilot rolls new spots every round."
+            info="Tap spots on the map to pick them, take All 25, or Smart: 4, 8, 15 or 20 spots at random. Tap a count again for a new set; autopilot rolls new spots every round."
             right={
               <>
                 <T v="black" style={{ fontSize: 15, color: blocks ? COLORS.text : COLORS.muted, marginRight: 4 }}>

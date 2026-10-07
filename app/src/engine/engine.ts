@@ -1044,7 +1044,6 @@ export class Engine {
         this.cancelPress();
       } else if (this.pointers.size === 1 && this.mode === 'island') {
         this.cancelPress();
-        this.pressTimer = setTimeout(() => this.longPress(p.x, p.y), 430);
       }
     });
     cv.addEventListener('pointermove', (e) => {
@@ -1112,17 +1111,6 @@ export class Engine {
     if (this.tapTimer) clearTimeout(this.tapTimer);
     this.tapTimer = null;
   }
-  /** Press and hold a spot to dive into it: the same as a double tap, for anyone who misses one. */
-  private longPress(x: number, y: number) {
-    this.pressTimer = null;
-    if (this.moved || this.mode !== 'island') return;
-    const [mx, my] = this.cam.toMap(x, y);
-    const hit = claimForTap(mx, my);
-    if (hit < 0) return;
-    this.longPressed = true;
-    this.cancelTap();
-    this.setFocus(hit);
-  }
   /** A single tap on a spot picks or unpicks it. Ignored while a round is being revealed. */
   private pick(hit: number) {
     this.tapTimer = null;
@@ -1148,15 +1136,10 @@ export class Engine {
     }
     if (this.mode !== 'island') return;
     const [mx, my] = this.cam.toMap(x, y);
-    // double tap: on a spot it dives in, anywhere else it zooms in or back out
-    if (now - this.lastTap.t < 280 && Math.hypot(x - this.lastTap.x, y - this.lastTap.y) < 24) {
-      const prev = this.lastTap.hit;
+    // double tap on open ground zooms in or back out. On a spot it is just two taps: no dive.
+    if (now - this.lastTap.t < 280 && this.lastTap.hit < 0 && Math.hypot(x - this.lastTap.x, y - this.lastTap.y) < 24) {
       this.lastTap.t = 0;
       this.cancelTap();
-      if (prev >= 0) {
-        this.setFocus(prev);
-        return;
-      }
       if (this.cam.userZoomed) this.cam.home(360);
       else {
         this.cam.userZoomed = true;
