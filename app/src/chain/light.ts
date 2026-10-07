@@ -44,6 +44,8 @@ export const RPC_URL =
   process.env.EXPO_PUBLIC_RPC_URL || (oreLive ? 'https://api.mainnet-beta.solana.com' : 'https://api.devnet.solana.com');
 // Enable only after the Bounded read proxy is deployed and verified. No secrets.
 const READ_RPC_URL = oreLive ? process.env.EXPO_PUBLIC_RPC_READ_URL : undefined;
+const PUBLIC_MAINNET_RPC = 'https://api.mainnet-beta.solana.com';
+const MAINNET_FALLBACK = oreLive && RPC_URL !== PUBLIC_MAINNET_RPC;
 const PROXIED_READS = new Set([
   'getSlot', 'getBlockTime', 'getBlockHeight', 'getLatestBlockhash',
   'getBalance', 'getTokenAccountBalance', 'getAccountInfo', 'getSignatureStatuses', 'sendTransaction',
@@ -97,13 +99,29 @@ export const retryingFetch: typeof fetch = async (input, init) => {
     }
   }
   let last: Response | undefined;
-  for (let i = 0; i < 4; i++) {
-    const res = await timedFetch(input as RequestInfo, init as RequestInit, 10_000);
-    if (res.status !== 429) return res;
-    last = res;
-    await wait(400 * 2 ** i);
+  try {
+    for (let i = 0; i < 4; i++) {
+      const res = await timedFetch(input as RequestInfo, init as RequestInit, 10_000);
+      if (res.status !== 429 && res.status < 500 && res.status !== 403) return res;
+      last = res;
+      await wait(400 * 2 ** i);
+      if (res.status >= 500 || res.status === 403) break; // refused or down: do not hammer it, use the last resort
+    }
+  } catch (e) {
+    // a browser blocks cross-origin calls the provider does not allow; fall through to the last resort
+    if (!MAINNET_FALLBACK || String(input) !== RPC_URL) throw e;
   }
-  return last as Response;
+  // last resort, mainnet only: the public endpoint is rate-limited but keeps the board alive when the proxy
+  // and the provider are both unreachable
+  if (MAINNET_FALLBACK && String(input) === RPC_URL && typeof init?.body === 'string') {
+    try {
+      return await timedFetch(PUBLIC_MAINNET_RPC, init as RequestInit, 10_000);
+    } catch {
+      /* fall through */
+    }
+  }
+  if (last) return last;
+  return timedFetch(input as RequestInfo, init as RequestInit, 10_000);
 };
 
 /** A bare JSON-RPC call, for the one read the app makes before the chain code has loaded. */
