@@ -1,5 +1,7 @@
 # Gali
 
+**The ORE Mining Game**
+
 A pixel-art mining game for Solana Seeker, played on [ORE](https://ore.supply)'s own board.
 
 ORE runs a 25-square mining round every 200 slots (about 80 seconds). Gali draws those 25 squares as spots on a pixel island. Players put SOL on the spots they want. When their spot strikes gold they mine $ORE. ORE keeps a small fee each round and returns the rest of the SOL. 1 round in 500, two jackpots pay at once: ORE's own motherlode and Gali's SKR pool.
@@ -18,7 +20,7 @@ Built for **CLOCK IN**, the Solana Mobile hackathon. Submissions close 8 Oct 202
 Be clear about what runs today:
 
 - **Gali is live on Solana mainnet.** Connect a wallet at galiisland.bounded.page or in the APK and you play ORE's real board. Each deploy and claim is a plain ORE instruction signed by your own wallet: no Gali program, no session key, no autopilot. A round is capped at 0.5 SOL, and an 18+ real-money notice comes before the wallet opens. Deploys and claims have been run with real SOL.
-- **The free daily expedition** needs no wallet. It is a separate dig-and-extract challenge with three tools. It has no wager, no token rewards and no effect on ORE odds or payouts.
+- **The Cave Run mini-game** needs no wallet. It is a separate dig-and-extract challenge with three tools. It has no wager, no token rewards and no effect on ORE odds or payouts.
 - **Chain reads go through a read-only proxy** (`app/rpc-backend`) that allows eight RPC methods. If the proxy is rate-limited or down, the app reads from the direct endpoint instead.
 - **The Gali program** (`programs/gali`) adds points, streaks, the SKR jackpot, gear and staking. It is written for ORE's board and tested against a mock of ORE's accounts. It is not deployed yet, so those parts are not live.
 - **The Gear Market** is a design preview. It shows gear as tradeable NFTs with sample listings. Nothing in it is on chain.

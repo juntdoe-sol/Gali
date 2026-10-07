@@ -134,7 +134,7 @@ export function Btn({
         kind === 'gold' && styles.goldBtn,
         kind === 'skr' && styles.skrBtn,
         kind === 'ghost' && styles.ghost,
-        { opacity: disabled ? 0.5 : 1, transform: [{ translateY: pressed ? 2 : 0 }, { scale: pressed ? 0.985 : 1 }] },
+        { opacity: disabled ? 0.5 : 1, transform: [{ translateY: pressed ? 3 : 0 }, { scale: pressed ? 0.96 : 1 }] },
         pressed || kind === 'ghost' ? null : bright && !disabled ? styles.brightShadow : styles.shadow,
         style,
       ]}
