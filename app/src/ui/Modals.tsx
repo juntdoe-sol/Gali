@@ -50,6 +50,11 @@ export function ResultPop() {
                   </T>
                 )}
                 <SolLine res={res} dark={false} />
+                {res.points > 0 ? (
+                  <T v="black" style={{ fontSize: 16, color: '#fff3c0' }}>
+                    +{res.points.toLocaleString()} pts
+                  </T>
+                ) : null}
               </>
             ) : res.won ? (
               <>
@@ -57,6 +62,11 @@ export function ResultPop() {
                   STRUCK GOLD!
                 </T>
                 <SolLine res={res} dark big />
+                {res.points > 0 ? (
+                  <T v="black" style={{ fontSize: 16, color: '#4a1f00' }}>
+                    +{res.points.toLocaleString()} pts
+                  </T>
+                ) : null}
               </>
             ) : (
               <>
