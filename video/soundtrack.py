@@ -17,9 +17,19 @@ Arrangement (beats):
   32-36  tension      rumble, rising arpeggio, snare roll
   36     STRUCK GOLD  the drop: full band, hook up an octave, coin shower
   40-52  underground  muffled groove, clinks as percussion, motherlode build at 48
-  52-60  living       breakdown: pads, bells, no drums; build into
-  60-68  gear up      bright groove, the hook again, a pop for every item
-  68-81  end          the logo hits, one accent per line, last chord rings out
+  52-60  living       breakdown: pads, bells, no drums
+  60-64  autopilot    light groove, a coin for every round sent
+  64-72  lobby        full band, the town's own brighter tune
+  72-80  talking      the band sits back; a pop for every line and emote
+  80-92  dance        four on the floor, claps, octave bass; thunder and rain at the end
+  92-96  tip          half time, three coins
+  96-104 tour         full band, a whoosh on every pan
+ 104-112 Cave Run     muffled; the engine's hits and cracks are the percussion
+ 112-116 games row    half time, a build
+ 116-140 mini games   three rounds of eight beats: ticking build, reveal on the bar, payoff
+ 140-144 checked      calm, a bell per step
+ 144-152 gear up      bright groove, the hook again, a pop for every item
+ 152-165 end          the logo hits, one accent per line, last chord rings out
 """
 import json
 import sys
@@ -32,7 +42,7 @@ SR = 44100
 BEAT = 0.54
 BAR = BEAT * 4
 b = lambda n: n * BEAT  # noqa: E731
-TOTAL = b(81)
+TOTAL = b(165)
 N = int(SR * TOTAL) + SR
 rng = np.random.default_rng(7)
 
@@ -225,6 +235,58 @@ def coin(at, m=83, g=0.07, pan=0.0):
     blip(at + 0.06, m + 5, 0.2, g, pan)
 
 
+def clap(at, g=0.3):
+    """A hand clap: three quick bursts of filtered noise and a short tail."""
+    n = int(0.2 * SR)
+    t = np.arange(n) / SR
+    e = np.zeros(n)
+    for d in (0.0, 0.011, 0.023):
+        e += np.where(t >= d, np.exp(-(t - d) * 90), 0) * 0.6
+    e += np.where(t >= 0.03, np.exp(-(t - 0.03) * 22), 0)
+    s = hp(lp(noise(0.2), 0.55), 0.25) * e
+    put('drums', s, at, g, 0.1, 0.3)
+
+
+def glide(at, d, m0, m1, g=0.06, curve=1.0, duty=0.25):
+    """A pulse whose pitch slides from one note to another: the cart climbing, or going over."""
+    n = int(d * SR)
+    k = (np.arange(n) / n) ** curve
+    f = midi(m0) * (midi(m1) / midi(m0)) ** k
+    ph = np.cumsum(f) / SR
+    s = lp(np.where((ph % 1) < duty, 1.0, -1.0), 0.3) * env(n, 0.01, 0.05, 0.9, 0.05)
+    put('music', s, at, g, 0, 0.25)
+
+
+def thunder(at, g=0.5):
+    d = 2.6
+    t = np.arange(int(d * SR)) / SR
+    s = lp(lp(noise(d), 0.03), 0.05) * 9 * np.exp(-t * 1.6) * (1 + 0.5 * np.sin(2 * np.pi * 7 * t))
+    put('sfx', s, at, g, -0.3, 0.4)
+    put('sfx', np.roll(s, 900), at, g, 0.3)
+    crackle = hp(noise(0.25), 0.5) * np.exp(-np.arange(int(0.25 * SR)) / SR * 30)
+    put('sfx', crackle, at, g * 0.35, 0.2, 0.4)
+
+
+def rainbed(start, end, g=0.035):
+    d = end - start
+    t = np.arange(int(d * SR)) / SR
+    e = np.clip(t / 1.0, 0, 1) * np.clip((d - t) / 1.2, 0, 1)
+    put('sfx', hp(lp(noise(d), 0.5), 0.35) * e, start, g, -0.4)
+    put('sfx', hp(lp(noise(d), 0.5), 0.35) * e, start, g, 0.4)
+
+
+def stab(tones, at, dur=0.14, g=0.03):
+    for k, m in enumerate(tones):
+        n = int(dur * SR)
+        s = lp(pulse(midi(m + 12), dur, 0.5) * env(n, 0.002, 0.05, 0.5, 0.04), 0.4)
+        put('music', s, at, g, (-0.4, 0.4, 0.0)[k % 3], 0.3)
+
+
+def rumble(at, d, g=0.45, rise=True):
+    t = np.arange(int(d * SR)) / SR
+    put('sfx', lp(noise(d), 0.02) * 6 * ((t / d) if rise else np.exp(-t * 2.5)), at, g)
+
+
 # ---------------- harmony ----------------
 # C minor: i - VI - III - VII, a bar each
 CHORDS = [(48, [60, 63, 67]), (44, [56, 60, 63]), (51, [58, 63, 67]), (46, [58, 62, 65])]
@@ -251,6 +313,95 @@ def play_hook(start, end, hook, g=0.07, octave=0):
             if at < end - 0.05:
                 lead(m + octave, at, min(b(ln), end - at) - 0.03, g)
         t0 += b(8)
+
+TOWN = [  # the lobby's tune: brighter, up in the relative major
+    (0, 0.5, 75), (0.5, 0.5, 79), (1, 1, 82), (2, 0.5, 80), (2.5, 0.5, 79), (3, 1, 75),
+    (4, 0.5, 77), (4.5, 0.5, 79), (5, 0.5, 80), (5.5, 0.5, 79), (6, 1, 77), (7, 1, 74),
+]
+DANCE = [  # the dance floor riff: short, syncopated, easy to nod to
+    (0, 0.25, 72), (0.75, 0.25, 72), (1.5, 0.5, 75), (2, 0.25, 72), (2.75, 0.25, 70), (3.5, 0.5, 67),
+    (4, 0.25, 72), (4.75, 0.25, 72), (5.5, 0.5, 77), (6, 0.5, 75), (6.5, 0.5, 72), (7, 1, 70),
+]
+
+
+def disco(start, end):
+    """Four on the floor, a clap on two and four, hats off the beat, a bass that bounces in octaves."""
+    t = start
+    while t < end - 1e-6:
+        beat = int(round((t - start) / BEAT))
+        root, tones = chord_at(t)
+        kick(t, 1.0)
+        if beat % 2 == 1:
+            clap(t, 0.3)
+            snare(t, 0.18, 0.2)
+        hat(t + b(0.5), 0.13, -0.3, open_=True)
+        for k in range(4):
+            hat(t + b(k * 0.25), 0.05 + 0.03 * (k % 2), 0.3)
+        bass(root - 12, t, b(0.25) - 0.01, 0.3)
+        bass(root, t + b(0.5), b(0.25) - 0.01, 0.26)
+        bass(root - 12, t + b(0.75), b(0.2), 0.2)
+        stab(tones, t + b(0.5), 0.12, 0.028)
+        t += BEAT
+
+
+def game_round(t0, kind, events):
+    """One mini game: a ticking build while stakes are open, the reveal on the bar, then the payoff."""
+    groove(t0, t0 + b(3.5), 'light', True, hats=True)
+    pads(t0, t0 + b(4), 0.03, 0.08)
+    whoosh(t0 - 0.1, 0.4, True, 0.22)
+    taps = (1.0, 1.25, 1.75) if kind == 'tunnel' else (1.25, 1.75) if kind == 'pot' else (0.75, 1.25, 1.75)
+    for k, u in enumerate(taps):
+        _, tones = chord_at(t0 + b(u))
+        blip(t0 + b(u), tones[k % 3] + 24, 0.05, 0.08, 0.2)
+    coin(t0 + b(1.75) + 0.04, 86, 0.07)
+    for k in range(12):  # other miners' stakes arriving
+        blip(t0 + b(0.4 + k * 0.26), 72 + [0, 3, 7, 10, 12][k % 5], 0.03, 0.03, (k % 5 - 2) * 0.25)
+    for k in range(8):  # the clock runs down
+        arp_note(60 + [0, 3, 7, 10, 12, 15, 19, 22][k], t0 + b(2 + k * 0.25), b(0.25), 0.02 + 0.03 * k / 8)
+    riser(t0 + b(2.5), b(1.5), 0.2)
+    roll(t0 + b(3.5), t0 + b(4), 0.3)
+    r = t0 + b(4)
+    if kind == 'tunnel':
+        kick(r, 1.0); boom(r, 0.95); crash(r, 0.35, 2.4); rumble(r, 1.6, 0.6, rise=False)
+        for k in range(10):
+            clink(r + 0.05 + k * 0.045, 0.12)
+        for k, m in enumerate((67, 63, 60, 55, 48)):
+            lead(m, r + k * 0.06, 0.4, 0.05, 0.3 if k % 2 else -0.3, 0.5, 0.3, 0.25)
+        groove(r, t0 + b(8), 'full', True)
+        pads(r, t0 + b(8), 0.035, 0.12)
+        play_hook(r, t0 + b(8), HOOK, 0.055)
+        for k in range(14):
+            coin(r + b(0.75) + k * 0.07, 84 + (k % 5) * 2, 0.03, (k % 5 - 2) * 0.25)
+    elif kind == 'pot':
+        for k in range(14):  # the wheel ticking round, slowing
+            blip(t0 + b(3.0) + (1 - (1 - k / 14) ** 2.2) * b(1.0), 84, 0.03, 0.05)
+        kick(r, 1.0); boom(r, 0.8); crash(r, 0.4, 2.8)
+        for k, m in enumerate((63, 67, 70, 75, 79, 82, 87)):
+            bell(m, r + k * 0.05, 1.3, 0.04, (k - 3) * 0.15)
+            lead(m, r + k * 0.05, 0.45 - k * 0.03, 0.045, 0.3 if k % 2 else -0.3)
+        for k in range(40):
+            coin(r + 0.1 + float(rng.uniform(0, b(2.6))), 84 + int(rng.integers(0, 12)), 0.026, float(rng.uniform(-0.6, 0.6)))
+        groove(r, t0 + b(8), 'full', True, arps=True)
+        pads(r, t0 + b(8), 0.04, 0.14)
+        play_hook(r, t0 + b(8), HOOK_B, 0.055)
+    else:
+        go, cash, bust = t0 + b(4), t0 + b(5.25), t0 + b(6.25)
+        kick(go, 0.9); crash(go, 0.2)
+        glide(go, bust - go, 57, 84, 0.06, 1.3)
+        glide(go, bust - go, 45, 72, 0.04, 1.3, 0.5)
+        k, at = 0, go
+        while at < bust:  # the wheels on the rails, faster and faster
+            hat(at, 0.09, 0.3 if k % 2 else -0.3)
+            kick(at, 0.3)
+            at += b(0.25) * (1 - 0.6 * (at - go) / (bust - go))
+            k += 1
+        bell(91, cash, 1.0, 0.06); bell(96, cash + 0.07, 1.0, 0.05); coin(cash, 88, 0.08)
+        kick(bust, 1.0); boom(bust, 1.0); crash(bust, 0.42, 2.6); rumble(bust, 1.2, 0.55, rise=False)
+        glide(bust, 0.7, 84, 40, 0.07, 0.6)
+        snare(bust, 0.5)
+        groove(t0 + b(6.5), t0 + b(8), 'half', True)
+        pads(bust, t0 + b(8), 0.04, 0.1)
+    whoosh(t0 + b(7.25), 0.5, True, 0.25)
 
 
 def groove(start, end, style='full', bassline=True, arps=False, hats=True):
@@ -374,7 +525,7 @@ def score(tl, events):
         clink(at, 0.14)
     # the miners on the island dig too, further off
     for e2 in events:
-        if e2['name'] == 'hit' and not (tl['dive'] <= e2['t'] < tl['exit']) and e2['t'] < tl['shutIn']:
+        if e2['name'] == 'hit' and not (tl['dive'] <= e2['t'] < tl['exit']) and e2['t'] < tl['shutIn'] and not e2['name'].startswith(('cave:', 'town:')):
             clink(e2['t'], 0.05)
     # motherlode build and burst
     riser(tl['ml'], tl['mlFull'] - tl['ml'], 0.2)
@@ -392,40 +543,151 @@ def score(tl, events):
     bells = [(0, 79), (1.5, 77), (2, 75), (4, 74), (5.5, 75), (6, 72)]
     for bt, m in bells:
         bell(m, b(53 + bt), 1.1, 0.04, 0.2)
-    riser(b(58), b(2), 0.2)
-    roll(b(58.5), b(60), 0.25)
+    riser(b(58.5), b(1.5), 0.14)
+    # 60 - 64: autopilot, the island at night: a round on every half beat
+    kick(b(60), 0.8); crash(b(60), 0.16)
+    groove(b(60), b(64), 'light', True, arps=True)
+    pads(b(60), b(64), 0.035, 0.1)
+    for k, at in enumerate(tl['autoTicks']):
+        coin(at, 79 + k * 2, 0.06, (k - 2.5) * 0.15)
+        kick(at, 0.4)
+    roll(b(63), b(64), 0.26)
     whoosh(tl['shutIn'], b(0.5), True, 0.25)
-    # 60 - 68: gear up
-    kick(b(60), 0.9); crash(b(60), 0.2)
-    groove(b(60), b(68), 'full', True)
-    pads(b(60), b(68), 0.028)
-    play_hook(b(60), b(68), HOOK_B, 0.06)
+    # 64 - 72: the lobby
+    kick(b(64), 1.0); crash(b(64), 0.28)
+    groove(b(64), b(72), 'full', True, arps=True)
+    pads(b(64), b(72), 0.03, 0.12)
+    play_hook(b(64), b(72), TOWN, 0.062)
+    for k in range(26):  # the town filling up
+        blip(b(66.5) + k * b(3) / 26, 72 + [0, 3, 7, 10, 12, 15][k % 6], 0.03, 0.028, (k % 5 - 2) * 0.25)
+    # 72 - 80: talking: the band sits back, every line and emote is a little pop
+    groove(b(72), b(80), 'light', True)
+    pads(b(72), b(80), 0.035, 0.1)
+    play_hook(b(72), b(80), TOWN, 0.035)
+    for at in tl['says']:
+        blip(at, 79, 0.05, 0.08, -0.2); blip(at + 0.07, 84, 0.07, 0.08, -0.2)
+    for k, at in enumerate(tl['emotes']):
+        _, tones = chord_at(at)
+        blip(at, tones[k % 3] + 24, 0.05, 0.06, 0.3)
+    riser(b(78), b(2), 0.22)
+    roll(b(79), b(80), 0.3)
+    # 80 - 92: the dance
+    d = tl['dance']
+    kick(d, 1.0); boom(d, 0.7); crash(d, 0.35, 2.4)
+    disco(b(80), b(92))
+    pads(b(80), b(92), 0.03, 0.14)
+    play_hook(b(80), b(88), DANCE, 0.07)
+    play_hook(b(88), b(92), DANCE, 0.07, 12)
+    for at in (tl['dance2'], tl['dance3']):
+        crash(at, 0.28); boom(at, 0.5)
+        roll(at - b(0.5), at, 0.26)
+        for k, m in enumerate((72, 75, 79, 84)):
+            lead(m, at + k * 0.04, 0.3, 0.04, 0.3 if k % 2 else -0.3)
+    for bt, ln, m in COUNTER:
+        lead(m + 12, b(84 + bt), b(ln) - 0.05, 0.028, -0.4, 0.5, 0.3, 0.2)
+        lead(m + 12, b(88 + bt / 2), b(ln / 2) - 0.05, 0.028, 0.4, 0.5, 0.3, 0.2)
+    rainbed(tl['rain'], tl['dawn'][0] + b(1.5), 0.03)
+    for at in tl['bolts']:
+        thunder(at + 0.05, 0.4)
+    whoosh(tl['danceOut'], 0.45, False, 0.22)
+    # 92 - 96: the tip: a breath, and three coins
+    groove(b(92), b(96), 'half', True)
+    pads(b(92), b(96), 0.045, 0.12)
+    for k, at in enumerate(tl['tipCoins']):
+        coin(at, 84 + k * 3, 0.085, (k - 1) * 0.3)
+        bell(84 + k * 3, at, 0.8, 0.03)
+    for bt, m in ((0, 79), (1.5, 77), (2.5, 75)):
+        bell(m, b(92 + bt), 1.0, 0.035, 0.2)
+    roll(b(95.5), b(96), 0.24)
+    # 96 - 104: the tour: full band, a whoosh on every pan
+    crash(b(96), 0.22)
+    groove(b(96), b(103.5), 'full', True, arps=True)
+    pads(b(96), b(104), 0.03, 0.12)
+    play_hook(b(96), b(103.5), HOOK_B, 0.055)
+    for at in tl['stops']:
+        whoosh(at, b(0.9), True, 0.26)
+        _, tones = chord_at(at + b(0.9))
+        for k, m in enumerate(tones):
+            bell(m + 24, at + b(0.9) + k * 0.03, 0.7, 0.03, (k - 1) * 0.3)
+    whoosh(tl['caveIn'] - 0.05, b(0.5), False, 0.36)
+    # 104 - 112: Cave Run: muffled, and the digging is the rhythm again
+    c0, c1 = tl['cave'], tl['caveExit']
+    groove(b(104), b(111.5), 'light', True, hats=False)
+    pads(b(104), b(112), 0.03, 0.05)
+    for k in range(0, 8, 2):
+        bell(72 + [0, 3, 7, 10][k // 2], b(104 + k + 1), 0.9, 0.025, 0.3)
+    for e2 in events:
+        if not (c0 - 0.3 <= e2['t'] < c1):
+            continue
+        n = e2['name']
+        if n == 'cave:hit':
+            clink(e2['t'], 0.15)
+        elif n == 'cave:crack':
+            clink(e2['t'], 0.2); kick(e2['t'], 0.5)
+        elif n in ('cave:gem', 'cave:oil'):
+            coin(e2['t'], 88, 0.07)
+        elif n == 'cave:pop':
+            blip(e2['t'], 76, 0.08, 0.09)
+        elif n == 'cave:hurt':
+            blip(e2['t'], 50, 0.15, 0.1)
+        elif n == 'cave:descend':
+            whoosh(e2['t'], 0.5, False, 0.25)
+    whoosh(c1 - 0.45, 0.5, True, 0.35)
+    # 112 - 116: the games row
+    kick(b(112), 1.0); crash(b(112), 0.3); boom(b(112), 0.6)
+    groove(b(112), b(116), 'half', True, arps=True)
+    pads(b(112), b(116), 0.04, 0.12)
+    for k, m in enumerate((72, 75, 79)):
+        for dd in (0, 7, 12):
+            lead(m + dd, b(113 + k * 0.5), b(0.45), 0.03, (k - 1) * 0.4, 0.5, 0.35, 0.3)
+    roll(b(115), b(116), 0.3)
+    # 116 - 140: three games, eight beats each
+    game_round(tl['tunnel'], 'tunnel', events)
+    game_round(tl['pot'], 'pot', events)
+    game_round(tl['crash'], 'crash', events)
+    # 140 - 144: how a round is checked: calm, a bell for every step
+    f = tl['fair']
+    pads(f, f + b(4), 0.05, 0.12)
+    groove(f, f + b(4), 'none', True, arps=True, hats=False)
+    for k, u in enumerate((0.6, 1.35, 2.1)):
+        bell(75 + (0, 4, 7)[k] + (0 if k < 2 else 5), f + b(u), 1.0, 0.045, (k - 1) * 0.3)
+    for k, m in enumerate((79, 84, 87, 91)):
+        bell(m, f + b(2.4) + k * 0.05, 1.4, 0.035, (k - 1.5) * 0.2)
+    riser(f + b(2.5), b(1.5), 0.18)
+    roll(f + b(3.25), f + b(4), 0.25)
+    whoosh(tl['shut2'], b(0.5), True, 0.25)
+    # 144 - 152: gear up
+    G = tl['gear']
+    kick(G, 0.9); crash(G, 0.2)
+    groove(G, G + b(8), 'full', True)
+    pads(G, G + b(8), 0.028)
+    play_hook(G, G + b(8), HOOK_B, 0.06)
     for row, n in enumerate((6, 6, 5, 4)):
         for col in range(n):
-            at = tl['gear'] + b(0.5) + b(row) + col * b(0.125)
+            at = G + b(0.5) + b(row) + col * b(0.125)
             _, tones = chord_at(at)
             blip(at, tones[col % 3] + 24, 0.045, 0.04, (col - 2.5) * 0.15)
     for k in range(21):
         bell(84 + [0, 3, 7, 10][k % 4], tl['glint'] + k * b(0.125), 0.4, 0.015, (k % 7 - 3) * 0.15)
     whoosh(tl['gearOut'] + 0.2, 0.5, True, 0.25)
-    roll(b(67), b(68), 0.28)
-    # 68: the logo, the promise, the last chord
+    roll(G + b(7), G + b(8), 0.28)
+    # 152: the logo, the promise, the last chord
     e = tl['end']
     kick(e, 1.0); boom(e, 0.8); crash(e, 0.38, 3.0)
-    groove(b(68), b(76), 'half', True, arps=True)
-    pads(b(68), b(76), 0.04, 0.12)
+    groove(e, e + b(8), 'half', True, arps=True)
+    pads(e, e + b(8), 0.04, 0.12)
     for at, m in ((tl['line1'], 60), (tl['line2'], 63), (tl['line3'], 67)):
-        for d in (0, 7, 12):
-            lead(m + d, at, b(0.9), 0.03, 0, 0.5, 0.35, 0.3)
+        for dd in (0, 7, 12):
+            lead(m + dd, at, b(0.9), 0.03, 0, 0.5, 0.35, 0.3)
         kick(at, 0.45)
     coin(tl['badge'], 88, 0.07)
-    lead(72, b(74), b(0.5), 0.05); lead(75, b(74.5), b(0.5), 0.05); lead(79, b(75), b(1), 0.05)
+    lead(72, e + b(6), b(0.5), 0.05); lead(75, e + b(6.5), b(0.5), 0.05); lead(79, e + b(7), b(1), 0.05)
     # the last chord rings out
     for m in (36, 48, 55, 60, 63, 67, 74):
-        pad([m], b(76), b(5), 0.045, 0.1)
+        pad([m], e + b(8), b(5), 0.045, 0.1)
     for k, m in enumerate((72, 75, 79, 84, 87)):
-        bell(m, b(76) + k * 0.09, 2.2, 0.035, (k - 2) * 0.2)
-    kick(b(76), 0.8); crash(b(76), 0.25, 3.5)
+        bell(m, e + b(8) + k * 0.09, 2.2, 0.035, (k - 2) * 0.2)
+    kick(e + b(8), 0.8); crash(e + b(8), 0.25, 3.5)
 
 
 # ---------------- mix ----------------
@@ -474,10 +736,11 @@ def master(tl):
     mix = BUS['drums'] * 0.95 + BUS['bass'] * duck * 0.9 + BUS['music'] * duck + BUS['sfx'] * 0.9
     mix += reverb(SEND) * 0.35
     # underground: roll the top off everything but the clinks and the effects
-    a, c = int(tl['dive'] * SR), int(tl['exit'] * SR)
-    for ch in range(2):
-        seg = mix[a:c, ch] - BUS['sfx'][a:c, ch] * 0.9
-        mix[a:c, ch] = lp(seg, 0.18) * 1.15 + BUS['sfx'][a:c, ch] * 0.9
+    for lo, hi in ((tl['dive'], tl['exit']), (tl['cave'], tl['caveExit'])):
+        a, c = int(lo * SR), int(hi * SR)
+        for ch in range(2):
+            seg = mix[a:c, ch] - BUS['sfx'][a:c, ch] * 0.9
+            mix[a:c, ch] = lp(seg, 0.18) * 1.15 + BUS['sfx'][a:c, ch] * 0.9
     mix = mix[: int(tl['total'] * SR)]
     n = len(mix)
     t = np.arange(n) / SR
@@ -499,9 +762,7 @@ def main():
         d = json.load(open(sys.argv[2]))
         tl, events = d['timeline'], d['events']
     if tl is None:
-        tl = {k: b(v) for k, v in dict(hit=4, wipe=7.5, wave=12.5, deploy=24.5, locked=31, strike=36, dive=39.5, ml=45.5, mlFull=48, exit=52, shutIn=59.5, gear=60, glint=64, gearOut=67.25, end=68, line1=70, line2=71, line3=72, badge=74, fade=79, total=81).items()}
-        tl['picks'] = [b(x) for x in (17, 18, 19, 20, 21)]
-        tl['count'] = [b(x) for x in (28, 29, 30)]
+        raise SystemExit('usage: python3 soundtrack.py out.wav render.events.json (the render writes the timeline)')
     score(tl, events)
     pcm = (master(tl) * 32767).astype(np.int16)
     with wave.open(out, 'wb') as w:
