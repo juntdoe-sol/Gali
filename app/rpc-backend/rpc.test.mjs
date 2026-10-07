@@ -12,11 +12,24 @@ globalThis.fetch = async (url, init) => {
   return Response.json({ jsonrpc: '2.0', id: 1, result: 42 });
 };
 
-const denied = await rpc(request(message('sendTransaction', ['unsigned'])), ctx);
+const denied = await rpc(request(message('requestAirdrop', ['unsigned'])), ctx);
 assert.equal(denied.status, 400);
 assert.equal((await denied.json()).error.code, -32601);
 assert.equal(calls.length, 0, 'mutations never reach the provider');
 console.log('RPC deny boundary passed');
+
+// relay: only a well-formed base64 transaction with fixed options
+const b64 = 'A'.repeat(300);
+for (const bad of [['unsigned'], [b64], [b64, { encoding: 'base58' }], [b64, { encoding: 'base64', extra: 1 }], ['!'.repeat(300), { encoding: 'base64' }], ['A'.repeat(1700), { encoding: 'base64' }], [b64, { encoding: 'base64', maxRetries: 99 }]]) {
+  const r = await rpc(request(message('sendTransaction', bad)), ctx);
+  assert.equal(r.status, 400, 'malformed sendTransaction refused');
+}
+assert.equal(calls.length, 0, 'refused sends never reach the provider');
+const sent = await rpc(request(message('sendTransaction', [b64, { encoding: 'base64', skipPreflight: false, preflightCommitment: 'confirmed', maxRetries: 0 }])), ctx);
+assert.equal(sent.status, 200);
+assert.equal(calls.length, 1);
+calls = [];
+console.log('RPC signed-transaction relay passed');
 
 const allowed = await rpc(request(message('getSlot', [{ commitment: 'confirmed' }])), ctx);
 assert.equal(allowed.status, 200);
@@ -43,13 +56,13 @@ for (const [method, params] of [
   ['getTokenAccountBalance', [pubkey]], ['getAccountInfo', [pubkey, { encoding: 'base64' }]],
   ['getLatestBlockhash', []], ['getBlockHeight', []], ['getBlockTime', [42]],
   ['getSignatureStatuses', [['1'.repeat(64)], { searchTransactionHistory: false }]],
+  ['getSignatureStatuses', [['1'.repeat(64)], { searchTransactionHistory: true }]],
 ]) assert.equal((await rpc(request(message(method, params)), ctx)).status, 200, method);
 
 for (const body of [null, [], [message('getSlot')], {}, message('getSlot', ['bad']),
   message('getSlot', [{ extra: 1 }]), message('getAccountInfo', ['bad']),
   message('getAccountInfo', [pubkey, { encoding: 'jsonParsed' }]),
   message('getBlockTime', [-1]), message('getSignatureStatuses', [Array(11).fill('1'.repeat(64))]),
-  message('getSignatureStatuses', [['1'.repeat(64)], { searchTransactionHistory: true }]),
   message('getProgramAccounts', [pubkey]), message('requestAirdrop', [pubkey]),
   { ...message('getSlot'), upstream: 'http://127.0.0.1' },
   { ...message('getSlot'), id: null }, { ...message('getSlot'), jsonrpc: '1.0' },
