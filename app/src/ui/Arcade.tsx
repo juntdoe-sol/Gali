@@ -10,8 +10,13 @@ import { COLORS } from '../game/constants';
 import { CLIENT_CUTOFF_MS, CRASH_TARGETS, GAME_META, fmtAmt, useArcade, type GameId, type RoundResult, type TokenId } from '../game/arcade';
 import { useGame } from '../game/store';
 import { Btn, T } from './kit';
+import { PixIcon } from './PixIcon';
+import type { PixName } from './pixIcons';
 
-const TUNNEL_ICON = ['🔦', '🪨', '⚒', '🕯', '💎'];
+const GAME_ICON: Record<GameId, PixName> = { tunnel: 'tunnel', pot: 'pot', crash: 'cart' };
+const GLASS = 'rgba(10,16,40,0.72)';
+const GLASS_IN = 'rgba(255,255,255,0.07)';
+const EDGE = 'rgba(255,255,255,0.16)';
 
 function useClock(ms: number) {
   const [, tick] = useState(0);
@@ -81,25 +86,29 @@ export function Arcade() {
   const pick = game === 'pot' ? 0 : choice[game];
 
   return (
-    <View style={styles.root}>
-      <View style={[styles.panel, { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 10 }]}>
+    <View style={[styles.root, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 90 }]}>
+      <Pressable style={StyleSheet.absoluteFill} onPress={() => useArcade.getState().open(null)} accessibilityLabel="Close game" />
+      <View style={[styles.panel, { borderColor: meta.color, shadowColor: meta.color }]}>
         <View style={styles.head}>
-          <Pressable onPress={() => useArcade.getState().open(null)} style={styles.close} accessibilityRole="button" accessibilityLabel="Close game">
-            <T v="black" style={{ fontSize: 16, color: COLORS.text }}>
-              ✕
-            </T>
-          </Pressable>
+          <View style={[styles.badge, { borderColor: meta.color }]}>
+            <PixIcon name={GAME_ICON[game]} size={32} />
+          </View>
           <View style={{ flex: 1 }}>
-            <T v="display" style={{ fontSize: 26, color: meta.color, letterSpacing: 1 }}>
-              {meta.icon} {meta.name}
+            <T v="display" style={{ fontSize: 22, color: meta.color, letterSpacing: 1 }} numberOfLines={1}>
+              {meta.name}
             </T>
-            <T v="muted" style={{ fontSize: 12 }}>
+            <T v="muted" style={{ fontSize: 12 }} numberOfLines={1}>
               {meta.line}
             </T>
           </View>
+          <Pressable onPress={() => useArcade.getState().open(null)} style={styles.close} accessibilityRole="button" accessibilityLabel="Close game">
+            <T v="black" style={{ fontSize: 15, color: COLORS.text }}>
+              ✕
+            </T>
+          </Pressable>
         </View>
 
-        <ScrollView contentContainerStyle={{ gap: 10, paddingBottom: 6 }} showsVerticalScrollIndicator={false}>
+        <ScrollView style={{ flexGrow: 0 }} contentContainerStyle={{ gap: 10, paddingBottom: 4 }} showsVerticalScrollIndicator={false}>
           <View style={styles.row}>
             {(['ore', 'skr'] as TokenId[]).map((t) => (
               <Pressable key={t} onPress={() => useArcade.getState().setToken(t)} style={[styles.tab, token === t && { backgroundColor: meta.color, borderColor: meta.color }]} accessibilityRole="tab">
@@ -140,9 +149,12 @@ export function Arcade() {
                     {left}s
                   </T>
                 </View>
-                <View style={styles.track}>
-                  <View style={[styles.fill, { width: `${Math.min(100, (into / roundMs) * 100)}%`, backgroundColor: open ? meta.color : COLORS.line }]} />
-                  <View style={[styles.cut, { left: `${(CLIENT_CUTOFF_MS / roundMs) * 100}%` }]} />
+                <View style={styles.segs}>
+                  {Array.from({ length: 20 }, (_, i) => {
+                    const on = (i + 1) / 20 <= into / roundMs + 0.0001;
+                    const closedPart = (i + 0.5) / 20 >= CLIENT_CUTOFF_MS / roundMs;
+                    return <View key={i} style={[styles.seg, { backgroundColor: on ? (closedPart ? '#ff6b6b' : meta.color) : 'rgba(255,255,255,0.12)' }]} />;
+                  })}
                 </View>
                 <T v="muted" style={{ fontSize: 10 }} numberOfLines={1}>
                   Round {round} · house commitment {commit && commit.round === round ? `${commit.hash.slice(0, 10)}…${commit.hash.slice(-6)}` : '…'}
@@ -152,9 +164,9 @@ export function Arcade() {
               {game === 'tunnel' ? (
                 <View style={styles.row}>
                   {[0, 1, 2, 3, 4].map((i) => (
-                    <Pressable key={i} onPress={() => useArcade.getState().setChoice(i)} style={[styles.tunnel, pick === i && { borderColor: meta.color, backgroundColor: '#1d2a52' }]} accessibilityRole="button" accessibilityLabel={`Tunnel ${i + 1}`}>
-                      <T style={{ fontSize: 24 }}>{TUNNEL_ICON[i]}</T>
-                      <T v="black" style={{ fontSize: 13, color: pick === i ? meta.color : COLORS.muted }}>
+                    <Pressable key={i} onPress={() => useArcade.getState().setChoice(i)} style={({ pressed }) => [styles.tunnel, pick === i && { borderColor: meta.color, backgroundColor: 'rgba(255,154,61,0.24)', shadowColor: meta.color, shadowOpacity: 0.9, shadowRadius: 8 }, pressed && { transform: [{ scale: 0.95 }] }]} accessibilityRole="button" accessibilityLabel={`Tunnel ${i + 1}`}>
+                      <PixIcon name="tunnel" size={32} />
+                      <T v="display" style={{ fontSize: 16, color: pick === i ? meta.color : COLORS.muted }}>
                         {i + 1}
                       </T>
                     </Pressable>
@@ -168,7 +180,7 @@ export function Arcade() {
                   </T>
                   <View style={[styles.row, { flexWrap: 'wrap', justifyContent: 'center' }]}>
                     {CRASH_TARGETS.map((c) => (
-                      <Pressable key={c} onPress={() => useArcade.getState().setChoice(c)} style={[styles.target, pick === c && { borderColor: meta.color, backgroundColor: '#1d2a52' }]} accessibilityRole="button">
+                      <Pressable key={c} onPress={() => useArcade.getState().setChoice(c)} style={({ pressed }) => [styles.target, pick === c && { borderColor: meta.color, backgroundColor: 'rgba(61,224,200,0.22)', shadowColor: meta.color, shadowOpacity: 0.9, shadowRadius: 8 }, pressed && { transform: [{ scale: 0.95 }] }]} accessibilityRole="button">
                         <T v="display" style={{ fontSize: 20, color: pick === c ? meta.color : COLORS.text }}>
                           {(c / 10).toFixed(1)}x
                         </T>
@@ -182,7 +194,7 @@ export function Arcade() {
               ) : null}
               {game === 'pot' ? (
                 <View style={styles.card}>
-                  <T style={{ fontSize: 34, textAlign: 'center' }}>💰</T>
+                  <PixIcon name="pot" size={48} style={{ alignSelf: 'center' }} />
                   <T v="muted" style={{ fontSize: 12, textAlign: 'center' }}>
                     The more you stake, the more tickets you hold. One ticket takes the pot.
                   </T>
@@ -191,7 +203,7 @@ export function Arcade() {
 
               <View style={styles.row}>
                 {tb.chips.map((c, i) => (
-                  <Pressable key={c} onPress={() => useArcade.getState().setChip(i)} style={[styles.chip, chip === i && { backgroundColor: meta.color, borderColor: meta.color }]} accessibilityRole="button">
+                  <Pressable key={c} onPress={() => useArcade.getState().setChip(i)} style={({ pressed }) => [styles.chip, chip === i && { backgroundColor: meta.color, borderColor: '#ffffff', shadowColor: meta.color, shadowOpacity: 0.9, shadowRadius: 10 }, pressed && { transform: [{ scale: 0.94 }] }]} accessibilityRole="button">
                     <T v="display" style={{ fontSize: 20, color: chip === i ? '#10162c' : COLORS.text }}>
                       {c}
                     </T>
@@ -264,9 +276,12 @@ function ResultCard({ r, verified, color }: { r: RoundResult; verified: boolean 
         : '';
   return (
     <View style={[styles.card, { borderColor: m && m.net > 0 ? COLORS.gold : COLORS.line }]}>
-      <T v="black" style={{ fontSize: 13, color }}>
-        LAST ROUND #{r.round}
-      </T>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        {m && m.net > 0 ? <PixIcon name="trophy" size={16} /> : null}
+        <T v="black" style={{ fontSize: 13, color }}>
+          LAST ROUND #{r.round}
+        </T>
+      </View>
       <T v="bold" style={{ fontSize: 14 }}>
         {r.game === 'pot' && r.outcome.winner ? `${r.outcome.winner.slice(0, 4)}…${r.outcome.winner.slice(-4)} won the pot of ${fmtAmt(Number(r.outcome.pot) / 10 ** (r.decimals ?? 0))} ${TK}` : line}
       </T>
@@ -292,27 +307,30 @@ function ResultCard({ r, verified, color }: { r: RoundResult; verified: boolean 
           {m.net > 0 ? `You won +${fmtAmt(m.net)} ${TK}` : m.net < 0 ? `You lost ${fmtAmt(-m.net)} ${TK}` : 'Your stake came back'}
         </T>
       ) : null}
-      <T v="muted" style={{ fontSize: 10 }} numberOfLines={2}>
-        {verified === true ? '✓ Checked: the secret matches the commitment.' : verified === false ? '✗ The secret does not match the commitment.' : `Commitment ${r.commit.slice(0, 12)}…`}
-      </T>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        {verified === true ? <PixIcon name="check" size={16} /> : null}
+        <T v="muted" style={{ fontSize: 10, flex: 1 }} numberOfLines={2}>
+          {verified === true ? 'Checked: the secret matches the commitment.' : verified === false ? 'The secret does not match the commitment.' : `Commitment ${r.commit.slice(0, 12)}…`}
+        </T>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { ...StyleSheet.absoluteFill, backgroundColor: '#050a1aee', zIndex: 60 },
-  panel: { flex: 1, paddingHorizontal: 14, gap: 10 },
+  root: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(3,6,18,0.38)', zIndex: 60, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 14 },
+  panel: { width: '100%', maxWidth: 430, maxHeight: '100%', padding: 14, gap: 10, borderRadius: 22, borderWidth: 2, backgroundColor: GLASS, shadowOpacity: 0.55, shadowRadius: 22, shadowOffset: { width: 0, height: 0 }, elevation: 12 },
   head: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  close: { width: 38, height: 38, borderRadius: 19, borderWidth: 2, borderColor: COLORS.line, backgroundColor: COLORS.bg2, alignItems: 'center', justifyContent: 'center' },
+  badge: { width: 48, height: 48, borderRadius: 14, borderWidth: 2, backgroundColor: GLASS_IN, alignItems: 'center', justifyContent: 'center' },
+  close: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: EDGE, backgroundColor: GLASS_IN, alignItems: 'center', justifyContent: 'center' },
   row: { flexDirection: 'row', gap: 8 },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  tab: { flex: 1, height: 48, borderRadius: 12, borderWidth: 2, borderColor: COLORS.line, backgroundColor: COLORS.bg2, alignItems: 'center', justifyContent: 'center' },
-  card: { borderRadius: 14, borderWidth: 2, borderColor: COLORS.line, backgroundColor: COLORS.card, padding: 12, gap: 6 },
-  track: { height: 8, borderRadius: 4, backgroundColor: '#0a1230', overflow: 'hidden' },
-  fill: { height: 8, borderRadius: 4 },
-  cut: { position: 'absolute', top: 0, bottom: 0, width: 2, backgroundColor: COLORS.text, opacity: 0.6 },
-  tunnel: { flex: 1, height: 84, borderRadius: 14, borderWidth: 2, borderColor: COLORS.line, backgroundColor: COLORS.bg2, alignItems: 'center', justifyContent: 'center', gap: 2, borderTopLeftRadius: 30, borderTopRightRadius: 30 },
-  target: { width: '31%', height: 54, borderRadius: 12, borderWidth: 2, borderColor: COLORS.line, backgroundColor: COLORS.bg2, alignItems: 'center', justifyContent: 'center' },
-  chip: { flex: 1, height: 56, borderRadius: 12, borderWidth: 2, borderColor: COLORS.line, backgroundColor: COLORS.bg2, alignItems: 'center', justifyContent: 'center' },
-  mini: { flex: 1, height: 34, borderRadius: 8, borderWidth: 1.5, borderColor: COLORS.line, alignItems: 'center', justifyContent: 'center' },
+  tab: { flex: 1, height: 46, borderRadius: 14, borderWidth: 1.5, borderColor: EDGE, backgroundColor: GLASS_IN, alignItems: 'center', justifyContent: 'center' },
+  card: { borderRadius: 16, borderWidth: 1.5, borderColor: EDGE, backgroundColor: GLASS_IN, padding: 12, gap: 6 },
+  segs: { flexDirection: 'row', gap: 3 },
+  seg: { flex: 1, height: 9, borderRadius: 3 },
+  tunnel: { flex: 1, height: 84, borderRadius: 14, borderWidth: 1.5, borderColor: EDGE, backgroundColor: GLASS_IN, alignItems: 'center', justifyContent: 'center', gap: 0, borderTopLeftRadius: 32, borderTopRightRadius: 32, shadowOffset: { width: 0, height: 0 } },
+  target: { width: '31%', height: 54, borderRadius: 14, borderWidth: 1.5, borderColor: EDGE, backgroundColor: GLASS_IN, alignItems: 'center', justifyContent: 'center', shadowOffset: { width: 0, height: 0 } },
+  chip: { flex: 1, height: 60, borderRadius: 30, borderWidth: 2, borderColor: EDGE, backgroundColor: GLASS_IN, alignItems: 'center', justifyContent: 'center', shadowOffset: { width: 0, height: 0 } },
+  mini: { flex: 1, height: 34, borderRadius: 8, borderWidth: 1.5, borderColor: EDGE, alignItems: 'center', justifyContent: 'center' },
 });

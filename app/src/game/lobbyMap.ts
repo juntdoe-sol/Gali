@@ -25,7 +25,8 @@ export const PLANK = 6;
 export const CLIFF = 7;
 export const HALL = 8;
 
-export type DoorId = 'island' | 'cave' | 'market';
+/** The three mini games are doors too: walk into a pavilion and its game opens. Their ids are the game ids. */
+export type DoorId = 'island' | 'cave' | 'market' | 'tunnel' | 'pot' | 'crash';
 export interface Door {
   id: DoorId;
   /** the tiles that count as walking in */
@@ -41,6 +42,15 @@ export const DOORS: Door[] = [
   { id: 'island', x: 66, y: 26, w: 3, h: 3, label: 'GALI ISLAND', sub: 'Mine ORE' },
   { id: 'cave', x: 14, y: 10, w: 3, h: 1, label: 'CAVE RUN', sub: 'Dig for XP' },
   { id: 'market', x: 51, y: 9, w: 3, h: 1, label: 'MARKET', sub: 'Gear and items' },
+  { id: 'tunnel', x: 26, y: 42, w: 3, h: 1, label: 'TUNNEL', sub: 'ORE and SKR' },
+  { id: 'pot', x: 35, y: 42, w: 3, h: 1, label: 'GOLD RUSH', sub: 'ORE and SKR' },
+  { id: 'crash', x: 44, y: 42, w: 3, h: 1, label: 'CRASH CART', sub: 'ORE and SKR' },
+];
+/** The three pavilions on the games row: the body tiles that block, above each door. */
+export const PAVILIONS: { id: 'tunnel' | 'pot' | 'crash'; x: number; y: number; w: number; h: number }[] = [
+  { id: 'tunnel', x: 26, y: 38, w: 3, h: 4 },
+  { id: 'pot', x: 35, y: 38, w: 3, h: 4 },
+  { id: 'crash', x: 44, y: 38, w: 3, h: 4 },
 ];
 
 /** Where you appear, as a tile, for each way into the lobby. */
@@ -49,6 +59,9 @@ export const SPAWNS: Record<'start' | DoorId, [number, number]> = {
   island: [61, 27],
   cave: [15, 13],
   market: [52, 12],
+  tunnel: [27, 44],
+  pot: [36, 44],
+  crash: [45, 44],
 };
 
 /** Things with a shape of their own: a tent, a stall, the lighthouse. The engine draws each; the tiles under them block. */
@@ -180,6 +193,11 @@ export function lobbyMap(): Lobby {
   rect(57, 26, 13, 3, PLANK, 0);
   // little paths for the shore and the pond
   road(36, 38, 36, 46, 1);
+  // the games row: a road along the front of three pavilions, and a path down to it either side of the middle one
+  rect(24, 42, 25, 3, ROAD, 0);
+  rect(31, 38, 2, 4, ROAD, 0);
+  rect(40, 38, 2, 4, ROAD, 0);
+  for (const pv of PAVILIONS) rect(pv.x, pv.y, pv.w, pv.h, terrain[lidx(pv.x, pv.y)], 1);
 
   for (const st of STRUCTURES) rect(st.at[0], st.at[1], st.at[2], st.at[3], terrain[lidx(st.at[0], st.at[1])], 1);
 
@@ -190,6 +208,7 @@ export function lobbyMap(): Lobby {
     [10, 15, 7],
     [52, 11, 9],
     [65, 27, 6],
+    [36, 42, 15], // the games row
   ];
   const trees: Tree[] = [];
   const decor: Decor[] = [];
@@ -225,8 +244,8 @@ export function lobbyMap(): Lobby {
   rect(41, 34, 2, 1, PLAZA, 1);
   rect(31, 22, 2, 1, PLAZA, 1);
   const lamps: [number, number][] = [
-    [28, 24], [44, 24], [28, 33], [44, 33], [36, 19], [36, 38],
-    [14, 13], [17, 13], [44, 13], [60, 13], [64, 26], [64, 28], [36, 44],
+    [28, 24], [44, 24], [28, 33], [44, 33], [36, 19],
+    [14, 13], [17, 13], [44, 13], [60, 13], [64, 26], [64, 28], [31, 44], [41, 44], [23, 44], [49, 44],
   ];
   for (const [x, y] of lamps) if (linside(x, y) && !block[lidx(x, y)] && terrain[lidx(x, y)] !== WATER) block[lidx(x, y)] = 1;
 
