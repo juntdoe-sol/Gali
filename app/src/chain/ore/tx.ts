@@ -13,11 +13,13 @@
  * is enforced by ORE rather than by us and ORE pays the key a fee for the work.
  */
 import '../polyfill-web';
-import { ComputeBudgetProgram, Keypair, LAMPORTS_PER_SOL, PublicKey, TransactionInstruction } from '@solana/web3.js';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ComputeBudgetProgram, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, TransactionInstruction } from '@solana/web3.js';
 import { assertSessionFundingAllowed, connection, sendWithKey, sendWithWallet } from '../client';
+import { LIVE_AUTOPILOT_MAX_SOL } from '../light';
 import { AUTOMATION_STRATEGY, EXECUTOR_ADDRESS } from './consts';
 import { automateIx, checkpointIx, claimOreIx, claimSolIx, deployIx } from './ix';
-import { fetchClock, fetchOreMiner, needsCheckpoint } from './read';
+import { fetchClock, fetchOreAutomation, fetchOreMiner, needsCheckpoint } from './read';
 
 /** Turn a set of chosen squares into the 25-bit mask ORE expects. */
 export const squaresToMask = (squares: number[]) =>
@@ -224,6 +226,105 @@ export async function stopOreAutomation(session: Keypair): Promise<string> {
       executor: session.publicKey,
     }),
   ]);
+}
+
+/* ---------------- live autopilot: ORE's own automation ----------------
+ * One wallet approval funds an ORE automation account and names a small device key as its
+ * executor. After that the device key deploys each round with no pop-up. What the key can do
+ * is fixed by ORE: it can only deploy the automation's balance onto the board (never withdraw
+ * it), and the player can close the automation any time and get the balance back.
+ */
+/** SOL left on the executor key to pay its own transaction fees. A system account must stay above rent-exempt (~0.00089 SOL). */
+export const EXECUTOR_TOPUP_LAMPORTS = 4_000_000;
+const EXECUTOR_MIN_LAMPORTS = 2_500_000;
+const execKey = (owner: PublicKey) => `gali-ore-exec-${owner.toBase58()}`;
+
+/** The device key that runs this player's automation. Created on first use, kept on the device. */
+export async function loadExecutor(owner: PublicKey, create = false): Promise<Keypair | null> {
+  const raw = await AsyncStorage.getItem(execKey(owner));
+  if (raw) return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(raw)));
+  if (!create) return null;
+  const k = Keypair.generate();
+  await AsyncStorage.setItem(execKey(owner), JSON.stringify(Array.from(k.secretKey)));
+  return k;
+}
+
+/** The player's automation as the app needs it, or null when they deploy by hand. */
+export async function readAutomation(owner: PublicKey) {
+  const a = await fetchOreAutomation(connection, owner);
+  if (!a) return null;
+  const mine = (await loadExecutor(owner))?.publicKey;
+  return {
+    balance: toSol(a.balance),
+    perSpot: toSol(a.amount),
+    spent: toSol(a.totalSolSpent),
+    executor: a.executor,
+    runnable: Boolean(mine && a.executor.equals(mine)),
+  };
+}
+
+/**
+ * Fund an automation and hand the device key the right to run it. `maxSquares` is the most
+ * spots any round will use; the deposit covers `rounds` rounds of that. One wallet approval.
+ */
+export async function startLiveAutomation(args: {
+  lamportsPerSquare: bigint;
+  maxSquares: number;
+  rounds: number;
+  expectedOwner?: PublicKey;
+}): Promise<void> {
+  if (args.rounds < 1 || args.maxSquares < 1 || args.maxSquares > 25) throw new Error('Bad autopilot setup');
+  const deposit = args.lamportsPerSquare * BigInt(args.maxSquares) * BigInt(args.rounds);
+  if (Number(deposit) / LAMPORTS_PER_SOL > LIVE_AUTOPILOT_MAX_SOL + 1e-9) throw new Error(`Autopilot is capped at ${LIVE_AUTOPILOT_MAX_SOL} SOL`);
+  await sendWithWallet(async (owner) => {
+    if (await fetchOreAutomation(connection, owner)) throw new Error('Autopilot is already on. Stop it first');
+    const exec = (await loadExecutor(owner, true)) as Keypair;
+    const have = await connection.getBalance(exec.publicKey);
+    const ixs: TransactionInstruction[] = [priorityIx()];
+    if (have < EXECUTOR_MIN_LAMPORTS) ixs.push(SystemProgram.transfer({ fromPubkey: owner, toPubkey: exec.publicKey, lamports: EXECUTOR_TOPUP_LAMPORTS - have }));
+    ixs.push(
+      automateIx({
+        authority: owner,
+        amount: args.lamportsPerSquare,
+        deposit,
+        fee: 0n,
+        mask: 0,
+        strategy: AUTOMATION_STRATEGY.DiscretionaryBps,
+        reload: false,
+        executor: exec.publicKey,
+      }),
+    );
+    return ixs;
+  }, args.expectedOwner);
+}
+
+/**
+ * Deploy one round from the automation, signed by the device key: no wallet pop-up.
+ * Checkpoints the previous round first when ORE needs it. Returns the round it went into.
+ */
+export async function deployFromAutomation(owner: PublicKey, squares: number[], lamportsPerSquare: bigint): Promise<bigint> {
+  const exec = await loadExecutor(owner);
+  if (!exec) throw new Error('This device does not hold the autopilot key. Stop autopilot from the wallet panel');
+  const [clock, miner] = await Promise.all([fetchClock(connection), fetchOreMiner(connection, owner)]);
+  if (clock.phase === 'intermission' || (clock.phase === 'mining' && clock.slotsLeft < LIVE_LOCK_SLOTS)) throw new Error('RoundLocked');
+  const ixs: TransactionInstruction[] = [priorityIx()];
+  const pending = needsCheckpoint(miner, clock);
+  if (pending !== null) ixs.push(checkpointIx({ signer: exec.publicKey, authority: owner, roundId: pending }));
+  ixs.push(deployIx({ signer: exec.publicKey, authority: owner, roundId: clock.roundId, amount: lamportsPerSquare, squares: squaresToMask(squares) }));
+  await sendWithKey(exec, ixs);
+  return clock.roundId;
+}
+
+/** Close the automation and get what is left of its balance back. One wallet approval. */
+export async function closeLiveAutomation(expectedOwner?: PublicKey): Promise<void> {
+  await sendWithWallet(async (owner) => {
+    if (!(await fetchOreAutomation(connection, owner))) throw new Error('Autopilot is not running');
+    return [
+      priorityIx(),
+      // a zero executor tells ORE to close the account and return its balance to the player
+      automateIx({ authority: owner, amount: 0n, deposit: 0n, fee: 0n, mask: 0, strategy: AUTOMATION_STRATEGY.DiscretionaryBps, reload: false, executor: PublicKey.default }),
+    ];
+  }, expectedOwner);
 }
 
 /** Lamports to whole SOL, for display. */

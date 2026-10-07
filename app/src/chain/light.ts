@@ -35,6 +35,8 @@ export const onChainMode = chainReady || oreLive;
 
 /** Most SOL a live player may put on the board in one round. A guard against a slipped finger, not a limit on ORE. */
 export const LIVE_MAX_ROUND_SOL = 0.5;
+/** Most SOL a live autopilot (ORE automation) may be funded with at once. */
+export const LIVE_AUTOPILOT_MAX_SOL = 1;
 
 // Public transaction transport/local validator only. EXPO_PUBLIC_* is bundled;
 // never configure a credential-bearing provider URL here.

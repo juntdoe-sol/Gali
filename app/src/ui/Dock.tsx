@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CLUSTER, LIVE_MAX_ROUND_SOL, REFINING_FEE } from '../chain/light';
+import { CLUSTER, LIVE_AUTOPILOT_MAX_SOL, LIVE_MAX_ROUND_SOL, REFINING_FEE } from '../chain/light';
 import { BLOCKS, boostFor, COLORS, pointsFor } from '../game/constants';
 import { watchMotion } from '../game/motion';
 import { DEFAULT_SMART, fmtSol, liveReturn, maskOf, randomPick, MIN_SOL_PER_BLOCK, SMART_COUNTS } from '../game/pot';
@@ -372,6 +372,8 @@ function ProPanel({ compact }: { compact: boolean }) {
   const selected = useGame((s) => s.selected);
   const pending = useGame((s) => s.pending);
   const run = useGame((s) => s.run);
+  const autopilot = useGame((s) => s.autopilot);
+  const busy = useGame((s) => s.wallet.busy);
   const { choosePreset, editPreset, startRun, selectAll, clearSelection } = useGame.getState();
   const p: Preset = presets[idx] ?? presets[0];
   // amount per spot, like other mining boards; older presets stored SOL per round
@@ -391,12 +393,13 @@ function ProPanel({ compact }: { compact: boolean }) {
   const blocks = p.blocks === 'all' ? BLOCKS : p.blocks === 'smart' ? p.smartN : selected.length;
   const perBlock = blocks ? perSpotIn : 0;
   const per = perBlock * blocks; // SOL a round
-  // live rounds are signed one at a time, so no autopilot
-  const rounds = live ? 1 : p.rounds;
+  // live autopilot runs from an ORE automation: one approval funds it, rounds then need no pop-up
+  const rounds = p.rounds;
   const need = per * rounds;
   const enough = need <= balance + 1e-9;
   const capped = live && per > LIVE_MAX_ROUND_SOL + 1e-9;
-  const ready = blocks > 0 && per > 0 && perBlock >= MIN_SOL_PER_BLOCK && enough && !pending && !capped;
+  const autoCapped = live && rounds > 1 && need > LIVE_AUTOPILOT_MAX_SOL + 1e-9;
+  const ready = blocks > 0 && per > 0 && perBlock >= MIN_SOL_PER_BLOCK && enough && !pending && !capped && !autoCapped && !(live && autopilot) && !busy;
   const label = !blocks
     ? 'NO CLAIMS SELECTED'
     : !per
@@ -407,6 +410,10 @@ function ProPanel({ compact }: { compact: boolean }) {
           ? 'NOT ENOUGH SOL'
           : capped
             ? `MAX ${LIVE_MAX_ROUND_SOL} SOL A ROUND`
+            : autoCapped
+              ? `AUTOPILOT MAX ${LIVE_AUTOPILOT_MAX_SOL} SOL`
+              : live && autopilot
+                ? 'STOP AUTOPILOT FIRST'
             : pending
               ? 'WAIT FOR THIS ROUND'
               : `DEPLOY ${fmtSol(per)} SOL${rounds > 1 ? ` × ${rounds}` : ''}`;
@@ -445,12 +452,11 @@ function ProPanel({ compact }: { compact: boolean }) {
             }
           />
           {p.blocks === 'smart' ? <SmartCounts value={p.smartN} onPick={(c) => pickSmart(c)} disabled={Boolean(run)} /> : null}
-          {live ? null : (
-            <>
+          <>
           <Row
             icon="🔁"
             label="Rounds"
-            info="1 = this round only. More = autopilot repeats the same setup each round (Smart re-picks every round)."
+            info={live ? `1 = this round only (you approve in your wallet). More = autopilot: one wallet approval funds ORE's automation with SOL for every round, then rounds deploy with no pop-up while the app stays open. Smart re-picks every round. Up to ${LIVE_AUTOPILOT_MAX_SOL} SOL in total. Stop it any time to get the unused SOL back.` : '1 = this round only. More = autopilot repeats the same setup each round (Smart re-picks every round).'}
             right={
               <>
                 <View style={[styles.tag, p.rounds > 1 && { borderColor: COLORS.teal }]}>
@@ -466,8 +472,22 @@ function ProPanel({ compact }: { compact: boolean }) {
               </>
             }
           />
-            </>
-          )}
+          </>
+          {live && autopilot ? (
+            <Row
+              icon="🤖"
+              label="Autopilot on"
+              info="Your SOL sits in ORE's automation and is deployed round by round while this app is open. Stopping closes it and sends what is left back to your wallet."
+              right={
+                <>
+                  <T v="black" style={{ fontSize: 12, color: COLORS.teal, marginRight: 6 }}>
+                    {fmtSol(autopilot.balance)} SOL left
+                  </T>
+                  <Chip label="STOP" onPress={() => void useGame.getState().stopAutopilot()} disabled={Boolean(busy)} />
+                </>
+              }
+            />
+          ) : null}
           <Row
             icon="🏆"
             label="If it strikes"
