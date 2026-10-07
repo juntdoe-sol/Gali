@@ -179,6 +179,8 @@ interface GameState {
   liveClockError: string | null;
   /** The real-money notice is up. A string is the web wallet to connect once accepted. */
   liveNotice: boolean | string;
+  /** The app came back to the foreground: read the live board and wallet again at once. */
+  resumeLive: () => void;
   save: Save;
   wallet: Wallet;
   offsetMs: number;
@@ -640,18 +642,27 @@ export const useGame = create<GameState>((set, get) => {
 
   /** Live mode: read ORE's board clock every couple of seconds. */
   const LIVE_CLOCK_POLL_MS = 10_000;
+  const LIVE_CLOCK_RETRY_MS = 3_000;
+  const LIVE_CLOCK_STUCK_MS = 20_000;
   const LIVE_POT_POLL_MS = 6_000;
   let clockAt = 0;
   let clockBusy = false;
   let livePotBusy = false;
   function pollLiveClock() {
     // Countdown advances locally from `endsAt`; chain reads only correct drift / round rollover.
-    if (clockBusy || Date.now() - clockAt < LIVE_CLOCK_POLL_MS) return;
+    // With no clock yet, or after a failed read, try again every 3 s instead of every 10.
+    const have = get().liveClock && !get().liveClockError;
+    const since = Date.now() - clockAt;
+    // A read that has not answered in 20 s is abandoned, so one stuck request can never freeze the board.
+    if (clockBusy && since < LIVE_CLOCK_STUCK_MS) return;
+    if (since < (have ? LIVE_CLOCK_POLL_MS : LIVE_CLOCK_RETRY_MS)) return;
     clockBusy = true;
     clockAt = Date.now();
+    const started = clockAt;
     loadBoard()
       .then(async (b) => {
         const c = await b.fetchOreClock();
+        if (started !== clockAt) return; // an abandoned read that answered late
         if (!isLive(get())) return;
         const roundId = Number(c.roundId);
         const prev = get().liveClock;
@@ -667,11 +678,24 @@ export const useGame = create<GameState>((set, get) => {
         }).catch(() => undefined);
       })
       .catch((e) => {
-        if (isLive(get())) set({ liveClockError: errMsg(e) });
+        if (started === clockAt && isLive(get())) set({ liveClockError: errMsg(e) });
       })
       .finally(() => {
-        clockBusy = false;
+        if (started === clockAt) clockBusy = false;
       });
+  }
+
+  /**
+   * Back from the background (a wallet approval, the home screen): read the board
+   * and the wallet again at once. Timers were paused and any read in flight is stale.
+   */
+  function resumeLive() {
+    if (!isLive(get())) return;
+    clockBusy = false;
+    livePotBusy = false;
+    clockAt = 0;
+    set({ potAt: 0 });
+    void get().refreshWallet();
   }
 
   function liveTick() {
@@ -724,6 +748,7 @@ export const useGame = create<GameState>((set, get) => {
     liveClock: null,
     liveClockError: null,
     liveNotice: false,
+    resumeLive,
     save: freshSave(),
     wallet: { owner: null, player: null, skr: 0, sol: 0, sessionSol: 0, pool: 0, orePool: 0, ore: 0, shop: null, unclaimed: NO_UNCLAIMED, busy: null },
     offsetMs: 0,
@@ -997,7 +1022,9 @@ export const useGame = create<GameState>((set, get) => {
         const owner = await chain.connectWallet(typeof webWallet === 'string' ? webWallet : undefined);
         saveJson('gali-owner', { owner: owner.toBase58() }, 0);
         if (chainReady) session = await chain.loadSession(owner);
-        set({ liveClock: null });
+        set({ liveClock: null, liveClockError: null });
+        clockBusy = false;
+        clockAt = 0; // read ORE's board at once, not on the next 10 s poll
         setWallet({ owner: owner.toBase58() });
         await get().refreshWallet();
         get().toast(`Connected ${short(owner.toBase58())}`, 'good');

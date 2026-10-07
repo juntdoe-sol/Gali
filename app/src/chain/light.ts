@@ -51,18 +51,56 @@ const PROXIED_READS = new Set([
 export const isRateLimited = (e: unknown) => /\b429\b|rate limit|too many requests/i.test(String((e as Error)?.message ?? e));
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
-/** Retries 429s with a growing pause, so a busy RPC slows the app down instead of breaking it. */
+
+/**
+ * fetch with a deadline. React Native's fetch has none, and a request that is in
+ * flight while the app is in the background (a wallet approval does that) can hang
+ * for good. A hung read left the live board "syncing" until the app was restarted.
+ */
+async function timedFetch(target: RequestInfo, init: RequestInit | undefined, ms: number): Promise<Response> {
+  if (typeof AbortController === 'undefined') return fetch(target, init);
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), ms);
+  try {
+    return await fetch(target, { ...(init ?? {}), signal: ctl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Whether a JSON-RPC body is a read the proxy accepts. The proxy refuses a history search, so that goes direct. */
+function proxiedRead(body: string): boolean {
+  try {
+    const b = JSON.parse(body) as { method?: string; params?: unknown[] };
+    if (!b || typeof b.method !== 'string' || !PROXIED_READS.has(b.method)) return false;
+    if (b.method === 'getSignatureStatuses') {
+      const cfg = Array.isArray(b.params) ? (b.params[1] as { searchTransactionHistory?: boolean } | undefined) : undefined;
+      if (cfg?.searchTransactionHistory) return false;
+    }
+    return true;
+  } catch {
+    return false; // malformed or non-JSON: leave it to its original transport
+  }
+}
+
+/**
+ * The transport for every RPC call. Reads go through the read proxy when one is
+ * configured, and fall back to the direct endpoint when the proxy is rate-limited
+ * (its limit is shared by every player in a region), down or slow. 429s on the
+ * direct endpoint are retried with a growing pause. Every attempt has a deadline.
+ */
 export const retryingFetch: typeof fetch = async (input, init) => {
-  let target = input;
-  if (READ_RPC_URL && String(input) === RPC_URL && typeof init?.body === 'string') {
+  if (READ_RPC_URL && String(input) === RPC_URL && typeof init?.body === 'string' && proxiedRead(init.body)) {
     try {
-      const body = JSON.parse(init.body) as { method?: string };
-      if (body && typeof body.method === 'string' && PROXIED_READS.has(body.method)) target = READ_RPC_URL;
-    } catch { /* Leave malformed/non-JSON requests to their original transport. */ }
+      const res = await timedFetch(READ_RPC_URL, init as RequestInit, 6_000);
+      if (res.ok) return res;
+    } catch {
+      /* timed out or unreachable: use the direct endpoint */
+    }
   }
   let last: Response | undefined;
   for (let i = 0; i < 4; i++) {
-    const res = await fetch(target as RequestInfo, init as RequestInit);
+    const res = await timedFetch(input as RequestInfo, init as RequestInit, 10_000);
     if (res.status !== 429) return res;
     last = res;
     await wait(400 * 2 ** i);
