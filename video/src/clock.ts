@@ -4,7 +4,8 @@
  * draw, so both are replaced before anything else loads. Math.random is seeded
  * so two renders of the same frame agree.
  */
-export const T0 = Date.UTC(2026, 9, 1, 2, 0, 0);
+// A whole number of 1080 ms dance loops since the epoch, so every dance in the lobby starts its loop on a beat of the score.
+export const T0 = Date.UTC(2026, 9, 1, 2, 0, 0) - 720;
 export const clock = { ms: 0 };
 Date.now = () => T0 + clock.ms;
 performance.now = () => clock.ms;
