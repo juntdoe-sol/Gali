@@ -44,6 +44,8 @@ export const RPC_URL =
   process.env.EXPO_PUBLIC_RPC_URL || (oreLive ? 'https://api.mainnet-beta.solana.com' : 'https://api.devnet.solana.com');
 // Enable only after the Bounded read proxy is deployed and verified. No secrets.
 const READ_RPC_URL = oreLive ? process.env.EXPO_PUBLIC_RPC_READ_URL : undefined;
+/** An optional second copy of the read proxy, tried when the first is down. */
+const READ_RPC_URL2 = oreLive ? process.env.EXPO_PUBLIC_RPC_READ_URL2 : undefined;
 const PUBLIC_MAINNET_RPC = 'https://api.mainnet-beta.solana.com';
 const MAINNET_FALLBACK = oreLive && RPC_URL !== PUBLIC_MAINNET_RPC;
 const PROXIED_READS = new Set([
@@ -89,13 +91,23 @@ function proxiedRead(body: string): boolean {
  * (its limit is shared by every player in a region), down or slow. 429s on the
  * direct endpoint are retried with a growing pause. Every attempt has a deadline.
  */
+const downUntil = new Map<string, number>();
 export const retryingFetch: typeof fetch = async (input, init) => {
   if (READ_RPC_URL && String(input) === RPC_URL && typeof init?.body === 'string' && proxiedRead(init.body)) {
-    try {
-      const res = await timedFetch(READ_RPC_URL, init as RequestInit, 6_000);
-      if (res.ok) return res;
-    } catch {
-      /* timed out or unreachable: use the direct endpoint */
+    // a proxy that just failed is skipped for a minute, so a dead one does not add its timeout to every read
+    const now = Date.now();
+    const order = [READ_RPC_URL, READ_RPC_URL2].filter((u): u is string => Boolean(u)).sort((a, b) => (downUntil.get(a) ?? 0) - (downUntil.get(b) ?? 0));
+    for (const u of order) {
+      try {
+        const res = await timedFetch(u, init as RequestInit, 6_000);
+        if (res.ok) {
+          downUntil.delete(u);
+          return res;
+        }
+        if (res.status >= 500) downUntil.set(u, Date.now() + 60_000);
+      } catch {
+        downUntil.set(u, Date.now() + 60_000);
+      }
     }
   }
   let last: Response | undefined;
