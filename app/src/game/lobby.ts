@@ -28,6 +28,8 @@ export interface LobbyPeer {
   pose: 'idle' | 'walk' | 'cheer';
   look: Look;
   lvl: number;
+  /** the wallet they play with, if they connected one (for tips). It is their claim: the tip sheet shows it before you send. */
+  wallet: string | null;
   seen: number;
   say: Say | null;
   emoji: string | null;
@@ -42,6 +44,15 @@ export interface LobbyMsg {
   mine?: boolean;
 }
 
+/** One line in the lobby's activity feed. */
+export type Act =
+  | { id: number; at: number; k: 'win'; n: string; sol: number; pts: number }
+  | { id: number; at: number; k: 'tip'; n: string; tn: string; a: number; tk: 'SOL' | 'ORE' | 'SKR'; toMe: boolean; mine?: boolean }
+  | { id: number; at: number; k: 'xp'; n: string; xp: number }
+  | { id: number; at: number; k: 'join'; n: string };
+export const ACT_LIFE_MS = 5200;
+const B58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
 interface LobbyState {
   /** the app opens in the lobby */
   where: Where;
@@ -53,6 +64,8 @@ interface LobbyState {
   me: string;
   peers: Record<string, LobbyPeer>;
   msgs: LobbyMsg[];
+  /** what players are doing, newest last; each line is dropped a few seconds after it appears */
+  feed: Act[];
   /** my own speech bubble and emote, for the engine to draw */
   mySay: Say | null;
   myEmoji: { e: string; at: number } | null;
@@ -90,6 +103,7 @@ export const useLobby = create<LobbyState>((set, get) => ({
   me: rid(),
   peers: {},
   msgs: [],
+  feed: [],
   mySay: null,
   myEmoji: null,
   chatOpen: false,
@@ -158,12 +172,68 @@ function onState(p: any) {
     pose: p.p === 'walk' || p.p === 'cheer' ? p.p : 'idle',
     look,
     lvl: Math.floor(num(p.lvl, 1, 999)),
+    wallet: typeof p.w === 'string' && B58.test(p.w) ? p.w : null,
     seen: Date.now(),
     say: prev?.say ?? null,
     emoji: prev?.emoji ?? null,
     emojiAt: prev?.emojiAt ?? 0,
   };
   useLobby.setState((s) => ({ peers: { ...s.peers, [id]: peer } }));
+  if (!prev && Date.now() - joinedAt > 3000) pushAct({ k: 'join', n: nm });
+}
+
+/* ---------------- activity feed ---------------- */
+let actId = 1;
+export function pushAct(a: DistributiveOmit<Act, 'id' | 'at'>) {
+  const act = { ...a, id: actId++, at: Date.now() } as Act;
+  useLobby.setState((s) => ({ feed: [...s.feed.filter((x) => act.at - x.at < ACT_LIFE_MS), act].slice(-5) }));
+}
+type DistributiveOmit<T, K extends keyof any> = T extends unknown ? Omit<T, K> : never;
+
+const lastActFrom = new Map<string, number>();
+function onAct(p: any) {
+  const s = useLobby.getState();
+  if (!p || typeof p.id !== 'string' || p.id === s.me) return;
+  const n = cleanName(p.nm);
+  if (!n) return;
+  const now = Date.now();
+  if (now - (lastActFrom.get(p.id) ?? 0) < 1200) return; // flooding: drop it
+  lastActFrom.set(p.id, now);
+  if (lastActFrom.size > 300) lastActFrom.clear();
+  const amt = (v: unknown, hi: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(hi, v)) : 0);
+  if (p.k === 'win') pushAct({ k: 'win', n, sol: amt(p.sol, 1000), pts: Math.floor(amt(p.pts, 1e6)) });
+  else if (p.k === 'xp') {
+    const xp = Math.floor(amt(p.xp, 1e5));
+    if (xp > 0) pushAct({ k: 'xp', n, xp });
+  } else if (p.k === 'tip' && (p.tk === 'SOL' || p.tk === 'ORE' || p.tk === 'SKR')) {
+    const tn = cleanName(p.tn);
+    const a = amt(p.a, 1e6);
+    if (tn && a > 0) pushAct({ k: 'tip', n, tn, a, tk: p.tk, toMe: p.to === s.me });
+  }
+}
+/** Tell the lobby what this player just did. Cosmetic: a feed line shows to everyone, and nothing here moves money. */
+export function announce(a: { k: 'win'; sol: number; pts: number } | { k: 'xp'; xp: number } | { k: 'tip'; to: string; tn: string; a: number; tk: 'SOL' | 'ORE' | 'SKR' }) {
+  const name = useName.getState().name;
+  if (!name) return;
+  const me = useLobby.getState().me;
+  if (a.k === 'win') pushAct({ k: 'win', n: name, sol: a.sol, pts: a.pts });
+  else if (a.k === 'xp') pushAct({ k: 'xp', n: name, xp: a.xp });
+  else pushAct({ k: 'tip', n: name, tn: a.tn, a: a.a, tk: a.tk, toMe: false, mine: true });
+  void chatChannel?.send({ type: 'broadcast', event: 'act', payload: { id: me, nm: name, ...(a.k === 'tip' ? { k: 'tip', to: a.to, tn: a.tn, a: a.a, tk: a.tk } : a) } });
+}
+let xpAcc = 0;
+let xpTimer: ReturnType<typeof setTimeout> | null = null;
+/** XP comes in small pieces while digging; show it as one line every few seconds. */
+export function announceXp(n: number) {
+  if (!(n > 0)) return;
+  xpAcc += n;
+  if (xpTimer) return;
+  xpTimer = setTimeout(() => {
+    const xp = Math.round(xpAcc);
+    xpAcc = 0;
+    xpTimer = null;
+    if (xp > 0) announce({ k: 'xp', xp });
+  }, 6000);
 }
 
 function onChat(p: any) {
@@ -251,7 +321,7 @@ export function joinLobby() {
       if (p.say && now - p.say.at > 6000) p.say = null;
       if (p.emoji && now - p.emojiAt > 3000) p.emoji = null;
     }
-    useLobby.setState({ peers: alive });
+    useLobby.setState((st) => ({ peers: alive, feed: st.feed.some((a) => now - a.at >= ACT_LIFE_MS) ? st.feed.filter((a) => now - a.at < ACT_LIFE_MS) : st.feed }));
   }, 1500);
 }
 
@@ -275,7 +345,9 @@ export function joinChat() {
   chatJoining = true;
   useLobby.setState({ chatStatus: 'joining' });
   const ch = client.channel('gali-chat', { config: { broadcast: { self: false, ack: false } } });
-  ch.on('broadcast', { event: 'chat' }, ({ payload }) => onChat(payload)).subscribe((st) => {
+  ch.on('broadcast', { event: 'chat' }, ({ payload }) => onChat(payload))
+    .on('broadcast', { event: 'act' }, ({ payload }) => onAct(payload))
+    .subscribe((st) => {
     if (st === 'SUBSCRIBED') useLobby.setState({ chatStatus: 'online' });
     else if (st === 'CLOSED' || st === 'CHANNEL_ERROR' || st === 'TIMED_OUT') {
       if (chatChannel === ch) useLobby.setState({ chatStatus: 'off' });
@@ -302,7 +374,7 @@ export function leaveLobby() {
 let lastSent = 0;
 let lastKey = '';
 /** Called by the lobby screen when your miner moves or stops; sends when it changes, and as a slow heartbeat. */
-export function publishLobbyMe(m: { x: number; y: number; tx: number; ty: number; facing: 1 | -1; pose: string; look: Look; lvl: number }) {
+export function publishLobbyMe(m: { x: number; y: number; tx: number; ty: number; facing: 1 | -1; pose: string; look: Look; lvl: number; wallet?: string | null }) {
   const { status, me } = useLobby.getState();
   const name = useName.getState().name;
   if (!channel || status !== 'online' || !name) return;
@@ -325,6 +397,7 @@ export function publishLobbyMe(m: { x: number; y: number; tx: number; ty: number
     pt: m.look.pet,
     g: m.look.glow,
     lvl: m.lvl,
+    ...(m.wallet ? { w: m.wallet } : {}),
   };
   const key = JSON.stringify({ ...payload, x: 0, y: 0 });
   // a walker sends when the target changes; someone standing still sends a heartbeat

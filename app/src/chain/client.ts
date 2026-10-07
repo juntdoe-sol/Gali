@@ -18,7 +18,8 @@ import { webConnect, webDisconnect, webOwner, webSign } from './webWallet';
 export { listWebWallets, PickWalletError, type WebWalletInfo } from './webWallet';
 import idlJson from './idl.json';
 import deployment from './deployment.json';
-import { CLUSTER, MAX_SESSION_FUND_SOL, PROGRAM_ID_STR, RPC_URL, retryingFetch, SKR_MINT_STR } from './light';
+import { CLUSTER, MAX_SESSION_FUND_SOL, PROGRAM_ID_STR, RPC_URL, retryingFetch, SKR_MINT_STR, TIP_LIMITS, TIP_SKR_MINT } from './light';
+import { ORE_MINT } from './ore/consts';
 
 export { CLUSTER, RPC_URL, chainReady, oreLive, onChainMode, isRateLimited, clockOffsetMs, MAX_SESSION_FUND_SOL, short, explorer } from './light';
 // PublicKey for code outside src/chain, which reaches web3 only through this lazily loaded module.
@@ -240,7 +241,7 @@ let sending = false;
 
 export async function confirmSig(sig: string, lastValidBlockHeight: number): Promise<void> {
   try {
-    for (let i = 0; i < 90; i++) {
+    for (let i = 0; i < 56; i++) {
       // a fresh transaction is in the recent status cache; only search history once it has had time to land
       const { value } = await withTimeout(connection.getSignatureStatuses([sig], i >= 12 ? { searchTransactionHistory: true } : undefined));
       const st = value[0];
@@ -249,7 +250,8 @@ export async function confirmSig(sig: string, lastValidBlockHeight: number): Pro
         return;
       }
       if (i % 10 === 9 && (await withTimeout(connection.getBlockHeight('confirmed'))) > lastValidBlockHeight) break;
-      await new Promise((r) => setTimeout(r, 500));
+      // quick checks while the transaction is fresh, then slower so a long wait cannot use up the proxy's request budget
+      await new Promise((r) => setTimeout(r, i < 16 ? 500 : 1500));
     }
   } catch (e) {
     if (e instanceof VerifiedTransactionFailure) throw e;
@@ -443,6 +445,56 @@ export async function sendSkr(to: PublicKey, amount: number) {
     return [createIdempotent, transfer];
   });
 }
+
+/* ---------- Lobby tips: SOL, ORE or SKR from one player to another ---------- */
+const TOKEN_2022 = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
+export type TipToken = 'SOL' | 'ORE' | 'SKR';
+export async function sendTip(token: TipToken, to: PublicKey, amount: number) {
+  // only the preset amounts the lobby offers go through, whatever calls this
+  if (!(TIP_LIMITS[token] as readonly number[]).includes(amount)) throw new Error('Pick one of the tip amounts');
+  return sendWithWallet(async (o) => {
+    if (o.equals(to)) throw new Error("You can't tip yourself");
+    if (token === 'SOL') return [SystemProgram.transfer({ fromPubkey: o, toPubkey: to, lamports: Math.round(amount * LAMPORTS_PER_SOL) })];
+    if (token === 'SKR' && !TIP_SKR_MINT) throw new Error('SKR tips are not set up in this build');
+    const mint = token === 'ORE' ? ORE_MINT : new PublicKey(TIP_SKR_MINT);
+    const info = await withTimeout(connection.getAccountInfo(mint));
+    if (!info) throw new Error(`${token} token not found on this network`);
+    const prog = info.owner;
+    if (!prog.equals(TOKEN_PROGRAM_ID) && !prog.equals(TOKEN_2022)) throw new Error(`${token} mint is not a token`);
+    const decimals = info.data[44];
+    const addr = (w: PublicKey) => PublicKey.findProgramAddressSync([w.toBuffer(), prog.toBuffer(), mint.toBuffer()], ASSOCIATED_TOKEN_PROGRAM_ID)[0];
+    const src = addr(o);
+    const dest = addr(to);
+    const make = new TransactionInstruction({
+      programId: ASSOCIATED_TOKEN_PROGRAM_ID,
+      keys: [
+        { pubkey: o, isSigner: true, isWritable: true },
+        { pubkey: dest, isSigner: false, isWritable: true },
+        { pubkey: to, isSigner: false, isWritable: false },
+        { pubkey: mint, isSigner: false, isWritable: false },
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+        { pubkey: prog, isSigner: false, isWritable: false },
+      ],
+      data: Buffer.from([1]),
+    });
+    const data = Buffer.alloc(10);
+    data[0] = TRANSFER_CHECKED;
+    new DataView(data.buffer, data.byteOffset, 10).setBigUint64(1, BigInt(Math.round(amount * 10 ** decimals)), true);
+    data[9] = decimals;
+    const xfer = new TransactionInstruction({
+      programId: prog,
+      keys: [
+        { pubkey: src, isSigner: false, isWritable: true },
+        { pubkey: mint, isSigner: false, isWritable: false },
+        { pubkey: dest, isSigner: false, isWritable: true },
+        { pubkey: o, isSigner: true, isWritable: false },
+      ],
+      data,
+    });
+    return [make, xfer];
+  });
+}
+export const tipSkrReady = Boolean(TIP_SKR_MINT);
 
 /** Sign a chat message with the session key (the chat server checks it against the Player account). */
 export function signWithSession(session: Keypair, message: string) {

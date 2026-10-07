@@ -173,3 +173,8 @@ export const explorer = (sig: string) =>
 /** The web wallet picker error, recognised without loading the class that throws it. */
 export const isPickWalletError = (e: unknown): e is Error & { wallets: import('./client').WebWalletInfo[] } =>
   (e as Error)?.name === 'PickWalletError' && Array.isArray((e as { wallets?: unknown }).wallets);
+
+/** The SKR token's mint, for lobby tips. Set EXPO_PUBLIC_SKR_MINT at build time; with none, the SKR tip option is hidden. */
+const SKR_TIP = (process.env.EXPO_PUBLIC_SKR_MINT ?? '').trim();
+export const TIP_SKR_MINT: string = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(SKR_TIP) ? SKR_TIP : '';
+export const TIP_LIMITS = { SOL: [0.001, 0.005, 0.01], ORE: [0.01, 0.05, 0.1], SKR: [10, 50, 100] } as const;

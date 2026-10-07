@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Keypair, PublicKey } from '@solana/web3.js';
 import { loadBoard, loadChain, loadOreTx } from '../chain/lazy';
+import { announce, announceXp } from './lobby';
 import {
   chainReady, clockOffsetMs, isPickWalletError, isRateLimited, LIVE_MAX_ROUND_SOL, MAX_SESSION_FUND_SOL, NOTHING_CLAIMABLE,
   onChainMode, oreLive, REFINING_FEE, short,
@@ -491,6 +492,7 @@ export const useGame = create<GameState>((set, get) => {
         };
       });
       if (won) {
+        announce({ k: 'win', sol: Math.round(solOut * 10000) / 10000, pts: points });
         play(motherlode ? 'motherlode' : 'win');
         haptic.win();
         if (get().save.winStreak >= 2) get().toast(`🔥 Hot streak x${get().save.winStreak}`, 'gold');
@@ -939,7 +941,10 @@ export const useGame = create<GameState>((set, get) => {
 
     gainXp: (n) => {
       const add = Math.max(0, Math.min(100, Math.floor(n)));
-      if (add) updateSave((s) => ({ ...s, xp: s.xp + add, bonusXp: s.bonusXp + add }));
+      if (add) {
+        updateSave((s) => ({ ...s, xp: s.xp + add, bonusXp: s.bonusXp + add }));
+        announceXp(add);
+      }
     },
 
     doEmote: () => {
@@ -1104,11 +1109,15 @@ export const useGame = create<GameState>((set, get) => {
         const [board, displayed] = await Promise.all([loadBoard(), ownerKey()]);
         if (!displayed) throw new Error('wallet disconnected');
         await (what === 'sol' ? board.claimBoardSol(displayed) : board.claimBoardOre(displayed));
-        await get().refreshWallet();
+        // the claim is confirmed: free the button and zero what was claimed now, then re-read balances behind the scenes
+        // (a slow balance read used to keep the button on "Approve" for a minute, so it looked stuck)
+        const cu = get().wallet.unclaimed;
+        setWallet({ busy: null, unclaimed: what === 'sol' ? { ...cu, sol: 0 } : { ...cu, unrefined: 0, refined: 0 } });
         play('win');
         haptic.win();
         set({ claimedAt: Date.now() });
-        get().toast(`${unit} claim confirmed${get().wallet.readError ? '; balance refresh unavailable' : ''}. See transaction for exact amount`, 'good');
+        get().toast(`${unit} claim confirmed. See transaction for exact amount`, 'good');
+        void get().refreshWallet();
       } catch (e) {
         get().toast(`Claim failed: ${errMsg(e)}`, 'bad');
       } finally {

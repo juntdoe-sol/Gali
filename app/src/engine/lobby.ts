@@ -24,6 +24,7 @@ export type LobbyEvent =
   | { t: 'ready' }
   | { t: 'me'; x: number; y: number; tx: number; ty: number; facing: 1 | -1; pose: string }
   | { t: 'door'; id: DoorId }
+  | { t: 'peer'; id: string }
   | { t: 'sfx'; name: 'step' | 'door' | 'pop' };
 
 export interface LobbyPeerView {
@@ -704,6 +705,22 @@ export class LobbyEngine {
         return;
       }
       const [wx, wy] = this.worldAt(q.x, q.y);
+      // a tap on another player opens their tip sheet instead of walking
+      let hit: string | null = null;
+      let best = Infinity;
+      for (const [id, p] of this.peers) {
+        const dx = Math.abs(wx - p.x);
+        const dy = wy - (p.y - 12);
+        if (dx < 12 && Math.abs(dy) < 20 && dx + Math.abs(dy) < best) {
+          best = dx + Math.abs(dy);
+          hit = id;
+        }
+      }
+      if (hit) {
+        this.emit({ t: 'peer', id: hit });
+        this.tapMark = null;
+        return;
+      }
       this.walkTo(wx, wy);
       this.tapMark = { x: wx, y: wy, at: performance.now() };
     };
