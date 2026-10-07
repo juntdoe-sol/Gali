@@ -9,7 +9,6 @@ import { initAudio } from './game/sfx';
 import { useGame } from './game/store';
 import PixelMine from './pixel/PixelMine';
 import { useWorld } from './game/world';
-import { ChatSheet } from './ui/Chat';
 import { TabBar, type SheetTab } from './ui/TabBar';
 import { Dock } from './ui/Dock';
 import { RoundCard, Toasts, TopBar } from './ui/Hud';
@@ -20,7 +19,7 @@ import { MapHint } from './ui/MapHint';
 import { Splash } from './ui/Splash';
 import { PeerCard } from './ui/World';
 import { CaveEntry, CaveScreen } from './ui/Cave';
-import { LobbyBack, LobbyScreen } from './ui/Lobby';
+import { LobbyBack, LobbyScreen, SharedChat } from './ui/Lobby';
 import { useLobby } from './game/lobby';
 
 
@@ -121,8 +120,8 @@ function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTa
         <ResultPop />
         <LevelUp />
         <GearReveal />
-        <ChatSheet />
-        <LobbyScreen onMarket={() => setSheet('gear')} />
+        <SharedChat />
+        <LobbyScreen onMarket={() => setSheet('gear')} sheet={sheet} onTab={setSheet} />
         <Sheet tab={sheet} onTab={setSheet} />
       </>}
         <Toasts />
