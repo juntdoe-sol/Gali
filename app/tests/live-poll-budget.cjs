@@ -11,6 +11,6 @@ assert.ok(pot >= 6_000, 'pot poll must be >=6s');
 const rpm = 60_000 / clock * 2 + 60_000 / pot;
 assert.ok(rpm <= 24, `live polling budget ${rpm}/min exceeds 24`);
 assert.match(src, /let livePotBusy = false/);
-assert.match(src, /if \(!livePotBusy && Date\.now\(\) - st\.potAt > LIVE_POT_POLL_MS\)/);
+assert.match(src, /if \(!livePotBusy && Date\.now\(\) - st\.potAt > LIVE_POT_POLL_MS \* idleFactor\(\)\)/);
 assert.match(src, /livePotBusy = true;[\s\S]{0,160}\.finally\(\(\) => \{ livePotBusy = false; \}\)/, 'pot poll cannot overlap itself');
 console.log(`PASS live polling budget ${rpm}/min/client with overlap guard`);

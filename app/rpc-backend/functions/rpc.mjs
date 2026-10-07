@@ -87,6 +87,40 @@ export default async function rpc(req, ctx) {
   }
   if (!Object.hasOwn(validators, body.method)) return error(400, -32601, 'Method not allowed', body.id);
   if (!validators[body.method](body.params)) return error(400, -32602, 'Invalid params', body.id);
+  // Short shared cache for read calls: every player watches the same round, so identical reads are answered
+  // once per few seconds. Transaction status and sendTransaction are never cached.
+  const ttl = CACHE_MS[body.method];
+  if (!ttl) return forward(body, ctx);
+  const key = body.method + JSON.stringify(body.params);
+  const now = Date.now();
+  const hit = cache.get(key);
+  if (hit && hit.until > now) return Response.json({ jsonrpc: '2.0', id: body.id, result: hit.result }, { headers });
+  let flight = inflight.get(key);
+  if (!flight) {
+    flight = (async () => {
+      const response = await forward({ ...body, id: 1 }, ctx);
+      if (!response.ok) return { response };
+      const parsed = await response.json();
+      if (!object(parsed) || !Object.hasOwn(parsed, 'result')) return { response };
+      if (cache.size >= 300) cache.delete(cache.keys().next().value);
+      cache.set(key, { until: Date.now() + ttl, result: parsed.result });
+      return { result: parsed.result };
+    })().finally(() => inflight.delete(key));
+    inflight.set(key, flight);
+  }
+  const out = await flight;
+  if (out.response) return error(out.response.status, -32000, 'RPC unavailable', body.id);
+  return Response.json({ jsonrpc: '2.0', id: body.id, result: out.result }, { headers });
+}
+
+const CACHE_MS = {
+  getSlot: 1500, getBlockHeight: 1500, getLatestBlockhash: 2000, getBlockTime: 60000,
+  getAccountInfo: 2000, getMultipleAccounts: 2000, getBalance: 1500, getTokenAccountBalance: 1500,
+};
+const cache = new Map();
+const inflight = new Map();
+
+async function forward(body, ctx) {
   // Helius first, Alchemy as the second path. Each key lives only in the function's secrets.
   const providers = [];
   const hk = ctx.env?.HELIUS_RPC_KEY;
