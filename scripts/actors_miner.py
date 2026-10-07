@@ -257,7 +257,8 @@ def draw_pick(f, grip, J, part='pick', buried=None, butt_extra=1.2):
 # ---------------- poses ----------------
 REST_TORSO = (9.4, 16.8)
 REST_HEAD = (4, 3)
-POSES = {'idle': 180, 'walk': 100, 'swing': 90, 'cheer': 120, 'carry': 110}
+POSES = {'idle': 180, 'walk': 100, 'swing': 90, 'cheer': 120, 'carry': 110,
+         'dance1': 130, 'dance2': 120, 'dance3': 140}
 HIT = 3
 SHOULDER_GRIP = (12.2, 17.0)
 SHOULDER_J = (3.4, 13.0)
@@ -324,6 +325,41 @@ def pose_frames():
         dict(body=(0, 1), squash=1, head=(0, 0), eyes='happy', mouth='open', feet=((7, 24), (12, 24)),
              back=(3.4, 14.0), grip=(15.6, 11.4), J=(18.2, 4.4), z='front', armz='back'),
     ]
+    # dance1 "pick disco": hip sway and a step-touch, the pick pointed up and across like a disco finger,
+    # the free hand on the hip, then the pick swept down low.
+    P['dance1'] = [
+        dict(body=(0, 0), head=(0, 0), eyes='happy', mouth='open', feet=((8, 24), (11, 24)),
+             back=(5.0, 16.8), grip=(14.6, 10.2), J=(17.4, 2.6), z='front', armz='back'),
+        dict(body=(1, 1), squash=1, head=(1, 0), eyes='happy', mouth='open', feet=((8, 24), (12, 24)),
+             back=(5.8, 17.4), grip=(14.0, 12.6), J=(17.8, 6.4), z='front', armz='back'),
+        dict(body=(1, 0), head=(1, -1), eyes='happy', mouth='open', feet=((9, 24), (12, 23)),
+             back=(6.2, 16.6), grip=(14.6, 15.4), J=(18.2, 11.8), z='front', armz='back'),
+        dict(body=(0, 1), squash=1, head=(0, 0), eyes='happy', mouth='open', feet=((8, 24), (11, 24)),
+             back=(5.4, 17.2), grip=(13.8, 13.0), J=(17.2, 7.0), z='front', armz='back'),
+        dict(body=(-1, 0), head=(-1, -1), eyes='happy', mouth='open', feet=((7, 23), (10, 24)),
+             back=(3.8, 16.2), grip=(14.0, 9.8), J=(16.6, 2.2), z='front', armz='back'),
+        dict(body=(-1, 1), squash=1, head=(-1, 0), eyes='happy', mouth='open', feet=((7, 24), (10, 24)),
+             back=(3.6, 17.0), grip=(14.2, 12.4), J=(17.6, 6.0), z='front', armz='back'),
+    ]
+    # dance2 "pogo": both feet off the ground, the pick held high overhead and shaken, other fist punching up
+    P['dance2'] = [
+        dict(body=(0, 1), squash=1, head=(0, 0), eyes='happy', mouth='open', feet=((8, 24), (11, 24)),
+             back=(4.2, 14.2), grip=(13.0, 9.6), J=(17.0, 3.0), z='front', armz='back'),
+        dict(body=(0, -2), head=(0, -1), eyes='happy', mouth='open', feet=((8, 22), (12, 21)),
+             back=(3.6, 7.8), grip=(13.2, 8.6), J=(16.2, 0.6), z='front', armz='back'),
+        dict(body=(0, -2), head=(0, -1), eyes='happy', mouth='open', feet=((9, 21), (11, 22)),
+             back=(3.2, 10.6), grip=(15.0, 8.2), J=(18.0, 1.6), z='front', armz='back'),
+        dict(body=(0, 1), squash=1, head=(0, 0), eyes='happy', mouth='open', feet=((7, 24), (12, 24)),
+             back=(3.8, 15.2), grip=(14.2, 10.8), J=(17.6, 4.2), z='front', armz='back'),
+    ]
+    # dance3 "wiggle": a loose side-to-side sway, the arms swinging opposite each other, the pick across the chest
+    wig = [(-1, 0), (0, 1), (1, 0), (1, 1), (0, 0), (-1, 1)]
+    wback = [(2.6, 19.0), (3.6, 15.2), (5.2, 12.4), (6.6, 15.6), (6.0, 19.4), (4.0, 20.2)]
+    wgrip = [(12.8, 14.4), (13.6, 17.4), (14.4, 19.0), (13.6, 17.0), (12.8, 14.0), (12.2, 12.6)]
+    wJ = [(15.6, 8.4), (16.8, 12.6), (17.8, 16.2), (16.6, 12.0), (15.4, 8.0), (14.6, 5.6)]
+    wfeet = [((7, 24), (12, 24)), ((8, 24), (12, 24)), ((9, 24), (13, 24)), ((9, 24), (12, 24)), ((8, 24), (11, 24)), ((7, 24), (11, 24))]
+    P['dance3'] = [dict(body=wig[t], squash=wig[t][1], head=(wig[t][0], 0), eyes='happy', mouth='open', feet=wfeet[t],
+                        back=wback[t], grip=wgrip[t], J=wJ[t], z='front', armz='back') for t in range(6)]
     # carry: heavier walk, ore sack hung from the pick head behind the back
     cbob = [0, 1, 1, 0, 1, 1]
     sway = [0, 0.4, 0.8, 0, -0.4, -0.8]

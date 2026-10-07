@@ -17,13 +17,14 @@ import { draw, has, makeCanvas, ctx2d, rect, sprite, text, textCentered, textWid
 import { drawMiner, drawPet, frameAt, lampOf, stepBody, type Body } from './actors';
 import { Particles } from './particles';
 import { Sky } from './sky';
-import type { Look } from './types';
+import type { Look, Pose } from './types';
 import { CLIFF, DOORS, STRUCTURES, doorAt, GRASS, HALL, LCOLS, LH, LROWS, LT, LW, lidx, lobbyMap, lobbyPath, PLANK, PLAZA, ROAD, SAND, SPAWNS, standable, tileCentre, tileOf, WATER, type DoorId } from '../game/lobbyMap';
 
 export type LobbyEvent =
   | { t: 'ready' }
   | { t: 'me'; x: number; y: number; tx: number; ty: number; facing: 1 | -1; pose: string }
   | { t: 'door'; id: DoorId }
+  | { t: 'dance-off' }
   | { t: 'peer'; id: string }
   | { t: 'sfx'; name: 'step' | 'door' | 'pop' };
 
@@ -44,6 +45,7 @@ export interface LobbySnap {
   peers: LobbyPeerView[];
   say: string | null;
   emoji: string | null;
+  dance?: number;
 }
 export interface LobbyOpts {
   spawn: 'start' | DoorId;
@@ -955,7 +957,16 @@ export class LobbyEngine {
       const moving = me.path.length > 0 || this.direct;
       const tx = moving ? me.tx : me.x;
       const ty = moving ? me.ty : me.y;
-      const pose = moving ? 'walk' : this.snap.emoji && now - this.myEmojiAt < 2200 ? 'cheer' : 'idle';
+      const dance = this.snap.dance ?? 0;
+      if (moving && dance) this.emit({ t: 'dance-off' });
+      const pose = moving ? 'walk' : dance ? `dance${dance}` : this.snap.emoji && now - this.myEmojiAt < 2200 ? 'cheer' : 'idle';
+      if (!moving) {
+        const want = dance ? (`dance${dance}` as Walker['pose']) : /^dance/.test(me.pose) ? 'idle' : me.pose;
+        if (want !== me.pose) {
+          me.pose = want;
+          me.since = now;
+        }
+      }
       const key = `${Math.round(tx)},${Math.round(ty)},${pose},${me.facing}`;
       if (key !== this.lastEmitKey || performance.now() - this.lastBeat > 1000) {
         this.lastEmitKey = key;
@@ -967,9 +978,9 @@ export class LobbyEngine {
     for (const p of this.peers.values()) {
       if (p.path.length) stepBody(p, dt, SPEED, now);
       const walking = p.path.length > 0;
-      const want = walking ? 'walk' : p.view.p === 'cheer' ? 'cheer' : 'idle';
+      const want = walking ? 'walk' : p.view.p === 'cheer' || /^dance[123]$/.test(p.view.p) ? p.view.p : 'idle';
       if (p.pose !== want) {
-        p.pose = want;
+        p.pose = want as Pose;
         p.since = now;
       }
       // a heartbeat that says they have stopped, while ours still walks: let us arrive
@@ -1097,7 +1108,8 @@ export class LobbyEngine {
       items.push({
         y: b.y,
         draw: () => {
-          const f = frameAt(b.pose, b.since, now);
+          // dances run on the wall clock, so everyone dancing near each other keeps the same beat
+          const f = /^dance/.test(b.pose) ? frameAt(b.pose, 0, Date.now()) : frameAt(b.pose, b.since, now);
           const X = sx(b.x);
           const Y = sy(b.y);
           if (pr.mine) {

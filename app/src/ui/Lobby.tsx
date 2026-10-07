@@ -64,6 +64,8 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
   const lvl = levelFromXp(useLevelXp());
   const sol = useGame((s) => (isOnChain(s) ? s.wallet.sol + s.wallet.sessionSol : s.save.practiceSol));
   const [navOpen, setNavOpen] = useState(false);
+  const [danceOpen, setDanceOpen] = useState(false);
+  const myDance = useLobby((s) => s.myDance);
   const [howTo, setHowTo] = useState(false);
   const [tipTo, setTipTo] = useState<{ id: string; name: string; wallet: string } | null>(null);
   const sex = useName((s) => s.sex);
@@ -120,6 +122,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
         peers,
         say: s.mySay && now - s.mySay.at < 6000 ? s.mySay.t : null,
         emoji: s.myEmoji && now - s.myEmoji.at < 3000 ? s.myEmoji.e : null,
+        dance: s.myDance,
       };
       const json = JSON.stringify(snap);
       // On Android the ref's methods only exist once the WebView has loaded.
@@ -194,6 +197,9 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
         break;
       case 'door':
         enter(e.id);
+        break;
+      case 'dance-off':
+        useLobby.getState().setDance(0);
         break;
       default:
         break;
@@ -289,7 +295,32 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
               <T style={{ fontSize: 18 }}>{e}</T>
             </Pressable>
           ))}
+          <Pressable onPress={() => setDanceOpen((o) => !o)} style={[styles.emote, myDance ? styles.emoteOn : null]} accessibilityRole="button" accessibilityLabel="Dance">
+            <T style={{ fontSize: 18 }}>🕺</T>
+          </Pressable>
         </View>
+        {danceOpen ? (
+          <View style={styles.danceRow}>
+            {([1, 2, 3] as const).map((n) => (
+              <Pressable
+                key={n}
+                onPress={() => {
+                  useLobby.getState().setDance(myDance === n ? 0 : n);
+                  setDanceOpen(false);
+                }}
+                style={[styles.danceBtn, myDance === n ? styles.emoteOn : null]}
+                accessibilityRole="button"
+                accessibilityLabel={`Dance ${DANCE_NAMES[n - 1]}`}>
+                <T v="black" style={{ fontSize: 11 }}>{DANCE_NAMES[n - 1]}</T>
+              </Pressable>
+            ))}
+            {myDance ? (
+              <Pressable onPress={() => { useLobby.getState().setDance(0); setDanceOpen(false); }} style={styles.danceBtn} accessibilityRole="button" accessibilityLabel="Stop dancing">
+                <T v="black" style={{ fontSize: 11 }}>STOP</T>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
       </View>
 
       {navOpen ? (
@@ -749,6 +780,8 @@ export function BackPill({ door = 'island', onBefore }: { door?: DoorId; onBefor
   );
 }
 
+const DANCE_NAMES = ['DISCO', 'POGO', 'WIGGLE'] as const;
+
 const styles = StyleSheet.create({
   feed: { position: 'absolute', left: 12, maxWidth: '62%', gap: 6, alignItems: 'flex-start' },
   act: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#0b1226e6', borderWidth: 1.5, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5 },
@@ -773,7 +806,10 @@ const styles = StyleSheet.create({
   doors: { flexDirection: 'row', gap: 8 },
   door: { flex: 1, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: '#070d20e6', borderWidth: 2 },
   emotes: { flexDirection: 'row', justifyContent: 'space-between' },
-  emote: { width: 46, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: '#070d20cc', borderWidth: 1, borderColor: '#2f5499' },
+  emote: { width: 40, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: '#070d20cc', borderWidth: 1, borderColor: '#2f5499' },
+  emoteOn: { borderColor: COLORS.gold, backgroundColor: '#3a2a0acc' },
+  danceRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 6, marginTop: 6 },
+  danceBtn: { paddingHorizontal: 12, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: '#070d20cc', borderWidth: 1, borderColor: '#2f5499' },
   inputRow: { flexDirection: 'row', gap: 8 },
   input: { flex: 1, height: 40, borderRadius: 10, paddingHorizontal: 12, backgroundColor: '#0c1634', color: COLORS.text, borderWidth: 1.5, borderColor: '#2f5499', fontSize: 14 },
   sendBtn: { height: 40, paddingHorizontal: 16, borderRadius: 10, backgroundColor: COLORS.gold, alignItems: 'center', justifyContent: 'center' },

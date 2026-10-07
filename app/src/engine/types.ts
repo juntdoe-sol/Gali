@@ -7,7 +7,7 @@
  * snapshot only says what is true.
  */
 
-export type Pose = 'idle' | 'walk' | 'swing' | 'cheer' | 'carry';
+export type Pose = 'idle' | 'walk' | 'swing' | 'cheer' | 'carry' | 'dance1' | 'dance2' | 'dance3';
 
 export interface Look {
   hat: string; // helmet gear key, e.g. 'hat-yellow'
