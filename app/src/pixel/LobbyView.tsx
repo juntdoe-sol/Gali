@@ -33,6 +33,11 @@ export default function LobbyView({ ref, onEvent, atlas, look, opts }: { ref: Re
     [],
   );
 
+  // your look changed (you picked the girl or boy miner)
+  useEffect(() => {
+    engine.current?.setLook(look);
+  }, [look.sex, look.hat, look.fit, look.pick, look.pet]);
+
   useEffect(() => {
     const cv = canvas.current;
     if (!cv) return;

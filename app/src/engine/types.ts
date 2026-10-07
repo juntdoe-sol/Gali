@@ -16,6 +16,8 @@ export interface Look {
   handle: string; // pick handle colour
   pet: string | null; // pet gear key
   glow: 'none' | 'rare' | 'epic' | 'legendary'; // pick rarity, for sparkles
+  /** which miner body: 'f' draws the girl miner. Anything else is the boy. */
+  sex?: 'm' | 'f';
 }
 
 export interface PeerView {
