@@ -68,7 +68,7 @@ test('cached wallet rebuilds against fresh round after authorization', async () 
 });
 test('processed then expired is unknown, signature survives restart, repeat is blocked', async () => {
   const rpc = { getSignatureStatuses: async () => ({ value: [{ confirmationStatus: 'processed', err: null }] }) };
-  const h = client({ rpc, globals: { setTimeout: (fn, ms) => ms === 1000 ? setTimeout(fn, 0) : setTimeout(fn, ms) } });
+  const h = client({ rpc, globals: { setTimeout: (fn, ms) => (ms === 1000 || ms === 500) ? setTimeout(fn, 0) : setTimeout(fn, ms) } });
   await assert.rejects(h.c.sendWithWallet(async owner => transfer(owner), A.publicKey), /unknown/i);
   assert.equal(h.signs(), 1);
   const saved = [...h.data.entries()].find(([k]) => k.includes('pending'));

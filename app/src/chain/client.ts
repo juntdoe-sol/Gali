@@ -240,15 +240,16 @@ let sending = false;
 
 export async function confirmSig(sig: string, lastValidBlockHeight: number): Promise<void> {
   try {
-    for (let i = 0; i < 45; i++) {
-      const { value } = await withTimeout(connection.getSignatureStatuses([sig], { searchTransactionHistory: true }));
+    for (let i = 0; i < 90; i++) {
+      // a fresh transaction is in the recent status cache; only search history once it has had time to land
+      const { value } = await withTimeout(connection.getSignatureStatuses([sig], i >= 12 ? { searchTransactionHistory: true } : undefined));
       const st = value[0];
       if (st && (st.confirmationStatus === 'confirmed' || st.confirmationStatus === 'finalized')) {
         if (st.err) throw new VerifiedTransactionFailure(`Transaction failed on chain (network fee may apply): ${JSON.stringify(st.err)}`);
         return;
       }
-      if (i % 5 === 4 && (await withTimeout(connection.getBlockHeight('confirmed'))) > lastValidBlockHeight) break;
-      await new Promise((r) => setTimeout(r, 1000));
+      if (i % 10 === 9 && (await withTimeout(connection.getBlockHeight('confirmed'))) > lastValidBlockHeight) break;
+      await new Promise((r) => setTimeout(r, 500));
     }
   } catch (e) {
     if (e instanceof VerifiedTransactionFailure) throw e;
@@ -321,8 +322,7 @@ export async function sendWithWallet(build: (owner: PublicKey) => Promise<Transa
     const prepare = async (owner: PublicKey) => {
       if (!owner.equals(displayed)) throw new Error('Wallet changed; reconnect before signing');
       // Fresh round and blockhash after authorization. A timeout cannot continue into signing.
-      const ixs = await withTimeout(build(owner));
-      const latest = await withTimeout(connection.getLatestBlockhash());
+      const [ixs, latest] = await Promise.all([withTimeout(build(owner)), withTimeout(connection.getLatestBlockhash())]);
       const tx = new Transaction({ feePayer: owner, ...latest }).add(...ixs);
       return { tx, lastValidBlockHeight: latest.lastValidBlockHeight };
     };
