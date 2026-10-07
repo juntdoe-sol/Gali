@@ -122,6 +122,11 @@ export class LobbyEngine {
   private fpsAcc = { n: 0, t: 0 };
   private minimapRect = { x: 0, y: 0, w: 1, h: 1 };
   private flagFrames = 1;
+  /**
+   * A film camera, for recording the trailer. When set, the view goes exactly where it says (no follow, no clamp)
+   * and the touch controls it names step aside. The app never sets it.
+   */
+  director: { x: number; y: number; z?: number; hide?: { stick?: boolean; mini?: boolean; signs?: boolean } } | null = null;
   private onKey = (e: KeyboardEvent) => this.key(e, true);
   private onKeyUp = (e: KeyboardEvent) => this.key(e, false);
 
@@ -1094,7 +1099,7 @@ export class LobbyEngine {
 
     // zoom: about 200 art pixels across a phone, in whole device pixels so nothing blurs
     const base = Math.max(1.6, Math.min(5, (this.W / 200) * this.zoomK));
-    this.z = Math.max(1 / dpr, Math.round(base * dpr) / dpr);
+    this.z = this.director?.z ?? Math.max(1 / dpr, Math.round(base * dpr) / dpr);
     const z = this.z;
     const cy = this.centreY();
     // follow me, and stay inside the map
@@ -1103,8 +1108,13 @@ export class LobbyEngine {
     const clampAxis = (v: number, half: number, size: number) => (half * 2 >= size ? size / 2 : Math.max(half, Math.min(size - half, v)));
     const tx = clampAxis(this.me.x, hw, LW);
     const ty = clampAxis(this.me.y - 6, hh, LH);
-    this.cam.x += (tx - this.cam.x) * Math.min(1, 0.12 + 0.0);
-    this.cam.y += (ty - this.cam.y) * Math.min(1, 0.12);
+    if (this.director) {
+      this.cam.x = this.director.x;
+      this.cam.y = this.director.y;
+    } else {
+      this.cam.x += (tx - this.cam.x) * Math.min(1, 0.12 + 0.0);
+      this.cam.y += (ty - this.cam.y) * Math.min(1, 0.12);
+    }
     const ox = Math.round((W / 2 - this.cam.x * z) * dpr) / dpr;
     const oy = Math.round((cy - this.cam.y * z) * dpr) / dpr;
     const sx = (wx: number) => ox + wx * z;
@@ -1268,9 +1278,10 @@ export class LobbyEngine {
 
     // names and bubbles sit above the light
     for (const l of labels) l();
-    this.doorSigns(c, sx, sy, z, now);
-    this.minimap(c, W, now);
-    this.drawStick(c);
+    const hide = this.director?.hide;
+    if (!hide?.signs) this.doorSigns(c, sx, sy, z, now);
+    if (!hide?.mini) this.minimap(c, W, now);
+    if (!hide?.stick) this.drawStick(c);
 
     // the fade as you step through a door
     if (this.leaving) {

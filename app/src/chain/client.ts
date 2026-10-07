@@ -213,7 +213,21 @@ async function authorize(wallet: Web3MobileWallet) {
 
 /** `webWallet`: on web, the wallet the player picked from the list. */
 export async function connectWallet(webWallet?: string): Promise<PublicKey> {
-  return IS_WEB ? webConnect(webWallet) : transact(authorize);
+  if (IS_WEB) return webConnect(webWallet);
+  // A wallet that starts cold or is locked can miss MWA's first reply window ("TimeoutException: Timed out waiting
+  // for response with id=1"). The wallet is awake by the second try, so ask once more, then explain in plain words.
+  const timedOut = (e: unknown) => /timeout|timed out/i.test(String((e as Error)?.message ?? e));
+  try {
+    return await transact(authorize);
+  } catch (e) {
+    if (!timedOut(e)) throw e;
+  }
+  try {
+    return await transact(authorize);
+  } catch (e) {
+    if (!timedOut(e)) throw e;
+    throw new Error('Your wallet did not answer. Open it, unlock it, then tap Connect wallet again.');
+  }
 }
 
 export async function disconnectWallet() {
