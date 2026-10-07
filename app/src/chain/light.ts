@@ -44,7 +44,7 @@ export const RPC_URL =
 const READ_RPC_URL = oreLive ? process.env.EXPO_PUBLIC_RPC_READ_URL : undefined;
 const PROXIED_READS = new Set([
   'getSlot', 'getBlockTime', 'getBlockHeight', 'getLatestBlockhash',
-  'getBalance', 'getTokenAccountBalance', 'getAccountInfo', 'getSignatureStatuses',
+  'getBalance', 'getTokenAccountBalance', 'getAccountInfo', 'getSignatureStatuses', 'sendTransaction',
 ]);
 
 /** True when an RPC turned us away for asking too often (public endpoints do this a lot). */
@@ -68,15 +68,11 @@ async function timedFetch(target: RequestInfo, init: RequestInit | undefined, ms
   }
 }
 
-/** Whether a JSON-RPC body is a read the proxy accepts. The proxy refuses a history search, so that goes direct. */
+/** Whether a JSON-RPC body is a read the proxy accepts.  */
 function proxiedRead(body: string): boolean {
   try {
     const b = JSON.parse(body) as { method?: string; params?: unknown[] };
     if (!b || typeof b.method !== 'string' || !PROXIED_READS.has(b.method)) return false;
-    if (b.method === 'getSignatureStatuses') {
-      const cfg = Array.isArray(b.params) ? (b.params[1] as { searchTransactionHistory?: boolean } | undefined) : undefined;
-      if (cfg?.searchTransactionHistory) return false;
-    }
     return true;
   } catch {
     return false; // malformed or non-JSON: leave it to its original transport

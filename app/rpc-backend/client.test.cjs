@@ -20,15 +20,15 @@ function load(network, readUrl, fail = new Map()) {
     await light.retryingFetch(light.RPC_URL, { method: 'POST', body: JSON.stringify({ method: 'getSlot' }) });
     assert.equal(calls[0], expected);
     await light.retryingFetch(light.RPC_URL, { method: 'POST', body: JSON.stringify({ method: 'sendTransaction' }) });
-    assert.equal(calls[1], light.RPC_URL, 'signed writes never use the read-only provider proxy');
+    assert.equal(calls[1], expected, 'signed transactions relay through the proxy when configured (browser cannot reach the RPC)');
     await light.retryingFetch('https://unrelated.example', { method: 'POST', body: JSON.stringify({ method: 'getSlot' }) });
     assert.equal(calls[2], 'https://unrelated.example', 'do not hijack unrelated requests');
   }
-  // the proxy refuses a history search, so that confirmation read goes direct
+  // history searches now go through the proxy too
   {
     const { light, calls } = load('mainnet', proxy);
     await light.retryingFetch(light.RPC_URL, { method: 'POST', body: JSON.stringify({ method: 'getSignatureStatuses', params: [['x'], { searchTransactionHistory: true }] }) });
-    assert.equal(calls[0], light.RPC_URL, 'history search bypasses the proxy');
+    assert.equal(calls[0], proxy, 'history search uses the proxy');
     await light.retryingFetch(light.RPC_URL, { method: 'POST', body: JSON.stringify({ method: 'getSignatureStatuses', params: [['x']] }) });
     assert.equal(calls[1], proxy, 'recent status reads use the proxy');
   }

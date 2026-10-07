@@ -37,7 +37,15 @@ const validators = {
   getSignatureStatuses: (p) => p.length >= 1 && p.length <= 2 && Array.isArray(p[0]) &&
     p[0].length >= 1 && p[0].length <= 10 && p[0].every((s) => bytes58(s, 64)) &&
     (p[1] === undefined || (keys(p[1], ['searchTransactionHistory']) &&
-      (p[1].searchTransactionHistory === undefined || p[1].searchTransactionHistory === false))),
+      (p[1].searchTransactionHistory === undefined || typeof p[1].searchTransactionHistory === 'boolean'))),
+  // Relays one already-signed transaction (the browser cannot reach the RPC directly). The wallet holds
+  // the keys; this only forwards bytes. Strict shape: base64, at most 1232 bytes (1644 chars), fixed options.
+  sendTransaction: (p) => p.length === 2 && typeof p[0] === 'string' && p[0].length >= 100 && p[0].length <= 1644 &&
+    /^[A-Za-z0-9+/]+={0,2}$/.test(p[0]) && keys(p[1], ['encoding', 'skipPreflight', 'preflightCommitment', 'maxRetries']) &&
+    p[1].encoding === 'base64' &&
+    (p[1].skipPreflight === undefined || typeof p[1].skipPreflight === 'boolean') &&
+    (p[1].preflightCommitment === undefined || ['processed', 'confirmed', 'finalized'].includes(p[1].preflightCommitment)) &&
+    (p[1].maxRetries === undefined || (uint(p[1].maxRetries) && p[1].maxRetries <= 5)),
 };
 
 async function boundedText(message, limit) {
