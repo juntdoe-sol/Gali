@@ -19,6 +19,7 @@ import {
   fetchClock,
   fetchOreMiner,
   fetchOreRound,
+  fetchOreRounds,
   fetchOreTreasury,
   needsCheckpoint,
   ORE_REFINING_BPS,
@@ -69,7 +70,11 @@ export interface BoardRound {
 /** Reads one ORE round into the shape the quarry and the Rounds tab want. */
 export async function fetchBoardRound(roundId: number | bigint): Promise<BoardRound | null> {
   const r = await fetchOreRound(connection, BigInt(roundId));
-  if (!r) return null;
+  return r ? boardRoundOf(r) : null;
+}
+
+/** An already-read ORE round in the shape the quarry and the Rounds tab want. */
+function boardRoundOf(r: OreRound): BoardRound {
 
   const perSquare = r.deployed.map((v) => Number(v) / LAMPORTS_PER_SOL);
   const total = perSquare.reduce((a, b) => a + b, 0);
@@ -95,14 +100,20 @@ export async function fetchBoardRound(roundId: number | bigint): Promise<BoardRo
   };
 }
 
-/** The last `limit` finished rounds, newest first. Stops at the first one ORE has closed. */
+/**
+ * The last `limit` finished rounds, newest first, in one batched read. ORE reclaims a round's rent about a
+ * day after it ends, so older ids come back empty and are skipped.
+ */
 export async function fetchPastBoardRounds(beforeRound: number, limit = 12): Promise<BoardRound[]> {
+  const ids: bigint[] = [];
+  for (let id = beforeRound - 1; id > 0 && ids.length < limit + 8; id--) ids.push(BigInt(id));
+  const rounds = await fetchOreRounds(connection, ids);
   const out: BoardRound[] = [];
-  for (let id = beforeRound - 1; id > 0 && out.length < limit; id--) {
-    const r = await fetchBoardRound(id);
-    // ORE reclaims a round's rent a day after it ends, so a gap here is the end of history.
-    if (!r) break;
-    if (r.settled) out.push(r);
+  for (const r of rounds) {
+    if (!r) continue;
+    const b = boardRoundOf(r);
+    if (b.settled) out.push(b);
+    if (out.length >= limit) break;
   }
   return out;
 }

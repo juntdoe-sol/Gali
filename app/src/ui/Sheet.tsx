@@ -256,13 +256,20 @@ function Rounds() {
   const roundId = useGame((s) => s.roundId);
   const onChain = useGame(isOnChain);
   const [rows, setRows] = useState<BoardRound[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const mine = useGame((s) => s.save.history).filter((h) => h.onChain).slice(0, 8);
   const [at, setAt] = useState(0);
   useEffect(() => {
     let live = true;
     setRows(null);
+    setFailed(false);
     (onChain ? loadBoard().then((b) => b.fetchPastBoardRounds(roundId)) : Promise.resolve(practiceRounds(roundId, 12)))
       .then((r) => live && setRows(r))
-      .catch(() => live && setRows([]));
+      .catch(() => {
+        if (!live) return;
+        setFailed(true);
+        setRows([]);
+      });
     return () => {
       live = false;
     };
@@ -289,9 +296,21 @@ function Rounds() {
           <T>Loading rounds…</T>
         </Card>
       ) : !rows.length ? (
-        <Card>
-          <T>No finished rounds yet. They show up here once they are settled.</T>
-        </Card>
+        <>
+          <Card>
+            <T>{failed ? 'Could not read past rounds from the network. Tap Refresh to try again.' : 'No finished rounds yet. They show up here once they are settled.'}</T>
+          </Card>
+          {mine.length ? (
+            <Card>
+              <T v="label">Your recent rounds</T>
+              {mine.map((h) => (
+                <T key={h.roundId} v="muted" style={{ marginTop: 4 }}>
+                  #{(h.roundId % 100000).toLocaleString()} · spot {h.winning + 1} · {h.won ? 'you won' : 'no strike'} · ◎ {fmtSol(h.solIn)} in
+                </T>
+              ))}
+            </Card>
+          ) : null}
+        </>
       ) : (
         rows.map((r) => {
           const p = r;

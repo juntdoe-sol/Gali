@@ -48,7 +48,7 @@ const PUBLIC_MAINNET_RPC = 'https://api.mainnet-beta.solana.com';
 const MAINNET_FALLBACK = oreLive && RPC_URL !== PUBLIC_MAINNET_RPC;
 const PROXIED_READS = new Set([
   'getSlot', 'getBlockTime', 'getBlockHeight', 'getLatestBlockhash',
-  'getBalance', 'getTokenAccountBalance', 'getAccountInfo', 'getSignatureStatuses', 'sendTransaction',
+  'getBalance', 'getTokenAccountBalance', 'getAccountInfo', 'getMultipleAccounts', 'getSignatureStatuses', 'sendTransaction',
 ]);
 
 /** True when an RPC turned us away for asking too often (public endpoints do this a lot). */

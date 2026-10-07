@@ -126,6 +126,20 @@ export async function fetchOreRound(conn: Connection, roundId: bigint): Promise<
   return info ? decodeRound(info.data) : null;
 }
 
+/** Several rounds in one read, newest id first. A closed round comes back as null. */
+export async function fetchOreRounds(conn: Connection, roundIds: bigint[]): Promise<(OreRound | null)[]> {
+  if (!roundIds.length) return [];
+  const infos = await conn.getMultipleAccountsInfo(roundIds.map((id) => roundPda(id)));
+  return infos.map((i) => {
+    if (!i) return null;
+    try {
+      return decodeRound(i.data);
+    } catch {
+      return null;
+    }
+  });
+}
+
 /** A player's miner account, or null if they have never deployed. */
 export async function fetchOreMiner(conn: Connection, authority: PublicKey): Promise<OreMiner | null> {
   const info = await conn.getAccountInfo(minerPda(authority));
