@@ -34,6 +34,8 @@ const validators = {
   getBalance: (p) => p.length >= 1 && p.length <= 2 && bytes58(p[0], 32) && config(p[1]),
   getTokenAccountBalance: (p) => p.length >= 1 && p.length <= 2 && bytes58(p[0], 32) && config(p[1]),
   getAccountInfo: (p) => p.length >= 1 && p.length <= 2 && bytes58(p[0], 32) && config(p[1], true),
+  getMultipleAccounts: (p) => p.length >= 1 && p.length <= 2 && Array.isArray(p[0]) && p[0].length >= 1 && p[0].length <= 20 &&
+    p[0].every((k) => bytes58(k, 32)) && config(p[1], true),
   getSignatureStatuses: (p) => p.length >= 1 && p.length <= 2 && Array.isArray(p[0]) &&
     p[0].length >= 1 && p[0].length <= 10 && p[0].every((s) => bytes58(s, 64)) &&
     (p[1] === undefined || (keys(p[1], ['searchTransactionHistory']) &&
