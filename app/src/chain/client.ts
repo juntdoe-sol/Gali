@@ -239,7 +239,8 @@ const pendingKey = `gali-pending-tx-${CLUSTER}`;
 interface PendingTransaction { signature: string; owner: string; lastValidBlockHeight: number }
 let sending = false;
 
-export async function confirmSig(sig: string, lastValidBlockHeight: number): Promise<void> {
+export async function confirmSig(sig: string, lastValidBlockHeight: number, raw?: Uint8Array | Buffer): Promise<void> {
+  let expired = false;
   try {
     for (let i = 0; i < 56; i++) {
       // a fresh transaction is in the recent status cache; only search history once it has had time to land
@@ -249,12 +250,35 @@ export async function confirmSig(sig: string, lastValidBlockHeight: number): Pro
         if (st.err) throw new VerifiedTransactionFailure(`Transaction failed on chain (network fee may apply): ${JSON.stringify(st.err)}`);
         return;
       }
-      if (i % 10 === 9 && (await withTimeout(connection.getBlockHeight('confirmed'))) > lastValidBlockHeight) break;
+      // Send the same signed bytes again every couple of seconds. A busy leader can drop a transaction it saw once;
+      // the signature is the same, so it can only ever land once, and a duplicate is ignored.
+      if (raw && i % 4 === 3) connection.sendRawTransaction(raw, { skipPreflight: true, maxRetries: 0 }).catch(() => undefined);
+      if (i % 10 === 9 && (await withTimeout(connection.getBlockHeight('confirmed'))) > lastValidBlockHeight) {
+        expired = true;
+        break;
+      }
       // quick checks while the transaction is fresh, then slower so a long wait cannot use up the proxy's request budget
       await new Promise((r) => setTimeout(r, i < 16 ? 500 : 1500));
     }
   } catch (e) {
     if (e instanceof VerifiedTransactionFailure) throw e;
+  }
+  if (expired) {
+    // The blockhash is gone. Once the chain is final past it, a transaction that is not on chain never will be.
+    try {
+      const [{ value }, height] = await Promise.all([
+        withTimeout(connection.getSignatureStatuses([sig], { searchTransactionHistory: true })),
+        withTimeout(connection.getBlockHeight('finalized')),
+      ]);
+      const st = value[0];
+      if (st && (st.confirmationStatus === 'confirmed' || st.confirmationStatus === 'finalized')) {
+        if (st.err) throw new VerifiedTransactionFailure(`Transaction failed on chain (network fee may apply): ${JSON.stringify(st.err)}`);
+        return;
+      }
+      if (!st && height > lastValidBlockHeight) throw new VerifiedTransactionFailure("The transaction never landed (the network dropped it). Nothing was spent. Try again.");
+    } catch (e) {
+      if (e instanceof VerifiedTransactionFailure) throw e;
+    }
   }
   throw new PendingTransactionError(sig);
 }
@@ -284,10 +308,10 @@ export async function reconcilePendingTransaction(): Promise<void> {
 }
 
 /** Persist the signature before waiting, so a crash or lost response cannot hide a possibly-landed tx. */
-async function trackAndConfirm(signature: string, owner: PublicKey, lastValidBlockHeight: number): Promise<string> {
+async function trackAndConfirm(signature: string, owner: PublicKey, lastValidBlockHeight: number, raw?: Uint8Array | Buffer): Promise<string> {
   await AsyncStorage.setItem(pendingKey, JSON.stringify({ signature, owner: owner.toBase58(), lastValidBlockHeight } satisfies PendingTransaction));
   try {
-    await confirmSig(signature, lastValidBlockHeight);
+    await confirmSig(signature, lastValidBlockHeight, raw);
     await AsyncStorage.removeItem(pendingKey);
     return signature;
   } catch (e) {
@@ -300,10 +324,19 @@ async function broadcastSigned(tx: Transaction, owner: PublicKey, lastValidBlock
   if (!tx.signature || !tx.feePayer?.equals(owner) || !tx.verifySignatures()) throw new Error('Wallet returned an invalid signature');
   const signature = utils.bytes.bs58.encode(tx.signature);
   await AsyncStorage.setItem(pendingKey, JSON.stringify({ signature, owner: owner.toBase58(), lastValidBlockHeight } satisfies PendingTransaction));
-  // No automatic RPC resubmission; the durable signature is available even if the response is lost.
-  try { await withTimeout(connection.sendRawTransaction(tx.serialize(), { maxRetries: 0 })); }
-  catch { throw new PendingTransactionError(signature); }
-  return trackAndConfirm(signature, owner, lastValidBlockHeight);
+  const raw = tx.serialize();
+  try {
+    await withTimeout(connection.sendRawTransaction(raw, { maxRetries: 0 }));
+  } catch (e) {
+    const m = String((e as Error)?.message ?? e);
+    // The node simulated it and said no: it was never sent, so say why instead of "outcome unknown".
+    if (/simulation failed|custom program error|insufficient (funds|lamports)|AccountNotFound|invalid account/i.test(m) && !/blockhash not found/i.test(m)) {
+      await AsyncStorage.removeItem(pendingKey);
+      throw new VerifiedTransactionFailure(`Rejected before sending (nothing was spent): ${m.replace(/\s+/g, ' ').slice(0, 160)}`);
+    }
+    // anything else (a timeout, a busy node) is uncertain: keep watching, and send the same bytes again below
+  }
+  return trackAndConfirm(signature, owner, lastValidBlockHeight, raw);
 }
 
 export async function withTimeout<T>(work: Promise<T>, ms = 12_000): Promise<T> {
