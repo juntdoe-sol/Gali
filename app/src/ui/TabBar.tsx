@@ -50,6 +50,16 @@ const RIGHT: { id: SheetTab | 'chat'; label: string }[] = [
   { id: 'chat', label: 'CHAT' },
 ];
 
+/** The lobby bar drops QUEST and ROUNDS (they belong to the island); the games live in the TRAVEL menu. */
+const LOBBY_LEFT: { id: SheetTab; label: string }[] = [
+  { id: 'gear', label: 'MARKET' },
+  { id: 'skr', label: 'BOOST' },
+];
+const LOBBY_RIGHT: { id: SheetTab | 'chat'; label: string }[] = [
+  { id: 'ranks', label: 'RANKS' },
+  { id: 'chat', label: 'CHAT' },
+];
+
 /** The lobby's version of the bar: same tabs, but the middle button is quick travel and CHAT opens the lobby chat. */
 export interface LobbyBar {
   navOpen: boolean;
@@ -108,7 +118,7 @@ export function TabBar({ active, onTab, inSheet, lobby }: { active: SheetTab | n
   return (
     <View style={[styles.bar, { height: BAR_H + insets.bottom, paddingBottom: insets.bottom }, inside && !inSheet && !lobby && { display: 'none' }]}>
       <LinearGradient colors={['#101c40', '#070d20']} style={[StyleSheet.absoluteFill, styles.barBg]} />
-      {LEFT.map(item)}
+      {(lobby ? LOBBY_LEFT : LEFT).map(item)}
       <Pressable
         onPress={mine}
         style={styles.item}
@@ -137,7 +147,7 @@ export function TabBar({ active, onTab, inSheet, lobby }: { active: SheetTab | n
           </View>
         ) : null}
       </Pressable>
-      {RIGHT.map(item)}
+      {(lobby ? LOBBY_RIGHT : RIGHT).map(item)}
     </View>
   );
 }

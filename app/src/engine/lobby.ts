@@ -71,6 +71,11 @@ interface Item {
   draw: () => void;
 }
 
+/** The sky's clouds are laid out for the island; the lobby map is about 2.5x wider, so spread and enlarge them. */
+const CLOUD_KX = 2.4;
+const CLOUD_KY = 3.4;
+const CLOUD_S = 1.9;
+
 export class LobbyEngine {
   private c: Ctx;
   private dpr = 1;
@@ -830,6 +835,15 @@ export class LobbyEngine {
   /* ------------------------------------------------------------------ */
   /* the loop                                                            */
   /* ------------------------------------------------------------------ */
+  /** For screenshots and demos: 0 midnight, 0.5 noon. */
+  setTime(f: number) {
+    this.sky.setTime(f);
+  }
+  setRain(k: number) {
+    (this.sky as unknown as { rainTarget: number }).rainTarget = k;
+    this.sky.rain = k;
+  }
+
   private resize() {
     const cssW = this.canvas.clientWidth || window.innerWidth;
     const cssH = this.canvas.clientHeight || window.innerHeight;
@@ -850,12 +864,10 @@ export class LobbyEngine {
     const now = Date.now();
     this.resize();
     this.perf(dt);
-    // the day matches the island's clock; no weather in the lobby
-    (this.sky as unknown as { rainTarget: number }).rainTarget = 0;
-    this.sky.rain = 0;
+    // the same living sky as the island: a turning day, drifting clouds, passing showers and lightning
     this.sky.update(dt, now, this.quality);
     this.parts.budget = this.quality ? 1 : 0.4;
-    this.parts.update(dt, 0.3);
+    this.parts.update(dt, 0.2 + this.sky.wind * 0.5);
     this.think(dt, now);
     this.draw(now);
     if (!this.ready && this.ground) {
@@ -1111,6 +1123,13 @@ export class LobbyEngine {
     // footstep dust, coins and so on
     this.parts.draw(c, ox, oy, z);
 
+    // cloud shadows slide over the ground (the sky's clouds are sized for the island, so spread them over this bigger map)
+    if (this.quality) {
+      c.globalAlpha = 0.1 + 0.08 * (1 - this.sky.night);
+      for (const cl of this.sky.clouds) c.drawImage(cl.shadow, Math.round(ox + (cl.x * CLOUD_KX + 26) * z), Math.round(oy + (cl.y * CLOUD_KY + 34) * z), cl.w * CLOUD_S * z, cl.shadow.height * CLOUD_S * z);
+      c.globalAlpha = 1;
+    }
+
     // a ring where you tapped
     if (this.tapMark) {
       const k = (performance.now() - this.tapMark.at) / 650;
@@ -1134,6 +1153,15 @@ export class LobbyEngine {
     lights.push({ x: sx(36 * LT + 8) * dpr, y: sy(28 * LT + 8) * dpr, r: 60 * z * dpr, c: '#8fd8ff', k: 1 });
     c.setTransform(1, 0, 0, 1, 0, 0);
     this.sky.applyLight(c, this.canvas.width, this.canvas.height, lights);
+    // clouds, rain and lightning sit above the light, in screen pixels
+    c.globalAlpha = (0.55 + this.sky.rain * 0.2) * (1 - this.sky.night * 0.35);
+    for (const cl of this.sky.clouds) c.drawImage(cl.cv, Math.round((ox + cl.x * CLOUD_KX * z) * dpr), Math.round((oy + cl.y * CLOUD_KY * z) * dpr), cl.w * CLOUD_S * z * dpr, cl.cv.height * CLOUD_S * z * dpr);
+    c.globalAlpha = 1;
+    this.sky.drawRain(c, this.canvas.width, this.canvas.height, Math.max(1, Math.round(dpr)));
+    if (this.sky.lightning > 0.3) {
+      c.fillStyle = `rgba(255,255,255,${(this.sky.lightning - 0.3) * 0.5})`;
+      c.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    }
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
     c.imageSmoothingEnabled = false;
 
