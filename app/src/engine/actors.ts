@@ -19,7 +19,7 @@ export const HIT_FRAME = M.hit as number;
 export const IMPACT = M.impact as unknown as [number, number];
 
 const cache = new Map<string, HTMLCanvasElement>();
-const lookKey = (l: Look) => `${l.hat}|${l.fit}|${l.pick}`;
+const lookKey = (l: Look) => `${l.hat}|${l.fit}|${l.pick}|${l.sex === 'f' ? 'f' : 'm'}`;
 
 /** One composed frame: body, tinted overalls, helmet, tinted pick head, shading. */
 export function minerFrame(look: Look, pose: Pose, f: number): HTMLCanvasElement {
@@ -41,6 +41,7 @@ export function minerFrame(look: Look, pose: Pose, f: number): HTMLCanvasElement
       if (s && h) g.drawImage(s, PAD_X + hx - h.ax, PAD_T + hy - h.ay);
     } else if (layer === 'fit') put(`${base}-fit`, look.fit);
     else if (layer === 'pick') put(`${base}-pick`, look.pick);
+    else if (layer === 'base' && look.sex === 'f') put(`minerf-${pose}-${f}-base`);
     else put(`${base}-${layer}`);
   }
   if (cache.size > 900) cache.clear();

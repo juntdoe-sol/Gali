@@ -159,6 +159,7 @@ function onState(p: any) {
     handle: col(p.hd, '#9b6b43'),
     pet: typeof p.pt === 'string' && KEY.test(p.pt) ? p.pt : null,
     glow: GLOWS.includes(p.g) ? p.g : 'none',
+    sex: p.sx === 'f' ? 'f' : 'm',
   };
   const jumped = !prev || Math.hypot(prev.x - x, prev.y - y) > 40;
   const peer: LobbyPeer = {
@@ -396,6 +397,7 @@ export function publishLobbyMe(m: { x: number; y: number; tx: number; ty: number
     hd: m.look.handle,
     pt: m.look.pet,
     g: m.look.glow,
+    sx: m.look.sex === 'f' ? 'f' : 'm',
     lvl: m.lvl,
     ...(m.wallet ? { w: m.wallet } : {}),
   };

@@ -35,6 +35,8 @@ export interface Avatar {
   /** helmet and pet gear keys, sent by newer clients; older ones send colours only */
   hk?: string;
   pk?: string | null;
+  /** which miner body they play: 'f' is the girl miner */
+  sx?: 'm' | 'f';
 }
 export interface MeState {
   x: number;
@@ -50,6 +52,7 @@ export interface MeState {
   lvl: number;
   hk?: string;
   pk?: string | null;
+  sx?: 'm' | 'f';
 }
 
 export const EMOTES = ['👋', '⛏️', '🎉', '💎', '🔥'] as const;
@@ -208,6 +211,7 @@ function onState(p: any) {
     seen: Date.now(),
     hk: typeof p.hk === 'string' && /^hat-[a-z]{2,12}$/.test(p.hk) ? p.hk : undefined,
     pk: typeof p.pk === 'string' && /^pet-[a-z]{2,12}$/.test(p.pk) ? p.pk : null,
+    sx: p.sx === 'f' ? 'f' : 'm',
   };
   useWorld.setState((s) => ({ peers: { ...s.peers, [id]: av } }));
   // identity claim: wallet + session key + signature over a fresh timestamp
@@ -263,6 +267,7 @@ export function publishMe(me: MeState, identity: { wallet: string | null; sessio
     lvl: me.lvl,
     hk: me.hk,
     pk: me.pk ?? null,
+    sx: me.sx === 'f' ? 'f' : 'm',
     nm: useName.getState().name || undefined,
   };
   const key = JSON.stringify(payload);

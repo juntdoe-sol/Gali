@@ -7,7 +7,7 @@
  * It also holds the "back to lobby" pills the other screens use.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, FlatList, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, levelFromXp } from '../game/constants';
@@ -62,7 +62,9 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
   const [navOpen, setNavOpen] = useState(false);
   const [howTo, setHowTo] = useState(false);
   const [tipTo, setTipTo] = useState<{ id: string; name: string; wallet: string } | null>(null);
-  const look = useRef(myLook()).current;
+  const sex = useName((s) => s.sex);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const look = useMemo(() => ({ ...myLook(), sex }), [sex]);
   const lvlRef = useRef(lvl);
   lvlRef.current = lvl;
 
@@ -612,12 +614,14 @@ const cs = StyleSheet.create({
 function NamePrompt({ first, onDone }: { first: boolean; onDone: () => void }) {
   const [v, setV] = useState(useName.getState().name);
   const [err, setErr] = useState('');
+  const [sex, setSex] = useState<'m' | 'f'>(useName.getState().sex);
   const save = () => {
     if (!cleanName(v)) {
       setErr('Use 2 to 14 letters, numbers, spaces, dots, dashes or underscores.');
       return;
     }
     useName.getState().set(v);
+    useName.getState().setSex(sex);
     onDone();
   };
   return (
@@ -644,6 +648,19 @@ function NamePrompt({ first, onDone }: { first: boolean; onDone: () => void }) {
           autoCorrect={false}
           style={[styles.input, { flex: 0, height: 46, minHeight: 46, width: '100%', fontSize: 18, textAlign: 'center' }]}
         />
+        <T v="label" style={{ textAlign: 'center' }}>
+          Your miner
+        </T>
+        <View style={styles.tipRow}>
+          {([['m', '👨\u200d🔧', 'BOY'], ['f', '👩\u200d🔧', 'GIRL']] as const).map(([k, icon, label]) => (
+            <Pressable key={k} onPress={() => setSex(k)} style={[styles.tipChip, { flex: 1 }, sex === k && styles.tipOn]} accessibilityRole="button" accessibilityLabel={`${label} miner`}>
+              <T style={{ fontSize: 26 }}>{icon}</T>
+              <T v="black" style={{ fontSize: 13, color: sex === k ? '#10162c' : COLORS.text }}>
+                {label}
+              </T>
+            </Pressable>
+          ))}
+        </View>
         {err ? (
           <T v="bold" style={{ color: COLORS.red, fontSize: 12, textAlign: 'center' }}>
             {err}
