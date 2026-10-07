@@ -24,7 +24,7 @@ import {
   ORE_REFINING_BPS,
   readRewards,
 } from './ore/read';
-import { oreCheckpoint, oreClaimOre, oreClaimSol, oreDeploy, oreDeployWithWallet, toOre, toSol } from './ore/tx';
+import { closeLiveAutomation, deployFromAutomation, oreCheckpoint, oreClaimOre, oreClaimSol, oreDeploy, oreDeployWithWallet, readAutomation, startLiveAutomation, toOre, toSol } from './ore/tx';
 import { distributionMask, type OreMiner, type OreRound } from './ore/accounts';
 
 export type { OreClock } from './ore/read';
@@ -355,6 +355,15 @@ export async function oreSoloMask(roundId: number): Promise<number> {
 export async function deployLive(squares: number[], solPerSquare: number, expectedOwner?: PublicKey): Promise<number> {
   const { roundId } = await oreDeployWithWallet(squares, BigInt(Math.floor(solPerSquare * LAMPORTS_PER_SOL)), expectedOwner);
   return Number(roundId);
+}
+
+/** Live autopilot (ORE's automation). One approval to start, none per round, one to stop and refund. */
+export const startAutopilot = (perSpotSol: number, maxSquares: number, rounds: number, expectedOwner?: PublicKey) =>
+  startLiveAutomation({ lamportsPerSquare: BigInt(Math.floor(perSpotSol * LAMPORTS_PER_SOL)), maxSquares, rounds, expectedOwner });
+export const stopAutopilot = (expectedOwner?: PublicKey) => closeLiveAutomation(expectedOwner);
+export const readAutopilot = (owner: PublicKey) => readAutomation(owner);
+export async function deployAutopilot(owner: PublicKey, squares: number[], solPerSquare: number): Promise<number> {
+  return Number(await deployFromAutomation(owner, squares, BigInt(Math.floor(solPerSquare * LAMPORTS_PER_SOL))));
 }
 
 /** Everything the wallet panel shows in live mode. Reads ORE and the wallet only. */
