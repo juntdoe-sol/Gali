@@ -235,8 +235,8 @@ export async function stopOreAutomation(session: Keypair): Promise<string> {
  * it), and the player can close the automation any time and get the balance back.
  */
 /** SOL left on the executor key to pay its own transaction fees. A system account must stay above rent-exempt (~0.00089 SOL). */
-export const EXECUTOR_TOPUP_LAMPORTS = 4_000_000;
-const EXECUTOR_MIN_LAMPORTS = 2_500_000;
+export const EXECUTOR_TOPUP_LAMPORTS = 2_000_000;
+const EXECUTOR_MIN_LAMPORTS = 1_500_000;
 const execKey = (owner: PublicKey) => `gali-ore-exec-${owner.toBase58()}`;
 
 /** The device key that runs this player's automation. Created on first use, kept on the device. */

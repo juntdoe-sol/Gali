@@ -1226,7 +1226,9 @@ export const useGame = create<GameState>((set, get) => {
         const per = r.perSpot ?? 0;
         if (!n || per < MIN_SOL_PER_BLOCK) return st.toast(`Pick spots and at least ${MIN_SOL_PER_BLOCK} SOL per spot`, 'bad');
         const deposit = per * n * r.total;
-        if (st.wallet.sol < deposit + LIVE_FEE_SOL + 0.01) return st.toast('Not enough SOL to fund autopilot', 'bad');
+        // setup costs: ORE account rent (~0.0022), the device key's fee float (0.002), network fees; +0.0055 once if the player has no ORE miner account yet
+        const need = deposit + 0.0065;
+        if (st.wallet.sol < need) return st.toast(`Autopilot needs about ${need.toFixed(4)} SOL (${deposit.toFixed(4)} for the rounds + ~0.0065 setup). You have ${st.wallet.sol.toFixed(4)}`, 'bad');
         try {
           const [board, owner] = await Promise.all([loadBoard(), ownerKey()]);
           if (!owner) throw new Error('wallet disconnected');
