@@ -18,7 +18,7 @@ import { drawMiner, drawPet, frameAt, lampOf, stepBody, type Body } from './acto
 import { Particles } from './particles';
 import { Sky } from './sky';
 import type { Look } from './types';
-import { CLIFF, DOORS, doorAt, GRASS, HALL, LCOLS, LH, LROWS, LT, LW, lidx, lobbyMap, lobbyPath, PLANK, PLAZA, ROAD, SAND, SPAWNS, standable, tileCentre, tileOf, WATER, type DoorId } from '../game/lobbyMap';
+import { CLIFF, DOORS, STRUCTURES, doorAt, GRASS, HALL, LCOLS, LH, LROWS, LT, LW, lidx, lobbyMap, lobbyPath, PLANK, PLAZA, ROAD, SAND, SPAWNS, standable, tileCentre, tileOf, WATER, type DoorId } from '../game/lobbyMap';
 
 export type LobbyEvent =
   | { t: 'ready' }
@@ -100,6 +100,9 @@ export class LobbyEngine {
   private steerAt = 0;
   private keys = new Set<string>();
   private keyAt = 0;
+  /** the on-screen stick: which finger holds it, and how far it is pushed (-1..1) */
+  private stick: { id: number; dx: number; dy: number } | null = null;
+  private direct = false;
   private tapMark: { x: number; y: number; at: number } | null = null;
   private leaving: { id: DoorId; at: number; sent: boolean } | null = null;
   private born = 0;
@@ -245,6 +248,7 @@ export class LobbyEngine {
     this.paintHall(g, px);
     // pier
     this.paintPier(g, px);
+    this.paintPlaces(g, px);
     // plaza: a ring round the fountain, and the name in the stone
     this.paintPlaza(g, px);
 
@@ -423,24 +427,95 @@ export class LobbyEngine {
   private paintPier(g: Ctx, px: (x: number, y: number, w: number, h: number, c: string) => void) {
     const x0 = 57 * LT;
     const y0 = 26 * LT;
-    const w = 11 * LT;
-    const h = 2 * LT;
-    px(x0, y0 + h, w, 5, 'rgba(8,30,60,0.35)');
+    const w = 13 * LT;
+    const h = 3 * LT;
+    // the shadow on the water, and the piles it stands on
+    px(x0 + 20, y0 + h, w - 20, 7, 'rgba(8,30,60,0.38)');
+    for (let x = 18; x < w; x += 32) {
+      px(x0 + x, y0 + h - 2, 5, 12, '#4a331c');
+      px(x0 + x, y0 + h - 2, 1, 12, '#6b4a2b');
+      px(x0 + x - 1, y0 + h + 8, 7, 2, '#cfeaff');
+    }
+    // planks, laid crosswise
     for (let x = 0; x < w; x += 8) {
       px(x0 + x, y0, 8, h, (x / 8) % 2 ? '#a8743f' : '#b78049');
       px(x0 + x, y0, 1, h, '#6e4a26');
-      px(x0 + x + 1, y0 + 1, 1, 1, '#3b2a18');
-      px(x0 + x + 1, y0 + h - 2, 1, 1, '#3b2a18');
+      for (let y = 6; y < h; y += 16) {
+        px(x0 + x + 1, y0 + y, 1, 1, '#3b2a18');
+        px(x0 + x + 6, y0 + y + 3, 1, 1, '#3b2a18');
+      }
     }
-    px(x0, y0, w, 2, '#c99560');
-    px(x0, y0 + h - 2, w, 2, '#8a5a30');
-    for (let x = 4; x < w; x += 40) {
-      px(x0 + x, y0 - 6, 4, 8, '#5e4126');
-      px(x0 + x, y0 + h - 2, 4, 8, '#5e4126');
+    // long beams along both sides
+    px(x0, y0, w, 3, '#c99560');
+    px(x0, y0 + 3, w, 1, '#6e4a26');
+    px(x0, y0 + h - 4, w, 4, '#8a5a30');
+    px(x0, y0 + h - 4, w, 1, '#c99560');
+    // rail posts and rope on the sea side
+    for (let x = 6; x < w; x += 32) {
+      px(x0 + x, y0 - 9, 4, 12, '#5e4126');
+      px(x0 + x, y0 - 9, 4, 2, '#8b6a42');
+      px(x0 + x, y0 + h - 3, 4, 12, '#5e4126');
     }
-    // rope between the posts
-    for (let x = 4; x < w - 40; x += 40) {
-      px(x0 + x + 4, y0 - 3, 36, 1, '#d8c08a');
+    for (let x = 6; x < w - 32; x += 32) {
+      px(x0 + x + 4, y0 - 6, 28, 1, '#e0c890');
+      px(x0 + x + 14, y0 - 5, 8, 1, '#e0c890');
+    }
+    // the end of the jetty: a wider landing with mooring bollards
+    px(x0 + w - 56, y0 - 3, 56, h + 6, '#9a6a38');
+    for (let x = 0; x < 56; x += 8) px(x0 + w - 56 + x, y0 - 3, 1, h + 6, '#6e4a26');
+    px(x0 + w - 56, y0 - 3, 56, 2, '#c99560');
+    px(x0 + w - 56, y0 + h + 1, 56, 2, '#6e4a26');
+    for (const bx of [w - 12]) for (const by of [-1, h - 3]) {
+      px(x0 + bx, y0 + by, 5, 5, '#2c2a34');
+      px(x0 + bx + 1, y0 + by - 1, 3, 1, '#4a4858');
+    }
+    // the shore end: a short ramp of stones
+    px(x0 - 6, y0, 8, h, '#8f887c');
+    px(x0 - 6, y0, 8, 2, '#b9b2a6');
+  }
+
+  /** The things around each door that make it a place and not a square: islets, a mining camp, bunting. */
+  private paintPlaces(g: Ctx, px: (x: number, y: number, w: number, h: number, c: string) => void) {
+    const put = (name: string, x: number, y: number, s: number) => {
+      const sp = sprite(name);
+      const r = rect(name);
+      if (!sp || !r) return;
+      g.drawImage(sp, x - r[4] * s, y - r[5] * s, r[2] * s, r[3] * s);
+    };
+    // islets out at sea, with a ripple of foam round each
+    for (const [n, x, y] of [['islet-palm', 1046, 292], ['islet-rock', 1102, 620], ['islet-bare', 1020, 706], ['islet-palm', 1098, 150]] as [string, number, number][]) {
+      g.fillStyle = 'rgba(207,234,255,0.5)';
+      g.beginPath();
+      g.ellipse(x, y + 4, 44, 14, 0, 0, Math.PI * 2);
+      g.fill();
+      put(n, x, y, 2);
+    }
+    // rails running from the cave mouth out to the camp
+    const cx = 15 * LT + 8;
+    for (let y = 12 * LT; y < 17 * LT; y += 5) px(cx - 12, y + 1, 24, 2, '#6b4a2b');
+    px(cx - 8, 12 * LT, 2, 5 * LT, '#8a8a96');
+    px(cx + 6, 12 * LT, 2, 5 * LT, '#8a8a96');
+    // a dirt yard in front of the camp
+    for (let k = 0; k < 90; k++) {
+      const x = 4 * LT + Math.floor(seeded(k * 3.3) * 10 * LT);
+      const y = 13 * LT + Math.floor(seeded(k * 7.7) * 7 * LT);
+      px(x, y, 3, 2, k % 2 ? '#b38f5e' : '#c9a572');
+    }
+    // the market sign over the door, and bunting across the square
+    const sx = 51 * LT - 8;
+    const sy = 2 * LT + 62;
+    px(sx, sy, 64, 14, '#4a2e18');
+    px(sx + 1, sy + 1, 62, 12, '#7a5330');
+    px(sx + 2, sy + 2, 60, 10, '#5e3b1e');
+    text(g, 'MARKET', Math.round(sx + 32 - textWidth('MARKET') / 2), sy + 4, 1, '#ffd24a');
+    const bx0 = 45 * LT;
+    const bx1 = 60 * LT;
+    const by = 9 * LT + 2;
+    const cols = ['#d8483a', '#ffd24a', '#2f9a8a', '#f4eadb', '#b86bff'];
+    for (let x = bx0; x < bx1; x++) px(x, by + Math.round(Math.sin(((x - bx0) / (bx1 - bx0)) * Math.PI) * 5), 1, 1, '#3b2a18');
+    for (let x = bx0 + 4, k = 0; x < bx1 - 4; x += 12, k++) {
+      const yy = by + Math.round(Math.sin(((x - bx0) / (bx1 - bx0)) * Math.PI) * 5);
+      for (let t = 0; t < 5; t++) px(x + t, yy + 1 + t, 5 - t * 2 > 0 ? 6 - t * 2 : 1, 1, cols[k % 5]);
     }
   }
 
@@ -559,6 +634,17 @@ export class LobbyEngine {
     };
     cv.addEventListener('pointerdown', (e) => {
       const p = pos(e);
+      const sb = this.stickBase();
+      if (!this.stick && Math.hypot(p.x - sb.x, p.y - sb.y) < sb.r * 1.35) {
+        this.stick = { id: e.pointerId, dx: 0, dy: 0 };
+        this.stickMove(p.x, p.y);
+        try {
+          cv.setPointerCapture(e.pointerId);
+        } catch {
+          /* not capturable */
+        }
+        return;
+      }
       this.pointers.set(e.pointerId, { ...p, x0: p.x, y0: p.y, t0: performance.now() });
       try {
         cv.setPointerCapture(e.pointerId);
@@ -573,6 +659,11 @@ export class LobbyEngine {
       }
     });
     cv.addEventListener('pointermove', (e) => {
+      if (this.stick && this.stick.id === e.pointerId) {
+        const sp = pos(e);
+        this.stickMove(sp.x, sp.y);
+        return;
+      }
       const q = this.pointers.get(e.pointerId);
       if (!q) return;
       const p = pos(e);
@@ -590,6 +681,10 @@ export class LobbyEngine {
       if (this.steering) this.steer(p.x, p.y);
     });
     const up = (e: PointerEvent) => {
+      if (this.stick && this.stick.id === e.pointerId) {
+        this.stick = null;
+        return;
+      }
       const q = this.pointers.get(e.pointerId);
       this.pointers.delete(e.pointerId);
       this.pinch = 0;
@@ -628,6 +723,59 @@ export class LobbyEngine {
     }
   }
 
+  /** Where the stick sits: bottom left, just above the chat panel. */
+  private stickBase() {
+    return { x: 16 + 52, y: this.H - this.opts.bottom - 52 - 12, r: 52 };
+  }
+  private stickMove(x: number, y: number) {
+    if (!this.stick) return;
+    const b = this.stickBase();
+    let dx = (x - b.x) / b.r;
+    let dy = (y - b.y) / b.r;
+    const n = Math.hypot(dx, dy);
+    if (n > 1) {
+      dx /= n;
+      dy /= n;
+    }
+    this.stick.dx = dx;
+    this.stick.dy = dy;
+    // taking the stick cancels a tap-to-walk in progress
+    this.me.path = [];
+  }
+
+  /** Walk straight in a direction, sliding along whatever is in the way. */
+  private moveDir(dx: number, dy: number, dt: number, now: number): boolean {
+    const n = Math.hypot(dx, dy);
+    if (n < 0.18) return false;
+    const m = lobbyMap();
+    const me = this.me;
+    const sp = SPEED * Math.min(1, n * 1.15);
+    const ux = dx / n;
+    const uy = dy / n;
+    const ok = (x: number, y: number) => standable(m, x, y) && standable(m, x - 5, y) && standable(m, x + 5, y);
+    const nx = me.x + ux * sp * dt;
+    const ny = me.y + uy * sp * dt;
+    if (ok(nx, ny)) {
+      me.x = nx;
+      me.y = ny;
+    } else if (ok(nx, me.y)) me.x = nx;
+    else if (ok(me.x, ny)) me.y = ny;
+    else return false;
+    if (Math.abs(ux) > 0.25) me.facing = ux > 0 ? 1 : -1;
+    me.tx = me.x + ux * 32;
+    me.ty = me.y + uy * 32;
+    me.path = [];
+    if (me.pose !== 'walk') {
+      me.pose = 'walk';
+      me.since = now;
+    }
+    if (now - this.lastStep > 200) {
+      this.lastStep = now;
+      this.parts.spawn('dust', me.x - 2 * me.facing, me.y, { vx: -6 * me.facing, vz: 8, life: 0.4, c: '#e8d4b0' });
+    }
+    return true;
+  }
+
   private inMini(x: number, y: number) {
     const r = this.minimapRect;
     return x >= r.x && y >= r.y && x <= r.x + r.w && y <= r.y + r.h;
@@ -656,7 +804,6 @@ export class LobbyEngine {
       if (down) this.keys.add(k);
       else this.keys.delete(k);
       e.preventDefault();
-      if (!this.keys.size) this.me.path = [];
     }
   }
 
@@ -711,18 +858,21 @@ export class LobbyEngine {
   private think(dt: number, now: number) {
     const m = lobbyMap();
     const me = this.me;
-    // keyboard: head the way the keys point
-    if (this.keys.size && performance.now() - this.keyAt > 110) {
-      this.keyAt = performance.now();
-      let dx = 0;
-      let dy = 0;
-      if (this.keys.has('arrowleft') || this.keys.has('a')) dx -= 1;
-      if (this.keys.has('arrowright') || this.keys.has('d')) dx += 1;
-      if (this.keys.has('arrowup') || this.keys.has('w')) dy -= 1;
-      if (this.keys.has('arrowdown') || this.keys.has('s')) dy += 1;
-      if (dx || dy) {
-        const n = Math.hypot(dx, dy);
-        this.walkTo(me.x + (dx / n) * 40, me.y + (dy / n) * 40);
+    // the stick and the keys walk you straight; a tap walks you along a route
+    let kx = 0;
+    let ky = 0;
+    if (this.keys.has('arrowleft') || this.keys.has('a')) kx -= 1;
+    if (this.keys.has('arrowright') || this.keys.has('d')) kx += 1;
+    if (this.keys.has('arrowup') || this.keys.has('w')) ky -= 1;
+    if (this.keys.has('arrowdown') || this.keys.has('s')) ky += 1;
+    const ix = this.stick ? this.stick.dx : kx;
+    const iy = this.stick ? this.stick.dy : ky;
+    this.direct = false;
+    if ((this.stick || kx || ky) && !this.leaving) {
+      this.direct = this.moveDir(ix, iy, dt, now);
+      if (!this.direct && me.pose === 'walk') {
+        me.pose = 'idle';
+        me.since = now;
       }
     }
     // me
@@ -734,11 +884,11 @@ export class LobbyEngine {
       }
       stepBody(me, dt, SPEED, now);
     }
-    if (wasWalking && !me.path.length) {
+    if (wasWalking && !me.path.length && !this.direct) {
       me.pose = 'idle';
       me.since = now;
     }
-    if (!me.path.length && me.pose === 'walk') {
+    if (!me.path.length && !this.direct && me.pose === 'walk') {
       me.pose = 'idle';
       me.since = now;
     }
@@ -770,7 +920,7 @@ export class LobbyEngine {
     // tell the app where we are, ten times a second at most, and only when it changed
     if (performance.now() - this.lastEmit > 100) {
       this.lastEmit = performance.now();
-      const moving = me.path.length > 0;
+      const moving = me.path.length > 0 || this.direct;
       const tx = moving ? me.tx : me.x;
       const ty = moving ? me.ty : me.y;
       const pose = moving ? 'walk' : this.snap.emoji && now - this.myEmojiAt < 2200 ? 'cheer' : 'idle';
@@ -850,6 +1000,7 @@ export class LobbyEngine {
 
     // things that stand: trees, lamps, boards, people. Sorted by their feet.
     const items: Item[] = [];
+    const lights: { x: number; y: number; r: number; c: string; k: number }[] = [];
     const inView = (wx: number, wy: number, pad = 40) => wx > vx0 - pad && wx < vx1 + pad && wy > vy0 - pad && wy < vy1 + pad + 30;
     for (const t of m.trees) {
       const wx = t.x * LT + 8;
@@ -883,13 +1034,18 @@ export class LobbyEngine {
       if (inView(fx, wy)) items.push({ y: wy, draw: () => draw(c, `fx-flag-${Math.floor(now / 170) % this.flagFrames}`, sx(fx), sy(wy), z * 1.5) });
     }
     {
-      const bx = 69 * LT + 4;
-      const by = 27 * LT + 10 + Math.sin(now / 700) * 1.2;
-      if (inView(bx, by, 40)) items.push({ y: by, draw: () => draw(c, 'ship-sloop', sx(bx), sy(by), z * 1.5) });
+      const bx = 67 * LT + 8;
+      const by = 30 * LT + 14 + Math.sin(now / 700) * 1.4;
+      if (inView(bx, by, 50)) items.push({ y: by, draw: () => draw(c, 'ship-sloop', sx(bx), sy(by), z * 3) });
+    }
+    for (const st of STRUCTURES) {
+      const wx = (st.at[0] + st.at[2] / 2) * LT;
+      const wy = (st.at[1] + st.at[3]) * LT - 1;
+      if (!inView(wx, wy, 40)) continue;
+      items.push({ y: wy, draw: () => this.drawStruct(c, st.kind, sx(wx), sy(wy), z, now, lights) });
     }
 
     // people
-    const lights: { x: number; y: number; r: number; c: string; k: number }[] = [];
     const meSay = this.snap.say && now - this.mySayAt < 6000 ? this.snap.say : null;
     const meEmoji = this.snap.emoji && now - this.myEmojiAt < 3000 ? this.snap.emoji : null;
     const near: { id: string; d: number }[] = [];
@@ -965,6 +1121,7 @@ export class LobbyEngine {
     for (const l of labels) l();
     this.doorSigns(c, sx, sy, z, now);
     this.minimap(c, W, now);
+    this.drawStick(c);
 
     // the fade as you step through a door
     if (this.leaving) {
@@ -977,6 +1134,134 @@ export class LobbyEngine {
         c.fillStyle = `rgba(7,13,32,${k})`;
         c.fillRect(0, 0, W, H);
       }
+    }
+  }
+
+  /** Each structure is painted once into its own small canvas, then drawn scaled. */
+  private structCache = new Map<string, HTMLCanvasElement>();
+  private structSprite(kind: string): HTMLCanvasElement {
+    const hit = this.structCache.get(kind);
+    if (hit) return hit;
+    const dims: Record<string, [number, number]> = { tent: [50, 40], fire: [20, 8], cart: [44, 26], crates: [20, 22], barrel: [14, 18], 'stall-red': [52, 46], 'stall-teal': [52, 46], rack: [36, 24], boulder: [30, 22], lighthouse: [1, 1] };
+    const [w, h] = dims[kind] ?? [16, 16];
+    const cv = makeCanvas(w, h);
+    const g = ctx2d(cv);
+    const P = (x: number, y: number, ww: number, hh: number, col: string) => {
+      g.fillStyle = col;
+      g.fillRect(x, y, ww, hh);
+    };
+    if (kind === 'tent') {
+      for (let y = 0; y < 34; y++) {
+        const hw = Math.round(1 + (y / 33) * 23);
+        for (let x = -hw; x < hw; x++) {
+          const band = Math.floor((x + 24) / 7) % 2;
+          const shade = x > 6 ? 0.82 : 1;
+          const base = band ? [244, 234, 219] : [216, 72, 58];
+          P(25 + x, 2 + y, 1, 1, `rgb(${Math.round(base[0] * shade)},${Math.round(base[1] * shade)},${Math.round(base[2] * shade)})`);
+        }
+      }
+      P(25, 0, 1, 4, '#5e4126');
+      P(25, 0, 6, 3, '#ffd24a');
+      for (let y = 0; y < 16; y++) P(25 - Math.round(1 + (y / 15) * 6), 22 + y, Math.round(2 + (y / 15) * 12), 1, '#2a1a10');
+      P(2, 36, 46, 2, '#3b6a2a');
+    } else if (kind === 'fire') {
+      P(3, 3, 14, 3, '#4a331c');
+      P(3, 3, 14, 1, '#6b4a2b');
+      P(5, 1, 3, 3, '#5e4126');
+      P(12, 1, 3, 3, '#5e4126');
+      P(1, 5, 18, 3, '#8f887c');
+    } else if (kind === 'cart') {
+      P(0, 22, 44, 2, '#8a8a96');
+      P(6, 6, 32, 14, '#6b4a2b');
+      P(6, 6, 32, 2, '#8b6a42');
+      P(6, 18, 32, 2, '#4a331c');
+      for (let k = 0; k < 9; k++) P(9 + k * 3, 3 + (k % 3), 3, 4, k % 2 ? '#ffd24a' : '#f2a020');
+      P(12, 1, 3, 3, '#ffe27a');
+      for (const wx of [10, 30]) {
+        P(wx, 18, 6, 6, '#26202e');
+        P(wx + 2, 20, 2, 2, '#8a8a96');
+      }
+    } else if (kind === 'crates') {
+      P(1, 10, 18, 12, '#a97b48');
+      P(1, 10, 18, 2, '#c79a60');
+      P(1, 20, 18, 2, '#6e4a26');
+      P(9, 10, 2, 12, '#6e4a26');
+      P(4, 0, 13, 11, '#b78049');
+      P(4, 0, 13, 2, '#d8a468');
+      P(10, 0, 1, 11, '#6e4a26');
+    } else if (kind === 'barrel') {
+      P(1, 2, 12, 15, '#7a5330');
+      P(2, 0, 10, 3, '#8f6a3e');
+      P(1, 5, 12, 1, '#3b2a18');
+      P(1, 12, 12, 1, '#3b2a18');
+      P(3, 3, 2, 13, '#9a7040');
+      P(0, 16, 14, 2, 'rgba(0,0,0,0.25)');
+    } else if (kind === 'stall-red' || kind === 'stall-teal') {
+      const c1 = kind === 'stall-red' ? '#d8483a' : '#2f9a8a';
+      for (let x = 0; x < 52; x += 6) {
+        P(x, 8, 6, 12, (x / 6) % 2 ? '#f4eadb' : c1);
+        P(x, 20, 6, 3, (x / 6) % 2 ? c1 : '#f4eadb');
+      }
+      P(-0, 6, 52, 2, '#5e4126');
+      P(2, 22, 3, 22, '#5e4126');
+      P(47, 22, 3, 22, '#5e4126');
+      P(4, 30, 44, 14, '#8a6238');
+      P(4, 30, 44, 2, '#a97b48');
+      const gem = ['#3de0c8', '#ff4fd8', '#ffd24a', '#8fb8ff', '#c7f284', '#ff6a4f'];
+      for (let k = 0; k < 8; k++) {
+        P(8 + k * 5, 25, 3, 5, gem[(k + (kind === 'stall-red' ? 0 : 2)) % 6]);
+        P(8 + k * 5, 25, 3, 1, 'rgba(255,255,255,0.7)');
+      }
+      P(0, 44, 52, 2, 'rgba(0,0,0,0.22)');
+    } else if (kind === 'rack') {
+      P(1, 6, 3, 18, '#5e4126');
+      P(32, 6, 3, 18, '#5e4126');
+      P(0, 4, 36, 3, '#7a5330');
+      for (const x of [7, 16, 25]) {
+        P(x + 1, 8, 2, 12, '#8b6a42');
+        P(x - 3, 8, 10, 2, '#b8c4d6');
+        P(x - 3, 10, 2, 2, '#b8c4d6');
+        P(x + 5, 10, 2, 2, '#b8c4d6');
+      }
+    } else if (kind === 'boulder') {
+      const sp = sprite('prop-boulder-b-0');
+      const r = rect('prop-boulder-b-0');
+      if (sp && r) g.drawImage(sp, 0, 0, r[2], r[3], 0, 0, 30, 22);
+    }
+    this.structCache.set(kind, cv);
+    return cv;
+  }
+
+  private drawStruct(c: Ctx, kind: string, X: number, Y: number, z: number, now: number, lights: { x: number; y: number; r: number; c: string; k: number }[]) {
+    if (kind === 'lighthouse') {
+      draw(c, 'prop-lighthouse-0', X, Y, z * 2);
+      const night = this.sky.night;
+      if (night > 0.2) {
+        c.fillStyle = '#ffe9a0';
+        c.fillRect(X - 3 * z, Y - 56 * z, 6 * z, 5 * z);
+        lights.push({ x: X * this.dpr, y: (Y - 52 * z) * this.dpr, r: 60 * z * this.dpr, c: '#ffe9a0', k: 1 });
+      }
+      return;
+    }
+    const sp = this.structSprite(kind);
+    const w = sp.width;
+    const h = sp.height;
+    const scale = kind === 'boulder' ? 1 : 1;
+    c.drawImage(sp, 0, 0, w, h, Math.round((X - (w / 2) * z) * this.dpr) / this.dpr, Math.round((Y - h * z) * this.dpr) / this.dpr, w * z * scale, h * z * scale);
+    if (kind === 'fire') {
+      const f = Math.floor(now / 110) % 3;
+      const fl = ['#ff9a3d', '#ffd24a', '#ff6a2a'];
+      for (let k = 0; k < 3; k++) {
+        const hgt = 7 + ((f + k) % 3) * 3;
+        c.fillStyle = fl[(k + f) % 3];
+        c.fillRect(X + (-4 + k * 3) * z, Y - (3 + hgt) * z, 3 * z, hgt * z);
+      }
+      if (Math.random() < 0.2) this.parts.spawn('ember', X / z * 0 + this.cam.x + (X - this.W / 2) / z, this.cam.y + (Y - this.centreY()) / z - 6, { vz: 14, life: 0.8, c: '#ffb347' });
+      lights.push({ x: X * this.dpr, y: (Y - 6 * z) * this.dpr, r: 70 * z * this.dpr, c: '#ff9a3d', k: 0.85 + 0.15 * Math.sin(now / 90) });
+    } else if (kind === 'stall-red' || kind === 'stall-teal') {
+      lights.push({ x: X * this.dpr, y: (Y - 30 * z) * this.dpr, r: 40 * z * this.dpr, c: '#ffcf80', k: 1 });
+    } else if (kind === 'tent') {
+      lights.push({ x: X * this.dpr, y: (Y - 8 * z) * this.dpr, r: 26 * z * this.dpr, c: '#ffb870', k: 0.9 });
     }
   }
 
@@ -1146,11 +1431,49 @@ export class LobbyEngine {
     }
   }
 
+  private drawStick(c: Ctx) {
+    if (this.leaving) return;
+    const b = this.stickBase();
+    const on = Boolean(this.stick);
+    c.globalAlpha = on ? 0.95 : 0.7;
+    c.fillStyle = 'rgba(7,13,32,0.55)';
+    c.beginPath();
+    c.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+    c.fill();
+    c.strokeStyle = '#ffd24a';
+    c.lineWidth = 2;
+    c.stroke();
+    c.fillStyle = 'rgba(255,210,74,0.55)';
+    for (const [ax, ay] of [[0, -1], [1, 0], [0, 1], [-1, 0]] as const) {
+      c.beginPath();
+      c.moveTo(b.x + ax * (b.r - 7) - ay * 6, b.y + ay * (b.r - 7) + ax * 6);
+      c.lineTo(b.x + ax * (b.r - 7) + ay * 6, b.y + ay * (b.r - 7) - ax * 6);
+      c.lineTo(b.x + ax * (b.r - 16), b.y + ay * (b.r - 16));
+      c.fill();
+    }
+    const kx = b.x + (this.stick ? this.stick.dx : 0) * b.r * 0.62;
+    const ky = b.y + (this.stick ? this.stick.dy : 0) * b.r * 0.62;
+    c.fillStyle = on ? '#ffd24a' : '#e6b83a';
+    c.beginPath();
+    c.arc(kx, ky, 21, 0, Math.PI * 2);
+    c.fill();
+    c.fillStyle = '#fff1a8';
+    c.beginPath();
+    c.arc(kx - 5, ky - 6, 7, 0, Math.PI * 2);
+    c.fill();
+    c.strokeStyle = '#8a4b0a';
+    c.lineWidth = 2;
+    c.beginPath();
+    c.arc(kx, ky, 21, 0, Math.PI * 2);
+    c.stroke();
+    c.globalAlpha = 1;
+  }
+
   private minimap(c: Ctx, W: number, now: number) {
     if (!this.mini) return;
-    const k = 2;
-    const w = LCOLS * k;
-    const h = LROWS * k;
+    const k = 1.7;
+    const w = Math.round(LCOLS * k);
+    const h = Math.round(LROWS * k);
     const x = W - w - 10;
     const y = this.opts.top + 6;
     this.minimapRect = { x, y, w, h };

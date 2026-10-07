@@ -21,7 +21,7 @@ import { atlasSource } from '../pixel/atlasSource';
 import LobbyView, { type LobbyRef } from '../pixel/LobbyView';
 import { myLook } from '../pixel/PixelMine';
 import { useView } from '../pixel/view';
-import { Btn, Card, T } from './kit';
+import { Btn, T } from './kit';
 import { BAR_H } from './TabBar';
 
 const DOOR_UI: { id: DoorId; label: string; color: string }[] = [
@@ -265,7 +265,7 @@ function NamePrompt({ first, onDone }: { first: boolean; onDone: () => void }) {
   };
   return (
     <View style={styles.promptScrim}>
-      <Card glow={COLORS.gold} style={{ width: '88%', maxWidth: 380, gap: 10 }}>
+      <View style={styles.promptCard}>
         <T v="display" style={{ fontSize: 26, textAlign: 'center' }}>
           {first ? 'Welcome to the lobby' : 'Change your name'}
         </T>
@@ -294,7 +294,7 @@ function NamePrompt({ first, onDone }: { first: boolean; onDone: () => void }) {
         ) : null}
         <Btn kind="gold" label={first ? 'ENTER THE LOBBY' : 'SAVE NAME'} onPress={save} />
         {!first ? <Btn kind="ghost" small label="Cancel" onPress={onDone} /> : null}
-      </Card>
+      </View>
     </View>
   );
 }
@@ -355,6 +355,7 @@ const styles = StyleSheet.create({
   inputRow: { flexDirection: 'row', gap: 8 },
   input: { flex: 1, height: 40, borderRadius: 10, paddingHorizontal: 12, backgroundColor: '#0c1634', color: COLORS.text, borderWidth: 1.5, borderColor: '#2f5499', fontSize: 14 },
   sendBtn: { height: 40, paddingHorizontal: 16, borderRadius: 10, backgroundColor: COLORS.gold, alignItems: 'center', justifyContent: 'center' },
+  promptCard: { width: '88%', maxWidth: 380, gap: 10, padding: 16, borderRadius: 16, backgroundColor: '#0f1b45', borderWidth: 2, borderColor: COLORS.gold2 },
   promptScrim: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: '#070d20cc', alignItems: 'center', justifyContent: 'center' },
   backWrap: { position: 'absolute', left: 12 },
   back: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 42, paddingHorizontal: 14, borderRadius: 21, backgroundColor: '#070d20e6', borderWidth: 1.5, borderColor: COLORS.gold2 },
