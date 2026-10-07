@@ -8,11 +8,13 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FlatList, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Animated, FlatList, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, levelFromXp } from '../game/constants';
 import { useCave } from '../game/caveStore';
-import { joinChat, joinLobby, leaveLobby, LOBBY_EMOTES, publishLobbyMe, useLobby, type LobbyMsg } from '../game/lobby';
+import { loadChain } from '../chain/lazy';
+import { TIP_LIMITS, TIP_SKR_MINT, short } from '../chain/light';
+import { ACT_LIFE_MS, announce, joinChat, joinLobby, leaveLobby, LOBBY_EMOTES, publishLobbyMe, useLobby, type Act, type LobbyMsg } from '../game/lobby';
 import { cleanName, LOBBY_CAP, type DoorId } from '../game/lobbyMap';
 import { isOnChain, useGame, useLevelXp } from '../game/store';
 import { play } from '../game/sfx';
@@ -59,6 +61,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
   const sol = useGame((s) => (isOnChain(s) ? s.wallet.sol + s.wallet.sessionSol : s.save.practiceSol));
   const [navOpen, setNavOpen] = useState(false);
   const [howTo, setHowTo] = useState(false);
+  const [tipTo, setTipTo] = useState<{ id: string; name: string; wallet: string } | null>(null);
   const look = useRef(myLook()).current;
   const lvlRef = useRef(lvl);
   lvlRef.current = lvl;
@@ -149,8 +152,18 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
   const onEvent = useCallback((e: LobbyEvent) => {
     switch (e.t) {
       case 'me':
-        publishLobbyMe({ x: e.x, y: e.y, tx: e.tx, ty: e.ty, facing: e.facing, pose: e.pose, look, lvl: lvlRef.current });
+        publishLobbyMe({ x: e.x, y: e.y, tx: e.tx, ty: e.ty, facing: e.facing, pose: e.pose, look, lvl: lvlRef.current, wallet: useGame.getState().wallet.owner });
         break;
+      case 'peer': {
+        const peer = useLobby.getState().peers[e.id];
+        const g = useGame.getState();
+        if (!peer) break;
+        if (!g.wallet.owner) g.toast('Connect a wallet to send tips', 'info');
+        else if (!peer.wallet) g.toast(`${peer.name} has no wallet connected`, 'info');
+        else if (peer.wallet === g.wallet.owner) g.toast("That's your own wallet", 'info');
+        else setTipTo({ id: peer.id, name: peer.name, wallet: peer.wallet });
+        break;
+      }
       case 'sfx':
         if (e.name === 'door') play('select');
         break;
@@ -278,6 +291,8 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
         lobby={{ navOpen, onNav: () => setNavOpen((v) => !v) }}
       />
 
+      <ActivityFeed top={topH + 10} />
+      {tipTo ? <TipSheet to={tipTo} onClose={() => setTipTo(null)} /> : null}
       {howTo ? <HowToPlay onClose={closeHowTo} /> : null}
 
       {nameReady && (!name || editing) ? <NamePrompt first={!name} onDone={() => setEditing(false)} /> : null}
@@ -322,6 +337,124 @@ function HowToPlay({ onClose }: { onClose: () => void }) {
           ))}
         </ScrollView>
         <Btn kind="gold" label="GOT IT" onPress={onClose} />
+      </View>
+    </View>
+  );
+}
+
+/* ---------------- activity feed ---------------- */
+function actText(a: Act): { icon: string; text: string; color: string } {
+  switch (a.k) {
+    case 'win':
+      return { icon: '🏆', text: `${a.n} won${a.sol > 0 ? ` ${a.sol} SOL` : ''}${a.pts > 0 ? ` · +${a.pts} pts` : ''}`, color: COLORS.gold };
+    case 'tip':
+      return { icon: '🎁', text: a.toMe ? `${a.n} tipped you ${a.a} ${a.tk}` : `${a.mine ? 'You' : a.n} tipped ${a.tn} ${a.a} ${a.tk}`, color: '#ff8fd8' };
+    case 'xp':
+      return { icon: '⭐', text: `${a.n} earned ${a.xp} XP`, color: '#7fe3ff' };
+    default:
+      return { icon: '👋', text: `${a.n} entered the lobby`, color: '#9ff0a8' };
+  }
+}
+
+function ActItem({ a }: { a: Act }) {
+  const v = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const left = Math.max(0, ACT_LIFE_MS - (Date.now() - a.at));
+    Animated.sequence([
+      Animated.timing(v, { toValue: 1, duration: 220, useNativeDriver: true }),
+      Animated.delay(Math.max(0, left - 220 - 900)),
+      Animated.timing(v, { toValue: 0, duration: 900, useNativeDriver: true }),
+    ]).start();
+  }, [a.at, v]);
+  const t = actText(a);
+  return (
+    <Animated.View style={[styles.act, { opacity: v, borderColor: t.color, transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [-6, 0] }) }] }]}>
+      <T style={{ fontSize: 14 }}>{t.icon}</T>
+      <T v="bold" style={{ fontSize: 12, flexShrink: 1 }} numberOfLines={2}>
+        {t.text}
+      </T>
+    </Animated.View>
+  );
+}
+
+/** What players are doing: wins, tips, points. Each line fades in, stays a few seconds and is gone. */
+function ActivityFeed({ top }: { top: number }) {
+  const feed = useLobby((s) => s.feed);
+  return (
+    <View style={[styles.feed, { top }]} pointerEvents="none">
+      {feed.map((a) => (
+        <ActItem key={a.id} a={a} />
+      ))}
+    </View>
+  );
+}
+
+/* ---------------- tipping ---------------- */
+type TipToken = 'SOL' | 'ORE' | 'SKR';
+function TipSheet({ to, onClose }: { to: { id: string; name: string; wallet: string }; onClose: () => void }) {
+  const insets = useSafeAreaInsets();
+  const sol = useGame((s) => s.wallet.sol);
+  const ore = useGame((s) => s.wallet.ore);
+  const tokens: TipToken[] = TIP_SKR_MINT ? ['ORE', 'SKR', 'SOL'] : ['ORE', 'SOL'];
+  const [token, setToken] = useState<TipToken>('ORE');
+  const [amount, setAmount] = useState<number>(TIP_LIMITS.ORE[1]);
+  const [busy, setBusy] = useState(false);
+  const pick = (t: TipToken) => {
+    setToken(t);
+    setAmount(TIP_LIMITS[t][1]);
+  };
+  const FEE = 0.003; // network fee, plus ~0.002 SOL if the other player has no account for the token yet
+  const short_ = token === 'SOL' ? sol < amount + FEE : token === 'ORE' ? ore < amount || sol < FEE : sol < FEE;
+  const send = async () => {
+    if (busy) return;
+    const g = useGame.getState();
+    if (short_) return g.toast(token === 'SOL' ? `Not enough SOL (you have ${sol.toFixed(4)})` : token === 'ORE' && ore < amount ? `Not enough ORE (you have ${ore.toFixed(4)})` : 'Keep about 0.003 SOL for the network fee', 'bad');
+    setBusy(true);
+    try {
+      const chain = await loadChain();
+      await chain.sendTip(token, new chain.PublicKey(to.wallet), amount);
+      announce({ k: 'tip', to: to.id, tn: to.name, a: amount, tk: token });
+      g.toast(`Sent ${amount} ${token} to ${to.name}`, 'good');
+      void g.refreshWallet();
+      onClose();
+    } catch (e) {
+      const m = String((e as Error)?.message ?? e);
+      g.toast(/declined|cancel|rejected/i.test(m) ? 'Cancelled in wallet' : m.slice(0, 140), /declined|cancel|rejected/i.test(m) ? 'info' : 'bad');
+      setBusy(false);
+    }
+  };
+  return (
+    <View style={styles.promptScrim}>
+      <View style={[styles.howCard, { marginTop: insets.top, gap: 10 }]}>
+        <T v="display" style={{ fontSize: 24, textAlign: 'center' }}>
+          Tip {to.name}
+        </T>
+        <T v="muted" style={{ fontSize: 12, textAlign: 'center' }}>
+          Sends to wallet {short(to.wallet)}. Check it matches theirs: a player can claim any name.
+        </T>
+        <View style={styles.tipRow}>
+          {tokens.map((t) => (
+            <Pressable key={t} onPress={() => pick(t)} style={[styles.tipChip, token === t && styles.tipOn]}>
+              <T v="black" style={{ fontSize: 14, color: token === t ? '#10162c' : COLORS.text }}>
+                {t}
+              </T>
+            </Pressable>
+          ))}
+        </View>
+        <View style={styles.tipRow}>
+          {TIP_LIMITS[token].map((a) => (
+            <Pressable key={a} onPress={() => setAmount(a)} style={[styles.tipChip, amount === a && styles.tipOn]}>
+              <T v="black" style={{ fontSize: 14, color: amount === a ? '#10162c' : COLORS.text }}>
+                {a}
+              </T>
+            </Pressable>
+          ))}
+        </View>
+        <T v="muted" style={{ fontSize: 11, textAlign: 'center' }}>
+          You approve it in your wallet. The network fee is about 0.0001 SOL{token === 'SOL' ? '.' : `, plus about 0.002 SOL if they have no ${token} account yet.`}
+        </T>
+        <Btn kind="gold" label={busy ? 'WAITING FOR WALLET…' : `SEND ${amount} ${token}`} disabled={busy} onPress={send} />
+        <Btn kind="ghost" label="CANCEL" disabled={busy} onPress={onClose} />
       </View>
     </View>
   );
@@ -560,6 +693,11 @@ export function BackPill({ door = 'island', onBefore }: { door?: DoorId; onBefor
 }
 
 const styles = StyleSheet.create({
+  feed: { position: 'absolute', left: 12, maxWidth: '62%', gap: 6, alignItems: 'flex-start' },
+  act: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#0b1226e6', borderWidth: 1.5, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5 },
+  tipRow: { flexDirection: 'row', gap: 8, justifyContent: 'center' },
+  tipChip: { minWidth: 70, alignItems: 'center', paddingVertical: 9, paddingHorizontal: 12, borderRadius: 14, borderWidth: 2, borderColor: COLORS.line, backgroundColor: COLORS.card },
+  tipOn: { backgroundColor: COLORS.gold, borderColor: COLORS.gold },
   root: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: '#2f7fc4', zIndex: 30 },
   head: { position: 'absolute', left: 0, right: 0, top: 0, paddingHorizontal: 12, gap: 6 },
   headRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },

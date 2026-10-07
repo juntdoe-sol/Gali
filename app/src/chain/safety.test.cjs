@@ -39,7 +39,7 @@ function client(options = {}) {
     '@react-native-async-storage/async-storage': { getItem: async k => data.get(k) ?? null, setItem: async (k,v) => data.set(k,v), removeItem: async k => data.delete(k) },
     'react-native': { Platform: { OS: 'android' } },
     './webWallet': {}, './idl.json': { accounts: [{ name: 'Player', discriminator: [] }] }, './deployment.json': { skrDecimals: 6 },
-    './light': { CLUSTER: 'mainnet-beta', PROGRAM_ID_STR: web3.PublicKey.default.toBase58(), SKR_MINT_STR: A.publicKey.toBase58(), MAX_SESSION_FUND_SOL: .1 },
+    './ore/consts': { ORE_MINT: A.publicKey }, './light': { CLUSTER: 'mainnet-beta', PROGRAM_ID_STR: web3.PublicKey.default.toBase58(), SKR_MINT_STR: A.publicKey.toBase58(), TIP_LIMITS: {}, TIP_SKR_MINT: '', MAX_SESSION_FUND_SOL: .1 },
   }, options.globals);
   return { c, data, rpc, authorized: () => authorized, authCalls: () => authCalls, signs: () => signs, sends: () => sends };
 }
@@ -104,7 +104,7 @@ function store(board = {}, chainOverride = {}) {
   const sounds = [];
   const c = { ...client().c, ...chainOverride };
   const s = load('../game/store.ts', {
-    '../chain/lazy': { loadChain: async () => c, loadBoard: async () => board, loadOreTx: async () => ({}) },
+    './lobby': { announce() {}, announceXp() {} }, '../chain/lazy': { loadChain: async () => c, loadBoard: async () => board, loadOreTx: async () => ({}) },
     '../chain/light': { oreLive: true, chainReady: false, onChainMode: true, NOTHING_CLAIMABLE: { sol: 0, unrefined: 0, refined: 0, fee: 0 }, short: x => x, isRateLimited: () => false },
     './constants': constants, './pot': pot,
     './sfx': { play: x => sounds.push(x), setMuted() {}, haptic: { win() {}, thud() {}, tap() {}, heavy() {} } },
