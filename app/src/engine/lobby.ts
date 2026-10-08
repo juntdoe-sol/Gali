@@ -883,8 +883,9 @@ export class LobbyEngine {
     else if (ok(me.x, ny)) me.y = ny;
     else return false;
     if (Math.abs(ux) > 0.25) me.facing = ux > 0 ? 1 : -1;
-    me.tx = me.x + ux * 32;
-    me.ty = me.y + uy * 32;
+    // aim a little ahead: others only hear from us twice a second, and should not stop and start in between
+    me.tx = me.x + ux * 44;
+    me.ty = me.y + uy * 44;
     me.path = [];
     if (me.pose !== 'walk') {
       me.pose = 'walk';
@@ -943,7 +944,8 @@ export class LobbyEngine {
   private resize() {
     const cssW = this.canvas.clientWidth || window.innerWidth;
     const cssH = this.canvas.clientHeight || window.innerHeight;
-    const dpr = Math.min(window.devicePixelRatio || 1, this.quality ? 2.5 : 1.5);
+    // pixel art gains nothing past 2x; a struggling phone drops to 1.25x
+    const dpr = Math.min(window.devicePixelRatio || 1, this.quality ? 2 : 1.25);
     if (cssW !== this.W || cssH !== this.H || dpr !== this.dpr) {
       this.W = cssW;
       this.H = cssH;
@@ -980,7 +982,7 @@ export class LobbyEngine {
     if (this.fpsAcc.t < 2.5) return;
     const fps = this.fpsAcc.n / this.fpsAcc.t;
     this.fpsAcc = { n: 0, t: 0 };
-    if (fps < 38 && this.quality === 1) this.quality = 0;
+    if (fps < 45 && this.quality === 1) this.quality = 0;
   }
 
   private think(dt: number, now: number) {
@@ -1193,13 +1195,20 @@ export class LobbyEngine {
     const near: { id: string; d: number }[] = [];
     const people: { id: string; b: Walker; look: Look; name: string; say: string | null; emoji: string | null; emojiAt: number; mine: boolean }[] = [];
     people.push({ id: 'me', b: this.me, look: this.look, name: 'YOU', say: meSay, emoji: meEmoji, emojiAt: this.myEmojiAt, mine: true });
+    const others: typeof people = [];
     for (const p of this.peers.values()) {
       if (!inView(p.x, p.y, 30)) continue;
-      people.push({ id: p.view.id, b: p, look: p.view.look, name: p.view.name, say: p.view.say, emoji: p.view.emoji, emojiAt: now - 1000, mine: false });
+      others.push({ id: p.view.id, b: p, look: p.view.look, name: p.view.name, say: p.view.say, emoji: p.view.emoji, emojiAt: now - 1000, mine: false });
       near.push({ id: p.view.id, d: Math.hypot(p.x - this.me.x, p.y - this.me.y) });
     }
     // names only for the nearest few, so a crowd stays readable
     near.sort((a, b) => a.d - b.d);
+    // a big crowd on a slow phone: draw the nearest ones, and anyone talking
+    const cap = this.quality ? 60 : 30;
+    if (others.length > cap) {
+      const keep = new Set(near.slice(0, cap).map((n) => n.id));
+      for (const o of others) if (keep.has(o.id) || o.say) people.push(o);
+    } else people.push(...others);
     const named = new Set(near.slice(0, 9).map((n) => n.id));
     const labels: (() => void)[] = [];
     for (const pr of people) {
@@ -1222,7 +1231,7 @@ export class LobbyEngine {
           if (pr.look.pet) drawPet(c, pr.look.pet, now, X - 15 * z * b.facing, Y + 1 * z, z, b.facing);
           drawMiner(c, pr.look, b.pose as never, f, X, Y, z, b.facing);
           const lamp = lampOf(pr.look, b.pose as never, f, b.facing);
-          if (lamp) lights.push({ x: (X + lamp[0] * z) * dpr, y: (Y + lamp[1] * z) * dpr, r: 34 * z * dpr, c: '#ffe3a0', k: 1 });
+          if (lamp && (this.quality || pr.mine)) lights.push({ x: (X + lamp[0] * z) * dpr, y: (Y + lamp[1] * z) * dpr, r: 34 * z * dpr, c: '#ffe3a0', k: 1 });
           const show = pr.mine || pr.say || named.has(pr.id);
           if (show) labels.push(() => this.tag(c, pr.name, pr.say, pr.emoji, now - pr.emojiAt, X, Y - 30 * z, z, pr.mine));
         },
@@ -1263,7 +1272,7 @@ export class LobbyEngine {
     lights.push({ x: sx(52 * LT + 8) * dpr, y: sy(8 * LT) * dpr, r: 80 * z * dpr, c: '#ffcf80', k: 1 });
     lights.push({ x: sx(36 * LT + 8) * dpr, y: sy(28 * LT + 8) * dpr, r: 60 * z * dpr, c: '#8fd8ff', k: 1 });
     c.setTransform(1, 0, 0, 1, 0, 0);
-    this.sky.applyLight(c, this.canvas.width, this.canvas.height, lights);
+    this.sky.applyLight(c, this.canvas.width, this.canvas.height, lights, 0, undefined, this.quality === 1);
     // clouds, rain and lightning sit above the light, in screen pixels
     c.globalAlpha = (0.55 + this.sky.rain * 0.2) * (1 - this.sky.night * 0.35);
     for (const cl of this.sky.clouds) c.drawImage(cl.cv, Math.round((ox + cl.x * CLOUD_KX * z) * dpr), Math.round((oy + cl.y * CLOUD_KY * z) * dpr), cl.w * CLOUD_S * z * dpr, cl.cv.height * CLOUD_S * z * dpr);
