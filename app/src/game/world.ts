@@ -63,9 +63,11 @@ export const worldReady = Boolean(URL_ && KEY);
 
 const MAP_W = 360;
 const MAP_H = 440;
-const STALE_MS = 8000;
-const SEND_MS = 250;
-const BEAT_MS = 2000;
+// Fewer messages keep the shared room under Realtime's per-second cap as the island fills up
+// (each broadcast counts once per listener). Updates carry the target, so walkers still glide.
+const STALE_MS = 15_000;
+const SEND_MS = 500;
+const BEAT_MS = 6000;
 const CLAIM_MS = 20_000;
 
 const rid = () => Math.random().toString(36).slice(2, 10);

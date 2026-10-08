@@ -192,6 +192,8 @@ export class Sky {
     extraDark = 0,
     /** paints extra ambient regions into the quarter-size lightmap, e.g. darkness underground */
     paint?: (g: Ctx, q: number) => void,
+    /** false on a struggling phone: skip the bloom pass on top of the lightmap */
+    bloom = true,
   ) {
     const amb = this.ambient();
     const dark = paint ? 1 : Math.min(1, this.night + extraDark);
@@ -225,7 +227,7 @@ export class Sky {
     c.drawImage(this.light, 0, 0, lw, lh, 0, 0, W, H);
     c.restore();
     // a soft bloom so lamps read as bright, not just un-dark
-    if (dark > 0.2 && !paint) {
+    if (dark > 0.2 && !paint && bloom) {
       c.save();
       c.globalCompositeOperation = 'lighter';
       for (const l of lights) {

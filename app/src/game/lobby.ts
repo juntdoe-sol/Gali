@@ -11,6 +11,7 @@ import type { RealtimeChannel } from '@supabase/realtime-js';
 import { create } from 'zustand';
 import type { Look } from '../engine/types';
 import { cleanChat, cleanName, LH, LOBBY_CAP, LW, SPAWNS, type DoorId } from './lobbyMap';
+import { loadJson, saveJson } from './storage';
 import { useName } from './username';
 import { useWorld, worldClient, worldReady } from './world';
 
@@ -40,6 +41,8 @@ export interface LobbyPeer {
 }
 export interface LobbyMsg {
   id: number;
+  /** the sender's id for this line, shared by every copy of it, so history from other players never doubles it */
+  mid?: string;
   from: string;
   name: string;
   text: string;
@@ -96,9 +99,14 @@ const GLOWS = ['none', 'rare', 'epic', 'legendary'];
 const num = (v: unknown, lo: number, hi: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : lo);
 const col = (v: unknown, d: string) => (typeof v === 'string' && HEX.test(v) ? v : d);
 
-const STALE_MS = 12_000;
-const SEND_MS = 220;
-const BEAT_MS = 4_000;
+// Realtime bills every broadcast once per listener, and the free plan cuts connections past 100 messages a
+// second. So a walker sends twice a second, not four times, and a player standing still every 8 seconds.
+// Each update carries where the player is heading, so others still walk smoothly in between.
+const STALE_MS = 20_000;
+const SEND_MS = 500;
+const BEAT_MS = 8_000;
+/** how often the full look rides along anyway (it is also sent at once when it changes or someone joins) */
+const LOOK_MS = 30_000;
 const CHAT_GAP_MS = 900;
 const MAX_MSGS = 60;
 
@@ -126,11 +134,12 @@ export const useLobby = create<LobbyState>((set, get) => ({
     const s = get();
     const now = Date.now();
     if (s.mySay && now - s.mySay.at < CHAT_GAP_MS) return false;
+    const mid = rid();
     set({
       mySay: { t: text, at: now },
-      msgs: [...s.msgs, { id: msgId++, from: s.me, name, text, at: now, mine: true }].slice(-MAX_MSGS),
+      msgs: [...s.msgs, { id: msgId++, mid, from: s.me, name, text, at: now, mine: true }].slice(-MAX_MSGS),
     });
-    void chatChannel?.send({ type: 'broadcast', event: 'chat', payload: { id: s.me, nm: name, t: text } });
+    void chatChannel?.send({ type: 'broadcast', event: 'chat', payload: { id: s.me, nm: name, t: text, mid } });
     return true;
   },
   myDance: 0,
@@ -163,7 +172,9 @@ function onState(p: any) {
   if (!prev && Object.keys(peers).length >= LOBBY_CAP - 1) return;
   const x = num(p.x, 0, LW);
   const y = num(p.y, 0, LH);
-  const look: Look = {
+  // the look rides along only when it changed, so a packet without one keeps what we already know
+  const hasLook = typeof p.h === 'string';
+  const look: Look = !hasLook && prev ? prev.look : {
     hat: typeof p.h === 'string' && KEY.test(p.h) ? p.h : 'hat-yellow',
     fit: col(p.c, '#2f5fd0'),
     pick: col(p.k, '#c9c9c9'),
@@ -183,8 +194,8 @@ function onState(p: any) {
     facing: p.f === -1 ? -1 : 1,
     pose: asPose(p.p),
     look,
-    lvl: Math.floor(num(p.lvl, 1, 999)),
-    wallet: typeof p.w === 'string' && B58.test(p.w) ? p.w : null,
+    lvl: p.lvl === undefined && prev ? prev.lvl : Math.floor(num(p.lvl, 1, 999)),
+    wallet: typeof p.w === 'string' && B58.test(p.w) ? p.w : !hasLook && prev ? prev.wallet : null,
     seen: Date.now(),
     say: prev?.say ?? null,
     emoji: prev?.emoji ?? null,
@@ -263,11 +274,96 @@ function onChat(p: any) {
   if (now - (lastChatFrom.get(p.id) ?? 0) < CHAT_GAP_MS - 100) return; // flooding: drop it
   lastChatFrom.set(p.id, now);
   if (lastChatFrom.size > 300) lastChatFrom.clear();
+  const mid = typeof p.mid === 'string' && MID.test(p.mid) ? p.mid : `${p.id}-${now}`;
+  if (s.msgs.some((m) => m.mid === mid)) return;
   useLobby.setState((st) => ({
     peers: peer ? { ...st.peers, [p.id]: { ...peer, say: { t: text, at: now } } } : st.peers,
-    msgs: [...st.msgs, { id: msgId++, from: p.id, name, text, at: now }].slice(-MAX_MSGS),
+    msgs: [...st.msgs, { id: msgId++, mid, from: p.id, name, text, at: now }].slice(-MAX_MSGS),
     unread: st.chatOpen ? 0 : Math.min(99, st.unread + 1),
   }));
+}
+
+/* ---------------- chat history ----------------
+ * Realtime keeps no history, so a reopened app used to show an empty chat. Two things fix that:
+ * the last lines are kept on the phone, and on joining we ask whoever is online for theirs.
+ * One player answers (the first to reply; the rest stand down), with at most HIST_N lines.
+ * History is treated like live chat from strangers: every line is cleaned and capped.
+ */
+const MID = /^[a-z0-9-]{4,40}$/;
+const HIST_KEY = 'gali-lobby-chat-v1';
+const HIST_N = 30;
+const HIST_MAX_AGE = 24 * 3600_000;
+let histAsk: string | null = null;
+let histTimer: ReturnType<typeof setTimeout> | null = null;
+let lastHistAnswer = 0;
+
+function cleanLine(m: any): LobbyMsg | null {
+  if (!m || typeof m.from !== 'string' || m.from.length > 16) return null;
+  const text = cleanChat(m.text);
+  const name = cleanName(m.name);
+  const at = typeof m.at === 'number' && Number.isFinite(m.at) ? m.at : 0;
+  const mid = typeof m.mid === 'string' && MID.test(m.mid) ? m.mid : null;
+  if (!text || !name || !mid) return null;
+  const now = Date.now();
+  if (at > now + 60_000 || now - at > HIST_MAX_AGE) return null;
+  return { id: 0, mid, from: m.from, name, text, at };
+}
+/** Merge older lines under the ones we have, oldest first, without doubles. */
+function mergeHistory(lines: LobbyMsg[]) {
+  if (!lines.length) return;
+  useLobby.setState((st) => {
+    const have = new Set(st.msgs.map((m) => m.mid).filter(Boolean));
+    const me = st.me;
+    const add = lines.filter((m) => !have.has(m.mid)).map((m) => ({ ...m, id: msgId++, mine: m.from === me || undefined }));
+    if (!add.length) return st;
+    const msgs = [...add, ...st.msgs].sort((a, b) => a.at - b.at).slice(-MAX_MSGS);
+    return { msgs };
+  });
+}
+/** Load what this phone saw last time. Called once at start. */
+export async function loadChatHistory() {
+  const saved = await loadJson<{ me: string | null; msgs: unknown[] }>(HIST_KEY, { me: null, msgs: [] });
+  const lines = (Array.isArray(saved.msgs) ? saved.msgs : []).map(cleanLine).filter((m): m is LobbyMsg => m !== null);
+  // lines I wrote last session still count as mine
+  mergeHistory(lines.map((m) => (saved.me && m.from === saved.me ? { ...m, from: useLobby.getState().me } : m)));
+}
+let lastSavedLen = -1;
+useLobby.subscribe((st) => {
+  const last = st.msgs[st.msgs.length - 1];
+  const sig = st.msgs.length * 1e13 + (last?.at ?? 0);
+  if (sig === lastSavedLen) return;
+  lastSavedLen = sig;
+  const msgs = st.msgs.filter((m) => m.mid).slice(-HIST_N).map(({ mid, from, name, text, at }) => ({ mid, from, name, text, at }));
+  saveJson(HIST_KEY, { me: st.me, msgs }, 800);
+});
+
+function onHistAsk(p: any) {
+  const s = useLobby.getState();
+  if (!p || typeof p.id !== 'string' || p.id === s.me || typeof p.q !== 'string') return;
+  const now = Date.now();
+  if (now - lastHistAnswer < 5000 || histTimer) return;
+  const lines = s.msgs.filter((m) => m.mid).slice(-HIST_N);
+  if (!lines.length) return;
+  // wait a random moment; if someone else answers first, stay quiet
+  histTimer = setTimeout(() => {
+    histTimer = null;
+    if (answered.has(p.q)) return;
+    lastHistAnswer = Date.now();
+    void chatChannel?.send({
+      type: 'broadcast',
+      event: 'hist',
+      payload: { id: s.me, q: p.q, m: lines.map(({ mid, from, name, text, at }) => ({ mid, from, name, text, at })) },
+    });
+  }, 150 + Math.random() * 1200);
+}
+const answered = new Set<string>();
+function onHist(p: any) {
+  if (!p || typeof p.q !== 'string') return;
+  answered.add(p.q);
+  if (answered.size > 50) answered.clear();
+  if (p.q !== histAsk || !Array.isArray(p.m)) return;
+  histAsk = null;
+  mergeHistory(p.m.slice(-HIST_N).map(cleanLine).filter((m: LobbyMsg | null): m is LobbyMsg => m !== null));
 }
 
 function onEmote(p: any) {
@@ -315,10 +411,17 @@ export function joinLobby() {
   ch.on('broadcast', { event: 'state' }, ({ payload }) => onState(payload))
     .on('broadcast', { event: 'emote' }, ({ payload }) => onEmote(payload))
     .on('broadcast', { event: 'bye' }, ({ payload }) => onBye(payload))
+    // someone new: send them our full look with the next update
+    .on('broadcast', { event: 'hi' }, () => {
+      lastKey = '';
+      lastLookAt = 0;
+      lastSent = Math.min(lastSent, Date.now() - SEND_MS);
+    })
     .subscribe((st) => {
       if (st === 'SUBSCRIBED') {
         joinedAt = Date.now();
         useLobby.setState({ status: 'online' });
+        void ch.send({ type: 'broadcast', event: 'hi', payload: { id: useLobby.getState().me } });
         // listen for a moment before deciding the room has space for us
         setTimeout(() => {
           if (channel === ch && Object.keys(useLobby.getState().peers).length >= LOBBY_CAP - 1) useLobby.setState({ status: 'full' });
@@ -346,7 +449,12 @@ export function joinLobby() {
  * Join the shared chat room. One room for the whole app: the lobby and the island's CHAT tab show the same
  * messages. Safe to call again; it waits for the world's realtime connection.
  */
+let histLoaded = false;
 export function joinChat() {
+  if (!histLoaded) {
+    histLoaded = true;
+    void loadChatHistory();
+  }
   if (chatChannel || chatJoining || !worldReady) return;
   const client = worldClient();
   if (!client) {
@@ -364,8 +472,15 @@ export function joinChat() {
   const ch = client.channel('gali-chat', { config: { broadcast: { self: false, ack: false } } });
   ch.on('broadcast', { event: 'chat' }, ({ payload }) => onChat(payload))
     .on('broadcast', { event: 'act' }, ({ payload }) => onAct(payload))
+    .on('broadcast', { event: 'hist?' }, ({ payload }) => onHistAsk(payload))
+    .on('broadcast', { event: 'hist' }, ({ payload }) => onHist(payload))
     .subscribe((st) => {
-    if (st === 'SUBSCRIBED') useLobby.setState({ chatStatus: 'online' });
+    if (st === 'SUBSCRIBED') {
+      useLobby.setState({ chatStatus: 'online' });
+      // ask whoever is here for the lines we missed
+      histAsk = rid();
+      void ch.send({ type: 'broadcast', event: 'hist?', payload: { id: useLobby.getState().me, q: histAsk } });
+    }
     else if (st === 'CLOSED' || st === 'CHANNEL_ERROR' || st === 'TIMED_OUT') {
       if (chatChannel === ch) useLobby.setState({ chatStatus: 'off' });
     }
@@ -385,6 +500,8 @@ export function leaveLobby() {
     void ch.unsubscribe();
   }
   lastKey = '';
+  lastLook = '';
+  lastLookAt = 0;
   useLobby.setState({ status: 'off', peers: {} });
 }
 
@@ -398,15 +515,8 @@ export function publishLobbyMe(m: { x: number; y: number; tx: number; ty: number
   if (![m.x, m.y, m.tx, m.ty].every(Number.isFinite)) return;
   const now = Date.now();
   const r = (v: number) => Math.round(v);
-  const payload = {
-    id: me,
-    nm: name,
-    x: r(m.x),
-    y: r(m.y),
-    tx: r(m.tx),
-    ty: r(m.ty),
-    f: m.facing,
-    p: asPose(m.pose),
+  const move = { id: me, nm: name, x: r(m.x), y: r(m.y), tx: r(m.tx), ty: r(m.ty), f: m.facing, p: asPose(m.pose) };
+  const look = {
     h: m.look.hat,
     c: m.look.fit,
     k: m.look.pick,
@@ -417,13 +527,21 @@ export function publishLobbyMe(m: { x: number; y: number; tx: number; ty: number
     lvl: m.lvl,
     ...(m.wallet ? { w: m.wallet } : {}),
   };
-  const key = JSON.stringify({ ...payload, x: 0, y: 0 });
+  const lk = JSON.stringify(look);
+  const key = JSON.stringify({ ...move, x: 0, y: 0 }) + lk;
   // a walker sends when the target changes; someone standing still sends a heartbeat
   if (now - lastSent < SEND_MS || (key === lastKey && now - lastSent < BEAT_MS)) return;
+  const withLook = lk !== lastLook || now - lastLookAt > LOOK_MS;
   lastSent = now;
   lastKey = key;
-  void channel.send({ type: 'broadcast', event: 'state', payload });
+  if (withLook) {
+    lastLook = lk;
+    lastLookAt = now;
+  }
+  void channel.send({ type: 'broadcast', event: 'state', payload: withLook ? { ...move, ...look } : move });
 }
+let lastLook = '';
+let lastLookAt = 0;
 
 export const lobbySpawn = (k: 'start' | DoorId) => SPAWNS[k];
 export const lobbyJoinedAt = () => joinedAt;
