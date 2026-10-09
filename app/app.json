@@ -17,7 +17,8 @@
       },
       "permissions": [
         "VIBRATE",
-        "POST_NOTIFICATIONS"
+        "POST_NOTIFICATIONS",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
       "predictiveBackGestureEnabled": false
     },
@@ -58,11 +59,12 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "2c57960e-78e4-4b88-822e-275d5ade8706"
+        "projectId": "3112c480-b19f-4772-a100-f0fcc468f54f"
       }
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "owner": "gali-app"
   }
 }
