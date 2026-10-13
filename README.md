@@ -11,7 +11,7 @@ Submitted to **CLOCK IN** (Solana Mobile) and the **Colosseum Crypto World's Fai
 ![Gali island](docs/gali-island.jpg)
 
 - **Play live (mainnet):** [galiisland.bounded.page](https://galiisland.bounded.page)
-- **Android APK:** [download](https://limewire.com/d/FJIqW#1VEDXHzrG8)
+- **Android APK:** [download from Expo](https://expo.dev/accounts/gali-app/projects/gali/builds/0725f134-9774-4c05-ab90-faecdf455f2d)
 - **Demo video:** [YouTube](https://www.youtube.com/watch?v=PCXDZZQpGm8)
 - **Founder speech:** [YouTube](https://youtu.be/Fl21Yzhqt_k)
 - **Team:** [@juntdoe](https://x.com/juntdoe) (technical lead), [@smsonx](https://x.com/smsonx) (BD and spokesperson), [@itsnotajay01](https://x.com/itsnotajay01) (community), [@OO_RAX](https://x.com/OO_RAX) (pixel art and creative)
