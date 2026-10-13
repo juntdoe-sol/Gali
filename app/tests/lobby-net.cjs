@@ -6,13 +6,11 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
-const esb = path.join(__dirname, '../../video/node_modules/.bin/esbuild');
 const out = path.join(os.tmpdir(), 'gali-lobby-net.cjs');
 const S = (f) => path.join(__dirname, 'stubs', f);
 // swap the app's world, storage and name modules for the stubs
 const plugin = `{name:'stub',setup(b){b.onResolve({filter:/\\.\\/(world|storage|username)$/},a=>({path:{world:${JSON.stringify(S('world.ts'))},storage:${JSON.stringify(S('storage.ts'))},username:${JSON.stringify(S('username.ts'))}}[a.path.slice(2)]}))}}`;
-const script = `require(${JSON.stringify(require.resolve('esbuild', { paths: [path.join(__dirname, '../../video')] }))}).buildSync({entryPoints:[${JSON.stringify(path.join(__dirname, '../src/game/lobby.ts'))}],bundle:true,platform:'node',format:'cjs',outfile:${JSON.stringify(out)},nodePaths:[${JSON.stringify(path.join(__dirname, '../node_modules'))}],logLevel:'error',plugins:[${plugin}]})`;
-void esb;
+const script = `require(${JSON.stringify(require.resolve('esbuild', { paths: [path.join(__dirname, '..')] }))}).buildSync({entryPoints:[${JSON.stringify(path.join(__dirname, '../src/game/lobby.ts'))}],bundle:true,platform:'node',format:'cjs',outfile:${JSON.stringify(out)},nodePaths:[${JSON.stringify(path.join(__dirname, '../node_modules'))}],logLevel:'error',plugins:[${plugin}]})`;
 // buildSync does not take plugins; use build() in a child instead
 fs.writeFileSync(out + '.build.cjs', script.replace('buildSync', 'build').replace(/^require/, 'require'));
 execFileSync(process.execPath, [out + '.build.cjs'], { stdio: 'inherit' });
