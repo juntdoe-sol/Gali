@@ -44,6 +44,7 @@ jobs:
       - run: node ../scripts/check-dependencies.cjs app
       - run: node ../scripts/check-build-hardening.cjs
       - run: npx tsc --noEmit
+      - run: npm test
       - name: Android bundle
         run: npx expo export --clear --platform android --output-dir "$RUNNER_TEMP/android"
       - name: Web build
