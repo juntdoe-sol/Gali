@@ -1,31 +1,34 @@
 # Gali
 
-**The ORE Mining Game**
+**A mini open-world pixel game on Seeker. Mine ORE, play to earn, trade gear.**
 
-A pixel-art mining game for Solana Seeker, played on [ORE](https://ore.supply)'s own board.
+Players meet in a shared pixel town, then walk to different zones: ORE Island to mine on [ORE](https://ore.supply)'s own board, the arcade, Cave Run and the Gear Market.
 
 ORE runs a 25-square mining round every 200 slots (about 80 seconds). Gali draws those 25 squares as spots on a pixel island. Players put SOL on the spots they want. When their spot strikes gold they mine $ORE. ORE keeps a small fee each round and returns the rest of the SOL. 1 round in 500, two jackpots pay at once: ORE's own motherlode and Gali's SKR pool.
 
-Built for **CLOCK IN**, the Solana Mobile hackathon. Submissions close 8 Oct 2026 (9 Oct, 14:59 GMT+8).
+Submitted to **CLOCK IN** (Solana Mobile) and the **Colosseum Crypto World's Fair**.
 
 ![Gali island](docs/gali-island.jpg)
 
 - **Play live (mainnet):** [galiisland.bounded.page](https://galiisland.bounded.page)
-- **Android APK (mainnet live):** [install from Expo](https://expo.dev/accounts/juntdoe/projects/gali/builds/8eecdbc1-bb75-4a32-b965-977b70ccb6a6)
-- **Demo video:** [Google Drive](https://drive.google.com/drive/folders/19_kvuqSsrazUKYvtMH5y8XHekSgKrOQN?usp=sharing)
-- **Team:** Juntdoe (lead), Josh (community), Rax (socials and creative)
+- **Android APK:** [download](https://limewire.com/d/FJIqW#1VEDXHzrG8)
+- **Demo video:** [YouTube](https://www.youtube.com/watch?v=PCXDZZQpGm8)
+- **Founder speech:** [YouTube](https://youtu.be/Fl21Yzhqt_k)
+- **Team:** [@juntdoe](https://x.com/juntdoe) (technical lead), [@smsonx](https://x.com/smsonx) (BD and spokesperson), [@itsnotajay01](https://x.com/itsnotajay01) (community), [@OO_RAX](https://x.com/OO_RAX) (pixel art and creative)
 
 ## Status
 
 Be clear about what runs today:
 
 - **Gali is live on Solana mainnet.** Connect a wallet at galiisland.bounded.page or in the APK and you play ORE's real board. Each deploy and claim is a plain ORE instruction signed by your own wallet: no Gali program, no session key, no autopilot. A round is capped at 0.5 SOL, and an 18+ real-money notice comes before the wallet opens. Deploys and claims have been run with real SOL.
+- **The lobby** is the start screen: a shared pixel town where players walk, chat, emote, dance and tip each other in SOL, ORE or SKR. Doors lead to ORE Island, the arcade, Cave Run and the Gear Market. Realtime runs on Supabase.
+- **The arcade** has three tables (Tunnel Collapse, Gold Rush Pot, Crash Cart) played in ORE or SKR against a house wallet. Each 40-second round uses a commit-reveal check players can verify, and the house keeps a 5% fee. Tables show "not funded" until the house wallet holds SOL, ORE and SKR.
 - **Cave Run** is a mini-game you play after connecting a wallet. You walk your miner through a lantern-lit cave, break rocks, dodge bats and climb deeper. It pays miner XP only: no wager, no token rewards, no effect on ORE odds or payouts.
 - **Chain reads go through a read-only proxy** (`app/rpc-backend`) that allows eight RPC methods. If the proxy is rate-limited or down, the app reads from the direct endpoint instead.
 - **The Gali program** (`programs/gali`) adds points, streaks, the SKR jackpot, gear and staking. It is written for ORE's board and tested against a mock of ORE's accounts. It is not deployed yet, so those parts are not live.
 - **The Gear Market** is a design preview. It shows gear as tradeable NFTs with sample listings. Nothing in it is on chain.
 
-Gali mints nothing, takes no cut of a winner's SOL and never holds a player's ORE position. ORE is credited here as the board Gali plays on; Gali is not affiliated with or endorsed by ORE.
+On ORE Island, Gali mints nothing, takes no cut of a winner's SOL and never holds a player's ORE position. The arcade is separate and takes its 5% fee from the tables. ORE is credited here as the board Gali plays on; Gali is not affiliated with or endorsed by ORE.
 
 ## Repo layout
 
