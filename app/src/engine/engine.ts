@@ -1340,15 +1340,12 @@ export class Engine {
       const r = cv.getBoundingClientRect();
       return { x: e.clientX - r.left, y: e.clientY - r.top };
     };
-    // PC: the right mouse button swings, so no browser menu over the map
+    // PC: no browser menu over the map
     cv.addEventListener('contextmenu', (e) => e.preventDefault());
     cv.addEventListener('pointerdown', (e) => {
       const p = pos(e);
       this.mouseTap = e.pointerType === 'mouse';
-      if (e.pointerType === 'mouse' && e.button === 2) {
-        if (this.mode === 'island') this.attack();
-        return;
-      }
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
       cv.setPointerCapture?.(e.pointerId);
       this.pointers.set(e.pointerId, { x: p.x, y: p.y, x0: p.x, y0: p.y, t0: performance.now() });
       this.moved = false;
@@ -1452,7 +1449,7 @@ export class Engine {
     if (this.mode !== 'island') return;
     const [mx, my] = this.cam.toMap(x, y);
     // double tap on open ground zooms in or back out. On a spot it is just two taps: no dive.
-    if (now - this.lastTap.t < 280 && this.lastTap.hit < 0 && Math.hypot(x - this.lastTap.x, y - this.lastTap.y) < 24) {
+    if (!this.mouseTap && now - this.lastTap.t < 280 && this.lastTap.hit < 0 && Math.hypot(x - this.lastTap.x, y - this.lastTap.y) < 24) {
       this.lastTap.t = 0;
       this.cancelTap();
       if (this.cam.userZoomed) this.cam.home(360);
@@ -1489,8 +1486,9 @@ export class Engine {
       this.tapTimer = setTimeout(() => this.pick(hit), 260);
       return;
     }
-    // open ground or sea: walk to the nearest dry land (a tap on a phone; on PC you walk with WASD)
-    if (this.mouseTap) return;
+    // open ground or sea: walk to the nearest dry land (a tap on a phone). On PC you walk with WASD and a
+    // left click there swings.
+    if (this.mouseTap) return this.attack();
     const [gx, gy] = toLand(mx, my);
     this.me.path = findPath(this.me.x, this.me.y, gx, gy);
     this.me.target = -1;

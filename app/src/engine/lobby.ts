@@ -865,15 +865,12 @@ export class LobbyEngine {
       const r = cv.getBoundingClientRect();
       return { x: e.clientX - r.left, y: e.clientY - r.top };
     };
-    // PC: the right mouse button swings, so no browser menu over the map
+    // PC: no browser menu over the map
     cv.addEventListener('contextmenu', (e) => e.preventDefault());
     cv.addEventListener('pointerdown', (e) => {
       const p = pos(e);
       this.mouseTap = e.pointerType === 'mouse';
-      if (e.pointerType === 'mouse' && e.button === 2) {
-        this.attack();
-        return;
-      }
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
       const sb = this.stickBase();
       if (!this.stick && this.opts.touch !== false && Math.hypot(p.x - sb.x, p.y - sb.y) < sb.r * 1.35) {
         this.stick = { id: e.pointerId, dx: 0, dy: 0 };
@@ -961,8 +958,8 @@ export class LobbyEngine {
         this.tapMark = null;
         return;
       }
-      // on PC you walk with WASD; a click on open ground does nothing
-      if (this.mouseTap) return;
+      // on PC you walk with WASD; a left click anywhere else swings
+      if (this.mouseTap) return this.attack();
       this.walkTo(wx, wy);
       this.tapMark = { x: wx, y: wy, at: performance.now() };
     };

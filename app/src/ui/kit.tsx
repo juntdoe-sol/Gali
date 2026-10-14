@@ -472,13 +472,19 @@ const styles = StyleSheet.create({
 });
 
 /** A floating button over the map: a pixel plate with an icon, a label, an optional count and key. */
-export function MapButton({ label, onPress, icon, count, kbd, accessibilityLabel, tone = 'dark' }: { label: string; onPress: () => void; icon?: ReactNode; count?: number; kbd?: string; accessibilityLabel?: string; tone?: 'dark' | 'gold' }) {
+/**
+ * A button over the game map. `instant` fires on touch-down: use it for fight and move actions, so they
+ * work while another finger holds the stick (a multi-touch release never fires onPress on mobile web).
+ */
+export function MapButton({ label, onPress, icon, count, kbd, accessibilityLabel, tone = 'dark', instant }: { label: string; onPress: () => void; icon?: ReactNode; count?: number; kbd?: string; accessibilityLabel?: string; tone?: 'dark' | 'gold'; instant?: boolean }) {
+  const fire = () => {
+    haptic.tap();
+    onPress();
+  };
   return (
     <Pressable
-      onPress={() => {
-        haptic.tap();
-        onPress();
-      }}
+      onPress={instant ? undefined : fire}
+      onPressIn={instant ? fire : undefined}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? label}
     >

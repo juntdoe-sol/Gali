@@ -402,8 +402,8 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
         ) : null}
         {!L.desktop ? (
           <View style={styles.fightRow} pointerEvents="box-none">
-            <MapButton label="JUMP" icon={<PixIcon name="jump" size={20} />} accessibilityLabel="Jump" onPress={() => ref.current?.jump?.()} />
-            {brawlOn ? <MapButton label="HIT" icon={<PixIcon name="fist" size={20} />} accessibilityLabel="Hit: swing your pickaxe" onPress={() => ref.current?.attack?.()} /> : null}
+            <MapButton instant label="JUMP" icon={<PixIcon name="jump" size={20} />} accessibilityLabel="Jump" onPress={() => ref.current?.jump?.()} />
+            {brawlOn ? <MapButton instant label="HIT" icon={<PixIcon name="fist" size={20} />} accessibilityLabel="Hit: swing your pickaxe" onPress={() => ref.current?.attack?.()} /> : null}
           </View>
         ) : null}
         <PixelBox fill="rgba(8,13,32,0.9)" hi="#2d4282" lo="#04060f" shadow={2} style={[styles.emotes, L.w < 390 && { gap: 3, paddingHorizontal: 6 }]}>
@@ -416,7 +416,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
             <>
               <View style={styles.emoteSep} />
               <EmoteKey icon="jump" label="Jump" kbd="SPC" onPress={() => ref.current?.jump?.()} />
-              {brawlOn ? <EmoteKey icon="fist" label="Hit: right click or F" kbd="RMB" onPress={() => ref.current?.attack?.()} /> : null}
+              {brawlOn ? <EmoteKey icon="fist" label="Hit: left click or F" kbd="LMB" onPress={() => ref.current?.attack?.()} /> : null}
             </>
           ) : null}
         </PixelBox>
@@ -499,7 +499,7 @@ function SolChip({ sol }: { sol: number }) {
 function EmoteKey({ icon, label, onPress, kbd, on }: { icon: PixName; label: string; onPress: () => void; kbd: string; on?: boolean }) {
   const narrow = useLayout().w < 390;
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label}>
+    <Pressable onPressIn={onPress} accessibilityRole="button" accessibilityLabel={label}>
       {(st) => {
         const { hovered, pressed, focused } = st as { hovered?: boolean; pressed: boolean; focused?: boolean };
         return (
@@ -952,7 +952,7 @@ export function LobbyBack() {
   const brawlOn = useBrawl((b) => !b.off);
   if (where !== 'island' || (dockOpen && !ch.desktop) || inside) return null;
   const bottom = ch.desktop ? ch.bottom : insets.bottom + BAR_H + 46;
-  const fight = brawlOn ? <MapButton label="HIT" kbd={ch.desktop ? 'RMB' : undefined} icon={<PixIcon name="fist" size={20} />} accessibilityLabel="Hit: swing your pickaxe" onPress={islandFight} /> : null;
+  const fight = brawlOn ? <MapButton instant label="HIT" kbd={ch.desktop ? 'LMB' : undefined} icon={<PixIcon name="fist" size={20} />} accessibilityLabel="Hit: swing your pickaxe" onPress={islandFight} /> : null;
   return (
     <>
       <View style={[styles.backWrap, styles.backRow, { left: ch.left, bottom }]} pointerEvents="box-none">
@@ -962,7 +962,7 @@ export function LobbyBack() {
       {ch.desktop ? null : (
         // phones: the action buttons sit on the right, above CAVE RUN, where a thumb rests
         <View style={[styles.actCol, { right: 12, bottom: bottom + 58 }]} pointerEvents="box-none">
-          <MapButton label="JUMP" icon={<PixIcon name="jump" size={20} />} accessibilityLabel="Jump" onPress={islandJump} />
+          <MapButton instant label="JUMP" icon={<PixIcon name="jump" size={20} />} accessibilityLabel="Jump" onPress={islandJump} />
           {fight}
         </View>
       )}
