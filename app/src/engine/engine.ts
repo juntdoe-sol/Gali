@@ -19,7 +19,7 @@ import { findPath } from './path';
 import { Sky } from './sky';
 import type { EngineEvent, Look, PeerView, Pose, Snapshot } from './types';
 import { Water } from './water';
-import { drawHp, drawKo, drawShield, hitFlash, koAge, pickTarget } from './brawlfx';
+import { drawHp, drawKo, drawShield, FightFx, hitFlash, jumpLift, koAge, pickTarget, swingTilt } from './brawlfx';
 import type { BrawlSnap } from './types';
 
 const BLOCKS = 25;
@@ -144,6 +144,15 @@ export class Engine {
   private lastRs = -1;
   private lastHit = 0;
   private peerHits = new Map<string, number>();
+  /** when our own jump started (wall ms) */
+  private myJumpAt = 0;
+  /** fight effects, the lunge of a swing, and what HP and swings we last saw */
+  private fx = new FightFx();
+  private lungeUntil = 0;
+  private lungeDir = 0;
+  private myHp = 100;
+  private myKo = 0;
+  private peerSeen = new Map<string, { hp: number; sw: number; ko: number }>();
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -201,29 +210,59 @@ export class Engine {
       // stand up again on the helipad
       if (this.onIsland) this.land();
     }
+    const wall = Date.now();
+    const vis = this.mode === 'island' && this.onIsland;
     if (b.me.hit && b.me.hit !== this.lastHit) {
       this.lastHit = b.me.hit;
+      // knocked back, away from the swing
       const dx = me.x - b.me.hx;
       const d = Math.abs(dx) || 1;
-      const nx = me.x + (dx / d) * 6;
-      if (isLand(nx, me.y)) me.x = nx;
+      for (let i = 0; i < 12; i++) {
+        const nx = me.x + dx / d;
+        if (!isLand(nx, me.y)) break;
+        me.x = nx;
+      }
       me.path = [];
       me.target = -1;
       me.manualUntil = performance.now() + 3000;
-      if (this.mode === 'island') {
-        this.parts.burst('star', me.x, me.y - 14, 5, 18, 16, ['#ffffff', '#ffd84a'], 0.45);
+      if (vis) {
+        this.parts.burst('star', me.x, me.y - 14, 8, 26, 22, ['#ffffff', '#ffd84a', '#ff8a70'], 0.5);
+        this.fx.hit(me.x, me.y, Math.max(0, this.myHp - b.me.hp), wall, true);
+        this.fx.shake(200, 2.2, wall);
         this.emit({ t: 'sfx', name: 'bonk' });
       }
     }
+    if (b.me.ko && !this.myKo && vis) this.fx.ko(me.x, me.y, wall);
+    this.myKo = b.me.ko;
+    this.myHp = b.me.hp;
+    // peers: this.peers holds their drawn positions; facing comes from the snapshot
+    const facingOf = new Map((this.snap?.peers ?? []).map((p) => [p.id, p.facing]));
     for (const [id, v] of Object.entries(b.peers)) {
-      if (v.hit && v.hit !== (this.peerHits.get(id) ?? 0)) {
-        const first = !this.peerHits.has(id);
-        this.peerHits.set(id, v.hit);
-        const p = this.peers.get(id);
-        if (p && !first && Date.now() - v.hit < 800 && this.mode === 'island') this.parts.burst('star', p.x, p.y - 14, 5, 18, 16, ['#ffffff', '#ffd84a'], 0.45);
+      const seen = this.peerSeen.get(id);
+      const p = this.peers.get(id);
+      if (seen && p && vis) {
+        if (v.hit && v.hit !== (this.peerHits.get(id) ?? 0) && wall - v.hit < 800) {
+          this.parts.burst('star', p.x, p.y - 14, 8, 26, 22, ['#ffffff', '#ffd84a', '#ff8a70'], 0.5);
+          this.fx.hit(p.x, p.y, Math.max(0, seen.hp - v.hp), wall, false);
+        }
+        if (v.sw && v.sw !== seen.sw && wall - v.sw < 300) this.fx.slash(p.x, p.y, facingOf.get(id) ?? 1, v.sw, false);
+        if (v.ko && !seen.ko) this.fx.ko(p.x, p.y, wall);
       }
+      if (v.hit) this.peerHits.set(id, v.hit);
+      this.peerSeen.set(id, { hp: v.hp, sw: v.sw, ko: v.ko });
     }
     if (this.peerHits.size > 200) this.peerHits.clear();
+    if (this.peerSeen.size > 200) this.peerSeen.clear();
+  }
+
+  /** Jump (Space, or the JUMP button). A swing at you mid-air misses. */
+  jump() {
+    const wall = Date.now();
+    const b = this.snap?.brawl;
+    if (!this.onIsland || this.mode !== 'island' || wall - this.myJumpAt < 600 || (b && koAge(b.me, wall) >= 0)) return;
+    this.myJumpAt = wall;
+    this.parts.burst('dust', this.me.x, this.me.y, 5, 14, 8, ['#f2e6c8', '#d8c8a8'], 0.4);
+    this.emit({ t: 'jump' });
   }
 
   /** Swing your pickaxe at whoever is in reach (F, or the FIGHT button). */
@@ -245,6 +284,14 @@ export class Engine {
     me.hitCycle = -1;
     me.manualUntil = now + 4000;
     this.swingUntil = now + 540;
+    // a big swing: step into it, and a white arc where the pick goes
+    // step in, but stop short of whoever you hit
+    const foe = t ? this.peers.get(t.id) : null;
+    const room = foe ? Math.max(0, Math.min(8, Math.abs(foe.x - me.x) - 12)) : 8;
+    this.lungeUntil = now + (room / 60) * 1000;
+    this.lungeDir = me.facing;
+    this.fx.slash(me.x, me.y, me.facing, wall, Boolean(t));
+    if (t) this.fx.shake(140, 1.4, wall + 200);
     this.emit({ t: 'swing', target: t?.id ?? null, x: me.x, y: me.y });
     this.emit({ t: 'sfx', name: 'whoosh' });
   }
@@ -342,6 +389,11 @@ export class Engine {
       const k = e.key.toLowerCase();
       if (k === 'f' && !e.repeat && this.onIsland && this.mode === 'island') {
         this.attack();
+        e.preventDefault();
+        return;
+      }
+      if (k === ' ' && this.onIsland && this.mode === 'island') {
+        if (!e.repeat) this.jump();
         e.preventDefault();
         return;
       }
@@ -582,6 +634,10 @@ export class Engine {
       me.since = now;
     }
     this.keyWalk = keyed;
+    if (now < this.lungeUntil && !downed) {
+      const nx = me.x + this.lungeDir * 60 * dt;
+      if (isLand(nx, me.y)) me.x = nx;
+    }
     // a brawl swing (no spot to dig) ends after one stroke
     if (me.pose === 'swing' && me.target < 0 && now >= this.swingUntil) {
       me.pose = 'idle';
@@ -775,8 +831,11 @@ export class Engine {
     // Existing strike shake is map-space. Lock rumble is added AFTER zoom/DPR, so it stays <2 physical screen px.
     // Quantize after capping: strict ±1 physical canvas pixel, independent of zoom/DPR and base rounding.
     const rumblePx = amp > 0 ? Math.max(-1, Math.min(1, Math.round((seeded(now / 45) - 0.5) * 2 * amp))) : 0;
+    // a fight's hit shake rides on the same map-space shake
+    const [fsx, fsy] = forClose ? [0, 0] : this.fx.offset(Date.now(), reducedMotion());
+    shake -= fsx;
     const OX = Math.round((cam.ox + shake * cam.z) * dpr) + rumblePx;
-    const OY = Math.round(cam.oy * dpr);
+    const OY = Math.round((cam.oy - fsy * cam.z) * dpr);
     const DW = this.canvas.width;
     const DH = this.canvas.height;
     const water = this.water;
@@ -926,27 +985,30 @@ export class Engine {
     const bs = s?.brawl;
     const wall = Date.now();
     /** a miner in a brawl: knocked down, flashing from a hit, with its shield and HP bar */
-    const fighter = (lk: Look, pose: Pose, f: number, x: number, y: number, facing: number, v: BrawlSnap['me'] | BrawlSnap['peers'][string] | undefined, mine: boolean) => {
+    const fighter = (lk: Look, pose: Pose, f: number, x: number, y: number, facing: number, v: BrawlSnap['me'] | BrawlSnap['peers'][string] | undefined, mine: boolean, jumpAt?: number) => {
       const X = OX + x * S;
       const Y = OY + y * S;
       const ko = v ? koAge(v, wall) : -1;
+      const lift = ko >= 0 ? 0 : jumpLift(jumpAt, wall);
       if (ko < 0 || !drawKo(c, lk, X, Y, S, facing, ko, wall)) {
         const sw = !mine && v && v.sw && wall - v.sw < 540 ? wall - v.sw : -1;
-        drawMiner(c, lk, sw >= 0 ? 'swing' : pose, sw >= 0 ? Math.min(5, Math.floor(sw / 90)) : f, X, Y, S, facing, hitFlash(v, wall) ? 0.45 : 1);
+        const air = lift > 0 && pose !== 'walk' && sw < 0;
+        const swAge = sw >= 0 ? sw : mine && wall - this.lastSwingWall < 540 ? wall - this.lastSwingWall : -1;
+        drawMiner(c, lk, sw >= 0 ? 'swing' : air ? 'walk' : pose, sw >= 0 ? Math.min(5, Math.floor(sw / 90)) : air ? 2 : f, X, Y, S, facing, hitFlash(v, wall) ? 0.45 : 1, lift, swingTilt(swAge, facing));
       }
       if (bs?.on && v?.on && this.mode === 'island') {
-        if (v.sh) drawShield(c, X, Y, S, wall, v.sh);
+        if (v.sh) drawShield(c, X, Y - lift * S, S, wall, v.sh);
         if (ko < 0) drawHp(c, v, X, Y, S, wall, mine);
       }
     };
-    items.push({ z: me.y, f: () => fighter(look, me.pose, mf, me.x, me.y, me.facing, bs?.me, true) });
+    items.push({ z: me.y, f: () => fighter(look, me.pose, mf, me.x, me.y, me.facing, bs?.me, true, this.myJumpAt) });
     items.push({ z: me.y + 1000, f: () => { if (!s?.pending && !s?.selected.length) draw(c, 'fx-sparkle-' + (Math.floor(now / 120) % 3), OX + me.x * S, OY + (me.y - 30 + Math.sin(now / 220) * 2) * S, S * 0.55, false, 0.8); } });
     if (look.pet) items.push({ z: this.petPos.y + (petFlies(look.pet) ? 16 : 0), f: () => drawPet(c, look.pet!, now, OX + this.petPos.x * S, OY + this.petPos.y * S, S, me.facing) });
     for (const p of s?.peers ?? []) {
       const d = this.peers.get(p.id);
       if (!d) continue;
       const pf = frameAt(d.pose, d.since, now);
-      items.push({ z: d.y, f: () => fighter(p.look, d.pose, pf, d.x, d.y, p.facing, bs?.peers[p.id], false) });
+      items.push({ z: d.y, f: () => fighter(p.look, d.pose, pf, d.x, d.y, p.facing, bs?.peers[p.id], false, bs?.jumps?.[p.id]) });
       if (p.look.pet) {
         const fly = petFlies(p.look.pet);
         const px = d.x - 11 * p.facing;
@@ -962,6 +1024,7 @@ export class Engine {
     tIs = performance.now();
 
     this.parts.draw(c, OX, OY, S);
+    if (!forClose) this.fx.draw(c, OX, OY, S, Date.now());
     if (this.quality && el < 1400) this.sky.drawShadows(c, OX, OY, S);
 
     // falling rock on a cave-in round

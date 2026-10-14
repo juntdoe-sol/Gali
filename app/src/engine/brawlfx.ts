@@ -2,7 +2,7 @@
  * Brawl on the canvas: HP bars, the shield bubble, the hit flash, the knockdown and the pick of a target.
  * Shared by the lobby and the island, which both draw miners at feet (X, Y) with `s` screen px per map px.
  */
-import { ACTORS, type Ctx } from './art';
+import { ACTORS, text, textWidth, type Ctx } from './art';
 import { drawMiner, frameAt, minerFrame } from './actors';
 import type { BrawlView, Look } from './types';
 
@@ -10,6 +10,23 @@ import type { BrawlView, Look } from './types';
 export const KO_MS = 3000;
 const FALL_MS = 220;
 const LIE_MS = 1500;
+/** a jump: up and down in this long, this high (map px) */
+export const JUMP_MS = 460;
+const JUMP_H = 11;
+/** How high a miner is off the ground at `now` (map px), from when the jump started. */
+export function jumpLift(at: number | undefined, now: number): number {
+  if (!at) return 0;
+  const t = (now - at) / JUMP_MS;
+  return t > 0 && t < 1 ? Math.sin(Math.PI * t) * JUMP_H : 0;
+}
+/** How far a miner leans into a swing that started `age` ms ago (radians, signed by facing). */
+export function swingTilt(age: number, facing: number): number {
+  if (age < 0 || age > 540) return 0;
+  // lean back on the wind-up, then throw the weight forward on the strike
+  const t = age / 540;
+  const k = t < 0.3 ? -0.45 * Math.sin((Math.PI * t) / 0.3) : Math.sin((Math.PI * (t - 0.3)) / 0.7);
+  return facing * 0.32 * k;
+}
 /** how far a swing reaches (map px between feet), matching game/brawl.ts */
 export const REACH = 22;
 
@@ -124,4 +141,96 @@ export function pickTarget(me: { x: number; y: number; facing: number }, others:
     if (!best || score < best.d) best = { id: o.id, facing: dx === 0 ? (me.facing < 0 ? -1 : 1) : dx > 0 ? 1 : -1, d: score };
   }
   return best ? { id: best.id, facing: best.facing } : null;
+}
+
+/* ---------------- the punch of a fight: slashes, lunges, damage numbers, shake ---------------- */
+
+
+interface Slash { x: number; y: number; facing: number; at: number; big: boolean }
+interface Pop { x: number; y: number; t: string; c: string; at: number; big: boolean }
+const WORDS = ['BONK!', 'POW!', 'WHAM!', 'CLANG!', 'THWACK!'];
+
+/**
+ * One per canvas. Positions are map px; draw() takes the map-to-screen origin and scale.
+ * Everything here is cosmetic and runs on wall-clock ms.
+ */
+export class FightFx {
+  private slashes: Slash[] = [];
+  private pops: Pop[] = [];
+  private shakeUntil = 0;
+  private shakeK = 0;
+
+  /** a pickaxe swing: a white arc in front of the miner; bigger when it connects */
+  slash(x: number, y: number, facing: number, at: number, big: boolean) {
+    this.slashes.push({ x, y, facing, at, big });
+    if (this.slashes.length > 30) this.slashes.shift();
+  }
+  /** a hit landed at (x, y): the damage, and now and then a comic word */
+  hit(x: number, y: number, dmg: number, at: number, onMe: boolean) {
+    if (dmg > 0) this.pops.push({ x: x + 10 + (Math.random() - 0.5) * 6, y: y - 38, t: `-${dmg}`, c: onMe ? '#ff4f5e' : '#ffffff', at, big: true });
+    if (Math.random() < 0.55) this.pops.push({ x: x - 8 + (Math.random() - 0.5) * 8, y: y - 18, t: WORDS[Math.floor(Math.random() * WORDS.length)], c: '#ffd84a', at, big: true });
+    if (this.pops.length > 40) this.pops.splice(0, this.pops.length - 40);
+  }
+  ko(x: number, y: number, at: number) {
+    this.pops.push({ x, y: y - 34, t: 'K.O.!', c: '#ff8a3d', at, big: true });
+  }
+  shake(ms: number, k: number, now: number) {
+    this.shakeUntil = Math.max(this.shakeUntil, now + ms);
+    this.shakeK = Math.max(k, now < this.shakeUntil ? this.shakeK : 0);
+  }
+  /** screen shake offset, in map px */
+  offset(now: number, reduced: boolean): [number, number] {
+    if (reduced || now >= this.shakeUntil) return [0, 0];
+    const k = this.shakeK;
+    return [(Math.random() - 0.5) * 2 * k, (Math.random() - 0.5) * 2 * k];
+  }
+
+  draw(c: Ctx, ox: number, oy: number, s: number, now: number) {
+    this.slashes = this.slashes.filter((sl) => now - sl.at < 520);
+    for (const sl of this.slashes) {
+      const a = now - sl.at;
+      // the pick comes over the head and down in front: the arc sweeps from above to in front
+      if (a < 120) continue;
+      const t = Math.min(1, (a - 120) / 130);
+      const fade = a > 330 ? Math.max(0, 1 - (a - 330) / 190) : 1;
+      const r = (sl.big ? 19 : 16) * s;
+      const cx = ox + (sl.x + sl.facing * 4) * s;
+      const cy = oy + (sl.y - 12) * s;
+      const start = -Math.PI * 0.62;
+      const end = start + Math.PI * 0.95 * t;
+      c.save();
+      if (sl.facing < 0) {
+        c.translate(cx, cy);
+        c.scale(-1, 1);
+        c.translate(-cx, -cy);
+      }
+      c.lineCap = 'butt';
+      c.globalAlpha = 0.85 * fade;
+      c.strokeStyle = sl.big ? '#ffd84a' : '#9fd6ee';
+      c.lineWidth = Math.max(2, (sl.big ? 5 : 3.5) * s);
+      c.beginPath();
+      c.arc(cx, cy, r, start, end);
+      c.stroke();
+      c.globalAlpha = fade;
+      c.strokeStyle = '#ffffff';
+      c.lineWidth = Math.max(1, 1.5 * s);
+      c.beginPath();
+      c.arc(cx, cy, r - 1.5 * s, Math.max(start, end - 0.9), end);
+      c.stroke();
+      c.restore();
+    }
+    this.pops = this.pops.filter((p) => now - p.at < 900);
+    for (const p of this.pops) {
+      const a = (now - p.at) / 900;
+      const k = Math.max(1, Math.round(s * (p.big ? 1.25 : 0.9)));
+      const pop = a < 0.12 ? 1.4 - a * 3 : 1;
+      const fs = Math.max(1, Math.round(k * pop));
+      const w = textWidth(p.t) * fs;
+      const X = Math.round(ox + p.x * s - w / 2);
+      const Y = Math.round(oy + (p.y - a * 12) * s);
+      c.globalAlpha = a > 0.7 ? (1 - a) / 0.3 : 1;
+      text(c, p.t, X, Y, fs, p.c, '#1a0c10');
+      c.globalAlpha = 1;
+    }
+  }
 }

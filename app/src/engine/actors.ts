@@ -78,11 +78,21 @@ export function frameAt(pose: Pose, since: number, now: number) {
 }
 
 /** Draw a miner with feet at screen (x, y). */
-export function drawMiner(c: Ctx, look: Look, pose: Pose, f: number, x: number, y: number, s: number, facing: number, alpha = 1) {
+/** Draw a miner with feet at screen (x, y). `lift` raises the body off the ground (map px) for a jump; the shadow stays down. */
+export function drawMiner(c: Ctx, look: Look, pose: Pose, f: number, x: number, y: number, s: number, facing: number, alpha = 1, lift = 0, tilt = 0) {
   const sh = shadow();
-  c.drawImage(sh, Math.round(x - 7 * s), Math.round(y - 2 * s), 14 * s, 4 * s);
+  const k = lift > 0 ? Math.max(0.55, 1 - lift / 22) : 1;
+  c.drawImage(sh, Math.round(x - 7 * s * k), Math.round(y - 2 * s), 14 * s * k, 4 * s);
   const cv = minerFrame(look, pose, f);
-  drawCanvas(c, cv, M.ax + PAD_X, M.ay + PAD_T, x, y, s, facing < 0, alpha);
+  if (tilt) {
+    // lean into a swing, pivoting on the feet
+    c.save();
+    c.translate(x, y);
+    c.rotate(tilt);
+    c.translate(-x, -y);
+  }
+  drawCanvas(c, cv, M.ax + PAD_X, M.ay + PAD_T, x, Math.round(y - lift * s), s, facing < 0, alpha);
+  if (tilt) c.restore();
 }
 
 export function drawPet(c: Ctx, key: string, now: number, x: number, y: number, s: number, facing: number) {

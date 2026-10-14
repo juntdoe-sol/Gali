@@ -17,6 +17,7 @@ export const PIX = {
   lock: require('../../assets/icons/lock.png'),
   bot: require('../../assets/icons/bot.png'),
   check: require('../../assets/icons/check.png'),
+  jump: require('../../assets/icons/jump.png'),
   fist: require('../../assets/icons/fist.png'),
   sol: require('../../assets/icons/sol.png'),
   ore: require('../../assets/icons/ore.png'),
