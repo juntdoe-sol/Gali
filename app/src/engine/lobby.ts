@@ -13,13 +13,13 @@
  * It tells the app three things: where your miner is (to share), that you walked through a
  * door, and a few sounds.
  */
-import { canvasDpr } from './screen';
+import { canvasDpr, reducedMotion } from './screen';
 import { draw, has, makeCanvas, ctx2d, rect, sprite, text, textCentered, textWidth, loadAtlas, type Ctx } from './art';
 import { drawMiner, drawPet, frameAt, lampOf, stepBody, type Body } from './actors';
 import { Particles } from './particles';
 import { Sky } from './sky';
 import type { BrawlSnap, Look, Pose } from './types';
-import { drawHp, drawKo, drawShield, hitFlash, koAge, pickTarget } from './brawlfx';
+import { drawHp, drawKo, drawShield, FightFx, hitFlash, jumpLift, koAge, pickTarget, swingTilt } from './brawlfx';
 import { CLIFF, DOORS, PAVILIONS, STRUCTURES, doorAt, GRASS, HALL, LCOLS, LH, LROWS, LT, LW, lidx, lobbyMap, lobbyPath, PLANK, PLAZA, ROAD, SAND, SPAWNS, standable, tileCentre, tileOf, WATER, type DoorId } from '../game/lobbyMap';
 
 export type LobbyEvent =
@@ -30,7 +30,9 @@ export type LobbyEvent =
   | { t: 'peer'; id: string }
   | { t: 'sfx'; name: 'step' | 'door' | 'pop' | 'swing' }
   /** your miner swung its pickaxe; target is the player it hit, if any */
-  | { t: 'swing'; target: string | null; x: number; y: number };
+  | { t: 'swing'; target: string | null; x: number; y: number }
+  /** your miner jumped */
+  | { t: 'jump' };
 
 export interface LobbyPeerView {
   id: string;
@@ -143,6 +145,15 @@ export class LobbyEngine {
   private lastRs = -1;
   private lastHit = 0;
   private peerHits = new Map<string, number>();
+  /** when our own jump started (wall ms) */
+  private myJumpAt = 0;
+  /** fight effects, the lunge of a swing, and what HP and swings we last saw */
+  private fx = new FightFx();
+  private lungeUntil = 0;
+  private lungeDir = 0;
+  private myHp = 100;
+  private myKo = 0;
+  private peerSeen = new Map<string, { hp: number; sw: number; ko: number }>();
   private onKey = (e: KeyboardEvent) => this.key(e, true);
   private onKeyUp = (e: KeyboardEvent) => this.key(e, false);
 
@@ -190,27 +201,43 @@ export class LobbyEngine {
       me.ty = sy;
       this.parts.burst('dust', sx, sy, 10, 22, 14, ['#f2e6c8', '#d8c8a8'], 0.7);
     }
+    const wall = Date.now();
     if (b.me.hit && b.me.hit !== this.lastHit) {
       this.lastHit = b.me.hit;
-      // knocked back a step, away from the swing
+      // knocked back, away from the swing
       const dx = me.x - b.me.hx;
       const d = Math.abs(dx) || 1;
       const m = lobbyMap();
-      const nx = me.x + (dx / d) * 6;
-      if (standable(m, nx, me.y)) me.x = nx;
+      for (let i = 0; i < 12; i++) {
+        const nx = me.x + dx / d;
+        if (!standable(m, nx, me.y)) break;
+        me.x = nx;
+      }
       me.path = [];
-      this.parts.burst('star', me.x, me.y - 14, 5, 18, 16, ['#ffffff', '#ffd84a'], 0.45);
+      this.parts.burst('star', me.x, me.y - 14, 8, 26, 22, ['#ffffff', '#ffd84a', '#ff8a70'], 0.5);
+      this.fx.hit(me.x, me.y, Math.max(0, this.myHp - b.me.hp), wall, true);
+      this.fx.shake(200, 2.2, wall);
       this.emit({ t: 'sfx', name: 'pop' });
     }
+    if (b.me.ko && !this.myKo) this.fx.ko(me.x, me.y, wall);
+    this.myKo = b.me.ko;
+    this.myHp = b.me.hp;
     for (const [id, v] of Object.entries(b.peers)) {
-      if (v.hit && v.hit !== (this.peerHits.get(id) ?? 0)) {
-        const first = !this.peerHits.has(id);
-        this.peerHits.set(id, v.hit);
-        const p = this.peers.get(id);
-        if (p && !first && Date.now() - v.hit < 800) this.parts.burst('star', p.x, p.y - 14, 5, 18, 16, ['#ffffff', '#ffd84a'], 0.45);
+      const seen = this.peerSeen.get(id);
+      const p = this.peers.get(id);
+      if (seen && p) {
+        if (v.hit && v.hit !== (this.peerHits.get(id) ?? 0) && wall - v.hit < 800) {
+          this.parts.burst('star', p.x, p.y - 14, 8, 26, 22, ['#ffffff', '#ffd84a', '#ff8a70'], 0.5);
+          this.fx.hit(p.x, p.y, Math.max(0, seen.hp - v.hp), wall, false);
+        }
+        if (v.sw && v.sw !== seen.sw && wall - v.sw < 300) this.fx.slash(p.x, p.y, p.facing, v.sw, false);
+        if (v.ko && !seen.ko) this.fx.ko(p.x, p.y, wall);
       }
+      if (v.hit) this.peerHits.set(id, v.hit);
+      this.peerSeen.set(id, { hp: v.hp, sw: v.sw, ko: v.ko });
     }
     if (this.peerHits.size > 200) this.peerHits.clear();
+    if (this.peerSeen.size > 200) this.peerSeen.clear();
   }
 
   /** Swing your pickaxe (F, or the FIGHT button). Hits the nearest fair fighter in reach, if any. */
@@ -231,8 +258,26 @@ export class LobbyEngine {
     me.pose = 'swing';
     me.since = now;
     this.swingUntil = now + 540;
+    // a big swing: step into it, and a white arc where the pick goes
+    // step in, but stop short of whoever you hit
+    const foe = t ? this.peers.get(t.id) : null;
+    const room = foe ? Math.max(0, Math.min(8, Math.abs(foe.x - me.x) - 12)) : 8;
+    this.lungeUntil = now + (room / 60) * 1000;
+    this.lungeDir = me.facing;
+    this.fx.slash(me.x, me.y, me.facing, wall, Boolean(t));
+    if (t) this.fx.shake(140, 1.4, wall + 200);
     this.emit({ t: 'swing', target: t?.id ?? null, x: me.x, y: me.y });
     this.emit({ t: 'sfx', name: 'swing' });
+  }
+
+  /** Jump (Space, or the JUMP button). A swing at you mid-air misses. */
+  jump() {
+    const wall = Date.now();
+    const b = this.snap.brawl;
+    if (this.leaving || wall - this.myJumpAt < 600 || (b && koAge(b.me, wall) >= 0)) return;
+    this.myJumpAt = wall;
+    this.parts.burst('dust', this.me.x, this.me.y, 5, 14, 8, ['#f2e6c8', '#d8c8a8'], 0.4);
+    this.emit({ t: 'jump' });
   }
 
   /** Walk to a door (the buttons in the app use this). */
@@ -1008,6 +1053,11 @@ export class LobbyEngine {
       e.preventDefault();
       return;
     }
+    if (k === ' ' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (down && !e.repeat) this.jump();
+      e.preventDefault();
+      return;
+    }
     if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'w', 'a', 's', 'd'].includes(k)) {
       if (down) this.keys.add(k);
       else this.keys.delete(k);
@@ -1092,6 +1142,10 @@ export class LobbyEngine {
       ky = 0;
     }
     const swinging = now < this.swingUntil && !downed;
+    if (now < this.lungeUntil && !downed) {
+      const nx = me.x + this.lungeDir * 60 * dt;
+      if (standable(m, nx, me.y)) me.x = nx;
+    }
     if ((this.stick || kx || ky) && !this.leaving && !downed) {
       this.swingUntil = 0;
       this.direct = this.moveDir(ix, iy, dt, now);
@@ -1215,8 +1269,9 @@ export class LobbyEngine {
       this.cam.x += (tx - this.cam.x) * Math.min(1, 0.12 + 0.0);
       this.cam.y += (ty - this.cam.y) * Math.min(1, 0.12);
     }
-    const ox = Math.round((this.centreX() - this.cam.x * z) * dpr) / dpr;
-    const oy = Math.round((cy - this.cam.y * z) * dpr) / dpr;
+    const [shx, shy] = this.fx.offset(Date.now(), reducedMotion());
+    const ox = Math.round((this.centreX() - (this.cam.x + shx) * z) * dpr) / dpr;
+    const oy = Math.round((cy - (this.cam.y + shy) * z) * dpr) / dpr;
     const sx = (wx: number) => ox + wx * z;
     const sy = (wy: number) => oy + wy * z;
 
@@ -1331,15 +1386,17 @@ export class LobbyEngine {
           const bv = bs ? (pr.mine ? bs.me : bs.peers[pr.id]) : undefined;
           const wall = Date.now();
           const ko = bv ? koAge(bv, wall) : -1;
+          const lift = ko >= 0 ? 0 : jumpLift(pr.mine ? this.myJumpAt : bs?.jumps?.[pr.id], wall);
           if (ko < 0 || !drawKo(c, pr.look, X, Y, z, b.facing, ko, wall)) {
             // someone else's swing, as their client told us
             const sw = !pr.mine && bv && bv.sw && wall - bv.sw < 540 ? wall - bv.sw : -1;
-            const pose = (sw >= 0 ? 'swing' : b.pose) as never;
-            const pf = sw >= 0 ? Math.min(5, Math.floor(sw / 90)) : f;
-            drawMiner(c, pr.look, pose, pf, X, Y, z, b.facing, hitFlash(bv, wall) ? 0.45 : 1);
+            const pose = (sw >= 0 ? 'swing' : lift > 0 && b.pose !== 'walk' ? 'walk' : b.pose) as never;
+            const pf = sw >= 0 ? Math.min(5, Math.floor(sw / 90)) : lift > 0 && b.pose !== 'walk' ? 2 : f;
+            const swAge = sw >= 0 ? sw : pr.mine && wall - this.lastSwingWall < 540 ? wall - this.lastSwingWall : -1;
+            drawMiner(c, pr.look, pose, pf, X, Y, z, b.facing, hitFlash(bv, wall) ? 0.45 : 1, lift, swingTilt(swAge, b.facing));
           }
           if (bs?.on && bv?.on) {
-            if (bv.sh) drawShield(c, X, Y, z, wall, bv.sh);
+            if (bv.sh) drawShield(c, X, Y - lift * z, z, wall, bv.sh);
             if (ko < 0) drawHp(c, bv, X, Y, z, wall, pr.mine);
           }
           const lamp = lampOf(pr.look, b.pose as never, f, b.facing);
@@ -1354,6 +1411,7 @@ export class LobbyEngine {
 
     // footstep dust, coins and so on
     this.parts.draw(c, ox, oy, z);
+    this.fx.draw(c, ox, oy, z, Date.now());
 
     // cloud shadows slide over the ground (the sky's clouds are sized for the island, so spread them over this bigger map)
     if (this.quality) {

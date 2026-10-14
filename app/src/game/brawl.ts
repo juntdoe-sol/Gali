@@ -27,6 +27,9 @@ export const KO_MS = 3000;
 export const SHIELD_MS = 3000;
 /** time between swings */
 export const SWING_MS = 450;
+/** a jump lasts this long, and a hit that lands mid-air misses */
+export const JUMP_MS = 460;
+const JUMP_GAP = 600;
 /** how far a swing reaches, map px between feet */
 export const REACH = 22;
 /** HP comes back after this long without a hit, at REGEN_HP every REGEN_TICK */
@@ -84,6 +87,9 @@ interface BrawlState {
   scope: Scope;
   me: MeFighter;
   peers: Record<string, Fighter>;
+  /** when each player last jumped (wall ms), and when we did */
+  jumps: Record<string, number>;
+  myJumpAt: number;
   setOff: (off: boolean) => void;
 }
 
@@ -92,6 +98,8 @@ export const useBrawl = create<BrawlState>((set) => ({
   scope: 'lobby',
   me: { ...fresh(0), respawn: 0, hitFrom: [0, 0] },
   peers: {},
+  jumps: {},
+  myJumpAt: 0,
   setOff: (off) => {
     set({ off });
     saveRecord({ ...rec, off });
@@ -166,8 +174,9 @@ function peerInfo(scope: Scope, id: string): { pos: [number, number]; lvl: numbe
 
 /** Am I a fair target right now? Off, deploying, knocked down or shielded: no. */
 function meSafe(now: number) {
-  const { off, me } = useBrawl.getState();
-  return off || busy() || me.koAt > 0 || now < me.shieldUntil;
+  const { off, me, myJumpAt } = useBrawl.getState();
+  // mid-air: the swing goes under you
+  return off || busy() || me.koAt > 0 || now < me.shieldUntil || now - myJumpAt < JUMP_MS;
 }
 
 /** Our state, packed for the wire: [hp, flags] with bit 1 on, 2 knocked down, 4 shielded. */
@@ -236,6 +245,11 @@ function onBx(scope: Scope, p: any) {
       if (!v || !v.on || v.koAt || now < v.shieldUntil) return;
       useBrawl.setState((s) => ({ peers: { ...s.peers, [p.t]: { ...v, hp: Math.max(1, v.hp - dmg), hitAt: now } } }));
     }
+  } else if (p.k === 'j' && typeof p.id === 'string' && p.id.length <= 16 && p.id !== me) {
+    if (now - (st.jumps[p.id] ?? 0) < JUMP_GAP - 150) return;
+    const jumps = Object.keys(st.jumps).length > 150 ? {} : { ...st.jumps };
+    jumps[p.id] = now;
+    useBrawl.setState({ jumps });
   } else if (p.k === 's' && typeof p.id === 'string' && p.id.length <= 16 && p.id !== me) {
     const was = st.peers[p.id];
     setPeer(p.id, p.b, now);
@@ -316,7 +330,7 @@ export function enterScope(scope: Scope) {
   const now = Date.now();
   myHits.clear();
   hitsFrom.clear();
-  useBrawl.setState((s) => ({ scope, peers: {}, me: { ...s.me, hp: MAX_HP, koAt: 0, hitAt: 0, shieldUntil: now + SHIELD_MS } }));
+  useBrawl.setState((s) => ({ scope, peers: {}, jumps: {}, me: { ...s.me, hp: MAX_HP, koAt: 0, hitAt: 0, shieldUntil: now + SHIELD_MS } }));
 }
 
 export function setMyPos(scope: Scope, x: number, y: number) {
@@ -344,6 +358,16 @@ export function swing(scope: Scope, target: string | null, x: number, y: number)
   return true;
 }
 
+/** Your miner jumped. Everyone in the room sees the hop, and a swing at you mid-air misses. */
+export function jump(scope: Scope): boolean {
+  const now = Date.now();
+  const s = useBrawl.getState();
+  if (scope !== s.scope || s.me.koAt || now - s.myJumpAt < JUMP_GAP - 30) return false;
+  useBrawl.setState({ myJumpAt: now });
+  send(scope, { k: 'j', id: meId(scope) });
+  return true;
+}
+
 /** Who may be targeted, for the canvas: Brawl on, standing, not shielded. */
 export const fairTarget = (f: Fighter | undefined, now: number) => Boolean(f && f.on && !f.koAt && now >= f.shieldUntil);
 
@@ -355,6 +379,7 @@ export function brawlSnap(now: number) {
     on: !s.off,
     me: { ...view(s.me), on: !s.off && !busy(), rs: s.me.respawn, hx: s.me.hitFrom[0], hy: s.me.hitFrom[1] },
     peers: Object.fromEntries(Object.entries(s.peers).map(([id, f]) => [id, view(f)])),
+    jumps: Object.fromEntries(Object.entries(s.jumps).filter(([, at]) => now - at < JUMP_MS)),
   };
 }
 
