@@ -15,6 +15,7 @@ Submitted to **CLOCK IN** (Solana Mobile) and the **Colosseum Crypto World's Fai
 - **Docs:** [galidocs.bounded.page](https://galidocs.bounded.page)
 - **Demo video:** [YouTube](https://www.youtube.com/watch?v=PCXDZZQpGm8)
 - **Founder speech:** [YouTube](https://youtu.be/Fl21Yzhqt_k)
+- **Follow Gali on X:** [@Gali_Game](https://x.com/Gali_Game)
 - **Team:** [@juntdoe](https://x.com/juntdoe) (technical lead), [@smsonx](https://x.com/smsonx) (BD and spokesperson), [@itsnotajay01](https://x.com/itsnotajay01) (community), [@OO_RAX](https://x.com/OO_RAX) (pixel art and creative)
 
 ## Status
