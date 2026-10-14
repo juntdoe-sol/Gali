@@ -1,3 +1,4 @@
+import { layoutNow } from './layout';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -15,7 +16,7 @@ import type { PixName } from './pixIcons';
 import { useLayout } from './layout';
 
 const SHAKE_G = 2.1;
-const layoutNowDesktop = () => Platform.OS === 'web' && typeof window !== 'undefined' && window.innerWidth >= 1000 && window.innerHeight >= 560;
+const layoutNowDesktop = () => layoutNow().desktop;
 const TABS: { id: DockTab; label: string }[] = [
   { id: 'lite', label: 'LITE' },
   { id: 'pro', label: 'PRO' },

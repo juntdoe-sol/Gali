@@ -5,14 +5,17 @@
  * Desktop: a rail down the left side, MINE at the top, every tab labelled with its key.
  * It hides on a phone while you are inside a spot's mine, where the spot panel owns the bottom.
  */
-import { Image, Pressable, StyleSheet, View, type ImageSourcePropType } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, View, type ImageSourcePropType } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLobby } from '../game/lobby';
 import { COLORS } from '../game/constants';
 import { useGame } from '../game/store';
 import { useView } from '../pixel/view';
 import { FocusRing, Kbd, PixelBox, T, TONE, U } from './kit';
-import { RAIL_W, useLayout } from './layout';
+import { LANDSCAPE_APP, RAIL_W, useLayout } from './layout';
+
+/** the landscape app's rail: smaller icons and labels, no logo, scrolls if a short screen needs it */
+const C = LANDSCAPE_APP;
 import { PixIcon } from './PixIcon';
 import type { PixName } from './pixIcons';
 
@@ -238,7 +241,7 @@ function Rail({ active, onTab, inSheet, lobby }: { active: SheetTab | null; onTa
               ) : null}
               {on ? <View style={styles.railMark} /> : null}
               <View style={{ transform: [{ translateY: pressed ? U : hovered ? -U : 0 }] }}>
-                <PixIcon name={TAB_PIX[t.id]} size={32} style={{ opacity: on || hovered ? 1 : 0.8 }} />
+                <PixIcon name={TAB_PIX[t.id]} size={C ? 24 : 32} style={{ opacity: on || hovered ? 1 : 0.8 }} />
               </View>
               <T v="display" style={[styles.railLabel, { color: on ? COLORS.gold : hovered ? COLORS.text : COLORS.muted }]}>
                 {t.label}
@@ -253,11 +256,9 @@ function Rail({ active, onTab, inSheet, lobby }: { active: SheetTab | null; onTa
     );
   };
 
-  return (
-    <View style={styles.rail} accessibilityRole="tablist">
-      <PixelBox fill="rgba(8,13,32,0.94)" hi="#22356f" lo="#04060f" edge="#04060f" style={StyleSheet.absoluteFill} />
-      <View style={styles.railEdge} />
-      <Image source={require('../../assets/brand/wordmark.png')} style={styles.railLogo} resizeMode="contain" accessibilityLabel="Gali" />
+  const body = (
+    <>
+      {C ? null : <Image source={require('../../assets/brand/wordmark.png')} style={styles.railLogo} resizeMode="contain" accessibilityLabel="Gali" />}
       <Pressable
         onPress={mine}
         accessibilityRole="button"
@@ -266,7 +267,7 @@ function Rail({ active, onTab, inSheet, lobby }: { active: SheetTab | null; onTa
       >
         {(st) => (
           <>
-            <MineButton lobby={Boolean(lobby)} on={Boolean(lobby?.navOpen)} pressed={(st as { pressed: boolean }).pressed} running={!lobby && Boolean(run)} size={60} />
+            <MineButton lobby={Boolean(lobby)} on={Boolean(lobby?.navOpen)} pressed={(st as { pressed: boolean }).pressed} running={!lobby && Boolean(run)} size={C ? 44 : 60} />
             <T v="display" style={[styles.railLabel, { color: COLORS.gold, marginTop: 4 }]}>
               {lobby ? 'TRAVEL' : run ? 'MINING' : 'MINE'}
             </T>
@@ -288,6 +289,19 @@ function Rail({ active, onTab, inSheet, lobby }: { active: SheetTab | null; onTa
           {item({ id: 'me' as SheetTab, label: 'PROFILE' })}
         </View>
       ) : null}
+    </>
+  );
+  return (
+    <View style={styles.rail} accessibilityRole="tablist">
+      <PixelBox fill="rgba(8,13,32,0.94)" hi="#22356f" lo="#04060f" edge="#04060f" style={StyleSheet.absoluteFill} />
+      <View style={styles.railEdge} />
+      {C ? (
+        <ScrollView style={{ alignSelf: 'stretch' }} contentContainerStyle={{ flexGrow: 1, alignItems: 'center' }} showsVerticalScrollIndicator={false}>
+          {body}
+        </ScrollView>
+      ) : (
+        body
+      )}
     </View>
   );
 }
@@ -305,13 +319,13 @@ const styles = StyleSheet.create({
   mineWrap: { alignItems: 'center', justifyContent: 'center' },
   mineFace: { position: 'absolute', left: 8, right: 8, top: 8, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   pickBadge: { position: 'absolute', top: -36, right: 6 },
-  rail: { position: 'absolute', left: 0, top: 0, bottom: 0, width: RAIL_W, alignItems: 'center', paddingTop: 12, paddingBottom: 12, paddingHorizontal: 8, zIndex: 20 },
+  rail: { position: 'absolute', left: 0, top: 0, bottom: 0, width: RAIL_W, alignItems: 'center', paddingTop: C ? 6 : 12, paddingBottom: C ? 6 : 12, paddingHorizontal: C ? 4 : 8, zIndex: 20 },
   railEdge: { position: 'absolute', right: 0, top: 0, bottom: 0, width: U, backgroundColor: COLORS.trim, opacity: 0.6 },
   railLogo: { width: 70, height: 31, marginBottom: 24 },
-  railMine: { alignItems: 'center', paddingTop: 30, marginBottom: 4 },
-  railRule: { alignSelf: 'stretch', height: U, backgroundColor: '#22356f', marginVertical: 12, marginHorizontal: 6 },
-  railItem: { alignSelf: 'stretch', alignItems: 'center', paddingVertical: 8, gap: 3 },
-  railLabel: { fontSize: 14, lineHeight: 15, letterSpacing: 1 },
+  railMine: { alignItems: 'center', paddingTop: C ? 22 : 30, marginBottom: C ? 2 : 4 },
+  railRule: { alignSelf: 'stretch', height: U, backgroundColor: '#22356f', marginVertical: C ? 6 : 12, marginHorizontal: 6 },
+  railItem: { alignSelf: 'stretch', alignItems: 'center', paddingVertical: C ? 4 : 8, gap: C ? 1 : 3 },
+  railLabel: { fontSize: C ? 11 : 14, lineHeight: C ? 12 : 15, letterSpacing: C ? 0.5 : 1 },
   railMark: { position: 'absolute', left: -8, top: 8, bottom: 8, width: U * 2, backgroundColor: COLORS.gold },
   railKbd: { position: 'absolute', right: 4, top: 4 },
   railBadge: { position: 'absolute', right: 10, top: 2 },
