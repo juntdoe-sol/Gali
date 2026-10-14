@@ -61,6 +61,9 @@ export const EMOTES = ['👋', '⛏️', '🎉', '💎', '🔥'] as const;
 const URL_ = process.env.EXPO_PUBLIC_WORLD_URL || (cfg.url ? `${cfg.url.replace(/^http/, 'ws')}/realtime/v1` : '');
 const KEY = process.env.EXPO_PUBLIC_WORLD_KEY || cfg.anonKey;
 export const worldReady = Boolean(URL_ && KEY);
+/** The same Supabase project over HTTPS (for the Brawl ranks table), and its public key. */
+export const restBase = () => (URL_ ? URL_.replace(/^ws/, 'http').replace(/\/realtime\/v1\/?$/, '') : '');
+export const publicKey = () => KEY || '';
 
 // On the wire, positions stay in the island's original 360x210 frame, which every installed build
 // understands. The island is now drawn inside a wider map (scripts/island_ext.py, OFFSET), so this

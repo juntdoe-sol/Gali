@@ -146,7 +146,7 @@ export function pickTarget(me: { x: number; y: number; facing: number }, others:
 /* ---------------- the punch of a fight: slashes, lunges, damage numbers, shake ---------------- */
 
 
-interface Slash { x: number; y: number; facing: number; at: number; big: boolean }
+interface Slash { x: number; y: number; facing: number; at: number; big: boolean; color?: string }
 interface Pop { x: number; y: number; t: string; c: string; at: number; big: boolean }
 const WORDS = ['BONK!', 'POW!', 'WHAM!', 'CLANG!', 'THWACK!'];
 
@@ -161,8 +161,8 @@ export class FightFx {
   private shakeK = 0;
 
   /** a pickaxe swing: a white arc in front of the miner; bigger when it connects */
-  slash(x: number, y: number, facing: number, at: number, big: boolean) {
-    this.slashes.push({ x, y, facing, at, big });
+  slash(x: number, y: number, facing: number, at: number, big: boolean, color?: string) {
+    this.slashes.push({ x, y, facing, at, big, color });
     if (this.slashes.length > 30) this.slashes.shift();
   }
   /** a hit landed at (x, y): the damage, and now and then a comic word */
@@ -173,6 +173,10 @@ export class FightFx {
   }
   ko(x: number, y: number, at: number) {
     this.pops.push({ x, y: y - 34, t: 'K.O.!', c: '#ff8a3d', at, big: true });
+  }
+  /** a word in the air, like a power's name */
+  say(x: number, y: number, t: string, c: string, at: number) {
+    this.pops.push({ x, y, t, c, at, big: true });
   }
   shake(ms: number, k: number, now: number) {
     this.shakeUntil = Math.max(this.shakeUntil, now + ms);
@@ -206,7 +210,7 @@ export class FightFx {
       }
       c.lineCap = 'butt';
       c.globalAlpha = 0.85 * fade;
-      c.strokeStyle = sl.big ? '#ffd84a' : '#9fd6ee';
+      c.strokeStyle = sl.color === 'rainbow' ? `hsl(${(now / 3) % 360},90%,62%)` : sl.color ?? (sl.big ? '#ffd84a' : '#9fd6ee');
       c.lineWidth = Math.max(2, (sl.big ? 5 : 3.5) * s);
       c.beginPath();
       c.arc(cx, cy, r, start, end);
