@@ -71,7 +71,7 @@ const seeded = (n: number) => {
   const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
   return x - Math.floor(x);
 };
-const DOOR_COLOR: Record<DoorId, string> = { island: '#3de0c8', cave: '#ff9a3d', market: '#b86bff', tunnel: '#ff9a3d', pot: '#ffcf4a', crash: '#3de0c8' };
+const DOOR_COLOR: Record<DoorId, string> = { island: '#3de0c8', cave: '#ff9a3d', market: '#b86bff', tunnel: '#ff9a3d', pot: '#ffcf4a', crash: '#3de0c8', arena: '#ff4f5e' };
 
 interface Walker extends Body {
   tx: number;
@@ -1481,7 +1481,7 @@ export class LobbyEngine {
   private structSprite(kind: string): HTMLCanvasElement {
     const hit = this.structCache.get(kind);
     if (hit) return hit;
-    const dims: Record<string, [number, number]> = { tent: [50, 40], fire: [20, 8], cart: [44, 26], crates: [20, 22], barrel: [14, 18], 'stall-red': [52, 46], 'stall-teal': [52, 46], rack: [36, 24], boulder: [30, 22], 'sol-crystal': [30, 54], 'ore-vein': [34, 26], lighthouse: [1, 1] };
+    const dims: Record<string, [number, number]> = { arena: [116, 74], tent: [50, 40], fire: [20, 8], cart: [44, 26], crates: [20, 22], barrel: [14, 18], 'stall-red': [52, 46], 'stall-teal': [52, 46], rack: [36, 24], boulder: [30, 22], 'sol-crystal': [30, 54], 'ore-vein': [34, 26], lighthouse: [1, 1] };
     const [w, h] = dims[kind] ?? [16, 16];
     const cv = makeCanvas(w, h);
     const g = ctx2d(cv);
@@ -1583,6 +1583,40 @@ export class LobbyEngine {
       }
       P(14, 4, 2, 24, 'rgba(255,255,255,0.35)');
       P(15, 0, 1, 3, '#d8fff4');
+    } else if (kind === 'arena') {
+      // a stone colosseum gate: two towers, an arch over the door, red and gold banners, crossed pickaxes
+      const stone = (x: number, y: number, w: number, h: number) => {
+        P(x, y, w, h, '#7a6e84');
+        for (let yy = y + 3; yy < y + h; yy += 6) P(x, yy, w, 1, '#5e5468');
+        for (let yy = y; yy < y + h; yy += 6) for (let xx = x + ((yy / 6) % 2 ? 4 : 0); xx < x + w; xx += 8) P(xx, yy, 1, 3, '#5e5468');
+        P(x, y, 2, h, '#968aa0');
+      };
+      stone(4, 22, 108, 50);
+      stone(0, 6, 24, 66);
+      stone(92, 6, 24, 66);
+      for (const tx of [0, 92]) for (let k = 0; k < 4; k++) P(tx + k * 6, 2, 4, 5, '#7a6e84');
+      for (let k = 0; k < 14; k++) P(24 + k * 5, 18, 3, 4, '#7a6e84');
+      // the arch and the dark way in
+      for (let y = 0; y < 34; y++) {
+        const hw = y < 12 ? Math.round(Math.sqrt(Math.max(0, 144 - (12 - y) * (12 - y))) + 6) : 18;
+        P(58 - hw, 38 + y, hw * 2, 1, y < 2 ? '#5e5468' : '#140c1c');
+      }
+      P(40, 70, 36, 4, '#3b2a18');
+      // banners
+      for (const [bx, col] of [[7, '#d8483a'], [99, '#d8483a'], [30, '#ffd24a'], [80, '#ffd24a']] as [number, string][]) {
+        P(bx, 24, 10, 22, col);
+        P(bx, 46, 5, 4, col);
+        P(bx + 5, 46, 5, 2, col);
+        P(bx + 3, 30, 4, 4, col === '#ffd24a' ? '#d8483a' : '#ffd24a');
+      }
+      // crossed pickaxes over the arch
+      for (let k = 0; k < 14; k++) {
+        P(50 + k, 24 + k * 0.6, 2, 2, '#9b6b43');
+        P(64 - k, 24 + k * 0.6, 2, 2, '#9b6b43');
+      }
+      P(46, 22, 8, 3, '#c9c9c9');
+      P(62, 22, 8, 3, '#c9c9c9');
+      P(0, 72, 116, 2, 'rgba(0,0,0,0.25)');
     } else if (kind === 'ore-vein') {
       // a dark rock with warm ore running through it
       for (let y = 0; y < 22; y++) {
@@ -1808,7 +1842,7 @@ export class LobbyEngine {
         c.strokeStyle = col;
         c.lineWidth = 2;
         c.stroke();
-        textCentered(c, { island: 'I', cave: 'C', market: 'M', tunnel: 'T', pot: 'G', crash: 'X' }[d.id], ex, ey - 3 * fs, fs, col);
+        textCentered(c, ({ island: 'I', cave: 'C', market: 'M', tunnel: 'T', pot: 'G', crash: 'X', arena: 'A' } as Record<DoorId, string>)[d.id], ex, ey - 3 * fs, fs, col);
       }
     }
   }
@@ -1876,6 +1910,7 @@ export class LobbyEngine {
       [36.5, 39.6, 'ui-cart', 'GAMES', DOOR_COLOR.pot],
       [36.5, 25.2, 'ui-star', 'PLAZA', '#ffe27a'],
       [8.5, 17.5, 'ui-fire', 'CAMP', '#ff9a3d'],
+      [10.5, 27, 'ui-trophy', 'ARENA', DOOR_COLOR.arena],
     ];
     const ms = 10;
     for (const [tx, ty, icon, label, col] of marks) {

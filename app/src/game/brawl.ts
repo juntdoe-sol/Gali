@@ -16,9 +16,11 @@
  */
 import { create } from 'zustand';
 import { announce, sendLobbyBx, useLobby } from './lobby';
+import { baseDamage, GAP, GUARD_MS, GUARD_STING, REACH as W_REACH, swingDmg, taken, type Weapon } from './powers';
 import { roomHooks, type Scope } from './rx';
 import { loadJson, saveJson } from './storage';
 import { sendWorldBx, useWorld } from './world';
+export type { Scope } from './rx';
 
 export const MAX_HP = 100;
 /** a knockdown lasts this long, then you stand up again */
@@ -40,8 +42,8 @@ const REGEN_HP = 5;
 export const KO_XP = 20;
 /** no XP for knocking out the same player again within this time */
 export const SAME_FOE_MS = 10 * 60_000;
-/** most fight XP a day */
-export const DAY_CAP = 200;
+/** most fight XP a day (lobby, island and arena together) */
+export const DAY_CAP = 300;
 /** XP only counts if you landed a hit on them this recently */
 const KO_CREDIT_MS = 6000;
 /** slack on the victim's side for network delay */
@@ -50,15 +52,8 @@ const CLAIM_SLACK = 64;
 const HP_SEND_MS = 700;
 
 /** Damage of an attacker's n-th swing: the same on every client, and not up to the attacker. */
-export function dmgOf(attacker: string, seq: number): number {
-  let h = 2166136261;
-  const s = `${attacker}:${seq}`;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return 10 + ((h >>> 0) % 6);
-}
+export const dmgOf = swingDmg;
+const WEAPONS: Weapon[] = ['swing', 'dash', 'slam', 'ore', 'splash', 'pet', 'boss', 'sting'];
 
 export interface Fighter {
   hp: number;
@@ -90,6 +85,9 @@ interface BrawlState {
   /** when each player last jumped (wall ms), and when we did */
   jumps: Record<string, number>;
   myJumpAt: number;
+  /** arena: blocking with Pickaxe Guard until then, and the passive you picked */
+  guardUntil: number;
+  passive: 'skin' | 'pet' | null;
   setOff: (off: boolean) => void;
 }
 
@@ -100,6 +98,8 @@ export const useBrawl = create<BrawlState>((set) => ({
   peers: {},
   jumps: {},
   myJumpAt: 0,
+  guardUntil: 0,
+  passive: null,
   setOff: (off) => {
     set({ off });
     saveRecord({ ...rec, off });
@@ -138,12 +138,21 @@ export function koXp(r: Rec, o: { now: number; foeKeys: string[]; myLvl: number;
   return { xp, rec: { ...r, day, dayXp: dayXp + xp, foes } };
 }
 
-/** Is a hit claim believable from where the victim stands? */
-export function hitOk(o: { claim: [number, number]; seen: [number, number] | null; me: [number, number]; lastFrom: number; now: number }): boolean {
-  if (o.now - o.lastFrom < SWING_MS - 80) return false;
+import { THROW_RANGE } from './arenaMap';
+export { THROW_RANGE };
+/**
+ * Is a hit claim believable from where the victim stands? `claim` is where the hit came from: the attacker
+ * for a melee hit, the shard for a thrown one. The weapon sets the reach and the least gap between hits.
+ */
+export function hitOk(o: { claim: [number, number]; seen: [number, number] | null; me: [number, number]; lastFrom: number; now: number; w?: Weapon }): boolean {
+  const w = o.w ?? 'swing';
+  if (o.now - o.lastFrom < GAP[w] - 80) return false;
   if (!o.seen) return false;
-  if (Math.hypot(o.claim[0] - o.seen[0], o.claim[1] - o.seen[1]) > CLAIM_SLACK) return false;
-  return Math.hypot(o.claim[0] - o.me[0], o.claim[1] - o.me[1]) <= REACH + RANGE_SLACK;
+  const thrown = w === 'ore' || w === 'splash';
+  // a melee hit comes from where the attacker stands; a thrown shard from within throwing range of them
+  const slack = thrown ? THROW_RANGE + CLAIM_SLACK : CLAIM_SLACK;
+  if (Math.hypot(o.claim[0] - o.seen[0], o.claim[1] - o.seen[1]) > slack) return false;
+  return Math.hypot(o.claim[0] - o.me[0], o.claim[1] - o.me[1]) <= W_REACH[w] + RANGE_SLACK;
 }
 
 /* ---------------- wiring ---------------- */
@@ -151,8 +160,35 @@ let busy: () => boolean = () => false;
 let myLevel: () => number = () => 1;
 let canFight: (scope: Scope) => boolean = () => true;
 let gainXp: (n: number) => void = () => undefined;
-const myPos: Record<Scope, [number, number]> = { lobby: [0, 0], island: [0, 0] };
+const myPos: Record<Scope, [number, number]> = { lobby: [0, 0], island: [0, 0], arena: [0, 0] };
 let seq = 0;
+
+/**
+ * A room Brawl can run in. The lobby and the island are built in; the arena registers itself
+ * (game/arena.ts), with its own rules for powers, XP and the host's boss.
+ */
+export interface Room {
+  me: () => string;
+  send: (p: Record<string, unknown>) => boolean;
+  peer: (id: string) => { pos: [number, number]; lvl: number; name: string } | null;
+  /** powers and the level bonus count here */
+  arena?: boolean;
+  /** XP for a KO here */
+  koXp?: number;
+  /** who may send the boss's hits (the arena's host) */
+  host?: () => string | null;
+}
+const rooms: Partial<Record<Scope, Room>> = {};
+export function registerRoom(scope: Scope, r: Room) {
+  rooms[scope] = r;
+}
+/** Things the arena and the ranks want to hear about. */
+export const brawlHooks: {
+  /** we knocked out `foeId` (after the anti-farm check; xp may be 0) */
+  koed?: (scope: Scope, foeId: string, foeName: string | null, xp: number) => void;
+  /** we were knocked out by `by` */
+  kodBy?: (scope: Scope, by: string, byName: string | null) => void;
+} = {};
 /** when we last landed a hit on each foe (for KO credit) */
 const myHits = new Map<string, number>();
 /** when each attacker last hit us (rate check) */
@@ -161,16 +197,25 @@ let lastHpSent = 0;
 let hpTimer: ReturnType<typeof setTimeout> | null = null;
 let tick: ReturnType<typeof setInterval> | null = null;
 
-const meId = (scope: Scope) => (scope === 'lobby' ? useLobby.getState().me : useWorld.getState().me);
-const send = (scope: Scope, p: Record<string, unknown>) => (scope === 'lobby' ? sendLobbyBx(p) : sendWorldBx(p));
-function peerInfo(scope: Scope, id: string): { pos: [number, number]; lvl: number; name: string } | null {
-  if (scope === 'lobby') {
+registerRoom('lobby', {
+  me: () => useLobby.getState().me,
+  send: sendLobbyBx,
+  peer: (id) => {
     const p = useLobby.getState().peers[id];
     return p ? { pos: [p.x, p.y], lvl: p.lvl, name: p.name } : null;
-  }
-  const p = useWorld.getState().peers[id];
-  return p && !p.bot ? { pos: [p.x, p.y], lvl: p.lvl, name: p.name } : null;
-}
+  },
+});
+registerRoom('island', {
+  me: () => useWorld.getState().me,
+  send: sendWorldBx,
+  peer: (id) => {
+    const p = useWorld.getState().peers[id];
+    return p && !p.bot ? { pos: [p.x, p.y], lvl: p.lvl, name: p.name } : null;
+  },
+});
+const meId = (scope: Scope) => rooms[scope]?.me() ?? '';
+const send = (scope: Scope, p: Record<string, unknown>) => rooms[scope]?.send(p) ?? false;
+const peerInfo = (scope: Scope, id: string) => rooms[scope]?.peer(id) ?? null;
 
 /** Am I a fair target right now? Off, deploying, knocked down or shielded: no. */
 function meSafe(now: number) {
@@ -223,20 +268,37 @@ function onBx(scope: Scope, p: any) {
   const me = meId(scope);
   if (p.k === 'h' && typeof p.a === 'string' && typeof p.t === 'string' && p.a.length <= 16 && p.t.length <= 16 && Number.isFinite(p.s) && Number.isFinite(p.x) && Number.isFinite(p.y)) {
     const a: string = p.a;
+    const room = rooms[scope];
+    const w: Weapon = WEAPONS.includes(p.w) ? p.w : 'swing';
+    // powers, thrown ORE and the boss only exist in the arena
+    if (w !== 'swing' && !room?.arena) return;
+    const boss = a === 'boss';
+    if (boss && (w !== 'boss' || !room?.host || typeof p.h !== 'string' || room.host() !== p.h)) return;
+    if (!boss && w === 'boss') return;
     // the attacker swung: draw it
-    if (st.peers[a]) useBrawl.setState((s) => ({ peers: { ...s.peers, [a]: { ...s.peers[a], swingAt: now } } }));
-    const dmg = dmgOf(a, Math.floor(p.s));
+    if (w === 'swing' && st.peers[a]) useBrawl.setState((s) => ({ peers: { ...s.peers, [a]: { ...s.peers[a], swingAt: now } } }));
+    const info = boss ? null : peerInfo(scope, a);
+    const dmg = baseDamage(w, a, Math.floor(p.s), info?.lvl ?? 1, Boolean(room?.arena));
     if (p.t === me) {
       if (meSafe(now) || !canFight(scope)) return void sendHp();
-      const info = peerInfo(scope, a);
-      if (!hitOk({ claim: [p.x, p.y], seen: info?.pos ?? null, me: myPos[scope], lastFrom: hitsFrom.get(a) ?? 0, now })) return;
-      hitsFrom.set(a, now);
-      if (hitsFrom.size > 200) hitsFrom.clear();
-      const hp = Math.max(0, st.me.hp - dmg);
+      const key = `${a}:${w}`;
+      const seen: [number, number] | null = boss ? [p.x, p.y] : info?.pos ?? null;
+      if (!hitOk({ claim: [p.x, p.y], seen, me: myPos[scope], lastFrom: hitsFrom.get(key) ?? 0, now, w })) return;
+      hitsFrom.set(key, now);
+      if (hitsFrom.size > 300) hitsFrom.clear();
+      const guarding = Boolean(room?.arena) && now < st.guardUntil;
+      const got = taken(dmg, { skin: Boolean(room?.arena) && st.passive === 'skin', guarding });
+      const hp = Math.max(0, st.me.hp - got);
       const ko = hp <= 0;
       useBrawl.setState((s) => ({ me: { ...s.me, hp, hitAt: now, hitFrom: [p.x, p.y], koAt: ko ? now : 0 } }));
+      // Pickaxe Guard stings whoever hit you
+      if (guarding && !boss) {
+        seq += 1;
+        send(scope, { k: 'h', a: me, t: a, s: seq, x: Math.round(myPos[scope][0]), y: Math.round(myPos[scope][1]), w: 'sting' });
+      }
       if (ko) {
         sendHp(true, a);
+        brawlHooks.kodBy?.(scope, a, boss ? 'Mole Boss' : info?.name ?? null);
         setTimeout(standUp, KO_MS);
       } else sendHp();
     } else {
@@ -265,10 +327,11 @@ function credit(scope: Scope, foe: string, now: number) {
   myHits.delete(foe);
   const info = peerInfo(scope, foe);
   const keys = [`id:${foe}`, ...(info?.name ? [`n:${info.name.toLowerCase()}`] : [])];
-  const r = koXp(rec, { now, foeKeys: keys, myLvl: myLevel(), foeLvl: info?.lvl ?? myLevel() });
+  const r = koXp(rec, { now, foeKeys: keys, myLvl: myLevel(), foeLvl: info?.lvl ?? myLevel(), base: rooms[scope]?.koXp });
   saveRecord({ ...r.rec, off: useBrawl.getState().off });
   if (r.xp > 0) gainXp(r.xp);
   if (info?.name) announce({ k: 'ko', tn: info.name });
+  brawlHooks.koed?.(scope, foe, info?.name ?? null, r.xp);
 }
 
 function standUp() {
@@ -325,12 +388,80 @@ export function initBrawl(o: { busy: () => boolean; level: () => number; canFigh
   if (!tick) tick = setInterval(regen, REGEN_TICK);
 }
 
-/** You moved to the lobby or the island: a fresh start there, with a shield while you arrive. */
+/** You moved to the lobby, the island or the arena: a fresh start there, with a shield while you arrive. */
 export function enterScope(scope: Scope) {
   const now = Date.now();
   myHits.clear();
   hitsFrom.clear();
-  useBrawl.setState((s) => ({ scope, peers: {}, jumps: {}, me: { ...s.me, hp: MAX_HP, koAt: 0, hitAt: 0, shieldUntil: now + SHIELD_MS } }));
+  useBrawl.setState((s) => ({ scope, peers: {}, jumps: {}, guardUntil: 0, me: { ...s.me, hp: MAX_HP, koAt: 0, hitAt: 0, shieldUntil: now + SHIELD_MS } }));
+}
+
+/** Fight XP that is not a KO (arena wins, the boss), under the same daily cap. Returns what was given. */
+export function awardFightXp(n: number): number {
+  const now = Date.now();
+  const day = new Date(now).toISOString().slice(0, 10);
+  const dayXp = rec.day === day ? rec.dayXp : 0;
+  const xp = Math.max(0, Math.min(DAY_CAP - dayXp, Math.round(n)));
+  saveRecord({ ...rec, day, dayXp: dayXp + xp, off: useBrawl.getState().off });
+  if (xp > 0) gainXp(xp);
+  return xp;
+}
+
+/** Arena: put me back to full HP (a new match), with a short shield. */
+export function resetMe(shieldMs = SHIELD_MS) {
+  const now = Date.now();
+  useBrawl.setState((s) => ({ guardUntil: 0, me: { ...s.me, hp: MAX_HP, koAt: 0, hitAt: 0, shieldUntil: now + shieldMs, respawn: s.me.respawn + 1 } }));
+  sendHp(true);
+}
+
+/** Arena: how much HP a pickup gives back, or a shield. */
+export function heal(hp: number) {
+  useBrawl.setState((s) => (s.me.koAt ? s : { me: { ...s.me, hp: Math.min(MAX_HP, s.me.hp + hp) } }));
+  sendHp(true);
+}
+export function shieldMe(ms: number) {
+  const now = Date.now();
+  useBrawl.setState((s) => ({ me: { ...s.me, shieldUntil: Math.max(s.me.shieldUntil, now + ms) } }));
+  sendHp(true);
+}
+/** Pickaxe Guard: block for a moment. */
+export function guard() {
+  useBrawl.setState({ guardUntil: Date.now() + GUARD_MS });
+}
+export function setPassive(p: 'skin' | 'pet' | null) {
+  useBrawl.setState({ passive: p });
+}
+
+/**
+ * An arena power or a thrown shard hit `target`. Same checks as a swing; `x, y` is where the hit
+ * came from (you, or the shard). Returns true when it was sent.
+ */
+export function strike(scope: Scope, w: Weapon, target: string, x: number, y: number): boolean {
+  const now = Date.now();
+  const s = useBrawl.getState();
+  const room = rooms[scope];
+  if (!room?.arena || scope !== s.scope || s.off || s.me.koAt || !canFight(scope)) return false;
+  if (target === 'boss') {
+    seq += 1;
+    return send(scope, { k: 'h', a: meId(scope), t: 'boss', s: seq, x: Math.round(x), y: Math.round(y), w });
+  }
+  const v = s.peers[target];
+  if (!v || !v.on || v.koAt || now < v.shieldUntil) return false;
+  seq += 1;
+  if (!send(scope, { k: 'h', a: meId(scope), t: target, s: seq, x: Math.round(x), y: Math.round(y), w })) return false;
+  myHits.set(target, now);
+  const d = baseDamage(w, meId(scope), seq, myLevel(), true);
+  useBrawl.setState((st) => ({ peers: { ...st.peers, [target]: { ...v, hp: Math.max(1, v.hp - d), hitAt: now } } }));
+  return true;
+}
+
+/** The arena host's boss hits a player. Only the host calls this. */
+export function bossHit(scope: Scope, target: string, x: number, y: number, host: string) {
+  seq += 1;
+  // the host may be the target: deliver it to ourselves too
+  const p = { k: 'h', a: 'boss', t: target, s: seq, x: Math.round(x), y: Math.round(y), w: 'boss', h: host };
+  if (target === meId(scope)) onBx(scope, p);
+  else send(scope, p);
 }
 
 export function setMyPos(scope: Scope, x: number, y: number) {
@@ -354,7 +485,8 @@ export function swing(scope: Scope, target: string | null, x: number, y: number)
   if (!send(scope, { k: 'h', a: meId(scope), t: target, s: seq, x: Math.round(x), y: Math.round(y) })) return true;
   myHits.set(target, now);
   if (myHits.size > 100) myHits.clear();
-  useBrawl.setState((st) => ({ peers: { ...st.peers, [target]: { ...v, hp: Math.max(1, v.hp - dmgOf(meId(scope), seq)), hitAt: now } } }));
+  const d = baseDamage('swing', meId(scope), seq, myLevel(), Boolean(rooms[scope]?.arena));
+  useBrawl.setState((st) => ({ peers: { ...st.peers, [target]: { ...v, hp: Math.max(1, v.hp - d), hitAt: now } } }));
   return true;
 }
 
@@ -385,3 +517,4 @@ export function brawlSnap(now: number) {
 
 /** For tests. */
 export const _test = { onBx, standUp, regen, setRec: (r: Rec) => (rec = r), getRec: () => rec };
+export { GUARD_STING };

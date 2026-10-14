@@ -23,6 +23,8 @@ import GameView, { type GameRef } from './GameView';
 import { useView } from './view';
 import { useLobby } from '../game/lobby';
 import { brawlSnap, enterScope, initBrawl, jump, setMyPos, swing } from '../game/brawl';
+import { initArena, useArena } from '../game/arena';
+import { initFightHooks } from '../game/fightHooks';
 
 const STANDS = CLAIMS.map((c) => c.stand as unknown as [number, number]);
 const GLOW: Record<Gear['rarity'], Look['glow']> = { common: 'none', rare: 'rare', epic: 'epic', legendary: 'legendary' };
@@ -185,18 +187,40 @@ export default function PixelMine() {
       },
       canFight: (scope) => {
         if (scope === 'lobby') return useLobby.getState().status === 'online' && Boolean(useName.getState().name);
+        if (scope === 'arena') {
+          const a = useArena.getState();
+          return a.open && a.match.phase === 'fight' && a.match.fighters.includes(a.me) && !a.spectator;
+        }
         return useWorld.getState().status === 'online' && (!oreLive || Boolean(useGame.getState().wallet.owner));
       },
       gainXp: (n) => useGame.getState().gainXp(n),
     });
+    initArena({
+      level: () => {
+        const g = useGame.getState();
+        return levelFromXp(g.wallet.player ? g.wallet.player.xp + g.save.bonusXp : g.save.xp);
+      },
+      look: myLook,
+      wallet: () => useGame.getState().wallet.owner,
+      gainXp: (n) => useGame.getState().gainXp(n),
+    });
+    initFightHooks(() => useName.getState().name);
     enterScope(useLobby.getState().where);
     let where = useLobby.getState().where;
-    return useLobby.subscribe((l) => {
+    const unA = useArena.subscribe((a, prev) => {
+      // leaving the arena puts Brawl back in the room you came from
+      if (prev.open && !a.open) enterScope(useLobby.getState().where);
+    });
+    const unL = useLobby.subscribe((l) => {
       if (l.where !== where) {
         where = l.where;
-        enterScope(where);
+        if (!useArena.getState().open) enterScope(where);
       }
     });
+    return () => {
+      unA();
+      unL();
+    };
   }, []);
   // F on the keyboard is handled inside the canvas; the FIGHT button calls islandFight
   useEffect(() => {
