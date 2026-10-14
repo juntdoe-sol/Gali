@@ -11,7 +11,7 @@ import { useGame } from '../game/store';
 import { useView } from '../pixel/view';
 import { PixelBox, T } from './kit';
 import { PixIcon } from './PixIcon';
-import { useLayout } from './layout';
+import { LANDSCAPE_APP, useLayout } from './layout';
 import { BAR_H } from './TabBar';
 
 export function MapHint() {
@@ -38,7 +38,8 @@ export function MapHint() {
     if (done) Animated.timing(fade, { toValue: 0, duration: 250, useNativeDriver: true }).start();
   }, [done, fade]);
 
-  if (!onboarded || (dockOpen && !desktop)) return null;
+  // the landscape app has no room under the map: the DEPLOY panel says the same thing
+  if (!onboarded || (dockOpen && !desktop) || LANDSCAPE_APP) return null;
   return (
     <Animated.View pointerEvents="none" style={[styles.wrap, desktop ? { bottom: 24, left: 88, right: side + 28 } : { bottom: BAR_H + insets.bottom + 18 }, { opacity: fade }]}>
       <PixelBox fill="rgba(8,13,32,0.92)" hi={COLORS.teal} lo="#04060f" shadow={1} style={styles.pill}>
