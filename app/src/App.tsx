@@ -1,14 +1,14 @@
 import { useBrawl, _test } from './game/brawl';
 import { useAppFonts } from './fonts';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { SidePanel } from './ui/Side';
-import { useLayout } from './ui/layout';
+import { LANDSCAPE_APP, useLayout } from './ui/layout';
 import { TAB_KEY } from './ui/TabBar';
 import { useView } from './pixel/view';
 import { BLOCKS } from './game/constants';
 import { AppState, Platform, StyleSheet, View } from 'react-native';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from './game/constants';
 import { oreLive } from './chain/light';
 import { initAudio } from './game/sfx';
@@ -104,9 +104,11 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <View style={styles.root}>
-        <StatusBar style="light" />
-        <PixelMine />
-        {fontsLoaded ? <Ui sheet={sheet} setSheet={setSheet} /> : null}
+        <StatusBar style="light" hidden={LANDSCAPE_APP} />
+        <Edges>
+          <PixelMine />
+          {fontsLoaded ? <Ui sheet={sheet} setSheet={setSheet} /> : null}
+        </Edges>
         <Splash fontsLoaded={fontsLoaded} />
       </View>
     </SafeAreaProvider>
@@ -174,6 +176,13 @@ function useHotkeys(sheet: SheetTab | null, setSheet: (t: SheetTab | null) => vo
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [on, sheet, setSheet]);
+}
+
+/** The landscape app keeps clear of a camera cutout or rounded corner on either side. */
+function Edges({ children }: { children: ReactNode }) {
+  const i = useSafeAreaInsets();
+  if (!LANDSCAPE_APP) return <>{children}</>;
+  return <View style={{ flex: 1, marginLeft: i.left, marginRight: i.right }}>{children}</View>;
 }
 
 function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTab | null) => void }) {

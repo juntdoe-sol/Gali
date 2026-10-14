@@ -7,21 +7,29 @@
  *          controls sit in a panel on the right, and pages open as windows beside the rail.
  *
  * `mouse` is separate from size: a big touchscreen keeps the joystick and loses the key hints.
+ *
+ * The Android app is locked to landscape (app.json) and always draws the desktop shape, made compact:
+ * a thinner rail and top bar and a narrower side panel, so it fits a phone held sideways. Mobile
+ * browsers keep the phone layout. `?land=1` on the web draws the Android layout, for testing.
  */
 import { useEffect, useState } from 'react';
 import { Platform, useWindowDimensions } from 'react-native';
 
 export type Shape = 'phone' | 'tablet' | 'desktop';
 
+/** The landscape Android app (or its web test mode). */
+export const LANDSCAPE_APP =
+  Platform.OS === 'android' || (Platform.OS === 'web' && typeof window !== 'undefined' && /[?&]land=1\b/.test(window.location?.search ?? ''));
+
 /** Desktop rail width, side panel width and the top bar height, in CSS px. */
-export const RAIL_W = 88;
-export const TOP_H = 64;
-export const GUTTER = 14;
-export const sideWidth = (w: number) => (w >= 1500 ? 400 : w >= 1280 ? 372 : 340);
+export const RAIL_W = LANDSCAPE_APP ? 66 : 88;
+export const TOP_H = LANDSCAPE_APP ? 48 : 64;
+export const GUTTER = LANDSCAPE_APP ? 8 : 14;
+export const sideWidth = (w: number) => (LANDSCAPE_APP ? (w >= 960 ? 320 : 292) : w >= 1500 ? 400 : w >= 1280 ? 372 : 340);
 /** Phone panels never grow wider than this on a tablet. */
 export const COLUMN_MAX = 560;
 
-export const shapeOf = (w: number, h: number): Shape => (w >= 1000 && h >= 560 ? 'desktop' : w >= 700 ? 'tablet' : 'phone');
+export const shapeOf = (w: number, h: number): Shape => (LANDSCAPE_APP ? 'desktop' : w >= 1000 && h >= 560 ? 'desktop' : w >= 700 ? 'tablet' : 'phone');
 
 function readMouse(): boolean {
   if (Platform.OS !== 'web' || typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
@@ -65,8 +73,8 @@ export interface Layout {
 export function useLayout(): Layout {
   const { width: w, height: h } = useWindowDimensions();
   const mouse = useMouse();
-  // the Android app keeps its tested phone layout whatever the screen; the wide layouts are web only
-  const shape = Platform.OS === 'web' ? shapeOf(w, h) : 'phone';
+  // the Android app is landscape and draws the compact desktop shape; iOS (not shipped) keeps the phone one
+  const shape = Platform.OS === 'web' || LANDSCAPE_APP ? shapeOf(w, h) : 'phone';
   const desktop = shape === 'desktop';
   return { shape, desktop, w, h, mouse, side: desktop ? sideWidth(w) : 0, rail: desktop ? RAIL_W : 0 };
 }
@@ -75,7 +83,7 @@ export function useLayout(): Layout {
 export function layoutNow(): { desktop: boolean; side: number; rail: number; mouse: boolean } {
   if (typeof window === 'undefined') return { desktop: false, side: 0, rail: 0, mouse: false };
   const w = window.innerWidth;
-  const desktop = Platform.OS === 'web' && shapeOf(w, window.innerHeight) === 'desktop';
+  const desktop = (Platform.OS === 'web' || LANDSCAPE_APP) && shapeOf(w, window.innerHeight) === 'desktop';
   return { desktop, side: desktop ? sideWidth(w) : 0, rail: desktop ? RAIL_W : 0, mouse: readMouse() };
 }
 

@@ -10,10 +10,10 @@
  * picks up the look without changing how it is built.
  */
 import { useState, type ReactNode } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
 import { COLORS } from '../game/constants';
 import { haptic } from '../game/sfx';
-import { useLayout } from './layout';
+import { LANDSCAPE_APP, useLayout } from './layout';
 
 // Jersey 15 (a pixel font with clear digits) for titles, numbers, labels and buttons; Pixelify Sans for reading;
 // Silkscreen, tiny caps, for key hints and tags.
@@ -462,6 +462,8 @@ const styles = StyleSheet.create({
   tip: { position: 'absolute', padding: 10, zIndex: 1000 },
   iconBtn: { minWidth: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   iconKbd: { position: 'absolute', right: -6, bottom: -6 },
+  scrimScroll: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 10 },
+  modalCenter: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(4,6,15,0.55)', padding: 16 },
   scrim: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: 'rgba(4,6,15,0.72)', alignItems: 'center', justifyContent: 'center', padding: 12, zIndex: 60 },
   window: { padding: 16, gap: 10 },
   winHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -522,10 +524,33 @@ export function MapButton({ label, onPress, icon, count, kbd, accessibilityLabel
 
 /** The dimmed backdrop behind a dialog. Tapping it closes the dialog when `onPress` is given. */
 export function Scrim({ onPress, children, style }: { onPress?: () => void; children?: ReactNode; style?: StyleProp<ViewStyle> }) {
+  if (LANDSCAPE_APP) {
+    // a phone held sideways is short: a tall window scrolls instead of running off the screen
+    return (
+      <View style={[styles.scrim, { padding: 0 }, style]}>
+        <ScrollView style={{ alignSelf: 'stretch' }} contentContainerStyle={styles.scrimScroll} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+          {onPress ? <Pressable style={StyleSheet.absoluteFill} onPress={onPress} accessibilityLabel="Close" /> : null}
+          {children}
+        </ScrollView>
+      </View>
+    );
+  }
   return (
     <View style={[styles.scrim, style]}>
       {onPress ? <Pressable style={StyleSheet.absoluteFill} onPress={onPress} accessibilityLabel="Close" /> : null}
       {children}
+    </View>
+  );
+}
+
+/** A centred modal body that scrolls on the short landscape screen. */
+export function ModalCenter({ children, style }: { children?: ReactNode; style?: StyleProp<ViewStyle> }) {
+  if (!LANDSCAPE_APP) return <View style={[styles.modalCenter, style]}>{children}</View>;
+  return (
+    <View style={[styles.modalCenter, { padding: 0 }, style]}>
+      <ScrollView style={{ alignSelf: 'stretch' }} contentContainerStyle={styles.scrimScroll} keyboardShouldPersistTaps="handled">
+        {children}
+      </ScrollView>
     </View>
   );
 }

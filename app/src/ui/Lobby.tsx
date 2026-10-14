@@ -27,10 +27,11 @@ import { islandFight, islandJump, myLook } from '../pixel/PixelMine';
 import { useArena } from '../game/arena';
 import { useView } from '../pixel/view';
 import { Btn, Choice, F, FocusRing, Frame, IconBtn, INPUT, Kbd, MapButton, PixelBox, Scrim, T, Tip, U, Window } from './kit';
-import { GUTTER, RAIL_W, TOP_H, sideWidth, useChrome, useLayout } from './layout';
+import { GUTTER, LANDSCAPE_APP, RAIL_W, TOP_H, sideWidth, useChrome, useLayout } from './layout';
 import { BAR_H, TabBar, type SheetTab } from './TabBar';
 import { Arcade } from './Arcade';
 import { PixIcon } from './PixIcon';
+import { FightPad } from './ActionPad';
 import type { PixName } from './pixIcons';
 import { GAME_IDS, GAME_META, useArcade, type GameId } from '../game/arcade';
 
@@ -145,7 +146,8 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
   }, []);
 
   const L = useLayout();
-  const chatW = L.desktop ? sideWidth(L.w) : 0;
+  // the landscape app opens chat on demand: the map gets the whole width
+  const chatW = L.desktop && !LANDSCAPE_APP ? sideWidth(L.w) : 0;
   const bottom = L.desktop ? 96 : bottomInset + BAR_H + 150;
   const topH = L.desktop ? TOP_H + GUTTER : top + 104;
   const left = L.desktop ? RAIL_W : 0;
@@ -281,7 +283,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
         />
       ) : null}
 
-      {L.desktop ? <SharedChat inLobby /> : null}
+      {L.desktop && !LANDSCAPE_APP ? <SharedChat inLobby /> : null}
 
       {/* header */}
       {L.desktop ? (
@@ -412,7 +414,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
           ))}
           <View style={styles.emoteSep} />
           <EmoteKey icon="note" label="Dance" kbd={String(LOBBY_EMOTES.length + 1)} on={Boolean(myDance) || danceOpen} onPress={() => setDanceOpen((o) => !o)} />
-          {L.desktop ? (
+          {L.desktop && !LANDSCAPE_APP ? (
             <>
               <View style={styles.emoteSep} />
               <EmoteKey icon="jump" label="Jump" kbd="SPC" onPress={() => ref.current?.jump?.()} />
@@ -421,6 +423,8 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
           ) : null}
         </PixelBox>
       </View>
+
+      {LANDSCAPE_APP ? <FightPad right={right + 14} bottom={GUTTER + 70} hit={brawlOn} onHit={() => ref.current?.attack?.()} onJump={() => ref.current?.jump?.()} /> : null}
 
       {navOpen ? (
         <>
@@ -723,7 +727,7 @@ export function SharedChat({ inLobby }: { inLobby?: boolean } = {}) {
     if (open) setTimeout(() => list.current?.scrollToEnd({ animated: false }), 50);
   }, [open, msgs.length]);
   // a desktop lobby keeps the chat docked down the right side; everywhere else it opens on demand
-  const docked = L.desktop && where === 'lobby';
+  const docked = L.desktop && !LANDSCAPE_APP && where === 'lobby';
   // the docked lobby chat is drawn by the lobby itself, under its menus and dialogs
   if (docked !== Boolean(inLobby)) return null;
   if (!open && !docked) return null;
@@ -957,8 +961,9 @@ export function LobbyBack() {
     <>
       <View style={[styles.backWrap, styles.backRow, { left: ch.left, bottom }]} pointerEvents="box-none">
         <BackPill kbd={ch.desktop ? 'L' : undefined} />
-        {ch.desktop ? fight : null}
+        {ch.desktop && !LANDSCAPE_APP ? fight : null}
       </View>
+      {LANDSCAPE_APP ? <FightPad right={ch.right} bottom={bottom + 58} hit={brawlOn} onHit={islandFight} onJump={islandJump} /> : null}
       {ch.desktop ? null : (
         // phones: the action buttons sit on the right, above CAVE RUN, where a thumb rests
         <View style={[styles.actCol, { right: 12, bottom: bottom + 58 }]} pointerEvents="box-none">

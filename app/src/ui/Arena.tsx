@@ -21,9 +21,10 @@ import { atlasSource } from '../pixel/atlasSource';
 import ArenaView, { type ArenaRef } from '../pixel/ArenaView';
 import { myLook } from '../pixel/PixelMine';
 import { Btn, Card, Choice, MapButton, PixelBox, Scrim, T, Window } from './kit';
-import { useLayout } from './layout';
+import { LANDSCAPE_APP, useLayout } from './layout';
 import { BackPill, TipSheet } from './Lobby';
 import { PixIcon } from './PixIcon';
+import { SkillButton } from './ActionPad';
 import type { PixName } from './pixIcons';
 
 const ICON: Record<ActiveId, PixName> = { dash: 'bolt', guard: 'helmet', slam: 'fire', splash: 'gem', spin: 'star', mend: 'heart' };
@@ -159,13 +160,14 @@ export function ArenaScreen() {
   }, []);
 
   if (!open) return null;
-  const desk = L.desktop;
+  // the landscape Android app is a touch screen: it keeps the phone's stick and skill wheel
+  const desk = L.desktop && !LANDSCAPE_APP;
   const barTop = insets.top + 64;
   // PC: the skill bar sits under the pit. Phone: the buttons float over it, like a MOBA.
   const barBottom = desk ? insets.bottom + 100 : insets.bottom + 8;
   return (
     <Modal visible transparent={false} animationType="fade" statusBarTranslucent onRequestClose={() => useArena.getState().close()}>
-      <View style={styles.screen}>
+      <View style={[styles.screen, LANDSCAPE_APP && { marginLeft: insets.left, marginRight: insets.right }]}>
         {atlas ? (
           <ArenaView
             ref={ref}
@@ -180,7 +182,7 @@ export function ArenaScreen() {
         <Controls bottom={insets.bottom + 10} desk={desk} arena={ref} />
         <Banner />
         {clip ? <ClipCard clip={clip} onClose={() => setClip(null)} top={barTop + 8} /> : null}
-        {panel === 'powers' ? <PowersPanel onClose={() => setPanel(null)} /> : null}
+        {panel === 'powers' ? <PowersPanel desk={desk} onClose={() => setPanel(null)} /> : null}
         {panel === 'ranks' ? <RanksPanel onClose={() => setPanel(null)} /> : null}
         {tipTo ? <TipSheet to={tipTo} onClose={() => setTipTo(null)} /> : null}
       </View>
@@ -231,62 +233,6 @@ function TopBar({ top, onPanel }: { top: number; onPanel: (p: 'powers' | 'ranks'
 }
 
 type Arena = { current: ArenaRef | null };
-
-/** One round (phone) or square (PC) fight button, with a cooldown that drains from the top. */
-function SkillButton({ size, round, icon, label, kbd, left = 0, total = 1, locked, count, gold, style, onPress }: { size: number; round: boolean; icon: PixName; label?: string; kbd?: string; left?: number; total?: number; locked?: string; count?: number; gold?: boolean; style?: ViewStyle; onPress: () => void }) {
-  const cooling = left > 0;
-  const frac = Math.max(0, Math.min(1, left / total));
-  return (
-    <Pressable
-      disabled={Boolean(locked)}
-      onPressIn={() => {
-        haptic.tap();
-        onPress();
-      }}
-      accessibilityRole="button"
-      accessibilityLabel={locked ? `${label ?? icon}, ${locked}` : label ?? icon}
-      style={style}
-    >
-      {({ pressed }) => (
-        <View
-          style={[
-            styles.skill,
-            { width: size, height: size, borderRadius: round ? size / 2 : 6, borderColor: gold ? '#ffffff' : locked ? '#33406a' : COLORS.gold, backgroundColor: gold ? COLORS.gold : 'rgba(8,13,32,0.82)', opacity: locked ? 0.45 : 1, transform: [{ scale: pressed ? 0.92 : 1 }] },
-          ]}
-        >
-          <PixIcon name={locked ? 'lock' : icon} size={Math.round(size * 0.42)} />
-          {label && size >= 52 ? (
-            <T v="display" numberOfLines={1} style={{ fontSize: size >= 80 ? 18 : 12, lineHeight: size >= 80 ? 19 : 13, color: gold ? '#070d20' : COLORS.gold }}>
-              {locked ?? label}
-            </T>
-          ) : null}
-          {cooling ? (
-            <View style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center' }]} pointerEvents="none">
-              <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: `${frac * 100}%`, backgroundColor: 'rgba(4,6,15,0.72)' }} />
-              <T v="display" style={{ fontSize: size >= 52 ? 22 : 18, color: '#ffffff', textShadowColor: '#000', textShadowRadius: 0, textShadowOffset: { width: 1, height: 1 } }}>
-                {Math.ceil(left / 1000)}
-              </T>
-            </View>
-          ) : null}
-          {count !== undefined ? (
-            <View style={[styles.badge, { backgroundColor: count ? COLORS.gold : '#5a6a8a' }]} pointerEvents="none">
-              <T v="display" style={{ fontSize: 13, lineHeight: 14, color: '#070d20' }}>
-                {count}
-              </T>
-            </View>
-          ) : null}
-          {kbd ? (
-            <View style={styles.key} pointerEvents="none">
-              <T v="display" style={{ fontSize: 11, lineHeight: 12, color: '#070d20' }}>
-                {kbd}
-              </T>
-            </View>
-          ) : null}
-        </View>
-      )}
-    </Pressable>
-  );
-}
 
 function Controls({ bottom, desk, arena }: { bottom: number; desk: boolean; arena: Arena }) {
   useTicker(100);
@@ -438,7 +384,7 @@ function ClipCard({ clip, onClose, top }: { clip: { url: string; mime: string };
   );
 }
 
-function PowersPanel({ onClose }: { onClose: () => void }) {
+function PowersPanel({ onClose, desk }: { onClose: () => void; desk: boolean }) {
   const lvl = myLvl();
   const lo = useArena((s) => s.loadout);
   const eff = effectiveLoadout(lvl);
@@ -473,7 +419,7 @@ function PowersPanel({ onClose }: { onClose: () => void }) {
     <Scrim onPress={onClose}>
       <Window title="POWERS" sub={`Level ${lvl}: all your unlocked actives, plus one passive. Powers work in the arena only.`} onClose={onClose} width={560}>
         <ScrollView style={{ maxHeight: 520 }} contentContainerStyle={{ gap: 10 }}>
-          <T v="label">Active: every unlocked power is yours, each on its own key</T>
+          <T v="label">{desk ? 'Active: every unlocked power is yours, each on its own key' : 'Active: every unlocked power is yours, each on its own button'}</T>
           <View style={styles.powerList}>
             {ACTIVES.map((id) => {
               const p = POWERS[id];
@@ -484,7 +430,7 @@ function PowersPanel({ onClose }: { onClose: () => void }) {
                     <T v="display" style={{ fontSize: 18, color: open ? COLORS.gold : COLORS.text }}>
                       {p.name.toUpperCase()}
                     </T>
-                    <T v="label">{open ? `KEY ${POWER_KEY[id]}` : `LV ${p.lvl}`}</T>
+                    <T v="label">{open ? (desk ? `KEY ${POWER_KEY[id]}` : "UNLOCKED") : `LV ${p.lvl}`}</T>
                   </View>
                   <T v="muted" style={{ fontSize: 12 }}>
                     {p.desc} Cooldown {p.cd / 1000}s.

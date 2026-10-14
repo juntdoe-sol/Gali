@@ -7,10 +7,10 @@ import { GEAR_ICON } from './icons';
 import { play } from '../game/sfx';
 import { chainReady, CLUSTER, LIVE_MAX_ROUND_SOL, oreLive } from '../chain/light';
 import { useGame, type RoundResult } from '../game/store';
-import { Btn, FocusRing, Frame, Kbd, PixelBox, Scrim, T, TONE, U, Window } from './kit';
+import { Btn, FocusRing, Frame, Kbd, ModalCenter, PixelBox, Scrim, T, TONE, U, Window } from './kit';
 import { PixIcon } from './PixIcon';
 import type { PixName } from './pixIcons';
-import { useLayout } from './layout';
+import { LANDSCAPE_APP, useLayout } from './layout';
 
 const isWeb = Platform.OS === 'web';
 
@@ -376,9 +376,9 @@ export function WalletGate() {
   if (!show) return null;
   return (
     <Modal transparent visible animationType="fade">
-      <View style={[styles.center, { backgroundColor: 'rgba(4,6,15,0.55)', padding: 16 }]}>
+      <ModalCenter>
         <Frame style={[styles.gate, desktop && { maxWidth: 760, paddingHorizontal: 40 }]}>
-          <Image source={require('../../assets/brand/wordmark.png')} style={{ width: desktop ? 300 : 220, height: desktop ? 132 : 97, alignSelf: 'center' }} resizeMode="contain" accessibilityLabel="Gali" />
+          <Image source={require('../../assets/brand/wordmark.png')} style={{ width: LANDSCAPE_APP ? 180 : desktop ? 300 : 220, height: LANDSCAPE_APP ? 79 : desktop ? 132 : 97, alignSelf: 'center' }} resizeMode="contain" accessibilityLabel="Gali" />
           <T v="display" style={{ fontSize: desktop ? 22 : 18, textAlign: 'center', color: COLORS.gold, letterSpacing: 2 }}>
             THE ORE MINING GAME
           </T>
@@ -409,7 +409,7 @@ export function WalletGate() {
             Every deploy and claim is signed by your wallet on Solana mainnet. 18+.
           </T>
         </Frame>
-      </View>
+      </ModalCenter>
     </Modal>
   );
 }
@@ -492,9 +492,9 @@ export function Onboarding() {
   const s = steps[i];
   return (
     <Modal transparent visible animationType="fade">
-      <View style={[styles.center, { backgroundColor: 'rgba(4,6,15,0.55)', padding: 16 }]}>
-        <Frame style={styles.gate}>
-          <Image source={require('../../assets/brand/wordmark.png')} style={{ width: 200, height: 88, alignSelf: 'center' }} resizeMode="contain" />
+      <ModalCenter>
+        <Frame style={[styles.gate, LANDSCAPE_APP && { maxWidth: 620 }]}>
+          {LANDSCAPE_APP ? null : <Image source={require('../../assets/brand/wordmark.png')} style={{ width: 200, height: 88, alignSelf: 'center' }} resizeMode="contain" />}
           <View style={styles.dots} accessibilityLabel={`Step ${i + 1} of ${steps.length}`}>
             {steps.map((_, k) => (
               <Pressable key={k} onPress={() => setI(k)} accessibilityRole="button" accessibilityLabel={`Step ${k + 1}`}>
@@ -520,7 +520,7 @@ export function Onboarding() {
             )}
           </View>
         </Frame>
-      </View>
+      </ModalCenter>
     </Modal>
   );
 }
