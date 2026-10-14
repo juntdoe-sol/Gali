@@ -258,7 +258,16 @@ function Rail({ active, onTab, inSheet, lobby }: { active: SheetTab | null; onTa
 
   const body = (
     <>
-      {C ? null : <Image source={require('../../assets/brand/wordmark.png')} style={styles.railLogo} resizeMode="contain" accessibilityLabel="Gali" />}
+      {C ? null : (
+        <View style={styles.railBrand}>
+          <Image source={require('../../assets/brand/wordmark.png')} style={styles.railLogo} resizeMode="contain" accessibilityLabel="Gali" />
+          <View style={styles.beta} accessibilityLabel="Beta">
+            <T v="display" style={styles.betaText}>
+              BETA
+            </T>
+          </View>
+        </View>
+      )}
       <Pressable
         onPress={mine}
         accessibilityRole="button"
@@ -321,7 +330,10 @@ const styles = StyleSheet.create({
   pickBadge: { position: 'absolute', top: -36, right: 6 },
   rail: { position: 'absolute', left: 0, top: 0, bottom: 0, width: RAIL_W, alignItems: 'center', paddingTop: C ? 6 : 12, paddingBottom: C ? 6 : 12, paddingHorizontal: C ? 4 : 8, zIndex: 20 },
   railEdge: { position: 'absolute', right: 0, top: 0, bottom: 0, width: U, backgroundColor: COLORS.trim, opacity: 0.6 },
-  railLogo: { width: 70, height: 31, marginBottom: 24 },
+  railBrand: { alignItems: 'center', marginBottom: 14 },
+  railLogo: { width: 70, height: 31 },
+  beta: { marginTop: 3, backgroundColor: COLORS.gold, paddingHorizontal: 5, borderWidth: 1, borderColor: '#04060f' },
+  betaText: { fontSize: 12, lineHeight: 13, letterSpacing: 2, color: '#070d20' },
   railMine: { alignItems: 'center', paddingTop: C ? 22 : 30, marginBottom: C ? 2 : 4 },
   railRule: { alignSelf: 'stretch', height: U, backgroundColor: '#22356f', marginVertical: C ? 6 : 12, marginHorizontal: 6 },
   railItem: { alignSelf: 'stretch', alignItems: 'center', paddingVertical: C ? 4 : 8, gap: C ? 1 : 3 },
