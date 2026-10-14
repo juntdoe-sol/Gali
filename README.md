@@ -2,7 +2,7 @@
 
 **A mini open-world pixel game on Seeker. Mine ORE, play to earn, trade gear.**
 
-Players meet in a shared pixel town, then walk to different zones: ORE Island to mine on [ORE](https://ore.supply)'s own board, the arcade, Cave Run and the Gear Market.
+Players meet in a shared pixel town, then walk to different zones: ORE Island to mine on [ORE](https://ore.supply)'s own board, the arcade, Cave Run, the Arena and the Gear Market.
 
 ORE runs a 25-square mining round every 200 slots (about 80 seconds). Gali draws those 25 squares as spots on a pixel island. Players put SOL on the spots they want. When their spot strikes gold they mine $ORE. ORE keeps a small fee each round and returns the rest of the SOL. 1 round in 500, ORE's motherlode hits, and the Gali program pays its SKR jackpot to the same winners.
 
@@ -11,7 +11,8 @@ Submitted to **CLOCK IN** (Solana Mobile) and the **Colosseum Crypto World's Fai
 ![Gali island](docs/gali-island.jpg)
 
 - **Play live (mainnet):** [galiisland.bounded.page](https://galiisland.bounded.page)
-- **Android APK:** [download from Expo](https://expo.dev/accounts/gali-app/projects/gali/builds/0725f134-9774-4c05-ab90-faecdf455f2d)
+- **Android APK (1.6.0, landscape):** [download from Expo](https://expo.dev/accounts/gali-app/projects/gali/builds/3cd0a6d6-2aaf-41f0-9bf5-3cedeab7c386)
+- **Docs:** [galidocs.bounded.page](https://galidocs.bounded.page)
 - **Demo video:** [YouTube](https://www.youtube.com/watch?v=PCXDZZQpGm8)
 - **Founder speech:** [YouTube](https://youtu.be/Fl21Yzhqt_k)
 - **Team:** [@juntdoe](https://x.com/juntdoe) (technical lead), [@smsonx](https://x.com/smsonx) (BD and spokesperson), [@itsnotajay01](https://x.com/itsnotajay01) (community), [@OO_RAX](https://x.com/OO_RAX) (pixel art and creative)
@@ -19,9 +20,11 @@ Submitted to **CLOCK IN** (Solana Mobile) and the **Colosseum Crypto World's Fai
 ## Status
 
 - **Gali is live on Solana mainnet.** Connect a wallet at galiisland.bounded.page or in the APK and you play ORE's real board. Each deploy and claim is a plain ORE instruction signed by your own wallet. A round is capped at 0.5 SOL, and an 18+ real-money notice comes before the wallet opens. Deploys and claims have been run with real SOL.
-- **Autopilot runs on ORE's own automation.** In PRO, set more than one round and approve once. The wallet funds an ORE `Automation` account and registers a key kept on the device (encrypted with `expo-secure-store`) as its executor. That key can deploy from the automation and nothing else: ORE holds the SOL and pays winnings to the player's miner account. Each round deploys with no pop-up while the app is open. Autopilot is capped at 1 SOL in total, charges no executor fee, and STOP returns the unused SOL in one approval.
+- **Autopilot runs on ORE's own automation.** In PRO, set more than one round and approve once. The wallet funds an ORE `Automation` account and registers a key kept on the device (encrypted with `expo-secure-store`) as its executor. That key can deploy from the automation and nothing else: ORE holds the SOL and pays winnings to the player's miner account. Each round deploys with no pop-up while the app is open. A server runner (`supabase/functions/autopilot`) can keep it going with the app closed; any runner can execute, but none can pick spots, change amounts or move SOL. Autopilot is capped at 1 SOL in total, pays ORE's executor fee at cost (0.00001 SOL per round, the network fee), and STOP returns the unused SOL in one approval.
 - **The lobby** is the start screen: a shared pixel town where players walk, chat, emote, dance and tip each other in SOL, ORE or SKR. Doors lead to ORE Island, the arcade, Cave Run and the Gear Market. Realtime runs on Supabase.
 - **The arcade** has three tables (Tunnel Collapse, Gold Rush Pot, Crash Cart) played in ORE or SKR against a house wallet. Each 40-second round uses a commit-reveal check players can verify, and the house keeps a 5% fee. Tables show "not funded" until the house wallet holds SOL, ORE and SKR.
+- **Brawl and the Arena.** Every miner has an HP bar and can hit and jump in the lobby and on the island. The Arena holds up to 12 players in Last Miner Standing, King of the Hill or a co-op Mole King boss. Levels unlock six active powers and two passives, used in the Arena only. Knockouts and wins pay XP and feed weekly ranks on Supabase. Brawl is free and never touches SOL, ORE or odds.
+- **The Android app plays in landscape**, with a joystick on the left and action buttons on the right. The web keeps its portrait phone and desktop layouts; on a computer, WASD walks, left click hits, right click throws and Q E R C V X fire powers.
 - **Cave Run** is a mini-game you play after connecting a wallet. You walk your miner through a lantern-lit cave, break rocks, dodge bats and climb deeper. It pays miner XP only: no wager, no token rewards, no effect on ORE odds or payouts.
 - **Chain reads go through a read-only proxy** (`app/rpc-backend`) that allows eight RPC methods. If the proxy is rate-limited or down, the app reads from the direct endpoint instead.
 - **The Gali program** (`programs/gali`) adds points, streaks, the SKR jackpot, gear and staking. It is written for ORE's board and tested against a mock of ORE's accounts. It is not deployed yet, so those parts are not live.
