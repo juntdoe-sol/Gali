@@ -12,6 +12,7 @@ import type { EngineEvent, Snapshot } from '../engine/types';
 export interface GameRef extends DOMImperativeFactory {
   push: (...args: any[]) => void;
   focus: (...args: any[]) => void;
+  attack: (...args: any[]) => void;
 }
 
 export default function GameView({ ref, onEvent, atlas }: { ref: Ref<GameRef>; onEvent: (e: EngineEvent) => void; atlas: string; dom?: DOMProps }) {
@@ -27,6 +28,7 @@ export default function GameView({ ref, onEvent, atlas }: { ref: Ref<GameRef>; o
         else pending.current = s as Snapshot;
       },
       focus: (i: any) => engine.current?.setFocus(Number(i)),
+      attack: () => engine.current?.attack(),
     }),
     [],
   );
