@@ -33,7 +33,7 @@ export function SidePanel() {
           <KeyHint k="CLICK" t="pick spot" />
           <KeyHint k="WASD" t="walk" />
           <KeyHint k="SPC" t="jump" />
-          <KeyHint k="F" t="hit" />
+          <KeyHint k="RMB" t="hit" />
           <KeyHint k="?" t="help" />
         </View>
       ) : null}

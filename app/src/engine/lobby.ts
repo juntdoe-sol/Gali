@@ -117,6 +117,8 @@ export class LobbyEngine {
   private pointers = new Map<number, { x: number; y: number; x0: number; y0: number; t0: number }>();
   private pinch = 0;
   private steering = false;
+  /** the last press came from a mouse (PC): no click-to-walk */
+  private mouseTap = false;
   private steerAt = 0;
   private keys = new Set<string>();
   private keyAt = 0;
@@ -863,8 +865,15 @@ export class LobbyEngine {
       const r = cv.getBoundingClientRect();
       return { x: e.clientX - r.left, y: e.clientY - r.top };
     };
+    // PC: the right mouse button swings, so no browser menu over the map
+    cv.addEventListener('contextmenu', (e) => e.preventDefault());
     cv.addEventListener('pointerdown', (e) => {
       const p = pos(e);
+      this.mouseTap = e.pointerType === 'mouse';
+      if (e.pointerType === 'mouse' && e.button === 2) {
+        this.attack();
+        return;
+      }
       const sb = this.stickBase();
       if (!this.stick && this.opts.touch !== false && Math.hypot(p.x - sb.x, p.y - sb.y) < sb.r * 1.35) {
         this.stick = { id: e.pointerId, dx: 0, dy: 0 };
@@ -907,7 +916,7 @@ export class LobbyEngine {
         this.pinch = d;
         return;
       }
-      if (this.inMini(q.x0, q.y0)) return;
+      if (this.inMini(q.x0, q.y0) || this.mouseTap) return;
       if (!this.steering && Math.hypot(p.x - q.x0, p.y - q.y0) > 9) this.steering = true;
       if (this.steering) this.steer(p.x, p.y);
     });
@@ -929,6 +938,7 @@ export class LobbyEngine {
       }
       if (performance.now() - q.t0 > 600 || Math.hypot(q.x - q.x0, q.y - q.y0) > 14) return;
       if (this.inMini(q.x, q.y)) {
+        if (this.mouseTap) return;
         const r = this.minimapRect;
         this.walkTo(((q.x - r.x) / r.w) * LW, ((q.y - r.y) / r.h) * LH);
         this.tapMark = null;
@@ -951,6 +961,8 @@ export class LobbyEngine {
         this.tapMark = null;
         return;
       }
+      // on PC you walk with WASD; a click on open ground does nothing
+      if (this.mouseTap) return;
       this.walkTo(wx, wy);
       this.tapMark = { x: wx, y: wy, at: performance.now() };
     };

@@ -6,15 +6,15 @@
  * and shows what they say.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, View, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, levelFromXp } from '../game/constants';
 import { cheer, effectiveLoadout, grab, hostId, hurtBoss, isHost, MODE_NAME, publishArenaMe, shareThrow, sharePower, useArena, KOTH_WIN, type Mode } from '../game/arena';
-import { brawlSnap, guard, jump, setMyPos, strike, swing, useBrawl } from '../game/brawl';
+import { brawlSnap, guard, heal, jump, setMyPos, strike, swing, useBrawl } from '../game/brawl';
 import { fightPoints, titleOf, TRAILS, trailUnlocked, useFightStats } from '../game/fightGear';
-import { ACTIVES, PASSIVES, POWERS, baseDamage, unlocked, type PowerId } from '../game/powers';
+import { ACTIVES, MEND_HP, PASSIVES, POWERS, POWER_KEY, baseDamage, unlocked, type ActiveId, type PowerId } from '../game/powers';
 import { useRanks } from '../game/ranks';
-import { play, type Sound } from '../game/sfx';
+import { haptic, play, type Sound } from '../game/sfx';
 import { useGame } from '../game/store';
 import type { ArenaEvent, ArenaSnap } from '../engine/arena';
 import { atlasSource } from '../pixel/atlasSource';
@@ -24,7 +24,10 @@ import { Btn, Card, Choice, MapButton, PixelBox, Scrim, T, Window } from './kit'
 import { useLayout } from './layout';
 import { BackPill, TipSheet } from './Lobby';
 import { PixIcon } from './PixIcon';
+import type { PixName } from './pixIcons';
 
+const ICON: Record<ActiveId, PixName> = { dash: 'bolt', guard: 'helmet', slam: 'fire', splash: 'gem', spin: 'star', mend: 'heart' };
+const SHORT: Record<ActiveId, string> = { dash: 'DASH', guard: 'GUARD', slam: 'SLAM', splash: 'SPLASH', spin: 'WHIRL', mend: 'HEAL' };
 const SFX: Record<string, Sound> = { swing: 'dig', hit: 'bonk', pop: 'pop', slam: 'crack', throw: 'select', pick: 'claim', cheer: 'win', ko: 'lose' };
 const myLvl = () => {
   const g = useGame.getState();
@@ -38,7 +41,7 @@ function snapshot(): ArenaSnap {
   const now = Date.now();
   const lo = effectiveLoadout(myLvl());
   return {
-    me: { id: a.me, spectator: a.spectator || !a.match.fighters.includes(a.me), ammo: a.ammo, active: lo.active, passive: lo.passive, readyAt: a.readyAt, trail: a.loadout.trail, guardUntil: b.guardUntil },
+    me: { id: a.me, spectator: a.spectator || !a.match.fighters.includes(a.me), ammo: a.ammo, actives: lo.actives, passive: lo.passive, ready: a.readyAt, trail: a.loadout.trail, guardUntil: b.guardUntil },
     peers: Object.values(a.peers)
       .filter((p) => now - p.seen < 15_000)
       .map((p) => ({ id: p.id, name: p.name, x: Math.round(p.x), y: Math.round(p.y), tx: Math.round(p.tx), ty: Math.round(p.ty), f: p.facing, p: p.pose, look: p.look, spectator: p.spectator, trail: p.trail, fx: p.fx })),
@@ -51,7 +54,7 @@ function snapshot(): ArenaSnap {
 }
 
 /** Hit the boss: the host keeps its HP, so the host applies its own hits directly. */
-function hitBoss(w: 'swing' | 'dash' | 'slam' | 'ore' | 'splash' | 'pet', x: number, y: number) {
+function hitBoss(w: 'swing' | 'dash' | 'slam' | 'ore' | 'splash' | 'pet' | 'spin', x: number, y: number) {
   if (isHost()) {
     hurtBoss(baseDamage(w, useArena.getState().me, Date.now() % 997, myLvl(), true));
     return;
@@ -91,7 +94,7 @@ export function ArenaScreen() {
   const onEvent = useCallback((e: ArenaEvent) => {
     const a = useArena.getState();
     const now = Date.now();
-    const cd = (p: PowerId) => useArena.setState({ readyAt: now + POWERS[p].cd });
+    const cd = (p: ActiveId) => useArena.setState((s) => ({ readyAt: { ...s.readyAt, [p]: now + POWERS[p].cd } }));
     switch (e.t) {
       case 'me':
         setMyPos('arena', e.x, e.y);
@@ -105,11 +108,14 @@ export function ArenaScreen() {
         jump('arena');
         break;
       case 'power':
-        if (e.p === 'dash' || e.p === 'slam' || e.p === 'splash' || e.p === 'guard') {
-          if (now < a.readyAt) return;
-          cd(e.p);
-          sharePower(e.p);
-          if (e.p === 'guard') guard();
+        if ((ACTIVES as string[]).includes(e.p)) {
+          const p = e.p as ActiveId;
+          if (!effectiveLoadout(myLvl()).actives.includes(p) || now < (a.readyAt[p] ?? 0)) return;
+          cd(p);
+          sharePower(p);
+          if (p === 'guard') guard();
+          if (p === 'mend') heal(MEND_HP);
+          if (p === 'spin') for (const t of e.targets) t === 'boss' ? hitBoss('spin', e.x, e.y) : strike('arena', 'spin', t, e.x, e.y);
         } else if (e.p === 'dash-hit' || e.p === 'slam-land') {
           const w = e.p === 'dash-hit' ? 'dash' : 'slam';
           for (const t of e.targets) {
@@ -155,7 +161,8 @@ export function ArenaScreen() {
   if (!open) return null;
   const desk = L.desktop;
   const barTop = insets.top + 64;
-  const barBottom = insets.bottom + (desk ? 70 : 132);
+  // PC: the skill bar sits under the pit. Phone: the buttons float over it, like a MOBA.
+  const barBottom = desk ? insets.bottom + 100 : insets.bottom + 8;
   return (
     <Modal visible transparent={false} animationType="fade" statusBarTranslucent onRequestClose={() => useArena.getState().close()}>
       <View style={styles.screen}>
@@ -165,7 +172,7 @@ export function ArenaScreen() {
             onEvent={onEvent}
             atlas={atlas}
             look={myLook()}
-            opts={{ top: barTop, bottom: barBottom, touch: !desk }}
+            opts={{ top: barTop, bottom: barBottom, touch: !desk, safeBottom: insets.bottom }}
             dom={{ style: { flex: 1, backgroundColor: '#120c1a' }, scrollEnabled: false, bounces: false, overScrollMode: 'never' } as never}
           />
         ) : null}
@@ -223,24 +230,82 @@ function TopBar({ top, onPanel }: { top: number; onPanel: (p: 'powers' | 'ranks'
   );
 }
 
-function Controls({ bottom, desk, arena }: { bottom: number; desk: boolean; arena: { current: ArenaRef | null } }) {
-  useTicker(200);
-  const a = useArena();
-  const lo = effectiveLoadout(myLvl());
-  const fighter = a.match.fighters.includes(a.me) && !a.spectator;
-  const cd = Math.max(0, Math.ceil((a.readyAt - Date.now()) / 1000));
-  const act = lo.active ? POWERS[lo.active] : null;
+type Arena = { current: ArenaRef | null };
+
+/** One round (phone) or square (PC) fight button, with a cooldown that drains from the top. */
+function SkillButton({ size, round, icon, label, kbd, left = 0, total = 1, locked, count, gold, style, onPress }: { size: number; round: boolean; icon: PixName; label?: string; kbd?: string; left?: number; total?: number; locked?: string; count?: number; gold?: boolean; style?: ViewStyle; onPress: () => void }) {
+  const cooling = left > 0;
+  const frac = Math.max(0, Math.min(1, left / total));
   return (
-    <View style={[styles.controls, { bottom }]} pointerEvents="box-none">
-      {fighter ? (
-        <View style={styles.ctrlRow} pointerEvents="box-none">
-          <MapButton label="HIT" kbd={desk ? 'F' : undefined} icon={<PixIcon name="fist" size={20} />} onPress={() => arena.current?.attack?.()} />
-          <MapButton label="JUMP" kbd={desk ? 'SPC' : undefined} icon={<PixIcon name="jump" size={20} />} onPress={() => arena.current?.jump?.()} />
-          {act ? <MapButton label={cd ? `${act.name.split(' ')[0].toUpperCase()} ${cd}` : act.name.split(' ')[0].toUpperCase()} kbd={desk ? 'Q' : undefined} icon={<PixIcon name="bolt" size={20} />} tone={cd ? 'dark' : 'gold'} onPress={() => arena.current?.power?.()} /> : null}
-          <MapButton label="THROW" count={a.ammo} kbd={desk ? 'G' : undefined} icon={<PixIcon name="ore" size={20} />} onPress={() => arena.current?.throwOre?.()} />
-          <MapButton label="CHEER" icon={<PixIcon name="heart" size={18} />} onPress={() => cheer()} />
+    <Pressable
+      disabled={Boolean(locked)}
+      onPressIn={() => {
+        haptic.tap();
+        onPress();
+      }}
+      accessibilityRole="button"
+      accessibilityLabel={locked ? `${label ?? icon}, ${locked}` : label ?? icon}
+      style={style}
+    >
+      {({ pressed }) => (
+        <View
+          style={[
+            styles.skill,
+            { width: size, height: size, borderRadius: round ? size / 2 : 6, borderColor: gold ? '#ffffff' : locked ? '#33406a' : COLORS.gold, backgroundColor: gold ? COLORS.gold : 'rgba(8,13,32,0.82)', opacity: locked ? 0.45 : 1, transform: [{ scale: pressed ? 0.92 : 1 }] },
+          ]}
+        >
+          <PixIcon name={locked ? 'lock' : icon} size={Math.round(size * 0.42)} />
+          {label && size >= 52 ? (
+            <T v="display" numberOfLines={1} style={{ fontSize: size >= 80 ? 18 : 12, lineHeight: size >= 80 ? 19 : 13, color: gold ? '#070d20' : COLORS.gold }}>
+              {locked ?? label}
+            </T>
+          ) : null}
+          {cooling ? (
+            <View style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center' }]} pointerEvents="none">
+              <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: `${frac * 100}%`, backgroundColor: 'rgba(4,6,15,0.72)' }} />
+              <T v="display" style={{ fontSize: size >= 52 ? 22 : 18, color: '#ffffff', textShadowColor: '#000', textShadowRadius: 0, textShadowOffset: { width: 1, height: 1 } }}>
+                {Math.ceil(left / 1000)}
+              </T>
+            </View>
+          ) : null}
+          {count !== undefined ? (
+            <View style={[styles.badge, { backgroundColor: count ? COLORS.gold : '#5a6a8a' }]} pointerEvents="none">
+              <T v="display" style={{ fontSize: 13, lineHeight: 14, color: '#070d20' }}>
+                {count}
+              </T>
+            </View>
+          ) : null}
+          {kbd ? (
+            <View style={styles.key} pointerEvents="none">
+              <T v="display" style={{ fontSize: 11, lineHeight: 12, color: '#070d20' }}>
+                {kbd}
+              </T>
+            </View>
+          ) : null}
         </View>
-      ) : (
+      )}
+    </Pressable>
+  );
+}
+
+function Controls({ bottom, desk, arena }: { bottom: number; desk: boolean; arena: Arena }) {
+  useTicker(100);
+  const a = useArena();
+  const lvl = myLvl();
+  const lo = effectiveLoadout(lvl);
+  const fighter = a.match.fighters.includes(a.me) && !a.spectator;
+  const now = Date.now();
+  const skill = (p: ActiveId) => ({
+    icon: ICON[p],
+    label: SHORT[p],
+    left: Math.max(0, (a.readyAt[p] ?? 0) - now),
+    total: POWERS[p].cd,
+    locked: lo.actives.includes(p) ? undefined : `LV ${POWERS[p].lvl}`,
+    onPress: () => arena.current?.power?.(p),
+  });
+  if (!fighter) {
+    return (
+      <View style={[styles.controls, { bottom }]} pointerEvents="box-none">
         <View style={styles.ctrlRow} pointerEvents="box-none">
           <PixelBox fill="rgba(8,13,32,0.88)" hi={COLORS.trim} lo="#04060f" style={styles.watch}>
             <T v="bold" style={{ fontSize: 13, textAlign: 'center' }}>
@@ -248,12 +313,59 @@ function Controls({ bottom, desk, arena }: { bottom: number; desk: boolean; aren
             </T>
           </PixelBox>
         </View>
-      )}
-      {fighter ? null : (
         <View style={styles.ctrlRow} pointerEvents="box-none">
           <MapButton label="CHEER" icon={<PixIcon name="heart" size={18} />} onPress={() => cheer()} />
         </View>
-      )}
+      </View>
+    );
+  }
+  if (desk) {
+    // PC: a skill bar like a MOBA. Mouse to fight, keys for powers.
+    return (
+      <View style={[styles.deskBar, { bottom }]} pointerEvents="box-none">
+        <View style={styles.deskRow} pointerEvents="box-none">
+          {ACTIVES.map((p) => (
+            <SkillButton key={p} size={56} round={false} kbd={POWER_KEY[p]} {...skill(p)} />
+          ))}
+          <View style={{ width: 10 }} />
+          <SkillButton size={56} round={false} icon="fist" label="HIT" kbd="RMB" onPress={() => arena.current?.attack?.()} />
+          <SkillButton size={56} round={false} icon="ore" label="THROW" kbd="LMB" count={a.ammo} onPress={() => arena.current?.throwOre?.()} />
+          <SkillButton size={56} round={false} icon="jump" label="JUMP" kbd="SPC" onPress={() => arena.current?.jump?.()} />
+          <SkillButton size={56} round={false} icon="heart" label="CHEER" onPress={() => cheer()} />
+        </View>
+        <T v="label" style={{ fontSize: 11, textAlign: 'center' }}>
+          WASD move · right click hit · left click throw at the cursor · Q E R C V X or 1 to 6 powers · SHIFT dash
+        </T>
+      </View>
+    );
+  }
+  // phone: a big HIT button bottom right, powers in two rings around it (the stick is on the canvas, bottom left)
+  const BIG = 88;
+  const SM = 54;
+  const cx = 18 + BIG / 2;
+  const cy = bottom + 8 + BIG / 2;
+  const at = (deg: number, r: number, sz: number): ViewStyle => {
+    const t = (deg * Math.PI) / 180;
+    return { position: 'absolute', right: cx - Math.cos(t) * r - sz / 2, bottom: cy + Math.sin(t) * r - sz / 2 };
+  };
+  const inner: (ActiveId | 'jump')[] = ['jump', 'dash', 'guard', 'slam'];
+  const outer: (ActiveId | 'throw')[] = ['throw', 'splash', 'spin', 'mend'];
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+      <SkillButton size={BIG} round gold icon="fist" label="HIT" style={at(0, 0, BIG)} onPress={() => arena.current?.attack?.()} />
+      {inner.map((p, i) => {
+        const deg = 192 - i * 36;
+        return p === 'jump' ? <SkillButton key={p} size={SM} round icon="jump" label="JUMP" style={at(deg, 100, SM)} onPress={() => arena.current?.jump?.()} /> : <SkillButton key={p} size={SM} round style={at(deg, 100, SM)} {...skill(p)} />;
+      })}
+      {outer.map((p, i) => {
+        const deg = 180 - i * 26;
+        return p === 'throw' ? (
+          <SkillButton key={p} size={SM} round icon="ore" label="THROW" count={a.ammo} style={at(deg, 170, SM)} onPress={() => arena.current?.throwOre?.()} />
+        ) : (
+          <SkillButton key={p} size={SM} round style={at(deg, 170, SM)} {...skill(p)} />
+        );
+      })}
+      <SkillButton size={42} round icon="heart" style={at(90, 196, 42)} onPress={() => cheer()} />
     </View>
   );
 }
@@ -359,10 +471,28 @@ function PowersPanel({ onClose }: { onClose: () => void }) {
   );
   return (
     <Scrim onPress={onClose}>
-      <Window title="POWERS" sub={`Level ${lvl}: one active, one passive. Powers work in the arena only.`} onClose={onClose} width={560}>
+      <Window title="POWERS" sub={`Level ${lvl}: all your unlocked actives, plus one passive. Powers work in the arena only.`} onClose={onClose} width={560}>
         <ScrollView style={{ maxHeight: 520 }} contentContainerStyle={{ gap: 10 }}>
-          <T v="label">Active (Q)</T>
-          {row(ACTIVES, eff.active, (p) => set({ active: p as never }))}
+          <T v="label">Active: every unlocked power is yours, each on its own key</T>
+          <View style={styles.powerList}>
+            {ACTIVES.map((id) => {
+              const p = POWERS[id];
+              const open = unlocked(id, lvl);
+              return (
+                <Card key={id} style={[styles.power, !open && { opacity: 0.5 }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <T v="display" style={{ fontSize: 18, color: open ? COLORS.gold : COLORS.text }}>
+                      {p.name.toUpperCase()}
+                    </T>
+                    <T v="label">{open ? `KEY ${POWER_KEY[id]}` : `LV ${p.lvl}`}</T>
+                  </View>
+                  <T v="muted" style={{ fontSize: 12 }}>
+                    {p.desc} Cooldown {p.cd / 1000}s.
+                  </T>
+                </Card>
+              );
+            })}
+          </View>
           <T v="label">Passive</T>
           {row(PASSIVES, eff.passive, (p) => set({ passive: p as never }))}
           <T v="label">
@@ -427,6 +557,11 @@ const styles = StyleSheet.create({
   controls: { position: 'absolute', left: 12, right: 12, gap: 8, alignItems: 'flex-end' },
   ctrlRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' },
   watch: { padding: 10, maxWidth: 420 },
+  deskBar: { position: 'absolute', left: 12, right: 12, alignItems: 'center', gap: 4 },
+  deskRow: { flexDirection: 'row', gap: 6, alignItems: 'flex-end' },
+  skill: { borderWidth: 3, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  badge: { position: 'absolute', top: 2, right: 2, minWidth: 18, paddingHorizontal: 3, borderRadius: 9, alignItems: 'center' },
+  key: { position: 'absolute', left: 2, top: 2, paddingHorizontal: 3, borderRadius: 3, backgroundColor: '#f2f5ff' },
   banner: { position: 'absolute', left: 0, right: 0, top: '38%', alignItems: 'center' },
   clip: { position: 'absolute', left: 12, right: 12, alignItems: 'center' },
   clipBox: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 10, paddingVertical: 6 },

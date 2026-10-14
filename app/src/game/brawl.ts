@@ -53,7 +53,7 @@ const HP_SEND_MS = 700;
 
 /** Damage of an attacker's n-th swing: the same on every client, and not up to the attacker. */
 export const dmgOf = swingDmg;
-const WEAPONS: Weapon[] = ['swing', 'dash', 'slam', 'ore', 'splash', 'pet', 'boss', 'sting'];
+const WEAPONS: Weapon[] = ['swing', 'dash', 'slam', 'ore', 'splash', 'pet', 'boss', 'sting', 'spin'];
 
 export interface Fighter {
   hp: number;

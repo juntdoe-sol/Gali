@@ -32,7 +32,7 @@ export default function ArenaView({ ref, onEvent, atlas, look, opts }: { ref: Re
       },
       attack: () => engine.current?.attack(),
       jump: () => engine.current?.jump(),
-      power: () => engine.current?.power(),
+      power: (p: any) => engine.current?.power(String(p)),
       throwOre: () => engine.current?.throwOre(),
       opts: (o: any) => engine.current?.setOpts(o as Partial<ArenaOpts>),
     }),

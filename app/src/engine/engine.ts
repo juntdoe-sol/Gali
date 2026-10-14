@@ -126,6 +126,8 @@ export class Engine {
   private ready = false;
   private pointers = new Map<number, { x: number; y: number; x0: number; y0: number; t0: number }>();
   private pinch: { d: number; mx: number; my: number } | null = null;
+  /** the last press came from a mouse (PC): taps on open ground don't walk */
+  private mouseTap = false;
   private pressTimer: ReturnType<typeof setTimeout> | null = null;
   private moved = false;
   private longPressed = false;
@@ -1338,8 +1340,15 @@ export class Engine {
       const r = cv.getBoundingClientRect();
       return { x: e.clientX - r.left, y: e.clientY - r.top };
     };
+    // PC: the right mouse button swings, so no browser menu over the map
+    cv.addEventListener('contextmenu', (e) => e.preventDefault());
     cv.addEventListener('pointerdown', (e) => {
       const p = pos(e);
+      this.mouseTap = e.pointerType === 'mouse';
+      if (e.pointerType === 'mouse' && e.button === 2) {
+        if (this.mode === 'island') this.attack();
+        return;
+      }
       cv.setPointerCapture?.(e.pointerId);
       this.pointers.set(e.pointerId, { x: p.x, y: p.y, x0: p.x, y0: p.y, t0: performance.now() });
       this.moved = false;
@@ -1480,7 +1489,8 @@ export class Engine {
       this.tapTimer = setTimeout(() => this.pick(hit), 260);
       return;
     }
-    // open ground or sea: walk to the nearest dry land
+    // open ground or sea: walk to the nearest dry land (a tap on a phone; on PC you walk with WASD)
+    if (this.mouseTap) return;
     const [gx, gy] = toLand(mx, my);
     this.me.path = findPath(this.me.x, this.me.y, gx, gy);
     this.me.target = -1;

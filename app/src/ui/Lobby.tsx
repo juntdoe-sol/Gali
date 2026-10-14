@@ -416,7 +416,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
             <>
               <View style={styles.emoteSep} />
               <EmoteKey icon="jump" label="Jump" kbd="SPC" onPress={() => ref.current?.jump?.()} />
-              {brawlOn ? <EmoteKey icon="fist" label="Hit: swing your pickaxe" kbd="F" onPress={() => ref.current?.attack?.()} /> : null}
+              {brawlOn ? <EmoteKey icon="fist" label="Hit: right click or F" kbd="RMB" onPress={() => ref.current?.attack?.()} /> : null}
             </>
           ) : null}
         </PixelBox>
@@ -952,7 +952,7 @@ export function LobbyBack() {
   const brawlOn = useBrawl((b) => !b.off);
   if (where !== 'island' || (dockOpen && !ch.desktop) || inside) return null;
   const bottom = ch.desktop ? ch.bottom : insets.bottom + BAR_H + 46;
-  const fight = brawlOn ? <MapButton label="HIT" kbd={ch.desktop ? 'F' : undefined} icon={<PixIcon name="fist" size={20} />} accessibilityLabel="Hit: swing your pickaxe" onPress={islandFight} /> : null;
+  const fight = brawlOn ? <MapButton label="HIT" kbd={ch.desktop ? 'RMB' : undefined} icon={<PixIcon name="fist" size={20} />} accessibilityLabel="Hit: swing your pickaxe" onPress={islandFight} /> : null;
   return (
     <>
       <View style={[styles.backWrap, styles.backRow, { left: ch.left, bottom }]} pointerEvents="box-none">
