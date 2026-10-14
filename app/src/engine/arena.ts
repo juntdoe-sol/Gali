@@ -2,21 +2,23 @@
  * The Arena, drawn and played: one screen, the whole pit in view.
  *
  * A sand oval with four stone pillars and a ring in the middle, walled in, with stands full of a pixel
- * crowd along the top. Fighters move with WASD, the arrows or the stick; F swings, Space jumps, Q uses the
- * active power, G throws ORE. Spectators stand in the stands and cheer.
+ * crowd along the top. Fighters move with WASD or the arrows (PC) or the stick (phone). On PC the right mouse
+ * button swings, the left throws ORE at the cursor, Space jumps, and every unlocked power has its own key
+ * (Q E R C V X, or 1 to 6). F and G still swing and throw. Spectators stand in the stands and cheer.
  *
  * The engine owns movement, aiming and the flight of your own ORE shards (it knows where everyone is
  * drawn), and tells the app what landed. The app (game/arena.ts, game/brawl.ts) owns the rules.
  * It can also record a short clip of the canvas after a knockout, for sharing.
  */
 import { canvasDpr, reducedMotion } from './screen';
-import { draw, ctx2d, makeCanvas, text, textWidth, loadAtlas, has, type Ctx } from './art';
-import { drawMiner, drawPet, frameAt, moleNames, type Body } from './actors';
+import { ctx2d, text, textWidth, loadAtlas, type Ctx } from './art';
+import { drawMiner, drawPet, frameAt, type Body } from './actors';
 import { drawHp, drawKo, drawShield, FightFx, hitFlash, jumpLift, koAge, pickTarget, swingTilt } from './brawlfx';
 import { Particles } from './particles';
 import type { BrawlSnap, Look, Pose } from './types';
 import { AH, AW, FLOOR, onFloor, PILLARS, PILLAR_R, RING, spawnAt, standsSpot, STANDS, THROW_RANGE, type Pickup, type Shot } from '../game/arenaMap';
 import { trailColor } from '../game/trails';
+import { BOSS_EYE, bossSprite, drawFan, drawFlags, drawFlame, drawGlow, drawPillar, drawVignette, makeCrowd, paintArena, TORCHES, type Fan } from './arenaArt';
 
 export type ArenaEvent =
   | { t: 'ready' }
@@ -48,7 +50,7 @@ export interface ArenaPeerView {
   fx: { p: string; at: number } | null;
 }
 export interface ArenaSnap {
-  me: { id: string; spectator: boolean; ammo: number; active: string | null; passive: string | null; readyAt: number; trail: string; guardUntil: number };
+  me: { id: string; spectator: boolean; ammo: number; actives: string[]; passive: string | null; ready: Record<string, number>; trail: string; guardUntil: number };
   peers: ArenaPeerView[];
   brawl: BrawlSnap;
   match: { n: number; mode: string; phase: string; fighters: string[]; out: string[]; score: Record<string, number>; boss: { x: number; y: number; hp: number; max: number; slamAt: number; hitAt: number; facing: 1 | -1 } | null };
@@ -61,6 +63,8 @@ export interface ArenaOpts {
   top: number;
   bottom: number;
   touch: boolean;
+  /** CSS px of the phone's own bottom edge (home bar), so the stick sits clear of it */
+  safeBottom?: number;
 }
 
 const SPEED = 62;
@@ -69,6 +73,11 @@ const DASH_PX = 52;
 const DASH_MS = 180;
 const SLAM_MS = 360;
 const SLAM_R = 34;
+const SPIN_R = 28;
+const STICK_R = 54;
+/** number keys 1 to 6 and the letter keys, in the order of ACTIVES */
+const SLOT_KEYS = ['q', 'e', 'r', 'c', 'v', 'x'];
+const SLOT_IDS = ['dash', 'guard', 'slam', 'splash', 'spin', 'mend'];
 
 interface Mover extends Body {
   tx: number;
@@ -105,7 +114,12 @@ export class ArenaEngine {
   private others = new Map<string, Mover & { view: ArenaPeerView }>();
   private keys = new Set<string>();
   private stick: { id: number; x0: number; y0: number; dx: number; dy: number } | null = null;
-  private walkTarget: [number, number] | null = null;
+  /** where the mouse points, in map px (PC aiming) */
+  private aim: [number, number] | null = null;
+  /** powers used here, before the app's snapshot catches up */
+  private usedAt = new Map<string, number>();
+  private spinAt = 0;
+  private lastEmpty = 0;
   private lastEmit = 0;
   private lastEmitKey = '';
   private swingUntil = 0;
@@ -122,7 +136,8 @@ export class ArenaEngine {
   private seen = new Map<string, { hp: number; sw: number; ko: number; fx: number; fxAt: number }>();
   private lastBossSlam = 0;
   private lastBossHit = 0;
-  private crowd: { x: number; y: number; c: string; ph: number }[] = [];
+  private crowd: Fan[] = [];
+  private lastEmber = 0;
   private grabbed = new Map<number, number>();
   private recorder: { rec: MediaRecorder; chunks: Blob[]; until: number } | null = null;
   private onKey = (e: KeyboardEvent) => this.key(e, true);
@@ -181,60 +196,8 @@ export class ArenaEngine {
 
   /* ---------------- the pit, painted once ---------------- */
   private buildGround() {
-    const cv = makeCanvas(AW, AH);
-    const g = ctx2d(cv);
-    const P = (x: number, y: number, w: number, h: number, col: string) => {
-      g.fillStyle = col;
-      g.fillRect(x, y, w, h);
-    };
-    // night sky behind the stands, then the stands: stepped stone rows
-    P(0, 0, AW, AH, '#1a1226');
-    for (let r = 0; r < 4; r++) {
-      const y = 8 + r * 10;
-      P(0, y, AW, 10, r % 2 ? '#4a3b52' : '#56465e');
-      P(0, y, AW, 1, '#6e5c76');
-    }
-    // banners
-    for (let i = 0; i < 6; i++) {
-      const x = 20 + i * 62;
-      P(x, 0, 10, 16, i % 2 ? '#d8483a' : '#ffd24a');
-      P(x, 16, 5, 3, i % 2 ? '#d8483a' : '#ffd24a');
-      P(x + 3, 4, 4, 4, i % 2 ? '#ffd24a' : '#d8483a');
-    }
-    // the wall round the pit
-    P(0, 48, AW, AH - 48, '#2a2030');
-    // the floor: an oval of sand, dithered, darker at the rim
-    for (let y = 48; y < AH; y++) {
-      for (let x = 0; x < AW; x++) {
-        const dx = (x - FLOOR.cx) / FLOOR.rx;
-        const dy = (y - FLOOR.cy) / FLOOR.ry;
-        const d = dx * dx + dy * dy;
-        if (d > 1.08) continue;
-        if (d > 1) {
-          P(x, y, 1, 1, '#5e4630');
-          continue;
-        }
-        const n = ((x * 73856093) ^ (y * 19349663)) >>> 0;
-        const base = d > 0.85 ? [176, 138, 92] : [214, 178, 122];
-        const k = (n % 7) < 1 ? 0.92 : (n % 11) < 1 ? 1.06 : 1;
-        P(x, y, 1, 1, `rgb(${Math.round(base[0] * k)},${Math.round(base[1] * k)},${Math.round(base[2] * k)})`);
-      }
-    }
-    // the ring in the middle
-    g.strokeStyle = 'rgba(120,80,40,0.55)';
-    g.lineWidth = 2;
-    g.beginPath();
-    g.ellipse(RING.x, RING.y, RING.r, RING.r / 1.6, 0, 0, Math.PI * 2);
-    g.stroke();
-    // torches on the wall
-    for (const x of [28, 120, 240, 332]) {
-      P(x, 52, 3, 8, '#5e4126');
-    }
-    this.ground = cv;
-    // a crowd of pixel heads in the stands
-    const cols = ['#d04a3a', '#2f5fd0', '#3aa05a', '#9a4ad0', '#e08a1e', '#2aa0b0', '#c0c040', '#d06aa0', '#f2f5ff'];
-    this.crowd = [];
-    for (let r = 0; r < 3; r++) for (let x = 6; x < AW - 6; x += 9 + ((x * 7) % 5)) this.crowd.push({ x, y: 16 + r * 10, c: cols[(x + r * 3) % cols.length], ph: (x * 13 + r * 7) % 100 });
+    this.ground = paintArena();
+    this.crowd = makeCrowd();
   }
 
   /* ---------------- people ---------------- */
@@ -284,7 +247,6 @@ export class ArenaEngine {
         if (!onFloor(nx, me.y)) break;
         me.x = nx;
       }
-      this.walkTarget = null;
       this.parts.burst('star', me.x, me.y - 14, 8, 26, 22, ['#ffffff', '#ffd84a', '#ff8a70'], 0.5);
       this.fx.hit(me.x, me.y, Math.max(0, this.myHp - b.me.hp), wall, true);
       this.fx.shake(200, 2.2, wall);
@@ -346,7 +308,6 @@ export class ArenaEngine {
     }
     me.tx = me.x;
     me.ty = me.y;
-    this.walkTarget = null;
     this.parts.burst('dust', me.x, me.y, 10, 22, 14, ['#f2e6c8', '#d8c8a8'], 0.7);
   }
 
@@ -372,6 +333,7 @@ export class ArenaEngine {
     if (!this.fighting() || this.downed(wall) || wall - this.lastSwing < 450) return;
     this.lastSwing = wall;
     const me = this.me;
+    if (this.aim && Math.abs(this.aim[0] - me.x) > 3) me.facing = this.aim[0] > me.x ? 1 : -1;
     let t = pickTarget(me, this.targets(), wall);
     // the boss is big: it can be hit from a little further away
     const boss = this.snap?.match.boss;
@@ -380,7 +342,6 @@ export class ArenaEngine {
     this.swingUntil = performance.now() + 540;
     me.pose = 'swing';
     me.since = performance.now();
-    this.walkTarget = null;
     this.fx.slash(me.x, me.y, me.facing, wall, Boolean(t), trailColor(this.snap?.me.trail));
     if (t) this.fx.shake(140, 1.4, wall + 200);
     this.emit({ t: 'swing', target: t?.id ?? null, x: me.x, y: me.y });
@@ -395,13 +356,22 @@ export class ArenaEngine {
     this.emit({ t: 'jump' });
   }
 
-  /** Use the active power. The app has checked the cooldown and unlock; this does the moving and aiming. */
-  power() {
+  /** Is power `p` unlocked and off cooldown? */
+  canUse(p: string, wall = Date.now()) {
+    const s = this.snap;
+    if (!s || !s.me.actives.includes(p)) return false;
+    const used = this.usedAt.get(p) ?? 0;
+    return wall >= (s.me.ready[p] ?? 0) && wall - used > 400;
+  }
+
+  /** Use power `p`. The app checks the cooldown and unlock again; this does the moving and aiming. */
+  power(p: string) {
     const s = this.snap;
     const wall = Date.now();
-    if (!s || !s.me.active || !this.fighting() || this.downed(wall) || wall < s.me.readyAt) return;
+    if (!s || !this.fighting() || this.downed(wall) || !this.canUse(p, wall)) return;
+    this.usedAt.set(p, wall);
     const me = this.me;
-    const p = s.me.active;
+    if (this.aim && (p === 'dash' || p === 'splash') && Math.abs(this.aim[0] - me.x) > 3) me.facing = this.aim[0] > me.x ? 1 : -1;
     this.powerFx(p, me.x, me.y, me.facing, wall);
     if (p === 'dash') {
       this.dash = { from: [me.x, me.y], dir: me.facing, at: performance.now(), hit: false };
@@ -424,16 +394,44 @@ export class ArenaEngine {
       const dirs: [number, number][] = [-0.35, 0, 0.35].map((a) => [Math.cos(a) * me.facing, Math.sin(a)]);
       this.fire(dirs, 'splash');
       this.emit({ t: 'power', p, targets: [], x: me.x, y: me.y });
+    } else if (p === 'spin') {
+      // everyone next to you takes it at once
+      this.spinAt = performance.now();
+      this.swingUntil = this.spinAt + 540;
+      const hit = this.targets().filter((o) => o.v && o.v.on && !(o.v.ko && wall - o.v.ko < 4500) && wall >= o.v.sh && Math.hypot(o.x - me.x, (o.y - me.y) * 1.4) <= (o.id === 'boss' ? SPIN_R + 10 : SPIN_R)).map((o) => o.id);
+      this.fx.slash(me.x, me.y, 1, wall, hit.length > 0, trailColor(this.snap?.me.trail));
+      this.fx.slash(me.x, me.y, -1, wall, hit.length > 0, trailColor(this.snap?.me.trail));
+      this.parts.burst('star', me.x, me.y - 10, 10, 34, 16, ['#ffffff', '#ffd84a'], 0.45);
+      if (hit.length) this.fx.shake(180, 2, wall);
+      this.emit({ t: 'power', p, targets: hit, x: me.x, y: me.y });
+      this.emit({ t: 'sfx', name: 'swing' });
+    } else if (p === 'mend') {
+      this.parts.burst('star', me.x, me.y - 14, 12, 26, 24, ['#7dffa0', '#ffffff'], 0.6);
+      this.emit({ t: 'power', p, targets: [], x: me.x, y: me.y });
+      this.emit({ t: 'sfx', name: 'pick' });
     }
   }
 
-  /** Throw an ORE shard the way you face (needs ammo; the app checks). */
-  throwOre() {
+  /** Throw an ORE shard: at the mouse on PC, else at the nearest target ahead (needs ammo; the app checks). */
+  throwOre(at?: [number, number] | null) {
     const s = this.snap;
     const wall = Date.now();
-    if (!s || s.me.ammo <= 0 || !this.fighting() || this.downed(wall)) return;
-    // aim at the nearest target ahead, if any
+    if (!s || !this.fighting() || this.downed(wall)) return;
     const me = this.me;
+    if (s.me.ammo <= 0) {
+      if (wall - this.lastEmpty > 900) {
+        this.lastEmpty = wall;
+        this.fx.say(me.x, me.y - 40, 'NO ORE', '#8ea2cc', wall);
+      }
+      return;
+    }
+    if (at && Math.hypot(at[0] - me.x, at[1] - (me.y - 10)) > 4) {
+      const d = Math.hypot(at[0] - me.x, at[1] - (me.y - 10));
+      const dx = (at[0] - me.x) / d;
+      if (Math.abs(dx) > 0.2) me.facing = dx > 0 ? 1 : -1;
+      this.fire([[dx, (at[1] - (me.y - 10)) / d]], 'ore');
+      return;
+    }
     const ahead = this.targets().filter((o) => Math.sign(o.x - me.x) === me.facing && Math.hypot(o.x - me.x, o.y - me.y) < THROW_RANGE).sort((a, b) => Math.hypot(a.x - me.x, a.y - me.y) - Math.hypot(b.x - me.x, b.y - me.y))[0];
     let dx = me.facing;
     let dy = 0;
@@ -453,64 +451,99 @@ export class ArenaEngine {
   }
 
   private powerFx(p: string, x: number, y: number, facing: number, wall: number) {
-    const names: Record<string, [string, string]> = { dash: ['DASH!', '#7fe3ff'], slam: ['SLAM!', '#ff8a3d'], guard: ['GUARD!', '#9fd6ee'], splash: ['SPLASH!', '#ffd84a'] };
+    const names: Record<string, [string, string]> = { dash: ['DASH!', '#7fe3ff'], slam: ['SLAM!', '#ff8a3d'], guard: ['GUARD!', '#9fd6ee'], splash: ['SPLASH!', '#ffd84a'], spin: ['WHIRL!', '#ffffff'], mend: ['+HP', '#7dffa0'] };
     const n = names[p];
     if (n) this.fx.say(x, y - 40, n[0], n[1], wall);
     if (p === 'dash') for (let k = 0; k < 6; k++) this.parts.spawn('dust', x - facing * k * 4, y, { vx: -facing * 20, vz: 4, life: 0.35, c: '#e8d4b0' });
   }
 
   /* ---------------- input ---------------- */
+  /** Where the phone's stick rests: bottom left, clear of the home bar. */
+  stickBase() {
+    return { x: 22 + STICK_R, y: this.H - (this.opts.safeBottom ?? 0) - 26 - STICK_R };
+  }
+  private toMap(x: number, y: number): [number, number] {
+    return [(x - this.ox) / this.z, (y - this.oy) / this.z];
+  }
   private bindInput() {
     const cv = this.canvas;
+    cv.style.touchAction = 'none';
     const pos = (e: PointerEvent) => {
       const r = cv.getBoundingClientRect();
       return { x: e.clientX - r.left, y: e.clientY - r.top };
     };
+    // the right button swings: no browser menu over the pit
+    cv.addEventListener('contextmenu', (e) => e.preventDefault());
     cv.addEventListener('pointerdown', (e) => {
       const p = pos(e);
-      cv.setPointerCapture?.(e.pointerId);
-      if (this.opts.touch && !this.stick && p.x < this.W * 0.5) {
-        this.stick = { id: e.pointerId, x0: p.x, y0: p.y, dx: 0, dy: 0 };
+      const mouse = e.pointerType === 'mouse' && !this.opts.touch;
+      if (!mouse) {
+        // phone: the left half is the stick. It rests bottom left; touch further away and it comes to your thumb.
+        if (!this.stick && p.x < this.W * 0.5 && p.y > this.opts.top) {
+          cv.setPointerCapture?.(e.pointerId);
+          const b = this.stickBase();
+          const near = Math.hypot(p.x - b.x, p.y - b.y) < STICK_R * 1.6;
+          this.stick = { id: e.pointerId, x0: near ? b.x : p.x, y0: near ? b.y : p.y, dx: 0, dy: 0 };
+          if (near) this.stickTo(p.x, p.y);
+          return;
+        }
+        const [mx, my] = this.toMap(p.x, p.y);
+        const hitPeer = [...this.others.values()].find((o) => Math.abs(o.x - mx) < 8 && my < o.y + 2 && my > o.y - 24);
+        if (hitPeer) this.emit({ t: 'peer', id: hitPeer.view.id });
         return;
       }
-      // a tap: on a player, open them; else walk there
-      const [mx, my] = [(p.x - this.ox) / this.z, (p.y - this.oy) / this.z];
+      e.preventDefault();
+      this.aim = this.toMap(p.x, p.y);
+      if (e.button === 2) return this.attack();
+      if (e.button !== 0) return;
+      // left button: throw while you fight; else a click on a miner opens them
+      if (this.fighting()) return this.throwOre(this.aim);
+      const [mx, my] = this.aim;
       const hitPeer = [...this.others.values()].find((o) => Math.abs(o.x - mx) < 8 && my < o.y + 2 && my > o.y - 24);
-      if (hitPeer) return this.emit({ t: 'peer', id: hitPeer.view.id });
-      this.walkTarget = [mx, my];
+      if (hitPeer) this.emit({ t: 'peer', id: hitPeer.view.id });
     });
     cv.addEventListener('pointermove', (e) => {
-      if (!this.stick || e.pointerId !== this.stick.id) return;
       const p = pos(e);
-      const dx = (p.x - this.stick.x0) / 46;
-      const dy = (p.y - this.stick.y0) / 46;
-      const n = Math.hypot(dx, dy);
-      this.stick.dx = n > 1 ? dx / n : dx;
-      this.stick.dy = n > 1 ? dy / n : dy;
+      if (e.pointerType === 'mouse' && !this.opts.touch) this.aim = this.toMap(p.x, p.y);
+      if (this.stick && e.pointerId === this.stick.id) this.stickTo(p.x, p.y);
     });
     const up = (e: PointerEvent) => {
       if (this.stick && e.pointerId === this.stick.id) this.stick = null;
     };
     cv.addEventListener('pointerup', up);
     cv.addEventListener('pointercancel', up);
+    cv.addEventListener('pointerleave', (e) => {
+      if (e.pointerType === 'mouse') this.aim = null;
+    });
     if (typeof window !== 'undefined') {
       window.addEventListener('keydown', this.onKey);
       window.addEventListener('keyup', this.onKeyUp);
       window.addEventListener('blur', this.onBlur);
     }
   }
+  private stickTo(x: number, y: number) {
+    if (!this.stick) return;
+    const dx = (x - this.stick.x0) / STICK_R;
+    const dy = (y - this.stick.y0) / STICK_R;
+    const n = Math.hypot(dx, dy);
+    this.stick.dx = n > 1 ? dx / n : dx;
+    this.stick.dy = n > 1 ? dy / n : dy;
+  }
   private key(e: KeyboardEvent, down: boolean) {
     const t = e.target as HTMLElement | null;
     if (t && (/^(INPUT|TEXTAREA)$/.test(t.tagName) || t.isContentEditable)) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const k = e.key.toLowerCase();
+    // powers: the letter keys, or 1 to 6, in the same order
+    const slot = SLOT_KEYS.indexOf(k) >= 0 ? SLOT_KEYS.indexOf(k) : /^[1-6]$/.test(k) ? Number(k) - 1 : -1;
     if (down && !e.repeat) {
       if (k === 'f') this.attack();
       else if (k === ' ') this.jump();
-      else if (k === 'q') this.power();
-      else if (k === 'g') this.throwOre();
+      else if (k === 'g') this.throwOre(this.aim);
+      else if (k === 'shift') this.power('dash');
+      else if (slot >= 0) this.power(SLOT_IDS[slot]);
     }
-    if (['f', ' ', 'q', 'g'].includes(k)) e.preventDefault();
+    if (['f', ' ', 'g'].includes(k) || slot >= 0) e.preventDefault();
     if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'w', 'a', 's', 'd'].includes(k)) {
       if (down) this.keys.add(k);
       else this.keys.delete(k);
@@ -539,7 +572,8 @@ export class ArenaEngine {
       this.ox = Math.round((this.W - AW * this.z) / 2);
       this.oy = Math.round(this.opts.top + (availH - AH * this.z) / 2);
     } else {
-      this.z = Math.max(fit, Math.min(2.4, availH / AH));
+      // phones: close enough to see the fight, never tiny (the buttons float over the edges)
+      this.z = Math.max(fit, this.opts.touch ? Math.min(2.4, Math.max(1.9, availH / AH)) : Math.min(2.4, availH / AH));
       const viewW = this.W / this.z;
       const viewH = availH / this.z;
       const cx = Math.max(viewW / 2, Math.min(AW - viewW / 2, this.me.x));
@@ -584,16 +618,9 @@ export class ArenaEngine {
       ix = this.stick.dx;
       iy = this.stick.dy;
     }
-    if ((ix || iy) && Math.hypot(ix, iy) > 0.18) this.walkTarget = null;
-    else if (this.walkTarget) {
-      const dx = this.walkTarget[0] - me.x;
-      const dy = this.walkTarget[1] - me.y;
-      const d = Math.hypot(dx, dy);
-      if (d < 2) this.walkTarget = null;
-      else {
-        ix = dx / d;
-        iy = dy / d;
-      }
+    if (Math.hypot(ix, iy) < 0.18) {
+      ix = 0;
+      iy = 0;
     }
     let moving = false;
     if (this.dash && !downed) {
@@ -630,7 +657,7 @@ export class ArenaEngine {
       } else if (this.canStand(me.x, ny)) {
         me.y = ny;
         moving = true;
-      } else this.walkTarget = null;
+      }
       if (Math.abs(ux) > 0.25) me.facing = ux > 0 ? 1 : -1;
       me.tx = me.x + ux * 20;
       me.ty = me.y + uy * 20;
@@ -644,6 +671,12 @@ export class ArenaEngine {
     if (!moving) {
       me.tx = me.x;
       me.ty = me.y;
+    }
+    // embers drift up from the fires
+    if (now - this.lastEmber > 140) {
+      this.lastEmber = now;
+      const src = Math.random() < 0.5 ? TORCHES[Math.floor(Math.random() * TORCHES.length)] : ((pp) => [pp[0], pp[1] - 44] as [number, number])(PILLARS[Math.floor(Math.random() * PILLARS.length)]);
+      this.parts.spawn('ember', src[0] + (Math.random() - 0.5) * 4, src[1], { vx: (Math.random() - 0.5) * 6, vy: -8 - Math.random() * 8, life: 0.9 + Math.random() * 0.6, c: Math.random() < 0.5 ? '#ffb43d' : '#ff6a2a' });
     }
     // pick up whatever you walk over
     for (const it of this.snap?.pickups ?? []) {
@@ -729,21 +762,16 @@ export class ArenaEngine {
     const sy = (y: number) => oy + y * z;
     c.drawImage(this.ground, ox, oy, AW * z, AH * z);
     const s = this.snap;
-    // the crowd bobs, and jumps when someone cheers
+    drawFlags(c, sx, sy, z, wall);
+    // the crowd bobs, and jumps with their arms up when someone cheers or lands a KO
     const loud = (s?.cheers ?? []).filter((ch) => wall - ch.at < 1200).length;
-    for (const p of this.crowd) {
-      const hop = loud && (p.ph + Math.floor(wall / 90)) % 7 < loud ? 3 : Math.floor(((wall / 300 + p.ph) % 4) / 3);
-      c.fillStyle = p.c;
-      c.fillRect(sx(p.x), sy(p.y - hop), 4 * z, 3 * z);
-      c.fillStyle = '#f2c99a';
-      c.fillRect(sx(p.x + 1), sy(p.y - 3 - hop), 2 * z, 2 * z);
+    for (const f of this.crowd) {
+      const wild = loud > 0 && (f.ph + Math.floor(wall / 90)) % 7 < loud + 1;
+      const hop = wild ? (Math.floor(wall / 120 + f.ph) % 2) * 2 : Math.floor(((wall / 300 + f.ph) % 4) / 3);
+      drawFan(c, f, sx, sy, z, hop, wild || (f.ph + Math.floor(wall / 700)) % 23 === 0);
     }
-    // torch flames
-    for (const x of [28, 120, 240, 332]) {
-      const f = Math.floor(wall / 110) % 3;
-      c.fillStyle = ['#ff9a3d', '#ffd24a', '#ff6a2a'][f];
-      c.fillRect(sx(x - 1), sy(48 - f), 5 * z, (4 + f) * z);
-    }
+    // torch flames on the wall
+    TORCHES.forEach(([tx, ty], i) => drawFlame(c, sx(tx + 0.5), sy(ty - 1), z, wall, i));
     // the ring glows in King of the Hill
     if (s?.match.mode === 'koth') {
       c.save();
@@ -789,53 +817,84 @@ export class ArenaEngine {
     // pillars (behind or in front of people by depth)
     type Item = { y: number; f: () => void };
     const items: Item[] = [];
-    for (const [px, py] of PILLARS) {
+    PILLARS.forEach(([px, py], i) => {
       items.push({
         y: py + 2,
         f: () => {
-          const X = sx(px - PILLAR_R);
-          c.fillStyle = 'rgba(0,0,0,0.3)';
-          c.fillRect(X, sy(py), PILLAR_R * 2 * z, 4 * z);
-          c.fillStyle = '#7a6e84';
-          c.fillRect(X, sy(py - 30), PILLAR_R * 2 * z, 32 * z);
-          c.fillStyle = '#968aa0';
-          c.fillRect(X, sy(py - 30), 4 * z, 32 * z);
-          c.fillStyle = '#5a5064';
-          c.fillRect(X, sy(py - 34), PILLAR_R * 2 * z, 4 * z);
+          drawPillar(c, sx(px), sy(py), z);
+          drawFlame(c, sx(px), sy(py - 42), z, wall, i + 5, 1.2);
         },
       });
-    }
-    // the boss
+    });
+    // the boss: the Mole King
     const boss = s?.match.boss;
     if (boss && boss.hp > 0) {
       items.push({
         y: boss.y,
         f: () => {
           const age = wall - boss.slamAt;
-          const up = boss.slamAt && age < 400 ? Math.sin((age / 400) * Math.PI) * 10 : 0;
-          const frames = moleNames.idle;
-          const name = boss.hitAt && wall - boss.hitAt < 160 ? moleNames.bonk : frames[Math.floor(wall / moleNames.idleMs) % frames.length];
-          c.fillStyle = 'rgba(0,0,0,0.3)';
+          const up = boss.slamAt && age < 400 ? Math.sin((age / 400) * Math.PI) * 12 : 0;
+          const bob = Math.round(Math.sin(wall / 260) * 0.8);
+          const flash = Boolean(boss.hitAt && wall - boss.hitAt < 120);
+          // claws up when it is ready to slam and someone is close: get out of the red ring
+          const near = [this.me, ...this.others.values()].some((o) => Math.hypot(o.x - boss.x, o.y - boss.y) < 50);
+          const ready = !boss.slamAt || age > 1900;
+          const raise = (ready && near) || (boss.slamAt > 0 && age < 220);
+          const X = sx(boss.x);
+          const Y = sy(boss.y);
+          c.fillStyle = 'rgba(0,0,0,0.35)';
           c.beginPath();
-          c.ellipse(sx(boss.x), sy(boss.y), 16 * z, 5 * z, 0, 0, Math.PI * 2);
+          c.ellipse(X, Y, (20 - up * 0.4) * z, (6 - up * 0.1) * z, 0, 0, Math.PI * 2);
           c.fill();
-          if (has(name)) draw(c, name, sx(boss.x), sy(boss.y - up), z * 2, boss.facing < 0, boss.hitAt && wall - boss.hitAt < 120 ? 0.5 : 1);
-          // its HP bar
-          const w = 50 * z;
-          const X = sx(boss.x) - w / 2;
-          const Y = sy(boss.y - 40);
-          c.fillStyle = 'rgba(4,6,15,0.9)';
-          c.fillRect(X - z, Y - z, w + 2 * z, 5 * z);
-          c.fillStyle = '#ff4f5e';
-          c.fillRect(X, Y, (w * boss.hp) / boss.max, 3 * z);
-          text(c, 'MOLE BOSS', Math.round(sx(boss.x) - (textWidth('MOLE BOSS') * z) / 2), Math.round(Y - 8 * z), Math.max(1, Math.round(z)), '#ffd84a', '#1a0c10');
+          if (ready && near) {
+            c.save();
+            c.globalAlpha = 0.35 + 0.25 * Math.sin(wall / 70);
+            c.strokeStyle = '#ff3a3a';
+            c.lineWidth = 2 * z;
+            c.beginPath();
+            c.ellipse(X, Y, 40 * z, 25 * z, 0, 0, Math.PI * 2);
+            c.stroke();
+            c.restore();
+          }
+          const spr = bossSprite(raise, flash);
+          c.save();
+          c.translate(X, Math.round(Y - (48 + up + bob) * z));
+          if (boss.facing < 0) c.scale(-1, 1);
+          c.drawImage(spr, -26 * z, 0, spr.width * z, spr.height * z);
+          // the eye glows
+          c.globalCompositeOperation = 'lighter';
+          const g = c.createRadialGradient((BOSS_EYE[0] - 26) * z, BOSS_EYE[1] * z, 0, (BOSS_EYE[0] - 26) * z, BOSS_EYE[1] * z, 7 * z);
+          g.addColorStop(0, 'rgba(255,60,40,0.7)');
+          g.addColorStop(1, 'rgba(255,60,40,0)');
+          c.fillStyle = g;
+          c.fillRect((BOSS_EYE[0] - 33) * z, (BOSS_EYE[1] - 7) * z, 14 * z, 14 * z);
+          c.restore();
+          // its HP bar, in a frame, with ticks every tenth
+          const w = 60 * z;
+          const bx = Math.round(X - w / 2);
+          const by = Math.round(sy(boss.y - 58));
+          c.fillStyle = '#140a0e';
+          c.fillRect(bx - 2 * z, by - 2 * z, w + 4 * z, 7 * z);
+          c.fillStyle = '#3a1418';
+          c.fillRect(bx, by, w, 3 * z);
+          const fr = Math.max(0, boss.hp / boss.max);
+          c.fillStyle = fr > 0.5 ? '#ff4f5e' : fr > 0.25 ? '#ff8a3d' : '#ffd24a';
+          c.fillRect(bx, by, w * fr, 3 * z);
+          c.fillStyle = 'rgba(255,255,255,0.35)';
+          c.fillRect(bx, by, w * fr, z);
+          c.fillStyle = '#140a0e';
+          for (let k = 1; k < 10; k++) c.fillRect(Math.round(bx + (w * k) / 10), by, Math.max(1, Math.round(z / 2)), 3 * z);
+          c.fillStyle = '#ffd24a';
+          c.fillRect(bx - 2 * z, by - 2 * z, 2 * z, 2 * z);
+          c.fillRect(bx + w, by - 2 * z, 2 * z, 2 * z);
+          text(c, 'MOLE KING', Math.round(X - (textWidth('MOLE KING') * z) / 2), Math.round(by - 9 * z), Math.max(1, Math.round(z)), '#ffd84a', '#1a0c10');
           if (boss.slamAt && age < 500) {
             c.save();
             c.globalAlpha = 1 - age / 500;
             c.strokeStyle = '#ff8a3d';
             c.lineWidth = 2 * z;
             c.beginPath();
-            c.ellipse(sx(boss.x), sy(boss.y), (12 + age / 12) * z, ((12 + age / 12) / 1.6) * z, 0, 0, Math.PI * 2);
+            c.ellipse(X, Y, (12 + age / 12) * z, ((12 + age / 12) / 1.6) * z, 0, 0, Math.PI * 2);
             c.stroke();
             c.restore();
           }
@@ -893,6 +952,7 @@ export class ArenaEngine {
       shard(sh.x + sh.dx * d, sh.y + sh.dy * d);
     }
     this.parts.draw(c, ox, oy, z);
+    drawGlow(c, [...TORCHES.map(([tx, ty]) => [sx(tx), sy(ty - 4), 46] as [number, number, number]), ...PILLARS.map(([px, py]) => [sx(px), sy(py - 46), 40] as [number, number, number])], z, wall);
     this.fx.draw(c, ox, oy, z, wall);
     // names
     const fs = Math.max(1, Math.round(z * 0.8));
@@ -922,19 +982,39 @@ export class ArenaEngine {
         }
       }
     }
-    // the stick
-    if (this.opts.touch && this.stick) {
-      c.globalAlpha = 0.6;
+    drawVignette(c, this.W, this.H);
+    // the stick: always shown on a phone, bright while you hold it
+    if (this.opts.touch && !s?.me.spectator) {
+      const b = this.stickBase();
+      const st = this.stick;
+      const x0 = st ? st.x0 : b.x;
+      const y0 = st ? st.y0 : b.y;
+      c.globalAlpha = st ? 0.7 : 0.35;
+      c.fillStyle = 'rgba(8,13,32,0.6)';
+      c.beginPath();
+      c.arc(x0, y0, STICK_R, 0, Math.PI * 2);
+      c.fill();
       c.strokeStyle = '#ffd24a';
       c.lineWidth = 2;
-      c.beginPath();
-      c.arc(this.stick.x0, this.stick.y0, 46, 0, Math.PI * 2);
       c.stroke();
       c.fillStyle = '#ffd24a';
       c.beginPath();
-      c.arc(this.stick.x0 + this.stick.dx * 30, this.stick.y0 + this.stick.dy * 30, 18, 0, Math.PI * 2);
+      c.arc(x0 + (st?.dx ?? 0) * (STICK_R - 18), y0 + (st?.dy ?? 0) * (STICK_R - 18), 22, 0, Math.PI * 2);
       c.fill();
       c.globalAlpha = 1;
+    }
+    // PC: a small crosshair where your throws go
+    const aiming = !this.opts.touch && Boolean(this.aim) && this.fighting();
+    const cur = aiming ? 'none' : 'default';
+    if (this.canvas.style.cursor !== cur) this.canvas.style.cursor = cur;
+    if (aiming && this.aim) {
+      const X = Math.round(sx(this.aim[0]));
+      const Y = Math.round(sy(this.aim[1]));
+      c.fillStyle = (s?.me.ammo ?? 0) > 0 ? 'rgba(255,210,74,0.85)' : 'rgba(142,162,204,0.6)';
+      c.fillRect(X - 7, Y - 1, 5, 2);
+      c.fillRect(X + 2, Y - 1, 5, 2);
+      c.fillRect(X - 1, Y - 7, 2, 5);
+      c.fillRect(X - 1, Y + 2, 2, 5);
     }
   }
 
