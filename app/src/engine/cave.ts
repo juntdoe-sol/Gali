@@ -9,6 +9,7 @@
  * It tells the app four things and nothing else: a run started, XP was earned,
  * how deep you got, and that you want to leave.
  */
+import { canvasDpr, reducedMotion } from './screen';
 import { draw, makeCanvas, ctx2d, text, textCentered, textWidth, loadAtlas, type Ctx } from './art';
 import { drawMiner, drawPet, frameAt, petFlies } from './actors';
 import { Particles } from './particles';
@@ -653,7 +654,7 @@ export class CaveEngine {
   private resize() {
     const cssW = this.canvas.clientWidth || window.innerWidth;
     const cssH = this.canvas.clientHeight || window.innerHeight;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    const dpr = canvasDpr(this.canvas.clientWidth || window.innerWidth, this.canvas.clientHeight || window.innerHeight, 2.5);
     if (cssW === this.W && cssH === this.H && dpr === this.dpr) return;
     this.W = cssW;
     this.H = cssH;
@@ -695,7 +696,7 @@ export class CaveEngine {
     const DW = this.canvas.width;
     const DH = this.canvas.height;
     const lv = this.level;
-    const sh = this.shake;
+    const sh = reducedMotion() ? 0 : this.shake;
     const mapW = COLS * TILE;
     // keep the whole width in view when it fits; otherwise follow
     const viewW = DW / S;

@@ -8,17 +8,20 @@ import { DEFAULT_SMART, fmtSol, liveReturn, maskOf, randomPick, MIN_SOL_PER_BLOC
 import { isLive, isOnChain, soloOf, useGame, type DockTab, type Preset } from '../game/store';
 import { fx } from '../pixel/fx';
 import { useView } from '../pixel/view';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Btn, F, Gem, T } from './kit';
+import { Btn, F, FocusRing, PixelBox, T, Tip, U } from './kit';
 import { BAR_H } from './TabBar';
+import { PixIcon } from './PixIcon';
+import type { PixName } from './pixIcons';
+import { useLayout } from './layout';
 
 const SHAKE_G = 2.1;
+const layoutNowDesktop = () => Platform.OS === 'web' && typeof window !== 'undefined' && window.innerWidth >= 1000 && window.innerHeight >= 560;
 const TABS: { id: DockTab; label: string }[] = [
   { id: 'lite', label: 'LITE' },
   { id: 'pro', label: 'PRO' },
 ];
 
-export function Dock() {
+export function Dock({ embedded }: { embedded?: boolean } = {}) {
   const insets = useSafeAreaInsets();
   const tab = useGame((s) => s.dockTab);
   const run = useGame((s) => s.run);
@@ -43,9 +46,54 @@ export function Dock() {
   const barTop = BAR_H + insets.bottom;
   // closed: the map frames itself down to the bottom bar
   useEffect(() => {
-    if (!open) fx.viewBottom = barTop + 6;
-  }, [open, barTop]);
-  if (!open) return null;
+    if (!open && !embedded) fx.viewBottom = barTop + 6;
+  }, [open, barTop, embedded]);
+  if (!open && !embedded) return null;
+
+  const head = (
+    <View style={styles.head}>
+      <View style={styles.seg} accessibilityRole="tablist">
+        {TABS.map((t) => {
+          const on = tab === t.id;
+          return (
+            <Pressable key={t.id} onPress={() => setTab(t.id)} style={styles.segBtn} accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={`${t.label} mode`}>
+              {(st) => {
+                const { hovered, focused } = st as { hovered?: boolean; focused?: boolean };
+                return (
+                  <>
+                    {on ? <PixelBox fill="#2e4d94" hi="#5f86d8" lo="#1b2f63" style={StyleSheet.absoluteFill} /> : hovered ? <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(255,255,255,0.05)' }]} /> : null}
+                    <T v="display" style={{ fontSize: 18, lineHeight: 20, letterSpacing: 2, color: on ? COLORS.gold : hovered ? COLORS.text : COLORS.muted }}>
+                      {t.label}
+                    </T>
+                    {run?.kind === t.id ? <View style={styles.runDot} /> : null}
+                    {focused ? <FocusRing /> : null}
+                  </>
+                );
+              }}
+            </Pressable>
+          );
+        })}
+      </View>
+      {embedded ? null : (
+        <Pressable onPress={() => setOpen(false)} style={styles.fold} accessibilityRole="button" accessibilityLabel="Close the mine panel">
+          <PixelBox fill="rgba(8,13,32,0.9)" hi="#2d4282" lo="#04060f" style={StyleSheet.absoluteFill} />
+          <T v="display" style={{ fontSize: 18, color: COLORS.gold, transform: [{ rotate: '90deg' }] }}>
+            {'>'}
+          </T>
+        </Pressable>
+      )}
+    </View>
+  );
+
+  if (embedded) {
+    return (
+      <View style={styles.embedded}>
+        {head}
+        <UnclaimedRow />
+        {tab === 'lite' ? <LitePanel compact={compact} /> : <ProPanel compact={compact} />}
+      </View>
+    );
+  }
 
   return (
     <View
@@ -54,40 +102,17 @@ export function Dock() {
         fx.viewBottom = e.nativeEvent.layout.height + barTop + 10;
       }}
     >
-      <LinearGradient colors={['#15285a', '#0c1838', '#070d20']} style={[StyleSheet.absoluteFill, styles.dockBg]} />
-      <View pointerEvents="none" style={styles.dockLit} />
-      <Gem size={10} style={styles.dockGem} />
+      <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+        <View style={[styles.dockFill, { top: 0, left: U, right: U, backgroundColor: '#04060f' }]} />
+        <View style={[styles.dockFill, { top: U, left: 0, right: 0, backgroundColor: '#04060f' }]} />
+        <View style={[styles.dockFill, { top: U, left: U, right: U, backgroundColor: 'rgba(17,27,60,0.97)' }]} />
+        <View style={[styles.dockFill, { top: U, left: U, right: U, height: U, bottom: undefined, backgroundColor: COLORS.trim }]} />
+        <View style={[styles.dockFill, { top: U * 2, left: U, right: U, height: U, bottom: undefined, backgroundColor: '#33498c' }]} />
+      </View>
       <Pressable onPress={() => setOpen(false)} hitSlop={8} style={styles.handle} accessibilityRole="button" accessibilityLabel="Close the mine panel">
         <View style={styles.handleBar} />
       </Pressable>
-      <View style={styles.head}>
-        <View style={styles.seg}>
-          {TABS.map((t) => {
-            const on = tab === t.id;
-            return (
-              <Pressable
-                key={t.id}
-                onPress={() => setTab(t.id)}
-                style={[styles.segBtn, on && styles.segOn]}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: on }}
-              >
-                {on ? <LinearGradient colors={['#2c56a8', '#173069']} style={[StyleSheet.absoluteFill, { borderRadius: 8 }]} /> : null}
-                <T v="display" style={{ fontSize: 13, letterSpacing: 2, color: on ? COLORS.gold : COLORS.muted }}>
-                  {t.label}
-                  {run?.kind === t.id ? ' ●' : ''}
-                </T>
-                {on ? <View style={styles.segUnder} /> : null}
-              </Pressable>
-            );
-          })}
-        </View>
-        <Pressable onPress={() => setOpen(false)} style={styles.fold} accessibilityRole="button" accessibilityLabel="Close the mine panel">
-          <T v="display" style={{ fontSize: 14, color: COLORS.gold }}>
-            ▾
-          </T>
-        </Pressable>
-      </View>
+      {head}
       <UnclaimedRow />
       {tab === 'lite' ? <LitePanel compact={compact} /> : <ProPanel compact={compact} />}
     </View>
@@ -115,8 +140,8 @@ export function UnclaimedRow() {
   return (
     <View style={styles.unclaimed} accessibilityLabel={`Unclaimed ${sol.toFixed(4)} SOL, ${Math.floor(unrefined)} unrefined ORE, ${Math.floor(refined)} refined ORE`}>
       <View style={styles.uRow}>
-        <T style={{ fontSize: 13 }}>🎁</T>
-        <T v="label" style={{ color: COLORS.muted }}>
+        <PixIcon name="gift" size={18} />
+        <T v="label" style={{ color: COLORS.gold }}>
           Unclaimed
         </T>
         <Info
@@ -158,20 +183,26 @@ function useBalance() {
 
 function Info({ text }: { text: string }) {
   const toast = useGame((s) => s.toast);
-  return (
-    <Pressable onPress={() => toast(text, 'info')} hitSlop={10} accessibilityLabel="More info" style={styles.info}>
-      <T v="black" style={{ fontSize: 10, color: COLORS.muted }}>
-        i
-      </T>
+  const { mouse } = useLayout();
+  const btn = (
+    <Pressable onPress={() => toast(text, 'info')} hitSlop={10} accessibilityLabel={`More info: ${text}`} style={styles.info}>
+      <PixIcon name="info" size={16} style={{ opacity: 0.85 }} />
     </Pressable>
+  );
+  return mouse ? (
+    <Tip text={text} side="top" width={280}>
+      {btn}
+    </Tip>
+  ) : (
+    btn
   );
 }
 
-function Row({ icon, label, info, right, last }: { icon: string; label: string; info?: string; right: ReactNode; last?: boolean }) {
+function Row({ icon, label, info, right, last }: { icon: PixName; label: string; info?: string; right: ReactNode; last?: boolean }) {
   return (
     <View style={[styles.line, last && { borderBottomWidth: 0 }]}>
       <View style={styles.lineLeft}>
-        <T style={{ fontSize: 13 }}>{icon}</T>
+        <PixIcon name={icon} size={18} />
         <T v="label" style={{ color: COLORS.text }}>
           {label}
         </T>
@@ -184,10 +215,25 @@ function Row({ icon, label, info, right, last }: { icon: string; label: string; 
 
 function Chip({ label, on, onPress, disabled, grow }: { label: string; on?: boolean; onPress: () => void; disabled?: boolean; grow?: boolean }) {
   return (
-    <Pressable onPress={onPress} disabled={disabled} style={[styles.chip, on && styles.chipOn, grow && styles.chipGrow, disabled && { opacity: 0.4 }]}>
-      <T v="black" numberOfLines={1} style={{ fontSize: 12, color: on ? COLORS.gold : COLORS.muted, textAlign: 'center' }}>
-        {label}
-      </T>
+    <Pressable onPress={onPress} disabled={disabled} accessibilityRole="button" accessibilityState={{ selected: Boolean(on), disabled: Boolean(disabled) }} style={[grow && styles.chipGrow, disabled && { opacity: 0.4 }]}>
+      {(st) => {
+        const { hovered, pressed, focused } = st as { hovered?: boolean; pressed: boolean; focused?: boolean };
+        const hot = hovered && !disabled;
+        return (
+          <PixelBox
+            fill={on ? 'rgba(255,201,60,0.16)' : hot ? '#1a2a58' : '#0b1430'}
+            hi={on ? COLORS.gold : hot ? '#4a68b8' : '#22356f'}
+            lo={on ? '#7a3d06' : '#04060f'}
+            edge={on ? '#2a1400' : '#04060f'}
+            style={[styles.chip, { transform: [{ translateY: pressed ? U : 0 }] }]}
+          >
+            <T v="display" numberOfLines={1} style={{ fontSize: 16, lineHeight: 17, color: on ? COLORS.gold : hot ? COLORS.text : COLORS.muted, textAlign: 'center', letterSpacing: 0.6 }}>
+              {label}
+            </T>
+            {focused ? <FocusRing /> : null}
+          </PixelBox>
+        );
+      }}
     </Pressable>
   );
 }
@@ -199,8 +245,8 @@ function BalanceRow({ onHalf, onAll }: { onHalf?: () => void; onAll?: () => void
   return (
     <View style={[styles.lineRight, { justifyContent: 'space-between', marginTop: 10 }]}>
       <View style={styles.lineLeft}>
-        <T style={{ fontSize: 13 }}>👛</T>
-        <T v="bold" style={{ fontSize: 13 }}>
+        <PixIcon name="wallet" size={18} />
+        <T v="display" style={{ fontSize: 18 }}>
           {balance.toFixed(4)}
         </T>
         <T v="muted">{live ? 'SOL · mainnet' : onChain ? 'SOL' : 'practice SOL'}</T>
@@ -218,14 +264,10 @@ function BalanceRow({ onHalf, onAll }: { onHalf?: () => void; onAll?: () => void
 
 function AmountBox({ value, onChange, hint, suffix }: { value: string; onChange: (v: string) => void; hint: string; suffix?: string }) {
   return (
-    <View style={styles.amount}>
+    <PixelBox fill="#050817" hi="#02040c" lo="#22356f" edge="#04060f" style={styles.amount}>
       <View style={styles.token}>
-        <View style={styles.solMark}>
-          <T v="black" style={{ fontSize: 12, color: '#040817' }}>
-            ◎
-          </T>
-        </View>
-        <T v="black" style={{ fontSize: 16 }}>
+        <PixIcon name="sol" size={22} />
+        <T v="display" style={{ fontSize: 20 }}>
           SOL
         </T>
       </View>
@@ -242,11 +284,11 @@ function AmountBox({ value, onChange, hint, suffix }: { value: string; onChange:
         />
       </View>
       {suffix ? (
-        <T v="bold" style={{ marginLeft: 8, fontSize: 12, color: COLORS.muted }}>
+        <T v="display" style={{ marginLeft: 8, fontSize: 15, color: COLORS.muted }}>
           {suffix}
         </T>
       ) : null}
-    </View>
+    </PixelBox>
   );
 }
 
@@ -260,15 +302,17 @@ function RunButton({ ready, label, sub, onStart }: { ready: boolean; label: stri
   if (run)
     return (
       <Btn
-        label={`■ STOP · ${run.total - run.left}/${run.total} rounds`}
+        kind="red"
+        label={`STOP · ${run.total - run.left}/${run.total} rounds`}
         sub={`${fmtSol(run.perRound)} SOL a round · ${run.kind.toUpperCase()}`}
         onPress={stop}
-        style={{ marginTop: 10, borderColor: COLORS.red }}
+        style={{ marginTop: 10 }}
       />
     );
   const start = () => {
     onStart();
-    useGame.getState().setDockOpen(false);
+    // a phone folds the panel away to show the dig; the desktop panel stays where it is
+    if (!layoutNowDesktop()) useGame.getState().setDockOpen(false);
   };
   return <Btn kind={ready ? 'gold' : 'plain'} label={busy ?? label} sub={sub} onPress={start} disabled={!ready || Boolean(busy)} style={{ marginTop: 10, minHeight: 54 }} />;
 }
@@ -331,7 +375,7 @@ function LitePanel({ compact }: { compact: boolean }) {
           <BalanceRow />
           <AmountBox value={perSpot} onChange={setPerSpot} hint="SOL per spot" suffix="per spot" />
           <Row
-            icon="▦"
+            icon="grid"
             label="Spots"
             last
             right={
@@ -425,7 +469,7 @@ function ProPanel({ compact }: { compact: boolean }) {
     <>
       {compact ? null : (
         <>
-          <Row icon="🔖" label="Presets" info="Four saved setups. Changes save to the selected preset." right={null} />
+          <Row icon="bookmark" label="Presets" info="Four saved setups. Changes save to the selected preset." right={null} />
           <View style={[styles.lineRight, { marginTop: 2 }]}>
             {[0, 1, 2, 3].map((i) => (
               <Chip key={i} grow label={`Preset ${i + 1}`} on={i === idx} onPress={() => choosePreset(i)} disabled={Boolean(run)} />
@@ -437,7 +481,7 @@ function ProPanel({ compact }: { compact: boolean }) {
           />
           <AmountBox value={perSpotStr} onChange={(v) => editPreset({ perSpot: v })} hint="SOL per spot" suffix="per spot" />
           <Row
-            icon="▦"
+            icon="grid"
             label="Spots"
             info="Tap spots on the map to pick them, take All 25, or Smart: 4, 8, 15 or 20 spots at random. Tap a count again for a new set; autopilot rolls new spots every round."
             right={
@@ -454,13 +498,13 @@ function ProPanel({ compact }: { compact: boolean }) {
           {p.blocks === 'smart' ? <SmartCounts value={p.smartN} onPick={(c) => pickSmart(c)} disabled={Boolean(run)} /> : null}
           <>
           <Row
-            icon="🔁"
+            icon="hourglass"
             label="Rounds"
             info={live ? `1 = this round only (you approve in your wallet). More = autopilot: one wallet approval funds ORE's automation with SOL for every round, then rounds deploy with no pop-up while the app stays open. Smart re-picks every round. Up to ${LIVE_AUTOPILOT_MAX_SOL} SOL in total. Stop it any time to get the unused SOL back.` : '1 = this round only. More = autopilot repeats the same setup each round (Smart re-picks every round).'}
             right={
               <>
                 <View style={[styles.tag, p.rounds > 1 && { borderColor: COLORS.teal }]}>
-                  <T v="black" style={{ fontSize: 9, letterSpacing: 1, color: p.rounds > 1 ? COLORS.teal : COLORS.muted }}>
+                  <T v="display" style={{ fontSize: 14, lineHeight: 15, letterSpacing: 1, color: p.rounds > 1 ? COLORS.teal : COLORS.muted }}>
                     {p.rounds > 1 ? 'AUTO' : 'MANUAL'}
                   </T>
                 </View>
@@ -475,7 +519,7 @@ function ProPanel({ compact }: { compact: boolean }) {
           </>
           {live && autopilot ? (
             <Row
-              icon="🤖"
+              icon="bot"
               label="Autopilot on"
               info="Your SOL sits in ORE's automation and is deployed round by round while this app is open. Stopping closes it and sends what is left back to your wallet."
               right={
@@ -489,7 +533,7 @@ function ProPanel({ compact }: { compact: boolean }) {
             />
           ) : null}
           <Row
-            icon="🏆"
+            icon="trophy"
             label="If it strikes"
             info={live ? LIVE_INFO : `Only the gold spot mines ORE. The ORE is split by SOL there, unless it is one of this round's 10 solo spots (★ on the map): then one miner takes it all, with odds equal to their share. A 1-in-500 motherlode pays the whole SKR Motherlode Pool on top, split by SOL on the gold spot, plus 10,000 points. Points: 40 x 25 / spots covered. ${RETURN_INFO}`}
             last
@@ -537,88 +581,45 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     paddingHorizontal: 12,
-    paddingTop: 14,
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    borderColor: COLORS.trim,
-    borderWidth: 1.5,
-    borderBottomWidth: 0,
-    shadowColor: '#000',
-    shadowOpacity: 0.6,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: -6 },
-    elevation: 12,
+    paddingTop: 16,
   },
-  dockBg: { borderTopLeftRadius: 21, borderTopRightRadius: 21 },
-  dockLit: { position: 'absolute', top: 0, left: 40, right: 40, height: 1, backgroundColor: COLORS.trimHi, opacity: 0.8 },
-  dockGem: { position: 'absolute', top: -6, alignSelf: 'center' },
-  handle: { position: 'absolute', top: 4, alignSelf: 'center', paddingHorizontal: 24, paddingVertical: 2 },
-  handleBar: { width: 38, height: 4, borderRadius: 2, backgroundColor: COLORS.line },
-  head: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
-  seg: { flex: 1, flexDirection: 'row', backgroundColor: '#02061499', borderRadius: 10, padding: 3, borderWidth: 1, borderColor: COLORS.line },
-  segBtn: { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 8, overflow: 'hidden' },
-  segOn: { borderWidth: 1, borderColor: '#5d8ae0' },
-  segUnder: { position: 'absolute', bottom: 0, left: '30%', right: '30%', height: 2, backgroundColor: COLORS.gold, borderRadius: 1 },
-  fold: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.trim,
-    backgroundColor: '#02061499',
-  },
+  dockFill: { position: 'absolute', bottom: 0 },
+  embedded: { gap: 0 },
+  handle: { position: 'absolute', top: 5, alignSelf: 'center', paddingHorizontal: 24, paddingVertical: 2 },
+  handleBar: { width: 36, height: U * 2, backgroundColor: '#3a5290' },
+  head: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  seg: { flex: 1, flexDirection: 'row', backgroundColor: '#04060f', padding: U, gap: U },
+  segBtn: { flex: 1, alignItems: 'center', paddingVertical: 7, flexDirection: 'row', justifyContent: 'center', gap: 6 },
+  runDot: { width: U * 3, height: U * 3, backgroundColor: COLORS.teal },
+  fold: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   row: { flexDirection: 'row', gap: 6, justifyContent: 'space-between' },
-  line: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingVertical: 7, borderBottomWidth: 1, borderColor: '#2a448055', minHeight: 42 },
+  line: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingVertical: 7, borderBottomWidth: U, borderColor: 'rgba(34,53,111,0.6)', borderStyle: 'dashed', minHeight: 44 },
   lineLeft: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
   lineRight: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1, minWidth: 0 },
-  info: { width: 16, height: 16, borderRadius: 8, borderWidth: 1, borderColor: COLORS.muted, alignItems: 'center', justifyContent: 'center' },
-  chip: { borderWidth: 1, borderColor: COLORS.line, borderRadius: 7, paddingHorizontal: 9, paddingVertical: 5, backgroundColor: '#0a1636' },
-  chipOn: { borderColor: COLORS.gold, backgroundColor: '#ffcf4a1f' },
-  chipGrow: { flex: 1, minWidth: 0, paddingHorizontal: 4 },
+  info: { width: 18, height: 18, alignItems: 'center', justifyContent: 'center' },
+  chip: { paddingHorizontal: 10, paddingVertical: 6, minHeight: 32, justifyContent: 'center' },
+  chipGrow: { flex: 1, minWidth: 0 },
   amount: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: COLORS.trim,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    height: 54,
+    paddingHorizontal: 14,
+    height: 56,
     marginTop: 8,
-    backgroundColor: '#020614cc',
     overflow: 'hidden',
   },
-  token: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 12, borderRightWidth: 1, borderColor: COLORS.line, flexShrink: 0 },
-  solMark: { width: 22, height: 22, borderRadius: 6, backgroundColor: COLORS.sol, alignItems: 'center', justifyContent: 'center' },
+  token: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 12, borderRightWidth: U, borderColor: '#22356f', flexShrink: 0, height: 30 },
   inputWrap: { flex: 1, minWidth: 0, marginLeft: 10 },
-  input: { width: '100%', minWidth: 0, textAlign: 'right', color: COLORS.gold, fontFamily: F.display, fontSize: 24, paddingVertical: 0, paddingHorizontal: 0, ...WEB_NO_OUTLINE },
-  small: {
-    width: 72,
-    textAlign: 'right',
-    color: COLORS.text,
-    fontFamily: F.display,
-    fontSize: 14,
-    paddingVertical: 3,
-    paddingHorizontal: 6,
-    borderWidth: 1,
-    borderColor: COLORS.line,
-    borderRadius: 7,
-    backgroundColor: '#020614aa',
-    ...WEB_NO_OUTLINE,
-  },
+  input: { width: '100%', minWidth: 0, textAlign: 'right', color: COLORS.gold, fontFamily: F.display, fontSize: 28, paddingVertical: 0, paddingHorizontal: 0, ...WEB_NO_OUTLINE },
   uRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   unclaimed: {
     gap: 4,
     paddingHorizontal: 10,
-    paddingVertical: 5,
-    marginBottom: 6,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: COLORS.line,
-    backgroundColor: '#02061488',
+    paddingVertical: 6,
+    marginBottom: 8,
+    borderWidth: U,
+    borderColor: 'rgba(255,207,74,0.45)',
+    borderStyle: 'dashed',
+    backgroundColor: 'rgba(4,8,22,0.6)',
   },
-  tag: { borderWidth: 1, borderColor: COLORS.line, borderRadius: 5, paddingHorizontal: 7, paddingVertical: 2 },
-  check: { width: 24, height: 24, borderRadius: 6, borderWidth: 2, borderColor: COLORS.line, alignItems: 'center', justifyContent: 'center' },
-  checkOn: { backgroundColor: COLORS.gold, borderColor: COLORS.gold },
+  tag: { borderWidth: U, borderColor: '#22356f', paddingHorizontal: 6, paddingVertical: 1 },
 });

@@ -7,6 +7,7 @@
  * the dive into a claim. It runs at the display's refresh rate and steps its
  * effects down on its own if a phone can't keep up.
  */
+import { canvasDpr, reducedMotion } from './screen';
 import { ACTORS, ISLE, blit, draw, drawCanvas, has, makeCanvas, ctx2d, sprite, text, textCentered, textWidth, loadAtlas, type Ctx } from './art';
 import { drawMiner, drawPet, frameAt, HIT_FRAME, IMPACT, lampOf, moleNames, petFlies, petLight, POSES, stepBody, type Body } from './actors';
 import { Camera } from './camera';
@@ -202,7 +203,7 @@ export class Engine {
   private resize() {
     const cssW = this.canvas.clientWidth || window.innerWidth;
     const cssH = this.canvas.clientHeight || window.innerHeight;
-    const dpr = Math.min(window.devicePixelRatio || 1, this.quality ? 2.5 : 1.5);
+    const dpr = canvasDpr(cssW, cssH, this.quality ? 2.5 : 1.5);
     if (cssW !== this.W || cssH !== this.H || dpr !== this.dpr) {
       this.W = cssW;
       this.H = cssH;
@@ -236,7 +237,9 @@ export class Engine {
     const top = Math.min(s?.view.top ?? 200, this.H * 0.45);
     const bottom = Math.min(s?.view.bottom ?? 150, this.H * 0.55);
     const band = Math.max(120, this.H - top - bottom);
-    this.cam.setView(0, top, this.W, band);
+    const left = Math.min(s?.view.left ?? 0, this.W * 0.4);
+    const right = Math.min(s?.view.right ?? 0, this.W * 0.45);
+    this.cam.setView(left, top, Math.max(160, this.W - left - right), band);
     this.cam.update(t);
     this.sky.update(dt, now, this.quality);
     let t0 = performance.now();
@@ -541,7 +544,8 @@ export class Engine {
     const cam = this.cam;
     const S = cam.z * dpr;
     let shake = 0;
-    if (el >= 0 && el < 1400) shake = (seeded(now / 50) - 0.5) * 2 * Math.min(1, el / 700);
+    if (reducedMotion()) shake = 0;
+    else if (el >= 0 && el < 1400) shake = (seeded(now / 50) - 0.5) * 2 * Math.min(1, el / 700);
     else if (el > 2500 && el < 2850) shake = (seeded(now / 40) - 0.5) * 3;
     // last seconds of a live round (the deploy lock window): a low rumble. Render-only, under 2px.
     const msLeft = s ? s.roundEndsAt - Date.now() : 0;
@@ -921,13 +925,13 @@ export class Engine {
   private closeupGeom() {
     const cam = this.cam;
     const dpr = this.dpr;
-    const vw = this.W;
+    const vw = cam.vw;
     const vh = cam.vh;
     // whole device pixels per art pixel where the screen allows it; a fraction on
     // small or low-density screens rather than a scene too small to read
     const raw = Math.min(vw / 168, vh / (SH - 44)) * dpr;
     const s = raw >= 3 ? Math.floor(raw) : Math.max(1, raw);
-    const ox = Math.round((vw * dpr) / 2 - SCENE_CX * s);
+    const ox = Math.round(cam.vx * dpr + (vw * dpr) / 2 - SCENE_CX * s);
     const oy = Math.round(cam.vy * dpr + (vh * dpr - (SH - 40) * s) / 2 - 20 * s);
     return { s, ox, oy };
   }

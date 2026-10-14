@@ -18,7 +18,8 @@ import CaveView, { type CaveRef } from '../pixel/CaveView';
 import { myLook } from '../pixel/PixelMine';
 import { useView } from '../pixel/view';
 import { GEAR_ICON } from './gearIcons';
-import { T } from './kit';
+import { MapButton, T } from './kit';
+import { useChrome } from './layout';
 import { BAR_H } from './TabBar';
 import { BackPill } from './Lobby';
 
@@ -39,6 +40,7 @@ export function CaveEntry() {
   const inside = useView((s) => s.focus >= 0);
   const runs = useCave((s) => s.save.runs);
   const pick = useGame((s) => GEAR_ICON[s.save.pickaxe] ?? GEAR_ICON['pick-wood']);
+  const ch = useChrome(insets);
   const bob = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     if (!runs) return;
@@ -51,28 +53,16 @@ export function CaveEntry() {
     loop.start();
     return () => loop.stop();
   }, [bob, runs]);
-  if (dockOpen || inside) return null;
+  if ((dockOpen && !ch.desktop) || inside) return null;
   return (
-    <Animated.View style={[styles.entryWrap, { bottom: insets.bottom + BAR_H + 46, transform: [{ translateY: bob.interpolate({ inputRange: [0, 1], outputRange: [0, -4] }) }] }]}>
-      <Pressable
-        onPress={() => {
-          haptic.tap();
-          useCave.getState().show(homeSpot());
-        }}
-        style={({ pressed }) => [styles.entry, pressed && { transform: [{ scale: 0.94 }] }]}
-        accessibilityRole="button"
+    <Animated.View style={[styles.entryWrap, { right: ch.right, bottom: ch.desktop ? ch.bottom : insets.bottom + BAR_H + 46, transform: [{ translateY: bob.interpolate({ inputRange: [0, 1], outputRange: [0, -4] }) }] }]}>
+      <MapButton
+        label="CAVE RUN"
+        count={runs}
+        icon={<Image source={pick} style={{ width: 26, height: 26 }} {...PIXEL} />}
+        onPress={() => useCave.getState().show(homeSpot())}
         accessibilityLabel={`Play Cave Run. ${runs} runs left today`}
-      >
-        <Image source={pick} style={{ width: 26, height: 26 }} {...PIXEL} />
-        <T v="black" style={{ fontSize: 13, color: COLORS.gold }}>
-          CAVE RUN
-        </T>
-        <View style={[styles.entryCount, !runs && { backgroundColor: '#5a6a8a' }]}>
-          <T v="black" style={{ fontSize: 11, color: '#070d20' }}>
-            {runs}
-          </T>
-        </View>
-      </Pressable>
+      />
     </Animated.View>
   );
 }
@@ -137,19 +127,6 @@ export function CaveScreen() {
 
 const styles = StyleSheet.create({
   entryWrap: { position: 'absolute', right: 12 },
-  entry: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingLeft: 8,
-    paddingRight: 8,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: 'rgba(7,13,32,0.6)',
-    borderWidth: 1.5,
-    borderColor: COLORS.gold2,
-  },
-  entryCount: { minWidth: 24, height: 24, borderRadius: 12, paddingHorizontal: 6, backgroundColor: COLORS.gold, alignItems: 'center', justifyContent: 'center' },
   screen: { flex: 1, backgroundColor: '#0a0810' },
   caveBack: { position: 'absolute', left: 12 },
 });
