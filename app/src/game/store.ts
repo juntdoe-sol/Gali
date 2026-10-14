@@ -1237,12 +1237,15 @@ export const useGame = create<GameState>((set, get) => {
       if (st.wallet.owner && !onChainMode) return st.toast('On-chain mode is not deployed yet', 'bad');
       let run = r;
       if (isLive(st) && r.total > 1) {
-        // live autopilot: ORE's own automation. One wallet approval funds it; the device key runs each round.
+        // live autopilot: ORE's own automation. One wallet approval funds it; ORE picks the spots each round
+        // and Gali's server deploys every round, app open or closed (the device helps while it is open).
         if (st.autopilot) return st.toast('Autopilot is already on. Stop it first', 'info');
-        const n = r.blocks === 'all' ? BLOCKS : r.blocks === 'smart' ? r.smartN : idxOf(r.manualMask).length;
+        const squares = r.blocks === 'all' ? [...Array(BLOCKS).keys()] : r.blocks === 'smart' ? (st.selected.length === r.smartN ? [...st.selected] : randomPick(r.smartN)) : idxOf(r.manualMask);
+        const n = squares.length;
         const per = r.perSpot ?? 0;
         if (!n || per < MIN_SOL_PER_BLOCK) return st.toast(`Pick spots and at least ${MIN_SOL_PER_BLOCK} SOL per spot`, 'bad');
-        const deposit = per * n * r.total;
+        // each round also pays its executor 0.00001 SOL, the network fee
+        const deposit = (per * n + 0.00001) * r.total;
         // setup costs: ORE account rent (~0.0022), the device key's fee float (0.002), network fees; +0.0055 once if the player has no ORE miner account yet
         const need = deposit + 0.0065;
         if (st.wallet.sol < need) return st.toast(`Autopilot needs about ${need.toFixed(4)} SOL (${deposit.toFixed(4)} for the rounds + ~0.0065 setup). You have ${st.wallet.sol.toFixed(4)}`, 'bad');
@@ -1250,7 +1253,7 @@ export const useGame = create<GameState>((set, get) => {
           const [board, owner] = await Promise.all([loadBoard(), ownerKey()]);
           if (!owner) throw new Error('wallet disconnected');
           setWallet({ busy: `Approve autopilot in your wallet: ${deposit.toFixed(4)} SOL for ${r.total} rounds` });
-          await board.startAutopilot(per, n, r.total, owner);
+          await board.startAutopilot(per, squares, r.blocks === 'smart', r.total, owner);
           setWallet({ busy: null });
           run = { ...r, automated: true };
           void get().refreshWallet();
