@@ -413,7 +413,7 @@ export const useGame = create<GameState>((set, get) => {
           // ORE draws the round a few seconds after mining closes; wait for it
           for (let i = 0; ; i++) {
             if (await board.isRoundDrawn(roundId).catch(() => false)) break;
-            if (i >= 45) throw new Error('The round is taking a while to draw');
+            if (i >= 75) throw new Error('SlowDraw');
             await new Promise((res) => setTimeout(res, 2000));
           }
           r = await board.readOutcome(owner, roundId);
@@ -431,8 +431,10 @@ export const useGame = create<GameState>((set, get) => {
         split = r.split;
         lucky = r.lucky;
       } catch (e) {
-        const busy = isRateLimited(e);
-        get().toast(busy ? 'The network is busy. This round will settle on its own.' : `Couldn't settle round: ${errMsg(e)}`, busy ? 'info' : 'bad');
+        const busy = isRateLimited(e) || /SlowDraw|timed? ?out|fetch|network|503|502|429/i.test(String((e as Error)?.message ?? e));
+        // the round is safe on chain either way and is retried in the background; only say so once in a while
+        if (!busy) get().toast(`Couldn't read the round result: ${errMsg(e)}. It will show in Rounds`, 'info');
+        else if (!get().run?.automated) get().toast('The result is slow to arrive. It will show in Rounds', 'info');
         set({ phase: 'mining', pending: null, roundId: isLive(get()) ? curRound(get()) : roundOf(chainNow(offsetMs)) });
         return; // the round stays in save.unsettled and is retried in the background
       }
@@ -577,6 +579,7 @@ export const useGame = create<GameState>((set, get) => {
 
   /** One round of a run: deploy SOL on the current round. */
   const ROUND_RENT_SOL = 0.01;
+  let lastMissToast = 0;
   async function runRound() {
     const st = get();
     const run = st.run;
@@ -638,6 +641,17 @@ export const useGame = create<GameState>((set, get) => {
     } catch (e) {
       console.warn('[gali] deploy failed', e);
       const msg = String((e as Error)?.message ?? e);
+      const transient = /RoundLocked|WrongRound|timed? ?out|fetch|network|blockhash|block height|503|502|429/i.test(msg) || isRateLimited(e);
+      if (transient && live && run.automated) {
+        // autopilot: one round got away (it closed first, or the network hiccuped). The SOL stays in
+        // ORE's automation, so skip it quietly and play the next round.
+        setWallet({ busy: null });
+        if (Date.now() - lastMissToast > 60_000) {
+          lastMissToast = Date.now();
+          get().toast('Autopilot missed a round. It plays the next one', 'info');
+        }
+        return;
+      }
       if (/RoundLocked|WrongRound/.test(msg) || isRateLimited(e)) {
         if (live) return stop('That round closed before it landed. Tap MINE to try the next one');
         // this round got away: keep the run and try the next one
@@ -716,6 +730,24 @@ export const useGame = create<GameState>((set, get) => {
    * Back from the background (a wallet approval, the home screen): read the board
    * and the wallet again at once. Timers were paused and any read in flight is stale.
    */
+  /**
+   * The app was closed or reloaded while ORE still held autopilot funds: the run lived only in memory,
+   * so pick it up again with the same spots and amount, for as many rounds as the balance still pays.
+   */
+  function resumeAutopilot(a: { balance: number; perSpot: number; runnable: boolean; mask: number; random: boolean; fee: number }) {
+    const st = get();
+    if (st.run || !a.runnable || !isLive(st) || a.perSpot < MIN_SOL_PER_BLOCK) return;
+    const squares = idxOf(a.mask);
+    const n = squares.length;
+    if (!n) return;
+    const perRound = a.perSpot * n + a.fee;
+    const left = Math.floor(a.balance / perRound + 1e-9);
+    if (left < 1) return;
+    const blocks: Preset['blocks'] = n === BLOCKS ? 'all' : a.random ? 'smart' : 'manual';
+    set({ run: { kind: 'pro', perRound: a.perSpot * n, perSpot: a.perSpot, blocks, smartN: n, manualMask: a.mask, total: left, automated: true, left, lastRound: -1 } });
+    get().toast(`Autopilot resumed: ${left} round${left === 1 ? '' : 's'} left`, 'good');
+  }
+
   function resumeLive() {
     if (!isLive(get())) return;
     clockBusy = false;
@@ -1169,7 +1201,10 @@ export const useGame = create<GameState>((set, get) => {
           setWallet({ ...w, player: null, skr: 0, sessionSol: 0, pool: 0, shop: null, readError: undefined });
           try {
             const a = await chain.withTimeout(board.readAutopilot(owner));
-            if (get().wallet.owner === owner.toBase58()) set({ autopilot: a ? { balance: a.balance, perSpot: a.perSpot, runnable: a.runnable } : null });
+            if (get().wallet.owner === owner.toBase58()) {
+              set({ autopilot: a ? { balance: a.balance, perSpot: a.perSpot, runnable: a.runnable } : null });
+              if (a) resumeAutopilot(a);
+            }
           } catch {
             /* keep what we last knew */
           }

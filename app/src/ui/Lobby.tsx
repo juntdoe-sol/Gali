@@ -963,7 +963,7 @@ export function LobbyBack() {
         <BackPill kbd={ch.desktop ? 'L' : undefined} />
         {ch.desktop && !LANDSCAPE_APP ? fight : null}
       </View>
-      {LANDSCAPE_APP ? <FightPad right={ch.right} bottom={bottom + 58} hit={brawlOn} onHit={islandFight} onJump={islandJump} /> : null}
+      {LANDSCAPE_APP ? <FightPad small right={ch.right} bottom={bottom + 54} hit={brawlOn} onHit={islandFight} onJump={islandJump} /> : null}
       {ch.desktop ? null : (
         // phones: the action buttons sit on the right, above CAVE RUN, where a thumb rests
         <View style={[styles.actCol, { right: 12, bottom: bottom + 58 }]} pointerEvents="box-none">

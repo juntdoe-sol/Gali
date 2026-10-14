@@ -266,6 +266,11 @@ export async function readAutomation(owner: PublicKey) {
     spent: toSol(a.totalSolSpent),
     executor: a.executor,
     runnable: a.executor.equals(EXECUTOR_ADDRESS) || Boolean(mine && a.executor.equals(mine)),
+    /** the spots it plays (Preferred), or how many it rolls each round (Random) */
+    mask: Number(a.mask & 0x1ffffffn),
+    random: Number(a.strategy) === AUTOMATION_STRATEGY.Random,
+    /** SOL each round pays its executor */
+    fee: toSol(a.fee),
   };
 }
 
