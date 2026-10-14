@@ -13,7 +13,7 @@ import { drawMiner, drawPet, frameAt, HIT_FRAME, IMPACT, lampOf, moleNames, petF
 import { Camera } from './camera';
 import { buildScene, drawScene, newVisit, paintUnderground, SCENE_CX, SH, type Scene, type Visit } from './closeup';
 import { landedSince, rumbleAmp, shouldCelebrate } from './juice';
-import { CLAIMS, MAP_H, MAP_W, REGIONS, claimForTap, shipAt, toLand } from './island';
+import { CLAIMS, MAP_H, MAP_W, REGIONS, claimForTap, isLand, shipAt, toLand } from './island';
 import { Particles } from './particles';
 import { findPath } from './path';
 import { Sky } from './sky';
@@ -23,6 +23,11 @@ import { Water } from './water';
 const BLOCKS = 25;
 const SWING_MS = POSES.swing.n * POSES.swing.ms;
 const HOME = ISLE.home as [number, number];
+/** where a miner lands on arrival: the middle of the ORE helipad, a step south of the logo's centre */
+const PAD = (ISLE as unknown as { pad?: { x: number; y: number; size: number } }).pad;
+const LANDING: [number, number] = PAD ? [PAD.x, PAD.y + 12] : HOME;
+/** keyboard walking speed, map px a second (a tap walk is 52) */
+const KEY_SPEED = 56;
 const standOf = (i: number) => CLAIMS[i].stand as [number, number];
 const [FIT_X, FIT_Y, FIT_W, FIT_H] = ISLE.fit as [number, number, number, number];
 /** where the island's original frame sits inside the wider map */
@@ -125,6 +130,12 @@ export class Engine {
   private lastTap = { t: 0, x: 0, y: 0, hit: -1 };
   /** A single tap on a spot waits this long for a second tap before it counts as a pick. */
   private tapTimer: ReturnType<typeof setTimeout> | null = null;
+  /** WASD / arrow keys held down (web) */
+  private keys = new Set<string>();
+  private keyWalk = false;
+  private keyAim: [number, number] = [0, 0];
+  private onIsland = false;
+  private offKeys: (() => void) | null = null;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -132,6 +143,7 @@ export class Engine {
   ) {
     this.c = ctx2d(canvas);
     this.bindInput();
+    this.bindKeys();
     (globalThis as unknown as { __galiEngine?: Engine }).__galiEngine = this;
   }
 
@@ -158,12 +170,35 @@ export class Engine {
   }
   stop() {
     cancelAnimationFrame(this.raf);
+    this.offKeys?.();
     this.cancelPress();
     this.cancelTap();
   }
 
   push(s: Snapshot) {
     this.snap = s;
+    const on = Boolean(s.onIsland);
+    if (on && !this.onIsland) this.land();
+    if (!on) this.keys.clear();
+    this.onIsland = on;
+  }
+
+  /** Arriving on the island: the miner steps off at the helipad, and the camera goes to meet them. */
+  private land() {
+    const me = this.me;
+    const now = performance.now();
+    me.x = LANDING[0];
+    me.y = LANDING[1];
+    me.path = [];
+    me.target = -1;
+    me.pose = 'idle';
+    me.since = now;
+    me.facing = -1;
+    // stand a moment on the pad before heading off to any spots you have picked
+    me.manualUntil = now + 2500;
+    this.petPos.x = me.x + 11;
+    this.petPos.y = me.y;
+    this.parts.burst('dust', me.x, me.y, 10, 22, 14, ['#f2e6c8', '#d8c8a8'], 0.7);
   }
   /** Dive into claim `i`, or -1 to come back up. */
   setFocus(i: number) {
@@ -226,6 +261,73 @@ export class Engine {
       cam.follow = true;
       cam.setFocus(me.x, me.y - 6);
     }
+  }
+
+  /** WASD and the arrows walk the miner on the island, as they do in the lobby (web only). */
+  private bindKeys() {
+    if (typeof window === 'undefined') return;
+    const MOVE = ['arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'w', 'a', 's', 'd'];
+    const typing = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      return Boolean(t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable));
+    };
+    const down = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || typing(e)) return;
+      const k = e.key.toLowerCase();
+      if (!MOVE.includes(k) || !this.onIsland || this.mode !== 'island') return;
+      this.keys.add(k);
+      e.preventDefault();
+    };
+    const up = (e: KeyboardEvent) => this.keys.delete(e.key.toLowerCase());
+    const blur = () => this.keys.clear();
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    window.addEventListener('blur', blur);
+    this.offKeys = () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', blur);
+    };
+  }
+
+  /** One frame of keyboard walking. Slides along the coast instead of stopping dead. */
+  private keyStep(dt: number, now: number): boolean {
+    const k = this.keys;
+    let dx = 0;
+    let dy = 0;
+    if (k.has('arrowleft') || k.has('a')) dx -= 1;
+    if (k.has('arrowright') || k.has('d')) dx += 1;
+    if (k.has('arrowup') || k.has('w')) dy -= 1;
+    if (k.has('arrowdown') || k.has('s')) dy += 1;
+    if ((!dx && !dy) || !this.onIsland || this.mode !== 'island') return false;
+    const n = Math.hypot(dx, dy);
+    const ux = dx / n;
+    const uy = dy / n;
+    const me = this.me;
+    const ok = (x: number, y: number) => isLand(x, y) && isLand(x - 4, y) && isLand(x + 4, y);
+    const nx = me.x + ux * KEY_SPEED * dt;
+    const ny = me.y + uy * KEY_SPEED * dt;
+    if (ok(nx, ny)) {
+      me.x = nx;
+      me.y = ny;
+    } else if (ok(nx, me.y)) me.x = nx;
+    else if (ok(me.x, ny)) me.y = ny;
+    else return false;
+    if (Math.abs(ux) > 0.25) me.facing = ux > 0 ? 1 : -1;
+    me.path = [];
+    me.target = -1;
+    me.manualUntil = now + 8000;
+    if (me.pose !== 'walk') {
+      me.pose = 'walk';
+      me.since = now;
+    }
+    // aim a little ahead, so other players see a steady walk between updates
+    this.keyAim = [me.x + ux * 30, me.y + uy * 30];
+    if (now - this.lastStep > 190) {
+      this.lastStep = now;
+      this.parts.spawn('dust', me.x - 2 * me.facing, me.y, { vx: -6 * me.facing, vz: 8, life: 0.45, c: '#e8d4b0' });
+    }
+    return true;
   }
 
   /* ------------------------------------------------------------------ */
@@ -401,7 +503,15 @@ export class Engine {
     };
     const winner = s?.winner ?? null;
     const won = winner !== null && pend & (1 << winner) && el > 2600;
-    if (me.path.length) {
+    const keyed = this.keyStep(dt, now);
+    if (!keyed && this.keyWalk && me.pose === 'walk' && !me.path.length) {
+      me.pose = 'idle';
+      me.since = now;
+    }
+    this.keyWalk = keyed;
+    if (keyed) {
+      // walking by hand: the miner goes where the keys say
+    } else if (me.path.length) {
       if (this.mode === 'island' && now - this.lastStep > 190) {
         this.lastStep = now;
         this.parts.spawn('dust', me.x - 2 * me.facing, me.y, { vx: -6 * me.facing, vz: 8, life: 0.45, c: '#e8d4b0' });
@@ -465,7 +575,7 @@ export class Engine {
     // tell the app where we are, a few times a second
     if (now - this.lastMe > 250) {
       this.lastMe = now;
-      const end = me.path.length ? me.path[me.path.length - 1] : [me.x, me.y];
+      const end = me.path.length ? me.path[me.path.length - 1] : this.keyWalk ? this.keyAim : [me.x, me.y];
       const legacy: Pose = me.pose === 'carry' ? 'walk' : me.pose === 'cheer' ? 'idle' : me.pose;
       this.emit({ t: 'me', x: me.x, y: me.y, tx: end[0], ty: end[1], facing: me.facing, pose: legacy });
     }

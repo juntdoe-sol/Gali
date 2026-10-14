@@ -21,6 +21,7 @@ import { GUTTER, layoutNow, TOP_H } from '../ui/layout';
 import { atlasSource } from './atlasSource';
 import GameView, { type GameRef } from './GameView';
 import { useView } from './view';
+import { useLobby } from '../game/lobby';
 
 const STANDS = CLAIMS.map((c) => c.stand as unknown as [number, number]);
 const GLOW: Record<Gear['rarity'], Look['glow']> = { common: 'none', rare: 'rare', epic: 'epic', legendary: 'legendary' };
@@ -123,6 +124,7 @@ function snapshot(): Snapshot {
     quality: 1,
     amounts: st.dockTab === 'pro',
     claimedAt: st.claimedAt,
+    onIsland: useLobby.getState().where === 'island',
   };
 }
 
