@@ -7,7 +7,14 @@ import { useLobby } from '../game/lobby';
 import { useGame } from '../game/store';
 import { EMOTES, useWorld } from '../game/world';
 import { fx } from '../pixel/fx';
-import { Btn, Frame, T } from './kit';
+import { Btn, Frame, IconBtn, PixelBox, T, U } from './kit';
+import { PixIcon } from './PixIcon';
+import type { PixName } from './pixIcons';
+import { useChrome } from './layout';
+
+/** The island's emotes travel as emoji (other players' apps read them); they are drawn as pixel icons. */
+const EMOTE_PIX: Record<string, PixName> = { '👋': 'wave', '⛏️': 'pick', '🎉': 'star', '💎': 'gem', '🔥': 'fire' };
+const EMOTE_NAME: Record<string, string> = { '👋': 'a wave', '⛏️': 'a pickaxe', '🎉': 'a cheer', '💎': 'a gem', '🔥': 'fire' };
 
 export function PeerCard() {
   const focus = useWorld((s) => s.focus);
@@ -15,6 +22,7 @@ export function PeerCard() {
   const status = useWorld((s) => s.status);
   const owner = useGame((s) => s.wallet.owner);
   const insets = useSafeAreaInsets();
+  const ch = useChrome(insets);
   const close = () => useWorld.getState().setFocus(null);
   useEffect(() => {
     if (focus && !peer) useWorld.getState().setFocus(null); // they left the world
@@ -23,31 +31,28 @@ export function PeerCard() {
   const badge = peer.bot ? 'Practice bot' : peer.wallet ? 'Verified wallet' : 'Guest (no verified wallet)';
   const badgeColor = peer.bot ? COLORS.muted : peer.wallet ? COLORS.sol : COLORS.text;
   return (
-    <Frame style={[styles.card, { bottom: Math.max(fx.viewBottom, insets.bottom + 80) + 8 }]} radius={12}>
+    <Frame style={[styles.card, ch.desktop ? { left: ch.left, right: undefined, width: 380, bottom: ch.bottom + 60 } : { bottom: Math.max(fx.viewBottom, insets.bottom + 80) + 8 }]}>
       <View style={styles.row}>
         <View style={{ flex: 1 }}>
-          <T v="display" style={{ fontSize: 20 }} numberOfLines={1}>
+          <T v="display" style={{ fontSize: 24 }} numberOfLines={1}>
             {peer.name}
           </T>
           <T v="bold" style={{ fontSize: 12, color: badgeColor }}>
             Level {peer.lvl} · {badge}
           </T>
         </View>
-        <Pressable onPress={close} hitSlop={10} accessibilityLabel="Close" style={styles.x}>
-          <T v="display" style={{ fontSize: 16 }}>
-            ✕
-          </T>
-        </Pressable>
+        <IconBtn onPress={close} label="Close">
+          <PixIcon name="close" size={16} />
+        </IconBtn>
       </View>
       <View style={[styles.row, { marginTop: 10, justifyContent: 'space-between' }]}>
         {EMOTES.map((e) => (
-          <Pressable
-            key={e}
-            onPress={() => useWorld.getState().emote(e)}
-            style={({ pressed }) => [styles.emote, pressed && { transform: [{ scale: 0.92 }] }]}
-            accessibilityLabel={`Send ${e}`}
-          >
-            <T style={{ fontSize: 22 }}>{e}</T>
+          <Pressable key={e} onPress={() => useWorld.getState().emote(e)} accessibilityRole="button" accessibilityLabel={`Send ${EMOTE_NAME[e] ?? e}`}>
+            {(st) => (
+              <PixelBox fill={(st as { hovered?: boolean }).hovered ? '#22346a' : '#0e1838'} hi="#2d4282" lo="#04060f" style={[styles.emote, { transform: [{ translateY: (st as { pressed: boolean }).pressed ? U : 0 }] }]}>
+                <PixIcon name={EMOTE_PIX[e] ?? 'star'} size={32} />
+              </PixelBox>
+            )}
           </Pressable>
         ))}
       </View>
@@ -75,17 +80,7 @@ export function PeerCard() {
 export const useMinersHere = () => useWorld((s) => Object.keys(s.peers).length + 1);
 
 const styles = StyleSheet.create({
-  card: { position: 'absolute', left: 12, right: 12, padding: 12 },
+  card: { position: 'absolute', left: 12, right: 12, padding: 14 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  x: { width: 30, height: 30, alignItems: 'center', justifyContent: 'center' },
-  emote: {
-    width: 48,
-    height: 42,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: COLORS.line,
-    backgroundColor: '#0a1636',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  emote: { width: 50, height: 46, alignItems: 'center', justifyContent: 'center' },
 });

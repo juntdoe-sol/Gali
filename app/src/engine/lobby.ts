@@ -13,6 +13,7 @@
  * It tells the app three things: where your miner is (to share), that you walked through a
  * door, and a few sounds.
  */
+import { canvasDpr } from './screen';
 import { draw, has, makeCanvas, ctx2d, rect, sprite, text, textCentered, textWidth, loadAtlas, type Ctx } from './art';
 import { drawMiner, drawPet, frameAt, lampOf, stepBody, type Body } from './actors';
 import { Particles } from './particles';
@@ -52,6 +53,11 @@ export interface LobbyOpts {
   /** CSS pixels the header covers, and the bottom panel covers */
   top: number;
   bottom: number;
+  /** CSS pixels a desktop side rail and side panel cover; the view centres between them */
+  left?: number;
+  right?: number;
+  /** false on a mouse-and-keyboard browser: no on-screen stick (WASD and click-to-walk instead) */
+  touch?: boolean;
 }
 
 const SPEED = 58;
@@ -725,7 +731,11 @@ export class LobbyEngine {
   /* input                                                               */
   /* ------------------------------------------------------------------ */
   private worldAt(sx: number, sy: number): [number, number] {
-    return [this.cam.x + (sx - this.W / 2) / this.z, this.cam.y + (sy - this.centreY()) / this.z];
+    return [this.cam.x + (sx - this.centreX()) / this.z, this.cam.y + (sy - this.centreY()) / this.z];
+  }
+  private centreX() {
+    const l = this.opts.left ?? 0;
+    return l + (this.W - l - (this.opts.right ?? 0)) / 2;
   }
   private centreY() {
     return this.opts.top + (this.H - this.opts.top - this.opts.bottom) / 2;
@@ -740,7 +750,7 @@ export class LobbyEngine {
     cv.addEventListener('pointerdown', (e) => {
       const p = pos(e);
       const sb = this.stickBase();
-      if (!this.stick && Math.hypot(p.x - sb.x, p.y - sb.y) < sb.r * 1.35) {
+      if (!this.stick && this.opts.touch !== false && Math.hypot(p.x - sb.x, p.y - sb.y) < sb.r * 1.35) {
         this.stick = { id: e.pointerId, dx: 0, dy: 0 };
         this.stickMove(p.x, p.y);
         try {
@@ -846,7 +856,7 @@ export class LobbyEngine {
 
   /** Where the stick sits: bottom left, just above the chat panel. */
   private stickBase() {
-    return { x: 16 + 52, y: this.H - this.opts.bottom - 52 - 12, r: 52 };
+    return { x: (this.opts.left ?? 0) + 16 + 52, y: this.H - this.opts.bottom - 52 - 12, r: 52 };
   }
   private stickMove(x: number, y: number) {
     if (!this.stick) return;
@@ -945,7 +955,7 @@ export class LobbyEngine {
     const cssW = this.canvas.clientWidth || window.innerWidth;
     const cssH = this.canvas.clientHeight || window.innerHeight;
     // pixel art gains nothing past 2x; a struggling phone drops to 1.25x
-    const dpr = Math.min(window.devicePixelRatio || 1, this.quality ? 2 : 1.25);
+    const dpr = canvasDpr(this.canvas.clientWidth || window.innerWidth, this.canvas.clientHeight || window.innerHeight, this.quality ? 2 : 1.25);
     if (cssW !== this.W || cssH !== this.H || dpr !== this.dpr) {
       this.W = cssW;
       this.H = cssH;
@@ -1099,13 +1109,16 @@ export class LobbyEngine {
     c.fillRect(0, 0, W, H);
     if (!this.ground) return;
 
-    // zoom: about 200 art pixels across a phone, in whole device pixels so nothing blurs
-    const base = Math.max(1.6, Math.min(5, (this.W / 200) * this.zoomK));
+    // zoom: about 200 art pixels across a phone, more of the world on a big screen, in whole device pixels so nothing blurs
+    const vw = W - (this.opts.left ?? 0) - (this.opts.right ?? 0);
+    const vh = H - this.opts.top - this.opts.bottom;
+    const span = Math.max(200, Math.min(520, vw / 3.2));
+    const base = Math.max(1.6, Math.min(5, Math.min(vw / span, vh / 150) * this.zoomK));
     this.z = this.director?.z ?? Math.max(1 / dpr, Math.round(base * dpr) / dpr);
     const z = this.z;
     const cy = this.centreY();
     // follow me, and stay inside the map
-    const hw = W / 2 / z;
+    const hw = vw / 2 / z;
     const hh = (H - this.opts.top - this.opts.bottom) / 2 / z;
     const clampAxis = (v: number, half: number, size: number) => (half * 2 >= size ? size / 2 : Math.max(half, Math.min(size - half, v)));
     const tx = clampAxis(this.me.x, hw, LW);
@@ -1117,7 +1130,7 @@ export class LobbyEngine {
       this.cam.x += (tx - this.cam.x) * Math.min(1, 0.12 + 0.0);
       this.cam.y += (ty - this.cam.y) * Math.min(1, 0.12);
     }
-    const ox = Math.round((W / 2 - this.cam.x * z) * dpr) / dpr;
+    const ox = Math.round((this.centreX() - this.cam.x * z) * dpr) / dpr;
     const oy = Math.round((cy - this.cam.y * z) * dpr) / dpr;
     const sx = (wx: number) => ox + wx * z;
     const sy = (wy: number) => oy + wy * z;
@@ -1290,7 +1303,7 @@ export class LobbyEngine {
     const hide = this.director?.hide;
     if (!hide?.signs) this.doorSigns(c, sx, sy, z, now);
     if (!hide?.mini) this.minimap(c, W, now);
-    if (!hide?.stick) this.drawStick(c);
+    if (!hide?.stick && this.opts.touch !== false) this.drawStick(c);
 
     // the fade as you step through a door
     if (this.leaving) {
@@ -1453,7 +1466,7 @@ export class LobbyEngine {
         c.fillStyle = fl[(k + f) % 3];
         c.fillRect(X + (-4 + k * 3) * z, Y - (3 + hgt) * z, 3 * z, hgt * z);
       }
-      if (Math.random() < 0.2) this.parts.spawn('ember', X / z * 0 + this.cam.x + (X - this.W / 2) / z, this.cam.y + (Y - this.centreY()) / z - 6, { vz: 14, life: 0.8, c: '#ffb347' });
+      if (Math.random() < 0.2) this.parts.spawn('ember', X / z * 0 + this.cam.x + (X - this.centreX()) / z, this.cam.y + (Y - this.centreY()) / z - 6, { vz: 14, life: 0.8, c: '#ffb347' });
       lights.push({ x: X * this.dpr, y: (Y - 6 * z) * this.dpr, r: 70 * z * this.dpr, c: '#ff9a3d', k: 0.85 + 0.15 * Math.sin(now / 90) });
     } else if (kind === 'stall-red' || kind === 'stall-teal') {
       lights.push({ x: X * this.dpr, y: (Y - 30 * z) * this.dpr, r: 40 * z * this.dpr, c: '#ffcf80', k: 1 });
@@ -1686,7 +1699,7 @@ export class LobbyEngine {
     const k = 2;
     const w = Math.round(LCOLS * k);
     const h = Math.round(LROWS * k);
-    const x = W - w - 10;
+    const x = W - (this.opts.right ?? 0) - w - 10;
     const y = this.opts.top + 6;
     this.minimapRect = { x, y, w, h };
     c.globalAlpha = 0.92;

@@ -1,6 +1,11 @@
 import { useAppFonts } from './fonts';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
+import { SidePanel } from './ui/Side';
+import { useLayout } from './ui/layout';
+import { TAB_KEY } from './ui/TabBar';
+import { useView } from './pixel/view';
+import { BLOCKS } from './game/constants';
 import { AppState, Platform, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { COLORS } from './game/constants';
@@ -21,10 +26,12 @@ import { PeerCard } from './ui/World';
 import { CaveEntry, CaveScreen } from './ui/Cave';
 import { LobbyBack, LobbyScreen, SharedChat } from './ui/Lobby';
 import { useLobby } from './game/lobby';
+import { useCave } from './game/caveStore';
+import { useArcade } from './game/arcade';
 
 
 // lets browser tests watch the game state
-if (Platform.OS === 'web') Object.assign(globalThis, { __gali: useGame, __galiWorld: useWorld, __galiLobbyStore: useLobby });
+if (Platform.OS === 'web') Object.assign(globalThis, { __gali: useGame, __galiWorld: useWorld, __galiLobbyStore: useLobby, __galiCaveStore: useCave, __galiArcadeStore: useArcade });
 // pixel art in the interface (gear icons) stays crisp when the browser scales it
 if (Platform.OS === 'web' && typeof document !== 'undefined' && !document.getElementById('gali-pixel-css')) {
   const el = document.createElement('style');
@@ -103,14 +110,79 @@ export default function App() {
   );
 }
 
+/**
+ * Keyboard shortcuts for a desktop browser. Letters open the pages (the rail shows each one's key),
+ * C or Enter the chat, L the lobby, Esc closes whatever is on top. Inside a spot: A and D step
+ * between spots and Space picks. Never a key that spends: deploying always takes a click and a
+ * wallet approval. Keys typed into a text field are left alone, and so is WASD in the lobby.
+ */
+function useHotkeys(sheet: SheetTab | null, setSheet: (t: SheetTab | null) => void, on: boolean) {
+  useEffect(() => {
+    if (!on || Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const byKey = Object.fromEntries(Object.entries(TAB_KEY).map(([t, k]) => [k.toLowerCase(), t])) as Record<string, SheetTab | 'chat'>;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      const k = e.key.toLowerCase();
+      const L = useLobby.getState();
+      const V = useView.getState();
+      if (k === 'escape') {
+        if (sheet) setSheet(null);
+        else if (L.chatOpen) L.setChatOpen(false);
+        else if (V.focus >= 0) V.go(-1);
+        else window.dispatchEvent(new CustomEvent('gali:escape'));
+        return;
+      }
+      // anything covering the game (a wallet prompt, a mini game) owns its own keys
+      const st = useGame.getState();
+      if (st.walletPicker || st.liveNotice || useCave.getState().open || useArcade.getState().game) return;
+      if (k === 'enter' && !sheet) {
+        L.setChatOpen(true);
+        e.preventDefault();
+        return;
+      }
+      if (k === '?' || (k === 'h' && L.where === 'island')) {
+        window.dispatchEvent(new CustomEvent('gali:help'));
+        return;
+      }
+      if (L.where === 'lobby') {
+        if (k === 'g') window.dispatchEvent(new CustomEvent('gali:travel'));
+        // WASD and the arrows walk you; the page letters still work
+      } else if (V.focus >= 0) {
+        if (k === 'a' || k === 'arrowleft') return V.go((V.focus + BLOCKS - 1) % BLOCKS);
+        if (k === 'd' || k === 'arrowright') return V.go((V.focus + 1) % BLOCKS);
+        if (k === ' ') {
+          e.preventDefault();
+          if (st.phase === 'mining' && !st.pending && !st.run) st.toggleBlock(V.focus);
+          return;
+        }
+      } else if (k === 'l' && !sheet) {
+        L.go('lobby', 'island');
+        return;
+      }
+      const tab = byKey[k];
+      if (!tab) return;
+      if (tab === 'chat') {
+        setSheet(null);
+        L.setChatOpen(!L.chatOpen);
+      } else setSheet(sheet === tab ? null : tab);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [on, sheet, setSheet]);
+}
+
 function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTab | null) => void }) {
   const guest = useGame((s) => oreLive && !s.wallet.owner);
+  const { desktop } = useLayout();
+  useHotkeys(sheet, setSheet, desktop && !guest);
   return (
     <>
       {!guest && <>
         <TopBar onMenu={() => setSheet('me')} />
-        <RoundCard />
-        <Dock />
+        {desktop ? <SidePanel /> : <RoundCard />}
+        {desktop ? null : <Dock />}
         <TabBar active={sheet} onTab={setSheet} />
         <MapHint />
         <CaveEntry />

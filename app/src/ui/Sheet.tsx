@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Linking, Modal, Pressable, ScrollView, StyleSheet, Switch, TextInput, View } from 'react-native';
+import { Linking, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ACHIEVEMENTS, BOOST_TIERS, COLORS, levelFromXp, localDay, MOTHERLODE_ODDS, MOTHERLODE_POINTS,
@@ -11,8 +11,10 @@ import { loadBoard, loadChain } from '../chain/lazy';
 import { ADMIN_FEE, fmtSol, POT_FEE, practiceMotherlode, practiceOreMotherlode, simPot, soloMask } from '../game/pot';
 import { UnclaimedRow } from './Dock';
 import { Market } from './Market';
-import { Bar, Btn, Card, Pill, T } from './kit';
-import { BAR_H, SHEET_TITLE, TabBar, type SheetTab } from './TabBar';
+import { Bar, Btn, Card, FocusRing, Frame, IconBtn, INPUT, Kbd, PixelBox, Pill, T, U } from './kit';
+import { PixIcon } from './PixIcon';
+import { GUTTER, RAIL_W, useLayout } from './layout';
+import { BAR_H, SHEET_TITLE, TAB_PIX, TabBar, type SheetTab } from './TabBar';
 import { BackPill } from './Lobby';
 
 const ORE_PROGRAM_STR = 'oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv';
@@ -20,34 +22,74 @@ const ORE_PROGRAM_STR = 'oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv';
 /** One page per bottom-bar tab. The bar is drawn inside the sheet too, so switching pages is one tap. */
 export function Sheet({ tab, onTab }: { tab: SheetTab | null; onTab: (t: SheetTab | null) => void }) {
   const insets = useSafeAreaInsets();
+  const { desktop, w } = useLayout();
   const close = () => onTab(null);
+  const head = (
+    <View style={styles.sheetHead}>
+      {tab ? <PixIcon name={TAB_PIX[tab]} size={32} /> : null}
+      <T v="display" style={{ fontSize: 30, lineHeight: 32, letterSpacing: 1, flex: 1 }}>
+        {tab ? SHEET_TITLE[tab].toUpperCase() : ''}
+      </T>
+      {tab === 'gear' ? <BackPill door="market" onBefore={close} /> : null}
+      <IconBtn onPress={close} label="Close" kbd="ESC">
+        <PixIcon name="close" size={18} />
+      </IconBtn>
+    </View>
+  );
+  const body = (
+    <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }} showsVerticalScrollIndicator>
+      {tab === 'quests' && <Quests />}
+      {tab === 'rounds' && <Rounds />}
+      {tab === 'gear' && <GearTab />}
+      {tab === 'skr' && <SkrTab />}
+      {tab === 'ranks' && <Ranks />}
+      {tab === 'me' && <Me />}
+    </ScrollView>
+  );
+  if (desktop) {
+    // a window beside the rail; the map stays visible to its right
+    const width = Math.min(tab === 'gear' ? 860 : 600, w - RAIL_W - GUTTER * 3);
+    return (
+      <Modal visible={tab !== null} animationType="fade" transparent onRequestClose={close}>
+        <Pressable style={styles.deskScrim} onPress={close} accessibilityLabel="Close" />
+        <View style={[styles.deskSheet, { left: RAIL_W + GUTTER, width }]}>
+          <Frame style={{ flex: 1, paddingTop: 14 }}>
+            <View style={{ paddingHorizontal: 16 }}>{head}</View>
+            {body}
+          </Frame>
+        </View>
+        <TabBar active={tab} onTab={onTab} inSheet />
+      </Modal>
+    );
+  }
   return (
     <Modal visible={tab !== null} animationType="slide" transparent onRequestClose={close}>
       <Pressable style={styles.scrim} onPress={close} />
       <View style={[styles.sheet, { paddingBottom: BAR_H + insets.bottom + 8 }]}>
-        <View style={styles.grabber} />
-        <View style={styles.sheetHead}>
-          <T v="display" style={{ fontSize: 24 }}>
-            {tab ? SHEET_TITLE[tab] : ''}
-          </T>
-          {tab === 'gear' ? <BackPill door="market" onBefore={close} /> : null}
-          <Pressable onPress={close} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close">
-            <T v="display" style={{ fontSize: 20, color: COLORS.muted }}>
-              ✕
-            </T>
-          </Pressable>
+        <View pointerEvents="none" style={styles.sheetBg}>
+          <View style={styles.sheetEdge} />
+          <View style={styles.sheetHi} />
         </View>
-        <ScrollView contentContainerStyle={{ padding: 14, gap: 10 }}>
-          {tab === 'quests' && <Quests />}
-          {tab === 'rounds' && <Rounds />}
-          {tab === 'gear' && <GearTab />}
-          {tab === 'skr' && <SkrTab />}
-          {tab === 'ranks' && <Ranks />}
-          {tab === 'me' && <Me />}
-        </ScrollView>
+        <View style={styles.grabber} />
+        <View style={{ paddingHorizontal: 16 }}>{head}</View>
+        {body}
       </View>
       <TabBar active={tab} onTab={onTab} inSheet />
     </Modal>
+  );
+}
+
+/** A pixel on/off switch. */
+function PixSwitch({ value, onChange, label }: { value: boolean; onChange: (v: boolean) => void; label: string }) {
+  return (
+    <Pressable onPress={() => onChange(!value)} accessibilityRole="switch" accessibilityState={{ checked: value }} accessibilityLabel={label}>
+      {(st) => (
+        <PixelBox fill={value ? '#15809a' : '#050817'} hi={value ? COLORS.teal : '#02040c'} lo={value ? '#0a4250' : '#22356f'} style={styles.switch}>
+          <PixelBox fill={value ? '#ffffff' : '#5f6f95'} hi={value ? '#ffffff' : '#8ea2cc'} lo={value ? '#9aeaff' : '#2d3a5e'} style={[styles.knob, { left: value ? 24 : 4 }]} />
+          {(st as { focused?: boolean }).focused ? <FocusRing /> : null}
+        </PixelBox>
+      )}
+    </Pressable>
   );
 }
 
@@ -64,7 +106,7 @@ function Quests() {
           Ends in {days} days. Top miners by points take the season crown.
         </T>
       </Card>
-      <T v="display" style={{ fontSize: 20, marginTop: 6 }}>
+      <T v="label" style={{ marginTop: 6 }}>
         Daily quests
       </T>
       {QUESTS.map((q) => {
@@ -80,22 +122,22 @@ function Quests() {
                 {Math.min(prog, q.target)}/{q.target} · +{q.rewardXp} XP
               </T>
             </View>
-            <Btn small label={claimed ? '✓' : done ? 'Claim' : '…'} disabled={!done || claimed} onPress={() => claim(q.id)} />
+            <Btn small kind={done && !claimed ? 'gold' : 'plain'} label={claimed ? 'Done' : done ? 'Claim' : `${Math.round((Math.min(prog, q.target) / q.target) * 100)}%`} disabled={!done || claimed} onPress={() => claim(q.id)} style={{ minWidth: 84, alignSelf: 'center' }} />
           </Card>
         );
       })}
-      <T v="display" style={{ fontSize: 20, marginTop: 6 }}>
+      <T v="label" style={{ marginTop: 6 }}>
         Achievements
       </T>
       <View style={styles.grid}>
         {ACHIEVEMENTS.map((a) => {
           const got = save.achievements.includes(a.id);
           return (
-            <View key={a.id} style={[styles.badge, got && { borderColor: COLORS.gold, opacity: 1 }]}>
-              <T style={{ fontSize: 20 }}>{got ? '🏅' : '🔒'}</T>
-              <T v="bold">{a.label}</T>
+            <PixelBox key={a.id} fill={got ? 'rgba(255,201,60,0.12)' : 'rgba(9,14,34,0.9)'} hi={got ? COLORS.gold : '#22356f'} lo="#04060f" style={[styles.badge, !got && { opacity: 0.75 }]}>
+              <PixIcon name={got ? 'medal' : 'lock'} size={32} />
+              <T v="display" style={{ fontSize: 18, lineHeight: 19, color: got ? COLORS.gold : COLORS.text }}>{a.label}</T>
               <T v="muted">{a.desc}</T>
-            </View>
+            </PixelBox>
           );
         })}
       </View>
@@ -118,7 +160,10 @@ function MotherlodeCard() {
   const won = useGame((s) => s.wallet.player?.skrWon ?? 0);
   return (
     <Card glow={COLORS.teal}>
-      <T v="label">💎 Two motherlodes, one hit{live ? '' : ' (practice)'}</T>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        <PixIcon name="ore" size={18} />
+        <T v="label">Two motherlodes, one hit{live ? '' : ' (practice)'}</T>
+      </View>
       <View style={{ flexDirection: 'row', gap: 18, marginVertical: 4 }}>
         <View>
           <T v="display" style={{ fontSize: 30, color: COLORS.teal }}>
@@ -197,7 +242,7 @@ function SkrTab() {
           value={amt}
           onChangeText={(v) => setAmt(v.replace(/[^0-9.]/g, ''))}
           keyboardType="numeric"
-          style={styles.input}
+          style={[INPUT, { marginTop: 6, fontFamily: 'Jersey15_400Regular', fontSize: 24, height: 50 }]}
           placeholderTextColor={COLORS.muted}
         />
         <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
@@ -305,7 +350,7 @@ function Rounds() {
               <T v="label">Your recent rounds</T>
               {mine.map((h) => (
                 <T key={h.roundId} v="muted" style={{ marginTop: 4 }}>
-                  #{(h.roundId % 100000).toLocaleString()} · spot {h.winning + 1} · {h.won ? 'you won' : 'no strike'} · ◎ {fmtSol(h.solIn)} in
+                  #{(h.roundId % 100000).toLocaleString()} · spot {h.winning + 1} · {h.won ? 'you won' : 'no strike'} · {fmtSol(h.solIn)} SOL in
                 </T>
               ))}
             </Card>
@@ -324,11 +369,11 @@ function Rounds() {
                 ? `★ Solo · ${p.winner === owner ? 'You' : p.winner.length > 20 ? short(p.winner) : p.winner}`
                 : '★ Solo · 1 wallet (claim pending)';
           return (
-            <View key={r.roundId} style={[styles.past, p.winner && p.winner === owner && { borderColor: COLORS.gold }]}>
+            <PixelBox key={r.roundId} fill="rgba(9,14,34,0.9)" hi={p.winner && p.winner === owner ? COLORS.gold : p.motherlode ? COLORS.teal : '#22356f'} lo="#04060f" style={styles.past}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <T v="bold">
                   #{(r.roundId % 100000).toLocaleString()} · spot {win + 1}
-                  {p.motherlode ? '  💎 MOTHERLODE' : ''}
+                  {p.motherlode ? '  · MOTHERLODE' : ''}
                 </T>
                 <T v="muted" style={{ fontSize: 11 }}>
                   {p.settled ? `${p.miners} miner${p.miners === 1 ? '' : 's'}` : 'settling'}
@@ -336,10 +381,10 @@ function Rounds() {
               </View>
               <T style={{ marginTop: 2, color: p.split || nobody ? COLORS.text : COLORS.gold }}>{who}</T>
               <T v="muted" style={{ fontSize: 12, marginTop: 2 }}>
-                ◎ {fmtSol(p.total)} SOL in · {fmtSol(p.fees)} fees · ◈ {p.oreReward.toFixed(2)} ORE
+                {fmtSol(p.total)} SOL in · {fmtSol(p.fees)} fees · {p.oreReward.toFixed(2)} ORE
                 {p.motherlodeOre > 0 ? ` + ${p.motherlodeOre.toFixed(2)} motherlode` : ''}
               </T>
-            </View>
+            </PixelBox>
           );
         })
       )}
@@ -374,19 +419,19 @@ function Ranks() {
         </Card>
       ) : (
         list.map((r, k) => (
-          <View key={r.owner} style={[styles.rank, r.owner === owner && { borderColor: COLORS.gold }]}>
-            <T v="display" style={{ width: 34, fontSize: 18, textAlign: 'center' }}>
-              {k < 3 ? ['🥇', '🥈', '🥉'][k] : k + 1}
-            </T>
+          <PixelBox key={r.owner} fill={r.owner === owner ? 'rgba(255,201,60,0.12)' : 'rgba(9,14,34,0.9)'} hi={r.owner === owner ? COLORS.gold : '#22356f'} lo="#04060f" style={styles.rank}>
+            <View style={{ width: 34, alignItems: 'center' }}>
+              {k < 3 ? <PixIcon name={(['medal', 'medal2', 'medal3'] as const)[k]} size={28} /> : <T v="display" style={{ fontSize: 22 }}>{k + 1}</T>}
+            </View>
             <T v="bold" style={{ flex: 1 }}>
               {short(r.owner)}
               {r.owner === owner ? '  (you)' : ''}
             </T>
             <T v="muted">Lv {r.level}</T>
-            <T v="black" style={{ color: COLORS.gold, minWidth: 70, textAlign: 'right' }}>
+            <T v="display" style={{ color: COLORS.gold, fontSize: 20, minWidth: 70, textAlign: 'right' }}>
               {r.points.toLocaleString()}
             </T>
-          </View>
+          </PixelBox>
         ))
       )}
     </>
@@ -440,21 +485,22 @@ function Me() {
           ['Day streak', String(w.player?.streak ?? save.dayStreak)],
           ['Moles bonked', String(save.moles)],
         ].map(([k, v]) => (
-          <View key={k} style={styles.badge}>
-            <T v="display" style={{ fontSize: 24 }}>
+          <PixelBox key={k} fill="rgba(9,14,34,0.9)" hi="#22356f" lo="#04060f" style={styles.badge}>
+            <T v="display" style={{ fontSize: 30, lineHeight: 32, color: COLORS.gold }}>
               {v}
             </T>
-            <T v="muted">{k}</T>
-          </View>
+            <T v="label" style={{ fontSize: 13 }}>{k}</T>
+          </PixelBox>
         ))}
       </View>
       <Card style={styles.rowCard}>
         <T style={{ flex: 1 }}>Mute sound</T>
-        <Switch id="mute" value={save.muted} onValueChange={setMute} trackColor={{ true: COLORS.teal, false: COLORS.card2 }} />
+        <PixIcon name={save.muted ? 'mute' : 'sound'} size={22} />
+        <PixSwitch value={save.muted} onChange={setMute} label="Mute sound" />
       </Card>
       {live ? (
         <T v="muted">
-          Live mode: real rounds on ORE&apos;s mainnet board, about every 80 seconds. Put SOL on 1 to 25 spots and one strikes gold. ORE keeps 1% of every spot and 10% more of spots that miss; the rest comes back for you to claim. The gold spot mines the round&apos;s ORE, split by SOL there, or all to one miner on a ★ solo spot. Gali takes no cut and never holds your SOL. ORE is credited as the board Gali plays on; Gali is not affiliated with or endorsed by ORE. This is a game of chance with real money: 18+ only, and only play with SOL you can afford to lose.
+          Live mode: real rounds on ORE&apos;s mainnet board, about every 80 seconds. Put SOL on 1 to 25 spots and one strikes gold. ORE keeps 1% of every spot and 10% more of spots that miss; the rest comes back for you to claim. The gold spot mines the round&apos;s ORE, split by SOL there, or all to one miner on a solo spot. Gali takes no cut and never holds your SOL. ORE is credited as the board Gali plays on; Gali is not affiliated with or endorsed by ORE. This is a game of chance with real money: 18+ only, and only play with SOL you can afford to lose.
         </T>
       ) : (
       <T v="muted">How it works: each minute is a round on an island with 25 mining spots. Put SOL on 1 to 25 spots. One spot strikes gold. ORE keeps 1% of every spot and 10% more of spots that miss; the rest of your SOL comes back to claim. The gold spot mines the round's ORE, split by SOL there, or on one of the round's 10 solo spots (★) taken whole by one miner, with odds equal to their share. Fewer spots pay more points: 1,000 for a single spot, 40 for all 25. A 1-in-500 motherlode pays out the whole SKR Motherlode Pool on top. Everything lands in Unclaimed until you claim it. This is a game of chance: only play with SOL you can afford to lose.</T>
@@ -477,29 +523,20 @@ function Me() {
 }
 
 const styles = StyleSheet.create({
-  scrim: { flex: 1, backgroundColor: '#04081733' },
-  sheet: {
-    maxHeight: '82%',
-    backgroundColor: COLORS.bg2,
-    borderTopLeftRadius: 26,
-    borderTopRightRadius: 26,
-    borderColor: COLORS.line,
-    borderWidth: 2,
-    borderBottomWidth: 0,
-  },
-  grabber: { alignSelf: 'center', width: 44, height: 5, borderRadius: 3, backgroundColor: COLORS.line, marginTop: 8 },
-  sheetHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 6, paddingBottom: 8, borderBottomColor: COLORS.line, borderBottomWidth: 2 },
-  tabs: { flexDirection: 'row', paddingHorizontal: 10, paddingTop: 8, gap: 4, borderBottomColor: COLORS.line, borderBottomWidth: 2, paddingBottom: 8 },
-  tab: { flex: 1, alignItems: 'center', paddingVertical: 6, borderRadius: 12 },
-  past: { padding: 10, borderRadius: 12, borderWidth: 1, borderColor: COLORS.line, backgroundColor: COLORS.card },
-  tabOn: { backgroundColor: COLORS.card2 },
+  scrim: { flex: 1, backgroundColor: 'rgba(4,6,15,0.35)' },
+  deskScrim: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: 'rgba(4,6,15,0.45)' },
+  deskSheet: { position: 'absolute', top: GUTTER, bottom: GUTTER },
+  sheet: { maxHeight: '82%', paddingTop: 4 },
+  sheetBg: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: 'rgba(15,23,52,0.97)' },
+  sheetEdge: { position: 'absolute', left: 0, right: 0, top: 0, height: U, backgroundColor: '#04060f' },
+  sheetHi: { position: 'absolute', left: 0, right: 0, top: U, height: U, backgroundColor: COLORS.trim },
+  grabber: { alignSelf: 'center', width: 40, height: U * 2, backgroundColor: '#3a5290', marginTop: 8, marginBottom: 4 },
+  sheetHead: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 6, paddingBottom: 10, borderBottomColor: '#22356f', borderBottomWidth: U },
+  past: { padding: 12 },
   rowCard: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  badge: { width: '48.5%', backgroundColor: COLORS.card, borderColor: COLORS.line, borderWidth: 2, borderRadius: 14, padding: 10, gap: 2, opacity: 0.85 },
-  gearIcon: { width: 54, height: 54, borderRadius: 14, borderWidth: 2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  swatch: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 10 },
-  seg: { flexDirection: 'row', gap: 4, backgroundColor: '#00000055', borderRadius: 14, padding: 4 },
-  segBtn: { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 10 },
-  rank: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: COLORS.card, borderRadius: 12, borderWidth: 2, borderColor: 'transparent', padding: 10 },
-  input: { marginTop: 6, backgroundColor: '#00000055', borderColor: COLORS.line, borderWidth: 2, borderRadius: 12, color: COLORS.text, fontSize: 20, paddingHorizontal: 12, paddingVertical: 8, fontFamily: 'Jersey15_400Regular' },
+  badge: { width: '48.5%', padding: 12, gap: 4 },
+  rank: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10 },
+  switch: { width: 50, height: 28 },
+  knob: { position: 'absolute', top: 4, width: 22, height: 20 },
 });

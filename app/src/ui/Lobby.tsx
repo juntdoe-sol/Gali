@@ -24,7 +24,8 @@ import { atlasSource } from '../pixel/atlasSource';
 import LobbyView, { type LobbyRef } from '../pixel/LobbyView';
 import { myLook } from '../pixel/PixelMine';
 import { useView } from '../pixel/view';
-import { Btn, F, T } from './kit';
+import { Btn, Choice, F, FocusRing, Frame, IconBtn, INPUT, Kbd, MapButton, PixelBox, Scrim, T, Tip, U, Window } from './kit';
+import { GUTTER, RAIL_W, TOP_H, sideWidth, useChrome, useLayout } from './layout';
 import { BAR_H, TabBar, type SheetTab } from './TabBar';
 import { Arcade } from './Arcade';
 import { PixIcon } from './PixIcon';
@@ -138,12 +139,47 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
     return () => clearInterval(id);
   }, []);
 
-  const bottom = bottomInset + BAR_H + 150;
-  const topH = top + 88;
+  const L = useLayout();
+  const chatW = L.desktop ? sideWidth(L.w) : 0;
+  const bottom = L.desktop ? 96 : bottomInset + BAR_H + 150;
+  const topH = L.desktop ? TOP_H + GUTTER : top + 104;
+  const left = L.desktop ? RAIL_W : 0;
+  const right = L.desktop ? chatW + GUTTER * 2 : 0;
+  const touch = !L.mouse;
   useEffect(() => {
     const f = ref.current?.opts;
-    if (typeof f === 'function') f({ top: topH, bottom });
-  }, [topH, bottom]);
+    if (typeof f === 'function') f({ top: topH, bottom, left, right, touch });
+  }, [topH, bottom, left, right, touch]);
+
+  // desktop keys: G travel, ? help, 1-6 emotes, 7 dance, Esc closes the top menu
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const travel = () => setNavOpen((v) => !v);
+    const help = () => setHowTo(true);
+    const esc = () => {
+      setNavOpen(false);
+      setDanceOpen(false);
+      setHowTo(false);
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      const n = Number(e.key);
+      if (n >= 1 && n <= LOBBY_EMOTES.length) useLobby.getState().emote(LOBBY_EMOTES[n - 1]);
+      else if (n === LOBBY_EMOTES.length + 1) setDanceOpen((o) => !o);
+    };
+    window.addEventListener('gali:travel', travel);
+    window.addEventListener('gali:help', help);
+    window.addEventListener('gali:escape', esc);
+    window.addEventListener('keydown', key);
+    return () => {
+      window.removeEventListener('gali:travel', travel);
+      window.removeEventListener('gali:help', help);
+      window.removeEventListener('gali:escape', esc);
+      window.removeEventListener('keydown', key);
+    };
+  }, []);
 
   /** Go through a door: by walking in, or instantly from the travel menu. */
   const enter = useCallback(
@@ -222,174 +258,157 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
           onEvent={onEvent}
           atlas={atlas}
           look={look}
-          opts={{ spawn, top: topH, bottom }}
+          opts={{ spawn, top: topH, bottom, left, right, touch }}
           dom={{ style: { flex: 1, backgroundColor: '#2f7fc4' }, scrollEnabled: false, bounces: false, overScrollMode: 'never' } as never}
         />
       ) : null}
 
-      {/* header */}
-      <View style={[styles.head, { paddingTop: top + 6 }]} pointerEvents="box-none">
-        <View style={styles.headRow} pointerEvents="box-none">
-          <View style={styles.titleBox}>
-            <Image source={require('../../assets/brand/wordmark.png')} style={styles.logo} resizeMode="contain" />
-            <T v="display" style={{ fontSize: 13, color: COLORS.gold, letterSpacing: 1 }}>
-              LOBBY
-            </T>
-          </View>
-          <Pressable onPress={() => setEditing(true)} style={styles.chip} accessibilityRole="button" accessibilityLabel="Change your name">
-            <View style={[styles.dot, { backgroundColor: status === 'online' ? '#7be07b' : status === 'full' ? COLORS.red : '#ffb347' }]} />
-            <T v="bold" style={{ fontSize: 13 }} numberOfLines={1}>
-              {name || 'Pick a name'}
-            </T>
-            <T v="muted" style={{ fontSize: 11 }}>
-              Lv {lvl}
-            </T>
-          </Pressable>
-        </View>
-        <View style={styles.headRow} pointerEvents="box-none">
-          <View style={styles.chip}>
-            <T v="black" style={{ color: COLORS.sol, fontSize: 13 }}>
-              ◎
-            </T>
-            <T v="display" style={{ fontSize: 13 }}>
-              {sol.toFixed(sol >= 100 ? 1 : 3)}
-            </T>
-            <T v="muted" style={{ fontSize: 11 }}>
-              SOL
-            </T>
-          </View>
-          <View style={{ flexDirection: 'row', gap: 6 }}>
-          <Pressable onPress={() => setHowTo(true)} style={styles.chip} accessibilityRole="button" accessibilityLabel="How to play">
-            <T v="black" style={{ fontSize: 13, color: COLORS.gold }}>
-              ?
-            </T>
-            <T v="bold" style={{ fontSize: 12 }}>
-              How to play
-            </T>
-          </Pressable>
-          <View style={styles.chip}>
-            <T v="bold" style={{ fontSize: 12 }}>
-              {status === 'full' ? 'Lobby full' : status === 'online' ? `${count} here` : status === 'joining' ? 'Joining…' : 'Offline'}
-            </T>
-          </View>
-          </View>
-        </View>
-      </View>
+      {L.desktop ? <SharedChat inLobby /> : null}
 
-      {/* bottom: the last few lines, emotes, then the same bar as the island */}
-      <View style={[styles.bottom, { bottom: bottomInset + BAR_H + 40 }]} pointerEvents="box-none">
-        {status === 'full' ? (
-          <View style={styles.full}>
-            <T v="bold" style={{ fontSize: 12, textAlign: 'center' }}>
-              The lobby holds {LOBBY_CAP} players and is full. You can still walk in, but nobody will see you until someone leaves. The island is open.
-            </T>
-          </View>
-        ) : null}
-        <Pressable style={styles.log} onPress={() => useLobby.getState().setChatOpen(true)} accessibilityRole="button" accessibilityLabel="Open the lobby chat">
-          {msgs.slice(-3).map((m) => (
-            <View key={m.id} style={styles.line}>
-              <T v="black" style={{ fontSize: 12, color: m.mine ? COLORS.gold : COLORS.teal }}>
-                {m.name}
+      {/* header */}
+      {L.desktop ? (
+        <View style={[styles.deskHead, { left: RAIL_W + GUTTER, right }]} pointerEvents="box-none">
+          <PixelBox fill="rgba(8,13,32,0.9)" hi={COLORS.trim} lo="#04060f" shadow={1} style={styles.deskTitle}>
+            <PixIcon name="users" size={24} />
+            <View>
+              <T v="display" style={{ fontSize: 22, lineHeight: 23, color: COLORS.gold, letterSpacing: 1 }}>
+                THE LOBBY
               </T>
-              <T v="body" style={{ fontSize: 12, flex: 1 }} numberOfLines={2}>
-                {m.text}
+              <View style={[styles.headRow, { justifyContent: 'flex-start' }]}>
+                <View style={[styles.dot, { backgroundColor: status === 'online' ? COLORS.green : status === 'full' ? COLORS.red : '#ffb347' }]} />
+                <T v="label" style={{ fontSize: 12, lineHeight: 13 }}>
+                  {status === 'full' ? 'Lobby full' : status === 'online' ? `${count} miner${count === 1 ? '' : 's'} online` : status === 'joining' ? 'Joining' : 'Offline'}
+                </T>
+              </View>
+            </View>
+          </PixelBox>
+          <View style={[styles.headRow, { gap: 8 }]}>
+            <NameChip name={name} lvl={lvl} status={status} onPress={() => setEditing(true)} />
+            <SolChip sol={sol} />
+            <Tip text="How to play (?)" side="bottom" width={150}>
+              <IconBtn onPress={() => setHowTo(true)} label="How to play" kbd="?">
+                <T v="display" style={{ fontSize: 22, color: COLORS.gold }}>
+                  ?
+                </T>
+              </IconBtn>
+            </Tip>
+          </View>
+        </View>
+      ) : (
+        <View style={[styles.head, { paddingTop: top + 6 }]} pointerEvents="box-none">
+          <View style={styles.headRow} pointerEvents="box-none">
+            <View style={styles.titleBox}>
+              <Image source={require('../../assets/brand/wordmark.png')} style={styles.logo} resizeMode="contain" />
+              <T v="display" style={{ fontSize: 15, color: COLORS.gold, letterSpacing: 1, marginTop: -4 }}>
+                LOBBY
               </T>
             </View>
-          ))}
-        </Pressable>
-        <View style={styles.emotes}>
-          {LOBBY_EMOTES.map((e) => (
-            <Pressable key={e} onPress={() => useLobby.getState().emote(e)} style={({ pressed }) => [styles.emote, pressed ? styles.emotePressed : null]} accessibilityRole="button" accessibilityLabel={`Emote ${EMOTE_NAME[e] ?? e}`}>
-              <PixIcon name={e} size={32} />
-            </Pressable>
-          ))}
-          <View style={styles.emoteSep} />
-          <Pressable onPress={() => setDanceOpen((o) => !o)} style={({ pressed }) => [styles.emote, myDance || danceOpen ? styles.emoteOn : null, pressed ? styles.emotePressed : null]} accessibilityRole="button" accessibilityLabel="Dance">
-            <PixIcon name="note" size={32} />
-          </Pressable>
+            <NameChip name={name} lvl={lvl} status={status} onPress={() => setEditing(true)} />
+          </View>
+          <View style={styles.headRow} pointerEvents="box-none">
+            <SolChip sol={sol} />
+            <View style={{ flexDirection: 'row', gap: 6 }}>
+              <IconBtn onPress={() => setHowTo(true)} label="How to play">
+                <View style={styles.headRow}>
+                  <T v="display" style={{ fontSize: 20, color: COLORS.gold, paddingLeft: 8 }}>
+                    ?
+                  </T>
+                  <T v="display" style={{ fontSize: 16, paddingRight: 10 }}>
+                    HOW TO PLAY
+                  </T>
+                </View>
+              </IconBtn>
+              <PixelBox fill="rgba(8,13,32,0.86)" hi="rgba(60,86,160,0.5)" lo="#04060f" style={styles.statusChip}>
+                <PixIcon name="users" size={16} />
+                <T v="display" style={{ fontSize: 16 }}>
+                  {status === 'full' ? 'FULL' : status === 'online' ? `${count}` : status === 'joining' ? '...' : 'OFF'}
+                </T>
+              </PixelBox>
+            </View>
+          </View>
         </View>
-        {danceOpen ? (
-          <View style={styles.danceCard}>
-            <T v="label" style={{ fontSize: 10, color: COLORS.muted, letterSpacing: 1.2 }}>
-              DANCE
+      )}
+
+      {/* bottom: the last few lines (phones), emotes, then the same bar as the island */}
+      <View style={[styles.bottom, L.desktop ? { bottom: GUTTER, left: RAIL_W + GUTTER, right, alignItems: 'center' } : { bottom: bottomInset + BAR_H + 40 }]} pointerEvents="box-none">
+        {status === 'full' ? (
+          <PixelBox fill="rgba(60,10,16,0.9)" hi={COLORS.red} lo="#04060f" style={styles.full}>
+            <T v="bold" style={{ fontSize: 13, textAlign: 'center' }}>
+              The lobby holds {LOBBY_CAP} players and is full. You can still walk in, but nobody will see you until someone leaves. The island is open.
             </T>
+          </PixelBox>
+        ) : null}
+        {L.desktop || L.h < 500 ? null : (
+          <Pressable style={styles.log} onPress={() => useLobby.getState().setChatOpen(true)} accessibilityRole="button" accessibilityLabel="Open the lobby chat">
+            {msgs.slice(-3).map((m) => (
+              <View key={m.id} style={styles.line}>
+                <T v="black" style={{ fontSize: 13, color: m.mine ? COLORS.gold : COLORS.teal }}>
+                  {m.name}
+                </T>
+                <T v="body" style={{ fontSize: 13, flex: 1 }} numberOfLines={2}>
+                  {m.text}
+                </T>
+              </View>
+            ))}
+          </Pressable>
+        )}
+        {danceOpen ? (
+          <Frame style={styles.danceCard}>
+            <T v="label">Dance</T>
             <View style={styles.danceRow}>
               {([1, 2, 3] as const).map((n) => (
-                <Pressable
+                <Choice
                   key={n}
+                  label={DANCE_NAMES[n - 1]}
+                  on={myDance === n}
                   onPress={() => {
                     useLobby.getState().setDance(myDance === n ? 0 : n);
                     setDanceOpen(false);
                   }}
-                  style={({ pressed }) => [styles.danceBtn, myDance === n ? styles.danceBtnOn : null, pressed ? styles.emotePressed : null]}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Dance ${DANCE_NAMES[n - 1]}`}>
-                  <T v="black" style={{ fontSize: 12, color: myDance === n ? '#2b1600' : COLORS.text, letterSpacing: 0.6 }}>
-                    {DANCE_NAMES[n - 1]}
-                  </T>
-                </Pressable>
+                />
               ))}
               {myDance ? (
-                <Pressable
+                <Btn
+                  small
+                  kind="red"
+                  label="STOP"
+                  style={{ alignSelf: 'center' }}
                   onPress={() => {
                     useLobby.getState().setDance(0);
                     setDanceOpen(false);
                   }}
-                  style={({ pressed }) => [styles.danceBtn, { borderColor: '#ff6b6b88' }, pressed ? styles.emotePressed : null]}
-                  accessibilityRole="button"
-                  accessibilityLabel="Stop dancing">
-                  <T v="black" style={{ fontSize: 12, color: '#ff8f8f', letterSpacing: 0.6 }}>
-                    STOP
-                  </T>
-                </Pressable>
+                />
               ) : null}
             </View>
-          </View>
+          </Frame>
         ) : null}
+        <PixelBox fill="rgba(8,13,32,0.9)" hi="#2d4282" lo="#04060f" shadow={2} style={[styles.emotes, L.w < 390 && { gap: 3, paddingHorizontal: 6 }]}>
+          {LOBBY_EMOTES.map((e, i) => (
+            <EmoteKey key={e} icon={e} label={`Emote ${EMOTE_NAME[e] ?? e}`} kbd={String(i + 1)} onPress={() => useLobby.getState().emote(e)} />
+          ))}
+          <View style={styles.emoteSep} />
+          <EmoteKey icon="note" label="Dance" kbd={String(LOBBY_EMOTES.length + 1)} on={Boolean(myDance) || danceOpen} onPress={() => setDanceOpen((o) => !o)} />
+        </PixelBox>
       </View>
 
       {navOpen ? (
         <>
           <Pressable style={styles.navScrim} onPress={() => setNavOpen(false)} accessibilityLabel="Close travel menu" />
-          <View style={[styles.navCol, { bottom: bottomInset + BAR_H + 128 }]} pointerEvents="box-none">
-            <View style={styles.navCard}>
-              <T v="label" style={styles.navHead}>
-                PLACES
-              </T>
+          <View style={[styles.navCol, L.desktop ? { left: RAIL_W + GUTTER, top: 110, width: 420 } : { bottom: bottomInset + BAR_H + 52 }]} pointerEvents="box-none">
+            <Window title="TRAVEL" sub="Your miner walks there and goes in" onClose={() => setNavOpen(false)} width={460}>
+              <T v="label">Places</T>
               <View style={styles.nav}>
                 {DOOR_UI.filter((d) => d.id !== 'market').map((d) => (
-                  <Pressable key={d.id} onPress={() => walkTo(d.id)} style={({ pressed }) => [styles.navTile, pressed ? styles.navTilePressed : null]} accessibilityRole="button" accessibilityLabel={`Go to ${d.label}`}>
-                    <View style={[styles.navAccent, { backgroundColor: d.color }]} />
-                    <View style={styles.navTxt}>
-                      <T v="display" style={{ fontSize: 15, color: d.color, letterSpacing: 0.5 }} numberOfLines={1}>
-                        {d.label}
-                      </T>
-                      <T v="muted" style={{ fontSize: 10 }} numberOfLines={1}>
-                        {d.sub}
-                      </T>
-                    </View>
-                  </Pressable>
+                  <NavTile key={d.id} label={d.label} sub={d.sub} color={d.color} icon={DOOR_ICON[d.id] ?? 'map'} onPress={() => walkTo(d.id)} />
                 ))}
               </View>
-              <T v="label" style={styles.navHead}>
-                MINI GAMES
-              </T>
+              <T v="label">Mini games</T>
               <View style={styles.nav}>
                 {GAME_IDS.map((g) => (
-                  <Pressable key={g} onPress={() => walkTo(g)} style={({ pressed }) => [styles.navTile, pressed ? styles.navTilePressed : null]} accessibilityRole="button" accessibilityLabel={`Go to ${GAME_META[g].name}`}>
-                    <View style={[styles.navAccent, { backgroundColor: GAME_META[g].color }]} />
-                    <View style={styles.navTxt}>
-                      <T v="display" style={{ fontSize: 12, color: GAME_META[g].color, letterSpacing: 0.3 }} numberOfLines={1}>
-                        {GAME_SHORT[g]}
-                      </T>
-                      <T v="muted" style={{ fontSize: 10 }} numberOfLines={1}>
-                        ORE · SKR
-                      </T>
-                    </View>
-                  </Pressable>
+                  <NavTile key={g} label={GAME_SHORT[g]} sub="ORE · SKR" color={GAME_META[g].color} icon={g === 'tunnel' ? 'tunnel' : g === 'pot' ? 'pot' : 'cart'} onPress={() => walkTo(g)} />
                 ))}
               </View>
-            </View>
+            </Window>
           </View>
         </>
       ) : null}
@@ -403,7 +422,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
         lobby={{ navOpen, onNav: () => setNavOpen((v) => !v) }}
       />
 
-      <ActivityFeed top={topH + 10} />
+      <ActivityFeed top={topH + 10} left={L.desktop ? RAIL_W + GUTTER : 12} />
       {tipTo ? <TipSheet to={tipTo} onClose={() => setTipTo(null)} /> : null}
       {howTo ? <HowToPlay onClose={closeHowTo} /> : null}
       <Arcade />
@@ -413,11 +432,87 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
   );
 }
 
+const DOOR_ICON: Partial<Record<DoorId, PixName>> = { island: 'ore', cave: 'cave', market: 'bag' };
+
+function NameChip({ name, lvl, status, onPress }: { name: string; lvl: number; status: string; onPress: () => void }) {
+  return (
+    <IconBtn onPress={onPress} label="Change your name">
+      <View style={[styles.headRow, { paddingHorizontal: 10 }]}>
+        <View style={[styles.dot, { backgroundColor: status === 'online' ? COLORS.green : status === 'full' ? COLORS.red : '#ffb347' }]} />
+        <T v="display" style={{ fontSize: 18 }} numberOfLines={1}>
+          {name || 'PICK A NAME'}
+        </T>
+        <T v="display" style={{ fontSize: 15, color: COLORS.teal }}>
+          LV {lvl}
+        </T>
+      </View>
+    </IconBtn>
+  );
+}
+
+function SolChip({ sol }: { sol: number }) {
+  return (
+    <PixelBox fill="rgba(8,13,32,0.86)" hi="rgba(60,86,160,0.5)" lo="#04060f" style={styles.statusChip}>
+      <PixIcon name="sol" size={18} />
+      <T v="display" style={{ fontSize: 18 }}>
+        {sol.toFixed(sol >= 100 ? 1 : 3)}
+      </T>
+      <T v="display" style={{ fontSize: 15, color: COLORS.muted }}>
+        SOL
+      </T>
+    </PixelBox>
+  );
+}
+
+/** One key of the emote bar: a pixel icon on a key cap that dips when pressed. */
+function EmoteKey({ icon, label, onPress, kbd, on }: { icon: PixName; label: string; onPress: () => void; kbd: string; on?: boolean }) {
+  const narrow = useLayout().w < 390;
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label}>
+      {(st) => {
+        const { hovered, pressed, focused } = st as { hovered?: boolean; pressed: boolean; focused?: boolean };
+        return (
+          <PixelBox fill={on ? 'rgba(255,201,60,0.22)' : hovered ? '#22346a' : '#0e1838'} hi={on ? COLORS.gold : '#2d4282'} lo="#04060f" style={[styles.emote, narrow && { width: 38, height: 40 }, { transform: [{ translateY: pressed ? U : hovered ? -U : 0 }] }]}>
+            <PixIcon name={icon} size={32} />
+            <Kbd k={kbd} style={styles.emoteKbd} />
+            {focused ? <FocusRing /> : null}
+          </PixelBox>
+        );
+      }}
+    </Pressable>
+  );
+}
+
+function NavTile({ label, sub, color, icon, onPress }: { label: string; sub: string; color: string; icon: PixName; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={`Go to ${label}`} style={styles.navTileWrap}>
+      {(st) => {
+        const { hovered, pressed, focused } = st as { hovered?: boolean; pressed: boolean; focused?: boolean };
+        return (
+          <PixelBox fill={hovered ? '#1d2d5e' : '#0b1430'} hi={hovered ? color : '#2d4282'} lo="#04060f" shadow={pressed ? 0 : 1} style={[styles.navTile, { transform: [{ translateY: pressed ? U : 0 }] }]}>
+            <View style={[styles.navAccent, { backgroundColor: color }]} />
+            <PixIcon name={icon} size={28} />
+            <View style={styles.navTxt}>
+              <T v="display" style={{ fontSize: 18, lineHeight: 19, color, letterSpacing: 0.5 }} numberOfLines={1}>
+                {label}
+              </T>
+              <T v="muted" style={{ fontSize: 12 }} numberOfLines={1}>
+                {sub}
+              </T>
+            </View>
+            {focused ? <FocusRing /> : null}
+          </PixelBox>
+        );
+      }}
+    </Pressable>
+  );
+}
+
 const HOWTO_KEY = 'gali-lobby-howto-v1';
 
 const HOWTO: { icon: PixName; title: string; body: string }[] = [
-  { icon: 'star', title: 'Walk around', body: 'Use the joystick, tap or drag on the map, or WASD on a keyboard. Pinch or scroll to zoom. Other players are real people in the lobby right now.' },
-  { icon: 'chat', title: 'Talk and react', body: 'Pick a name, then use CHAT in the bar to message everyone. Tap an icon to wave, laugh or show off, or the note to dance.' },
+  { icon: 'star', title: 'Walk around', body: 'Use the joystick or tap the map on a phone; WASD, the arrow keys or a click on a computer. Pinch or scroll to zoom. Other players are real people in the lobby right now.' },
+  { icon: 'chat', title: 'Talk and react', body: 'Pick a name, then use CHAT to message everyone (Enter on a keyboard). Tap an icon to wave, laugh or show off, or the note to dance. Keys 1 to 7 do the same.' },
   { icon: 'gem', title: 'Island: mine ORE', body: 'Walk onto the jetty, or tap GO then ISLAND. Pick spots on the map, deploy SOL, and win ORE when your spot is the gold one. Your wallet approves every deploy. Only play with SOL you can afford to lose.' },
   { icon: 'cart', title: 'Mini games', body: 'South of the plaza are three pavilions: Tunnel Collapse, Gold Rush Pot and Crash Cart. Walk into one, or tap GO then its name, to open it. Each has an ORE table and an SKR table, with a new round every 40 seconds shared by everyone.' },
   { icon: 'tunnel', title: 'Tunnel Collapse', body: 'Pick one of five tunnels. One caves in. Miners in the other four split the stakes of the collapsed one, minus a 5% fee.' },
@@ -433,21 +528,21 @@ const HOWTO: { icon: PixName; title: string; body: string }[] = [
 /** A short guide for new players, shown once and always one tap away from the lobby header. */
 function HowToPlay({ onClose }: { onClose: () => void }) {
   const insets = useSafeAreaInsets();
+  const { desktop } = useLayout();
   return (
-    <View style={styles.promptScrim}>
-      <View style={[styles.howCard, { maxHeight: '86%', marginTop: insets.top }]}>
-        <T v="display" style={{ fontSize: 26, textAlign: 'center' }}>
-          How to play
-        </T>
-        <ScrollView style={{ flexGrow: 0 }} contentContainerStyle={{ gap: 10, paddingVertical: 8 }} showsVerticalScrollIndicator={false}>
+    <Scrim onPress={onClose}>
+      <Window title="HOW TO PLAY" onClose={onClose} width={desktop ? 860 : 520} style={{ maxHeight: '88%', marginTop: insets.top }}>
+        <ScrollView style={{ flexGrow: 0, flexShrink: 1 }} contentContainerStyle={[styles.howGrid, desktop && { flexDirection: 'row', flexWrap: 'wrap' }]} showsVerticalScrollIndicator>
           {HOWTO.map((h) => (
-            <View key={h.title} style={styles.howRow}>
-              <PixIcon name={h.icon} size={32} style={{ marginRight: 2 }} />
+            <View key={h.title} style={[styles.howRow, desktop && { width: '48.5%' }]}>
+              <PixelBox fill="#0b1430" hi="#2d4282" lo="#04060f" style={styles.howIcon}>
+                <PixIcon name={h.icon} size={32} />
+              </PixelBox>
               <View style={{ flex: 1 }}>
-                <T v="black" style={{ fontSize: 14, color: COLORS.gold }}>
+                <T v="display" style={{ fontSize: 19, lineHeight: 20, color: COLORS.gold }}>
                   {h.title}
                 </T>
-                <T v="body" style={{ fontSize: 13 }}>
+                <T v="body" style={{ fontSize: 14, lineHeight: 19 }}>
                   {h.body}
                 </T>
               </View>
@@ -455,8 +550,8 @@ function HowToPlay({ onClose }: { onClose: () => void }) {
           ))}
         </ScrollView>
         <Btn kind="gold" label="GOT IT" onPress={onClose} />
-      </View>
-    </View>
+      </Window>
+    </Scrim>
   );
 }
 
@@ -490,20 +585,23 @@ function ActItem({ a }: { a: Act }) {
   }, [a.at, v]);
   const t = actText(a);
   return (
-    <Animated.View style={[styles.act, { opacity: v, borderColor: t.color, transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [-6, 0] }) }] }]}>
-      <PixIcon name={t.icon} size={16} />
-      <T v="bold" style={{ fontSize: 12, flexShrink: 1 }} numberOfLines={2}>
-        {t.text}
-      </T>
+    <Animated.View style={{ opacity: v, transform: [{ translateX: v.interpolate({ inputRange: [0, 1], outputRange: [-12, 0] }) }] }}>
+      <PixelBox fill="rgba(8,13,32,0.9)" hi={t.color} lo="#04060f" style={styles.act}>
+        <View style={[styles.actEdge, { backgroundColor: t.color }]} />
+        <PixIcon name={t.icon} size={18} />
+        <T v="bold" style={{ fontSize: 13, flexShrink: 1 }} numberOfLines={2}>
+          {t.text}
+        </T>
+      </PixelBox>
     </Animated.View>
   );
 }
 
 /** What players are doing: wins, tips, points. Each line fades in, stays a few seconds and is gone. */
-function ActivityFeed({ top }: { top: number }) {
+function ActivityFeed({ top, left }: { top: number; left: number }) {
   const feed = useLobby((s) => s.feed);
   return (
-    <View style={[styles.feed, { top }]} pointerEvents="none">
+    <View style={[styles.feed, { top, left }]} pointerEvents="none">
       {feed.map((a) => (
         <ActItem key={a.id} a={a} />
       ))}
@@ -546,39 +644,25 @@ function TipSheet({ to, onClose }: { to: { id: string; name: string; wallet: str
     }
   };
   return (
-    <View style={styles.promptScrim}>
-      <View style={[styles.howCard, { marginTop: insets.top, gap: 10 }]}>
-        <T v="display" style={{ fontSize: 24, textAlign: 'center' }}>
-          Tip {to.name}
-        </T>
-        <T v="muted" style={{ fontSize: 12, textAlign: 'center' }}>
-          Sends to wallet {short(to.wallet)}. Check it matches theirs: a player can claim any name.
-        </T>
+    <Scrim onPress={busy ? undefined : onClose}>
+      <Window title={`TIP ${to.name.toUpperCase()}`} sub={`To wallet ${short(to.wallet)}. Check it matches theirs: a player can claim any name.`} onClose={busy ? undefined : onClose} width={440} style={{ marginTop: insets.top }}>
         <View style={styles.tipRow}>
           {tokens.map((t) => (
-            <Pressable key={t} onPress={() => pick(t)} style={[styles.tipChip, token === t && styles.tipOn]}>
-              <T v="black" style={{ fontSize: 14, color: token === t ? '#10162c' : COLORS.text }}>
-                {t}
-              </T>
-            </Pressable>
+            <Choice key={t} label={t} on={token === t} onPress={() => pick(t)} icon={<PixIcon name={t === 'SOL' ? 'sol' : t === 'ORE' ? 'ore' : 'skr'} size={18} />} />
           ))}
         </View>
         <View style={styles.tipRow}>
           {TIP_LIMITS[token].map((a) => (
-            <Pressable key={a} onPress={() => setAmount(a)} style={[styles.tipChip, amount === a && styles.tipOn]}>
-              <T v="black" style={{ fontSize: 14, color: amount === a ? '#10162c' : COLORS.text }}>
-                {a}
-              </T>
-            </Pressable>
+            <Choice key={a} label={String(a)} on={amount === a} onPress={() => setAmount(a)} />
           ))}
         </View>
-        <T v="muted" style={{ fontSize: 11, textAlign: 'center' }}>
+        <T v="muted" style={{ fontSize: 12, textAlign: 'center' }}>
           You approve it in your wallet. The network fee is about 0.0001 SOL{token === 'SOL' ? '.' : `, plus about 0.002 SOL if they have no ${token} account yet.`}
         </T>
-        <Btn kind="gold" label={busy ? 'WAITING FOR WALLET…' : `SEND ${amount} ${token}`} disabled={busy} onPress={send} />
+        <Btn kind="gold" label={busy ? 'WAITING FOR WALLET' : `SEND ${amount} ${token}`} disabled={busy} onPress={send} />
         <Btn kind="ghost" label="CANCEL" disabled={busy} onPress={onClose} />
-      </View>
-    </View>
+      </Window>
+    </Scrim>
   );
 }
 
@@ -586,11 +670,13 @@ function TipSheet({ to, onClose }: { to: { id: string; name: string; wallet: str
  * The one chat box. The lobby and the island's CHAT tab both open this sheet, and it shows the same room,
  * so a message sent from the island appears in the lobby and the other way round.
  */
-export function SharedChat() {
+export function SharedChat({ inLobby }: { inLobby?: boolean } = {}) {
   const insets = useSafeAreaInsets();
   const open = useLobby((s) => s.chatOpen);
   const msgs = useLobby((s) => s.msgs);
   const chatStatus = useLobby((s) => s.chatStatus);
+  const where = useLobby((s) => s.where);
+  const L = useLayout();
   const name = useName((s) => s.name);
   const [text, setText] = useState('');
   const [draftName, setDraftName] = useState('');
@@ -602,26 +688,38 @@ export function SharedChat() {
   useEffect(() => {
     if (open) setTimeout(() => list.current?.scrollToEnd({ animated: false }), 50);
   }, [open, msgs.length]);
-  if (!open) return null;
+  // a desktop lobby keeps the chat docked down the right side; everywhere else it opens on demand
+  const docked = L.desktop && where === 'lobby';
+  // the docked lobby chat is drawn by the lobby itself, under its menus and dialogs
+  if (docked !== Boolean(inLobby)) return null;
+  if (!open && !docked) return null;
   const close = () => useLobby.getState().setChatOpen(false);
   const send = () => {
     if (!text.trim()) return;
     if (useLobby.getState().say(text)) setText('');
   };
-  return (
-    <Modal transparent visible animationType="slide" onRequestClose={close}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <Pressable style={cs.backdrop} onPress={close} />
-        <View style={[cs.sheet, { paddingBottom: insets.bottom + 10 }]}>
-          <View style={cs.head}>
-            <View>
-              <T v="display" style={{ fontSize: 24 }}>
-                Miners chat
-              </T>
-              <T v="muted">{chatStatus === 'online' ? 'Global room · everyone in the lobby and on the island' : chatStatus === 'joining' ? 'Connecting…' : 'Chat server not connected yet'}</T>
-            </View>
-            <Btn small label="✕" onPress={close} />
+  const status = chatStatus === 'online' ? 'Global room · lobby and island' : chatStatus === 'joining' ? 'Connecting' : 'Chat server not connected yet';
+  const body = (
+    <>
+      <View style={cs.head}>
+        <PixIcon name="chat" size={28} />
+        <View style={{ flex: 1 }}>
+          <T v="display" style={{ fontSize: 24, lineHeight: 26, letterSpacing: 1 }}>
+            MINERS CHAT
+          </T>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <View style={[cs.dot, { backgroundColor: chatStatus === 'online' ? COLORS.green : chatStatus === 'joining' ? '#ffb347' : COLORS.red }]} />
+            <T v="muted" style={{ fontSize: 12 }}>
+              {status}
+            </T>
           </View>
+        </View>
+        {docked ? null : (
+          <IconBtn onPress={close} label="Close chat" kbd="ESC">
+            <PixIcon name="close" size={18} />
+          </IconBtn>
+        )}
+      </View>
           <FlatList
             ref={list}
             data={msgs}
@@ -630,7 +728,7 @@ export function SharedChat() {
             contentContainerStyle={{ gap: 8, paddingVertical: 8 }}
             ListEmptyComponent={
               <View style={cs.empty}>
-                <T style={{ fontSize: 36 }}>⛏</T>
+                <PixIcon name="pick" size={48} />
                 <T v="bold" style={{ textAlign: 'center' }}>
                   No messages yet. Say hi to the other miners.
                 </T>
@@ -640,26 +738,24 @@ export function SharedChat() {
               const time = new Date(m.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
               return (
                 <View style={[cs.bubbleRow, m.mine && { justifyContent: 'flex-end' }]}>
-                  <View style={[cs.bubble, m.mine && cs.bubbleMine]}>
+                  <PixelBox fill={m.mine ? COLORS.gold : 'rgba(14,24,56,0.95)'} hi={m.mine ? '#fff1a6' : '#2d4282'} lo={m.mine ? '#d27a12' : '#04060f'} edge={m.mine ? '#2a1400' : '#04060f'} style={cs.bubble}>
                     {!m.mine ? (
                       <T v="black" style={{ fontSize: 12, color: COLORS.gold, marginBottom: 2 }}>
                         {m.name}
                       </T>
                     ) : null}
                     <T style={{ color: m.mine ? '#2b1600' : COLORS.text }}>{m.text}</T>
-                    <T v="muted" style={{ fontSize: 10, alignSelf: 'flex-end', color: m.mine ? '#6b3a00' : COLORS.muted }}>
+                    <T v="muted" style={{ fontSize: 11, alignSelf: 'flex-end', color: m.mine ? '#6b3a00' : COLORS.muted }}>
                       {time}
                     </T>
-                  </View>
+                  </PixelBox>
                 </View>
               );
             }}
           />
           <View style={cs.emoteRow}>
             {LOBBY_EMOTES.map((e) => (
-              <Pressable key={e} onPress={() => useLobby.getState().emote(e)} style={cs.emote} accessibilityRole="button" accessibilityLabel={`Emote ${EMOTE_NAME[e] ?? e}`}>
-                <PixIcon name={e} size={32} />
-              </Pressable>
+              <EmoteKey key={e} icon={e} label={`Emote ${EMOTE_NAME[e] ?? e}`} kbd="" onPress={() => useLobby.getState().emote(e)} />
             ))}
           </View>
           {name ? (
@@ -673,7 +769,7 @@ export function SharedChat() {
                 editable={chatStatus === 'online'}
                 maxLength={80}
                 returnKeyType="send"
-                style={cs.input}
+                style={[INPUT, { flex: 1 }]}
               />
               <Btn kind="gold" small label="Send" disabled={chatStatus !== 'online' || !text.trim()} onPress={send} />
             </View>
@@ -692,7 +788,7 @@ export function SharedChat() {
                   maxLength={14}
                   autoCapitalize="none"
                   autoCorrect={false}
-                  style={cs.input}
+                  style={[INPUT, { flex: 1 }]}
                 />
                 <Btn
                   kind="gold"
@@ -711,6 +807,33 @@ export function SharedChat() {
               ) : null}
             </View>
           )}
+    </>
+  );
+  if (docked) {
+    return (
+      <View style={[cs.dock, { width: sideWidth(L.w), right: GUTTER, top: GUTTER, bottom: GUTTER }]}>
+        <Frame style={{ flex: 1, padding: 14, gap: 8 }}>{body}</Frame>
+      </View>
+    );
+  }
+  if (L.desktop) {
+    // the island on a desktop: a window over the bottom left of the map, the round panel stays in view
+    return (
+      <View style={[cs.float, { left: RAIL_W + GUTTER, bottom: GUTTER }]}>
+        <Frame style={{ flex: 1, padding: 14, gap: 8 }}>{body}</Frame>
+      </View>
+    );
+  }
+  return (
+    <Modal transparent visible animationType="slide" onRequestClose={close}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+        <Pressable style={cs.backdrop} onPress={close} />
+        <View style={[cs.sheet, { paddingBottom: insets.bottom + 10 }]}>
+          <View pointerEvents="none" style={cs.sheetBg}>
+            <View style={cs.sheetEdge} />
+            <View style={cs.sheetHi} />
+          </View>
+          {body}
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -718,17 +841,20 @@ export function SharedChat() {
 }
 
 const cs = StyleSheet.create({
-  backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#04081788' },
-  sheet: { position: 'absolute', left: 0, right: 0, bottom: 0, height: '78%', backgroundColor: COLORS.bg2, borderTopLeftRadius: 26, borderTopRightRadius: 26, borderWidth: 2, borderColor: COLORS.line, paddingHorizontal: 14, paddingTop: 14 },
-  head: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 8, borderBottomWidth: 1, borderColor: COLORS.line },
-  empty: { alignItems: 'center', gap: 6, padding: 30 },
+  backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(4,6,15,0.55)' },
+  sheet: { position: 'absolute', left: 0, right: 0, bottom: 0, height: '78%', paddingHorizontal: 14, paddingTop: 16, gap: 8 },
+  sheetBg: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: 'rgba(15,23,52,0.97)' },
+  sheetEdge: { position: 'absolute', left: 0, right: 0, top: 0, height: U, backgroundColor: '#04060f' },
+  sheetHi: { position: 'absolute', left: 0, right: 0, top: U, height: U, backgroundColor: COLORS.trim },
+  dock: { position: 'absolute' },
+  float: { position: 'absolute', width: 380, height: 460, zIndex: 40 },
+  head: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingBottom: 10, borderBottomWidth: U, borderColor: '#22356f' },
+  dot: { width: U * 3, height: U * 3 },
+  empty: { alignItems: 'center', gap: 8, padding: 30 },
   bubbleRow: { flexDirection: 'row' },
-  bubble: { maxWidth: '82%', backgroundColor: COLORS.card, borderColor: COLORS.line, borderWidth: 2, borderRadius: 16, borderTopLeftRadius: 4, paddingHorizontal: 12, paddingVertical: 7 },
-  bubbleMine: { backgroundColor: COLORS.gold, borderColor: '#ffe08a', borderTopLeftRadius: 16, borderTopRightRadius: 4 },
-  emoteRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
-  emote: { width: 46, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: '#00000044', borderWidth: 1, borderColor: COLORS.line },
+  bubble: { maxWidth: '86%', paddingHorizontal: 12, paddingVertical: 7 },
+  emoteRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 4, marginVertical: 4 },
   inputRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  input: { flex: 1, height: 44, borderRadius: 14, borderWidth: 2, borderColor: COLORS.line, backgroundColor: '#00000044', color: COLORS.text, paddingHorizontal: 12, fontFamily: F.body },
 });
 
 function NamePrompt({ first, onDone }: { first: boolean; onDone: () => void }) {
@@ -745,14 +871,8 @@ function NamePrompt({ first, onDone }: { first: boolean; onDone: () => void }) {
     onDone();
   };
   return (
-    <View style={styles.promptScrim}>
-      <View style={styles.promptCard}>
-        <T v="display" style={{ fontSize: 26, textAlign: 'center' }}>
-          {first ? 'Welcome to the lobby' : 'Change your name'}
-        </T>
-        <T v="muted" style={{ textAlign: 'center' }}>
-          Pick the name other miners will see. It is only a label: it does not touch your wallet.
-        </T>
+    <Scrim>
+      <Window title={first ? 'WELCOME, MINER' : 'CHANGE YOUR NAME'} sub="Pick the name other miners will see. It is only a label: it does not touch your wallet." width={420} accent={first ? COLORS.gold : undefined}>
         <TextInput
           value={v}
           onChangeText={(t) => {
@@ -766,19 +886,14 @@ function NamePrompt({ first, onDone }: { first: boolean; onDone: () => void }) {
           autoFocus
           autoCapitalize="none"
           autoCorrect={false}
-          style={[styles.input, { flex: 0, height: 46, minHeight: 46, width: '100%', fontSize: 18, textAlign: 'center' }]}
+          style={[INPUT, { width: '100%', fontSize: 20, textAlign: 'center', fontFamily: F.display }]}
         />
         <T v="label" style={{ textAlign: 'center' }}>
           Your miner
         </T>
         <View style={styles.tipRow}>
-          {([['m', '👨\u200d🔧', 'BOY'], ['f', '👩\u200d🔧', 'GIRL']] as const).map(([k, icon, label]) => (
-            <Pressable key={k} onPress={() => setSex(k)} style={[styles.tipChip, { flex: 1 }, sex === k && styles.tipOn]} accessibilityRole="button" accessibilityLabel={`${label} miner`}>
-              <T style={{ fontSize: 26 }}>{icon}</T>
-              <T v="black" style={{ fontSize: 13, color: sex === k ? '#10162c' : COLORS.text }}>
-                {label}
-              </T>
-            </Pressable>
+          {([['m', 'user', 'BOY'], ['f', 'girl', 'GIRL']] as const).map(([k, icon, label]) => (
+            <Choice key={k} label={label} on={sex === k} onPress={() => setSex(k)} icon={<PixIcon name={icon} size={32} />} />
           ))}
         </View>
         {err ? (
@@ -788,8 +903,8 @@ function NamePrompt({ first, onDone }: { first: boolean; onDone: () => void }) {
         ) : null}
         <Btn kind="gold" label={first ? 'ENTER THE LOBBY' : 'SAVE NAME'} onPress={save} />
         {!first ? <Btn kind="ghost" small label="Cancel" onPress={onDone} /> : null}
-      </View>
-    </View>
+      </Window>
+    </Scrim>
   );
 }
 
@@ -799,82 +914,67 @@ export function LobbyBack() {
   const dockOpen = useGame((s) => s.dockOpen);
   const inside = useView((s) => s.focus >= 0);
   const where = useLobby((s) => s.where);
-  if (where !== 'island' || dockOpen || inside) return null;
+  const ch = useChrome(insets);
+  if (where !== 'island' || (dockOpen && !ch.desktop) || inside) return null;
   return (
-    <View style={[styles.backWrap, { bottom: insets.bottom + BAR_H + 46 }]} pointerEvents="box-none">
-      <BackPill />
+    <View style={[styles.backWrap, { left: ch.left, bottom: ch.desktop ? ch.bottom : insets.bottom + BAR_H + 46 }]} pointerEvents="box-none">
+      <BackPill kbd={ch.desktop ? 'L' : undefined} />
     </View>
   );
 }
 
 /** The pill itself, for any screen: closes what is open and puts you back in the lobby, at the door you came out of. */
-export function BackPill({ door = 'island', onBefore }: { door?: DoorId; onBefore?: () => void }) {
+export function BackPill({ door = 'island', onBefore, kbd }: { door?: DoorId; onBefore?: () => void; kbd?: string }) {
   return (
-    <Pressable
+    <MapButton
+      label="LOBBY"
+      kbd={kbd}
+      icon={<PixIcon name="back" size={20} />}
+      accessibilityLabel="Back to lobby"
       onPress={() => {
         onBefore?.();
         useLobby.getState().go('lobby', door);
       }}
-      style={({ pressed }) => [styles.back, pressed && { transform: [{ scale: 0.94 }] }]}
-      accessibilityRole="button"
-      accessibilityLabel="Back to lobby"
-    >
-      <T v="display" style={{ fontSize: 16, color: COLORS.gold }}>
-        ←
-      </T>
-      <T v="black" style={{ fontSize: 13, color: COLORS.gold }}>
-        LOBBY
-      </T>
-    </Pressable>
+    />
   );
 }
 
 const DANCE_NAMES = ['DISCO', 'POGO', 'WIGGLE'] as const;
 
 const styles = StyleSheet.create({
-  feed: { position: 'absolute', left: 12, maxWidth: '62%', gap: 6, alignItems: 'flex-start' },
-  act: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(11,18,38,0.62)', borderWidth: 1.5, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 5 },
+  feed: { position: 'absolute', left: 12, maxWidth: 420, gap: 6, alignItems: 'flex-start' },
+  act: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 10, paddingVertical: 6 },
+  actEdge: { position: 'absolute', left: U, top: U, bottom: U, width: U * 2 },
   tipRow: { flexDirection: 'row', gap: 8, justifyContent: 'center' },
-  tipChip: { minWidth: 70, alignItems: 'center', paddingVertical: 9, paddingHorizontal: 12, borderRadius: 14, borderWidth: 2, borderColor: COLORS.line, backgroundColor: COLORS.card },
-  tipOn: { backgroundColor: COLORS.gold, borderColor: COLORS.gold },
   root: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: '#2f7fc4', zIndex: 30 },
-  head: { position: 'absolute', left: 0, right: 0, top: 0, paddingHorizontal: 12, gap: 6 },
-  headRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  titleBox: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  logo: { width: 96, height: 30 },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 34, paddingHorizontal: 11, borderRadius: 17, backgroundColor: 'rgba(7,13,32,0.6)', borderWidth: 1.5, borderColor: COLORS.gold2, maxWidth: 220 },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-  bottom: { position: 'absolute', left: 0, right: 0, paddingHorizontal: 12, gap: 6 },
-  navScrim: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 },
-  navCol: { position: 'absolute', left: 12, right: 12 },
-  navCard: { gap: 6, padding: 10, borderRadius: 18, backgroundColor: 'rgba(7,13,32,0.62)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)' },
-  navHead: { fontSize: 10, letterSpacing: 1.6, color: '#9fb0e8', marginLeft: 4 },
+  head: { position: 'absolute', left: 0, right: 0, top: 0, paddingHorizontal: 12, gap: 8 },
+  deskHead: { position: 'absolute', top: GUTTER, height: TOP_H - GUTTER, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  headRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 6 },
+  deskTitle: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, height: 44 },
+  titleBox: { alignItems: 'center' },
+  logo: { width: 90, height: 38 },
+  statusChip: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 40, paddingHorizontal: 10 },
+  dot: { width: U * 4, height: U * 4 },
+  bottom: { position: 'absolute', left: 0, right: 0, paddingHorizontal: 12, gap: 8 },
+  navScrim: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: 'rgba(4,6,15,0.35)' },
+  navCol: { position: 'absolute', left: 12, right: 12, alignItems: 'center' },
   nav: { flexDirection: 'row', gap: 8, justifyContent: 'center' },
-  navTile: { flex: 1, height: 46, borderRadius: 12, flexDirection: 'row', alignItems: 'center', overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' },
-  navTilePressed: { backgroundColor: 'rgba(255,255,255,0.2)', transform: [{ scale: 0.97 }] },
-  navAccent: { width: 4, alignSelf: 'stretch' },
-  navTxt: { flex: 1, paddingHorizontal: 8, justifyContent: 'center' },
-  full: { backgroundColor: 'rgba(7,13,32,0.72)', borderRadius: 10, padding: 8, borderWidth: 1, borderColor: COLORS.red },
-  log: { minHeight: 8, gap: 2 },
-  line: { flexDirection: 'row', gap: 6, backgroundColor: '#070d20b3', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
-  doors: { flexDirection: 'row', gap: 8 },
-  door: { flex: 1, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(7,13,32,0.6)', borderWidth: 2 },
-  emotes: { flexDirection: 'row', alignItems: 'center', alignSelf: 'center', gap: 4, paddingHorizontal: 6, paddingVertical: 5, borderRadius: 26, backgroundColor: 'rgba(7,13,32,0.55)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)' },
-  emote: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' },
-  emotePressed: { backgroundColor: 'rgba(255,255,255,0.22)', transform: [{ scale: 0.92 }] },
-  emoteOn: { borderColor: COLORS.gold, backgroundColor: 'rgba(255,210,74,0.22)' },
-  emoteSep: { width: 1, height: 24, backgroundColor: 'rgba(255,255,255,0.2)', marginHorizontal: 2 },
-  danceCard: { alignSelf: 'center', marginTop: 6, gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, backgroundColor: 'rgba(7,13,32,0.62)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)', alignItems: 'center' },
+  navTileWrap: { flex: 1 },
+  navTile: { height: 54, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 12, overflow: 'hidden' },
+  navAccent: { position: 'absolute', left: U, top: U, bottom: U, width: U * 2 },
+  navTxt: { flex: 1, paddingRight: 6, justifyContent: 'center' },
+  full: { padding: 10 },
+  log: { minHeight: 8, gap: 3 },
+  line: { flexDirection: 'row', gap: 6, backgroundColor: 'rgba(7,13,32,0.78)', paddingHorizontal: 8, paddingVertical: 4, borderLeftWidth: U, borderColor: '#2d4282' },
+  emotes: { flexDirection: 'row', alignItems: 'center', alignSelf: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 8 },
+  emote: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center' },
+  emoteKbd: { position: 'absolute', right: -4, bottom: -4 },
+  emoteSep: { width: U, height: 30, backgroundColor: '#22356f', marginHorizontal: 2 },
+  danceCard: { alignSelf: 'center', gap: 8, padding: 12, alignItems: 'center' },
   danceRow: { flexDirection: 'row', gap: 6 },
-  danceBtn: { paddingHorizontal: 14, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.08)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)' },
-  danceBtnOn: { backgroundColor: COLORS.gold, borderColor: COLORS.gold },
-  inputRow: { flexDirection: 'row', gap: 8 },
-  input: { flex: 1, height: 40, borderRadius: 10, paddingHorizontal: 12, backgroundColor: '#0c1634', color: COLORS.text, borderWidth: 1.5, borderColor: '#2f5499', fontSize: 14 },
-  sendBtn: { height: 40, paddingHorizontal: 16, borderRadius: 10, backgroundColor: COLORS.gold, alignItems: 'center', justifyContent: 'center' },
-  promptCard: { width: '88%', maxWidth: 380, gap: 10, padding: 16, borderRadius: 16, backgroundColor: 'rgba(15,27,69,0.74)', borderWidth: 2, borderColor: COLORS.gold2 },
-  howCard: { width: '92%', maxWidth: 420, gap: 8, padding: 16, borderRadius: 16, backgroundColor: 'rgba(15,27,69,0.74)', borderWidth: 2, borderColor: COLORS.gold2 },
-  howRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
-  promptScrim: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: '#070d20cc', alignItems: 'center', justifyContent: 'center' },
+  howGrid: { gap: 12, paddingVertical: 4, justifyContent: 'space-between' },
+  howRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
+  howIcon: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center' },
   backWrap: { position: 'absolute', left: 12 },
-  back: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 42, paddingHorizontal: 14, borderRadius: 21, backgroundColor: 'rgba(7,13,32,0.6)', borderWidth: 1.5, borderColor: COLORS.gold2 },
 });
+

@@ -36,7 +36,8 @@ export interface PeerView {
 
 export interface Snapshot {
   /** CSS pixels covered by the HUD above and the dock below */
-  view: { top: number; bottom: number };
+  /** screen CSS px the interface covers on each side; left/right are a desktop rail and side panel */
+  view: { top: number; bottom: number; left?: number; right?: number };
   phase: string;
   roundId: number;
   roundEndsAt: number; // wall-clock ms

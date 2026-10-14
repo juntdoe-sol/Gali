@@ -53,8 +53,15 @@ export function Splash({ fontsLoaded }: { fontsLoaded: boolean }) {
       <Word word="GALI" />
       <Text style={styles.tag}>THE ORE MINING GAME</Text>
       <View style={styles.track}>
-        <Animated.View style={[styles.bar, { width: fill.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) }]} />
+        <View style={styles.trackV} />
+        <View style={styles.trackIn}>
+          <Animated.View style={[styles.bar, { width: fill.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) }]}>
+            <View style={styles.barHi} />
+            <View style={styles.barLo} />
+          </Animated.View>
+        </View>
       </View>
+      <Text style={styles.hint}>{ready ? 'LOADING THE INTERFACE' : 'LOADING THE ISLAND'}</Text>
     </Animated.View>
   );
 }
@@ -63,6 +70,12 @@ const styles = StyleSheet.create({
   root: { backgroundColor: '#070d20', alignItems: 'center', justifyContent: 'center', gap: 22 },
   logo: { width: 168, height: 168 },
   tag: { color: '#ffcf4a', fontFamily: 'Jersey15_400Regular', fontSize: 20, letterSpacing: 3, marginTop: -8 },
-  track: { width: 180, height: 10, borderWidth: 2, borderColor: '#2a4480', backgroundColor: '#0c1734' },
-  bar: { height: '100%', backgroundColor: '#ffcf4a' },
+  hint: { color: '#8ea2cc', fontFamily: 'Jersey15_400Regular', fontSize: 15, letterSpacing: 2, marginTop: -12 },
+  // the same notched pixel bar as the boot screen in public/index.html
+  track: { width: 180, height: 12, paddingHorizontal: 2, backgroundColor: 'transparent' },
+  trackV: { position: 'absolute', left: 2, right: 2, top: 0, bottom: 0, backgroundColor: '#04060f' },
+  trackIn: { position: 'absolute', left: 0, right: 0, top: 2, bottom: 2, backgroundColor: '#04060f', paddingHorizontal: 2 },
+  bar: { height: '100%', backgroundColor: '#ffc93c', overflow: 'hidden' },
+  barHi: { position: 'absolute', left: 0, right: 0, top: 0, height: 2, backgroundColor: '#fff1a6' },
+  barLo: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 2, backgroundColor: '#d27a12' },
 });

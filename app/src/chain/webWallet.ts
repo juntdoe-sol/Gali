@@ -211,7 +211,8 @@ export class PickWalletError extends Error {
 
 function chosen(): Adapter {
   const all = adapters();
-  if (!all.length) throw new Error('No Solana wallet found. Install Jupiter, Phantom or Solflare in this browser.');
+  // no wallet in this browser: an empty pick list, so the app can offer to open Gali inside a wallet's own browser
+  if (!all.length) throw new PickWalletError([]);
   const saved = choice.get();
   const hit = saved ? all.find((a) => a.name === saved) : undefined;
   if (hit) return hit;

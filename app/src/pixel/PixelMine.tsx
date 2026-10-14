@@ -17,6 +17,7 @@ import { clearBots, ensureBots, EMOTES, publishMe, startWorld, stopWorld, thinkB
 import { CLAIMS, openSpot } from '../engine/island';
 import type { EngineEvent, Look, PeerView, Snapshot } from '../engine/types';
 import { fx } from './fx';
+import { GUTTER, layoutNow, TOP_H } from '../ui/layout';
 import { atlasSource } from './atlasSource';
 import GameView, { type GameRef } from './GameView';
 import { useView } from './view';
@@ -57,6 +58,17 @@ export function myLook(): Look {
   return { hat: hat.key, fit: fit.color, pick: pick.accent, handle: pick.color, pet: pet?.key ?? null, glow: GLOW[pick.rarity], sex: useName.getState().sex };
 }
 
+/** The band of screen the map may use. A desktop browser has a rail on the left and the round panel on the right. */
+function viewBand(focus: number): Snapshot['view'] {
+  const L = layoutNow();
+  if (L.desktop) {
+    const left = L.rail + GUTTER;
+    if (focus >= 0) return { top: closeupView.top, bottom: closeupView.bottom, left, right: L.side + GUTTER * 2 };
+    return { top: TOP_H + GUTTER, bottom: GUTTER, left, right: L.side + GUTTER * 2 };
+  }
+  return focus >= 0 ? { top: closeupView.top, bottom: closeupView.bottom } : { top: fx.viewTop, bottom: fx.viewBottom };
+}
+
 function snapshot(): Snapshot {
   const st = useGame.getState();
   const world = useWorld.getState();
@@ -84,7 +96,7 @@ function snapshot(): Snapshot {
     emoji: emo(p.id),
   }));
   return {
-    view: focus >= 0 ? { top: closeupView.top, bottom: closeupView.bottom } : { top: fx.viewTop, bottom: fx.viewBottom },
+    view: viewBand(focus),
     phase: st.phase,
     roundId: st.roundId,
     // a live round waiting for its first deploy has no end yet: hold it a full round away

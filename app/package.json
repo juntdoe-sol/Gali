@@ -4,8 +4,9 @@
   "main": "index.ts",
   "dependencies": {
     "@coral-xyz/anchor": "^0.31.1",
-    "@expo-google-fonts/chakra-petch": "^0.4.1",
     "@expo-google-fonts/jersey-15": "^0.4.1",
+    "@expo-google-fonts/pixelify-sans": "^0.4.2",
+    "@expo-google-fonts/silkscreen": "^0.4.2",
     "@expo/dom-webview": "~57.0.1",
     "@expo/metro-runtime": "~57.0.16",
     "@noble/curves": "^2.4.0",
