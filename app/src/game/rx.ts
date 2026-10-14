@@ -3,7 +3,7 @@
  * island's channels without those files importing them back. Everything a stranger sends is untrusted:
  * whoever registers here cleans it.
  */
-export type Scope = 'lobby' | 'island';
+export type Scope = 'lobby' | 'island' | 'arena';
 
 export const roomHooks: {
   /** a 'bx' broadcast arrived on a room */

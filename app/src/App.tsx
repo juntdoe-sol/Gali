@@ -25,6 +25,8 @@ import { MapHint } from './ui/MapHint';
 import { Splash } from './ui/Splash';
 import { PeerCard } from './ui/World';
 import { CaveEntry, CaveScreen } from './ui/Cave';
+import { ArenaScreen } from './ui/Arena';
+import { useArena } from './game/arena';
 import { LobbyBack, LobbyScreen, SharedChat } from './ui/Lobby';
 import { useLobby } from './game/lobby';
 import { useCave } from './game/caveStore';
@@ -32,7 +34,7 @@ import { useArcade } from './game/arcade';
 
 
 // lets browser tests watch the game state
-if (Platform.OS === 'web') Object.assign(globalThis, { __gali: useGame, __galiWorld: useWorld, __galiLobbyStore: useLobby, __galiCaveStore: useCave, __galiArcadeStore: useArcade, __galiBrawl: useBrawl, __galiBrawlTest: _test });
+if (Platform.OS === 'web') Object.assign(globalThis, { __gali: useGame, __galiWorld: useWorld, __galiLobbyStore: useLobby, __galiCaveStore: useCave, __galiArcadeStore: useArcade, __galiBrawl: useBrawl, __galiBrawlTest: _test, __galiArenaStore: useArena });
 // pixel art in the interface (gear icons) stays crisp when the browser scales it
 if (Platform.OS === 'web' && typeof document !== 'undefined' && !document.getElementById('gali-pixel-css')) {
   const el = document.createElement('style');
@@ -204,6 +206,7 @@ function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTa
         <WalletPicker />
         <LiveNotice />
         {!guest && <CaveScreen />}
+        <ArenaScreen />
     </>
   );
 }

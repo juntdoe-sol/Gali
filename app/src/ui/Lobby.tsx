@@ -24,6 +24,7 @@ import type { LobbyEvent, LobbyPeerView, LobbySnap } from '../engine/lobby';
 import { atlasSource } from '../pixel/atlasSource';
 import LobbyView, { type LobbyRef } from '../pixel/LobbyView';
 import { islandFight, islandJump, myLook } from '../pixel/PixelMine';
+import { useArena } from '../game/arena';
 import { useView } from '../pixel/view';
 import { Btn, Choice, F, FocusRing, Frame, IconBtn, INPUT, Kbd, MapButton, PixelBox, Scrim, T, Tip, U, Window } from './kit';
 import { GUTTER, RAIL_W, TOP_H, sideWidth, useChrome, useLayout } from './layout';
@@ -39,6 +40,7 @@ const DOOR_UI: { id: DoorId; label: string; sub: string; color: string }[] = [
   { id: 'island', label: 'ISLAND', sub: 'Mine ORE', color: '#3de0c8' },
   { id: 'cave', label: 'CAVE', sub: 'Dig for XP', color: '#ff9a3d' },
   { id: 'market', label: 'MARKET', sub: 'Gear and items', color: '#b86bff' },
+  { id: 'arena', label: 'ARENA', sub: 'Brawl', color: '#ff4f5e' },
 ];
 const EMOTE_NAME: Record<string, string> = { wave: 'Wave', laugh: 'Laugh', heart: 'Love', fire: 'Fire', pick: 'Pickaxe', gem: 'Gem' };
 
@@ -197,6 +199,10 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
       } else if (id === 'cave') {
         useLobby.setState({ spawn: 'cave' });
         useCave.getState().show(homeSpot());
+      } else if (id === 'arena') {
+        useLobby.setState({ spawn: 'arena' });
+        if (!useName.getState().name) useGame.getState().toast('Pick a name to fight in the arena', 'info');
+        else useArena.getState().show();
       } else {
         useLobby.setState({ spawn: 'market' });
         onMarket();
@@ -457,7 +463,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
   );
 }
 
-const DOOR_ICON: Partial<Record<DoorId, PixName>> = { island: 'ore', cave: 'cave', market: 'bag' };
+const DOOR_ICON: Partial<Record<DoorId, PixName>> = { island: 'ore', cave: 'cave', market: 'bag', arena: 'fist' };
 
 function NameChip({ name, lvl, status, onPress }: { name: string; lvl: number; status: string; onPress: () => void }) {
   return (
@@ -639,7 +645,7 @@ function ActivityFeed({ top, left }: { top: number; left: number }) {
 
 /* ---------------- tipping ---------------- */
 type TipToken = 'SOL' | 'ORE' | 'SKR';
-function TipSheet({ to, onClose }: { to: { id: string; name: string; wallet: string }; onClose: () => void }) {
+export function TipSheet({ to, onClose }: { to: { id: string; name: string; wallet: string }; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const sol = useGame((s) => s.wallet.sol);
   const ore = useGame((s) => s.wallet.ore);

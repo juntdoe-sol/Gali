@@ -26,7 +26,7 @@ export const CLIFF = 7;
 export const HALL = 8;
 
 /** The three mini games are doors too: walk into a pavilion and its game opens. Their ids are the game ids. */
-export type DoorId = 'island' | 'cave' | 'market' | 'tunnel' | 'pot' | 'crash';
+export type DoorId = 'island' | 'cave' | 'market' | 'tunnel' | 'pot' | 'crash' | 'arena';
 export interface Door {
   id: DoorId;
   /** the tiles that count as walking in */
@@ -45,6 +45,7 @@ export const DOORS: Door[] = [
   { id: 'tunnel', x: 26, y: 42, w: 3, h: 1, label: 'TUNNEL', sub: 'ORE and SKR' },
   { id: 'pot', x: 35, y: 42, w: 3, h: 1, label: 'GOLD RUSH', sub: 'ORE and SKR' },
   { id: 'crash', x: 44, y: 42, w: 3, h: 1, label: 'CRASH CART', sub: 'ORE and SKR' },
+  { id: 'arena', x: 9, y: 29, w: 3, h: 1, label: 'ARENA', sub: 'Brawl' },
 ];
 /** The three pavilions on the games row: the body tiles that block, above each door. */
 export const PAVILIONS: { id: 'tunnel' | 'pot' | 'crash'; x: number; y: number; w: number; h: number }[] = [
@@ -62,15 +63,18 @@ export const SPAWNS: Record<'start' | DoorId, [number, number]> = {
   tunnel: [27, 44],
   pot: [36, 44],
   crash: [45, 44],
+  arena: [10, 31],
 };
 
 /** Things with a shape of their own: a tent, a stall, the lighthouse. The engine draws each; the tiles under them block. */
 export interface Structure {
-  kind: 'tent' | 'fire' | 'cart' | 'crates' | 'barrel' | 'stall-red' | 'stall-teal' | 'lighthouse' | 'rack' | 'boulder' | 'sol-crystal' | 'ore-vein';
+  kind: 'tent' | 'fire' | 'cart' | 'crates' | 'barrel' | 'stall-red' | 'stall-teal' | 'lighthouse' | 'rack' | 'boulder' | 'sol-crystal' | 'ore-vein' | 'arena';
   /** tiles that block: x, y, width, height */
   at: [number, number, number, number];
 }
 export const STRUCTURES: Structure[] = [
+  // the Brawl arena: a stone gate with banners, its door on the south side
+  { kind: 'arena', at: [7, 26, 7, 3] },
   { kind: 'tent', at: [8, 14, 3, 2] },
   { kind: 'fire', at: [12, 15, 1, 1] },
   { kind: 'tent', at: [5, 17, 3, 2] },

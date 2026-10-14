@@ -12,6 +12,7 @@ const suites = [
   'tests/lobby-net.cjs',
   'tests/brawl.cjs',
   'tests/autopilot.cjs',
+  'tests/arena.cjs',
   'tests/pixel-guest.cjs',
   'src/chain/safety.test.cjs',
   'rpc-backend/client.test.cjs',
