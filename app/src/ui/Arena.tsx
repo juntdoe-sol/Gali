@@ -328,13 +328,13 @@ function Controls({ bottom, desk, arena }: { bottom: number; desk: boolean; aren
             <SkillButton key={p} size={56} round={false} kbd={POWER_KEY[p]} {...skill(p)} />
           ))}
           <View style={{ width: 10 }} />
-          <SkillButton size={56} round={false} icon="fist" label="HIT" kbd="RMB" onPress={() => arena.current?.attack?.()} />
-          <SkillButton size={56} round={false} icon="ore" label="THROW" kbd="LMB" count={a.ammo} onPress={() => arena.current?.throwOre?.()} />
+          <SkillButton size={56} round={false} icon="fist" label="HIT" kbd="LMB" onPress={() => arena.current?.attack?.()} />
+          <SkillButton size={56} round={false} icon="ore" label="THROW" kbd="RMB" count={a.ammo} onPress={() => arena.current?.throwOre?.()} />
           <SkillButton size={56} round={false} icon="jump" label="JUMP" kbd="SPC" onPress={() => arena.current?.jump?.()} />
           <SkillButton size={56} round={false} icon="heart" label="CHEER" onPress={() => cheer()} />
         </View>
         <T v="label" style={{ fontSize: 11, textAlign: 'center' }}>
-          WASD move · right click hit · left click throw at the cursor · Q E R C V X or 1 to 6 powers · SHIFT dash
+          WASD move · left click hit · right click throw at the cursor · Q E R C V X or 1 to 6 powers · SHIFT dash
         </T>
       </View>
     );
