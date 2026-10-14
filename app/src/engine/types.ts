@@ -61,6 +61,8 @@ export interface Snapshot {
   amounts: boolean;
   /** Wall-clock ms of the latest confirmed claim; the island sprays coins once per new stamp. Cosmetic only. */
   claimedAt?: number;
+  /** true while the player is on the island (not in the lobby). Arriving lands the miner on the helipad. */
+  onIsland?: boolean;
 }
 
 export type EngineEvent =
