@@ -877,7 +877,10 @@ def claims_meta(boxes):
 def build_atlas(atlas):
     """Paint the island into `atlas` and return the block for art.json."""
     ground, sprites = paint_island()
-    atlas.add('ground', ground)
+    # the island is authored at 360x210 and wrapped in a wider map: see island_ext.py
+    import island_ext
+    ext = island_ext.extend(sys.modules[__name__], ground, sprites)
+    atlas.add('ground', ext['ground'])
 
     boxes = []
     for c in CLAIMS:
@@ -898,8 +901,11 @@ def build_atlas(atlas):
     for name, d in sprites.items():
         for f, fr in enumerate(d['frames']):
             atlas.add(f'prop-{name}-{f}', fr.img(), d['ax'], d['ay'])
+    for name, d in ext['sprites'].items():
+        for f, fr in enumerate(d['frames']):
+            atlas.add(f'prop-{name}-{f}', fr.img(), d['ax'], d['ay'])
 
-    return {
+    meta = {
         'size': [W, H],
         'block': B,
         'cols': COLS,
@@ -917,6 +923,7 @@ def build_atlas(atlas):
         'lighthouse': LIGHTHOUSE,
         'islets': ISLETS,
     }
+    return island_ext.shift_meta(meta, ext)
 
 
 def preview(path, scale=4, crop=None, crop_scale=8):

@@ -61,8 +61,14 @@ const URL_ = process.env.EXPO_PUBLIC_WORLD_URL || (cfg.url ? `${cfg.url.replace(
 const KEY = process.env.EXPO_PUBLIC_WORLD_KEY || cfg.anonKey;
 export const worldReady = Boolean(URL_ && KEY);
 
-const MAP_W = 360;
-const MAP_H = 440;
+// On the wire, positions stay in the island's original 360x210 frame, which every installed build
+// understands. The island is now drawn inside a wider map (scripts/island_ext.py, OFFSET), so this
+// store holds positions in the wider map and converts at the edge: beach positions go over the wire
+// as small or negative numbers that older builds simply clamp to the edge.
+const WIRE_X = 180;
+const WIRE_Y = 105;
+const WIRE_W = 360;
+const WIRE_H = 210;
 // Fewer messages keep the shared room under Realtime's per-second cap as the island fills up
 // (each broadcast counts once per listener). Updates carry the target, so walkers still glide.
 const STALE_MS = 15_000;
@@ -192,8 +198,8 @@ function onState(p: any) {
   if (!p || typeof p.id !== 'string' || p.id.length > 16 || p.id === useWorld.getState().me) return;
   const id: string = p.id;
   const prev = useWorld.getState().peers[id];
-  const x = clamp(p.x, 0, MAP_W);
-  const y = clamp(p.y, 0, MAP_H);
+  const x = clamp(p.x, -WIRE_X, WIRE_W + WIRE_X) + WIRE_X;
+  const y = clamp(p.y, -WIRE_Y, WIRE_H + WIRE_Y) + WIRE_Y;
   const av: Avatar = {
     id,
     name: cleanName(p.nm) || (prev && !prev.wallet ? prev.name : '') || prev?.name || `Miner ${id.slice(0, 4)}`,
@@ -201,8 +207,8 @@ function onState(p: any) {
     // keep our smoothed position unless the sender jumped
     x: prev && Math.hypot(prev.x - x, prev.y - y) < 24 ? prev.x : x,
     y: prev && Math.hypot(prev.x - x, prev.y - y) < 24 ? prev.y : y,
-    tx: clamp(p.tx, 0, MAP_W),
-    ty: clamp(p.ty, 0, MAP_H),
+    tx: clamp(p.tx, -WIRE_X, WIRE_W + WIRE_X) + WIRE_X,
+    ty: clamp(p.ty, -WIRE_Y, WIRE_H + WIRE_Y) + WIRE_Y,
     facing: p.f === -1 ? -1 : 1,
     pose: p.p === 'walk' || p.p === 'swing' ? p.p : 'idle',
     hat: color(p.hat, '#ffc83d'),
@@ -256,10 +262,10 @@ export function publishMe(me: MeState, identity: { wallet: string | null; sessio
   const r = (v: number) => Math.round(v * 10) / 10;
   const payload: Record<string, unknown> = {
     id: useWorld.getState().me,
-    x: r(me.x),
-    y: r(me.y),
-    tx: r(me.tx),
-    ty: r(me.ty),
+    x: r(me.x - WIRE_X),
+    y: r(me.y - WIRE_Y),
+    tx: r(me.tx - WIRE_X),
+    ty: r(me.ty - WIRE_Y),
     f: me.facing,
     p: me.pose,
     hat: me.hat,

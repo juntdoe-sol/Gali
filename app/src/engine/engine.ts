@@ -25,6 +25,8 @@ const SWING_MS = POSES.swing.n * POSES.swing.ms;
 const HOME = ISLE.home as [number, number];
 const standOf = (i: number) => CLAIMS[i].stand as [number, number];
 const [FIT_X, FIT_Y, FIT_W, FIT_H] = ISLE.fit as [number, number, number, number];
+/** where the island's original frame sits inside the wider map */
+const [OFF_X, OFF_Y] = ISLE.offset as [number, number];
 const seeded = (n: number) => {
   const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
   return x - Math.floor(x);
@@ -41,15 +43,19 @@ const SPARKS: Record<Look['glow'], string[]> = {
   legendary: ['#ff4fd8', '#c7f284', '#ffffff'],
 };
 
-/** Islets out in open water beyond the painted board, for tall screens. */
-const FAR_ISLETS: [string, number, number][] = [
-  ['islet-palm', 40, -44],
-  ['islet-rock', 318, -34],
-  ['islet-bare', 86, 258],
-  ['islet-palm', 290, 250],
-  ['islet-rock', -30, 110],
-  ['islet-bare', 392, 96],
-];
+/** Islets out in open water beyond the beaches, clear of the sand (old-frame coordinates). */
+const FAR_ISLETS: [string, number, number][] = (
+  [
+    ['islet-palm', 40, -44],
+    ['islet-rock', 318, -34],
+    ['islet-bare', 86, 258],
+    ['islet-palm', 290, 280],
+    ['islet-rock', -30, 110],
+    ['islet-bare', 480, 15],
+    ['islet-palm', -90, 225],
+    ['islet-rock', 460, 265],
+  ] as [string, number, number][]
+).map(([n, x, y]) => [n, x + OFF_X, y + OFF_Y] as [string, number, number]);
 
 type Mode = 'island' | 'enter' | 'closeup' | 'exit';
 
@@ -199,6 +205,29 @@ export class Engine {
     this.sky.rain = k;
   }
 
+  /**
+   * The island is wider than the frame it opens on. While your miner stays inside the frame the
+   * camera does not move; walk out onto the beach and it trails you, as it does in the lobby, then
+   * settles back when you return. A pinch or drag by hand pauses it for a few seconds.
+   */
+  private followMe() {
+    const cam = this.cam;
+    if (this.mode !== 'island') {
+      cam.follow = false;
+      return;
+    }
+    if (cam.flying || cam.hold || cam.manual) return;
+    const me = this.me;
+    const inside = (pad: number) => me.x > FIT_X + pad && me.x < FIT_X + FIT_W - pad && me.y > FIT_Y + pad && me.y < FIT_Y + FIT_H - pad;
+    if (cam.follow) {
+      cam.setFocus(me.x, me.y - 6);
+      if (inside(10) && !cam.userZoomed) cam.home(520);
+    } else if (!inside(-4)) {
+      cam.follow = true;
+      cam.setFocus(me.x, me.y - 6);
+    }
+  }
+
   /* ------------------------------------------------------------------ */
   private resize() {
     const cssW = this.canvas.clientWidth || window.innerWidth;
@@ -240,6 +269,7 @@ export class Engine {
     const left = Math.min(s?.view.left ?? 0, this.W * 0.4);
     const right = Math.min(s?.view.right ?? 0, this.W * 0.45);
     this.cam.setView(left, top, Math.max(160, this.W - left - right), band);
+    this.followMe();
     this.cam.update(t);
     this.sky.update(dt, now, this.quality);
     let t0 = performance.now();
@@ -1071,7 +1101,7 @@ export class Engine {
         this.cam.zoomAt(mx, my, d / this.pinch.d);
         this.cam.pan(mx - this.pinch.mx, my - this.pinch.my);
         this.pinch = { d, mx, my };
-      } else if (this.moved && this.cam.userZoomed) this.cam.pan(dx, dy);
+      } else if (this.moved) this.cam.pan(dx, dy); // the wider map can be looked over at any zoom
     });
     const up = (e: PointerEvent) => {
       const q = this.pointers.get(e.pointerId);

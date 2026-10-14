@@ -6,6 +6,9 @@
 import { ISLE } from './art';
 
 const [FX, FY, FW, FH] = ISLE.fit as [number, number, number, number];
+const [MAPW, MAPH] = ISLE.size as [number, number];
+/** how far out a pinch may go: the whole wider map, not only the default frame */
+const ZOOM_OUT = 0.5;
 const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
 export class Camera {
@@ -22,10 +25,15 @@ export class Camera {
   userZoomed = false;
   /** keep the current framing (a punch-in on the winner) instead of easing back to fit */
   hold = false;
+  /** the camera trails the miner once they walk out of the default frame, like the lobby does */
+  follow = false;
+  private focus: [number, number] = [FX + FW / 2, FY + FH / 2];
+  /** a pinch or drag by hand pauses the follow until this time (ms, performance clock) */
+  manualUntil = 0;
 
   setView(x: number, y: number, w: number, h: number) {
     const fit = Math.min(w / FW, h / FH);
-    const wasFit = !this.userZoomed && !this.fly && !this.hold;
+    const wasFit = !this.userZoomed && !this.fly && !this.hold && !this.follow && !this.manual;
     this.vx = x;
     this.vy = y;
     this.vw = w;
@@ -44,16 +52,32 @@ export class Camera {
     return this.fly !== null;
   }
 
+  /** where the camera should be looking while it follows */
+  setFocus(x: number, y: number) {
+    this.focus = [x, y];
+  }
+  get manual() {
+    return performance.now() < this.manualUntil;
+  }
+
   flyTo(cx: number, cy: number, z: number, ms: number) {
+    this.follow = false;
     this.fly = { t0: performance.now(), ms, a: [this.cx, this.cy, this.z], b: [cx, cy, z] };
   }
   home(ms = 420) {
+    this.follow = false;
     this.userZoomed = false;
     this.hold = false;
     this.flyTo(FX + FW / 2, FY + FH / 2, this.fitZ, ms);
   }
 
   update(now: number) {
+    if (this.follow && !this.fly) {
+      this.cx += (this.focus[0] - this.cx) * 0.14;
+      this.cy += (this.focus[1] - this.cy) * 0.14;
+      this.clamp();
+      return;
+    }
     if (!this.fly) return;
     const { t0, ms, a, b } = this.fly;
     const k = Math.min(1, (now - t0) / ms);
@@ -71,30 +95,35 @@ export class Camera {
   /** Zoom by `k` keeping map point under screen (sx, sy) fixed. */
   zoomAt(sx: number, sy: number, k: number) {
     const [mx, my] = this.toMap(sx, sy);
-    const nz = Math.max(this.fitZ, Math.min(this.fitZ * 4, this.z * k));
+    const nz = Math.max(this.fitZ * ZOOM_OUT, Math.min(this.fitZ * 4, this.z * k));
     this.z = nz;
+    this.manualUntil = performance.now() + 4000;
+    this.follow = false;
     const [nx, ny] = this.toMap(sx, sy);
     this.cx += mx - nx;
     this.cy += my - ny;
-    this.userZoomed = nz > this.fitZ * 1.02;
+    this.userZoomed = nz > this.fitZ * 1.02 || nz < this.fitZ * 0.98;
     this.clamp();
   }
   pan(dx: number, dy: number) {
+    this.manualUntil = performance.now() + 4000;
+    this.follow = false;
     this.cx -= dx / this.z;
     this.cy -= dy / this.z;
     this.clamp();
   }
   clamp() {
-    // keep some of the island in view however far you drag
+    // keep some of the map in view however far you drag or follow
     const hw = this.vw / 2 / this.z;
     const hh = this.vh / 2 / this.z;
-    const minX = FX + Math.min(hw, FW / 2);
-    const maxX = FX + FW - Math.min(hw, FW / 2);
-    const minY = FY + Math.min(hh, FH / 2);
-    const maxY = FY + FH - Math.min(hh, FH / 2);
+    const minX = Math.min(hw, MAPW / 2);
+    const maxX = MAPW - minX;
+    const minY = Math.min(hh, MAPH / 2);
+    const maxY = MAPH - minY;
     this.cx = Math.max(minX, Math.min(maxX, this.cx));
     this.cy = Math.max(minY, Math.min(maxY, this.cy));
-    if (this.z <= this.fitZ * 1.001) {
+    // at the default zoom, with nothing following, the frame is the island's own
+    if (!this.follow && !this.manual && Math.abs(this.z - this.fitZ) <= this.fitZ * 0.001) {
       this.cx = FX + FW / 2;
       this.cy = FY + FH / 2;
     }
