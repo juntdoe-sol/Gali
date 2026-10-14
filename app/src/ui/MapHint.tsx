@@ -9,7 +9,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../game/constants';
 import { useGame } from '../game/store';
 import { useView } from '../pixel/view';
-import { T } from './kit';
+import { PixelBox, T } from './kit';
+import { PixIcon } from './PixIcon';
+import { useLayout } from './layout';
 import { BAR_H } from './TabBar';
 
 export function MapHint() {
@@ -18,6 +20,7 @@ export function MapHint() {
   const picked = useGame((s) => s.selected.length);
   const dockOpen = useGame((s) => s.dockOpen);
   const insets = useSafeAreaInsets();
+  const { desktop, mouse, side } = useLayout();
   const [done, setDone] = useState(false);
   const fade = useRef(new Animated.Value(0)).current;
   const startPicked = useRef(picked);
@@ -35,26 +38,21 @@ export function MapHint() {
     if (done) Animated.timing(fade, { toValue: 0, duration: 250, useNativeDriver: true }).start();
   }, [done, fade]);
 
-  if (!onboarded || dockOpen) return null;
+  if (!onboarded || (dockOpen && !desktop)) return null;
   return (
-    <Animated.View pointerEvents="none" style={[styles.pill, { bottom: BAR_H + insets.bottom + 18, opacity: fade }]}>
-      <T v="bold" style={styles.text}>
-        Tap a spot to pick it
-      </T>
+    <Animated.View pointerEvents="none" style={[styles.wrap, desktop ? { bottom: 24, left: 88, right: side + 28 } : { bottom: BAR_H + insets.bottom + 18 }, { opacity: fade }]}>
+      <PixelBox fill="rgba(8,13,32,0.92)" hi={COLORS.teal} lo="#04060f" shadow={1} style={styles.pill}>
+        <PixIcon name="star" size={16} />
+        <T v="display" style={styles.text}>
+          {mouse ? 'CLICK A SPOT TO PICK IT' : 'TAP A SPOT TO PICK IT'}
+        </T>
+      </PixelBox>
     </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  pill: {
-    position: 'absolute',
-    alignSelf: 'center',
-    backgroundColor: '#070d20e6',
-    borderColor: COLORS.teal,
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-  },
-  text: { color: COLORS.text, fontSize: 12 },
+  wrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
+  pill: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 6 },
+  text: { color: COLORS.text, fontSize: 17, letterSpacing: 1 },
 });

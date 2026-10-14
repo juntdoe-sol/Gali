@@ -8,12 +8,14 @@
  * every action button explains that the market is not open yet.
  */
 import { useMemo, useState } from 'react';
-import { Image, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Image, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { COLORS, GEAR, GEAR_KINDS, MOTHERLODE_POOL_SHARE, RARITY_COLOR, usd, type Gear, type GearKind } from '../game/constants';
 import { useGame, useOwnedMask } from '../game/store';
 import { GEAR_ICON as PIXEL_ICON } from './gearIcons';
 import { GEAR_ICON, ITEM_ICON } from './icons';
-import { Btn, Card, Pill, T } from './kit';
+import { Btn, Card, Choice, INPUT, PixelBox, Pill, T, U } from './kit';
+import { PixIcon } from './PixIcon';
+import { useLayout } from './layout';
 
 /** Royalty on every resale, in basis points. */
 export const ROYALTY_BPS = 500;
@@ -25,13 +27,13 @@ const SOON = 'The market opens after launch. This page is a preview.';
 export function GearIcon({ g, size = 54 }: { g: Gear; size?: number }) {
   const px = PIXEL_ICON[g.key];
   return (
-    <View style={[styles.icon, { width: size, height: size, borderColor: RARITY_COLOR[g.rarity], backgroundColor: g.accent + '22' }]}>
+    <PixelBox fill={g.accent + '22'} hi={RARITY_COLOR[g.rarity]} lo="#04060f" edge="#04060f" style={[styles.icon, { width: size, height: size }]}>
       {px ? (
         <Image source={px} style={{ width: size * 0.74, height: size * 0.74 }} {...({ dataSet: { pixelart: '1' } } as object)} />
       ) : (
-        <T style={{ fontSize: size * 0.44 }}>{ITEM_ICON[g.key] ?? GEAR_ICON[g.kind]}</T>
+        <PixIcon name={ITEM_ICON[g.key] ?? GEAR_ICON[g.kind]} size={Math.round((size * 0.6) / 16) * 16 || 32} />
       )}
-    </View>
+    </PixelBox>
   );
 }
 
@@ -92,7 +94,8 @@ export function Market() {
     <>
       <Card glow={COLORS.gold}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-          <T v="label">🏪 Gear Market</T>
+          <PixIcon name="bag" size={22} />
+          <T v="label">Gear Market</T>
           <Pill text="COMING SOON" color={COLORS.gold} fg="#2a1a00" />
         </View>
         <T>Every gear item is an NFT in your wallet. Mint new gear from Gali&apos;s drops, or trade with other miners for SOL or SKR.</T>
@@ -103,15 +106,11 @@ export function Market() {
       <View style={styles.seg}>
         {(
           [
-            ['browse', 'Browse'],
-            ['mine', 'My items'],
+            ['browse', 'BROWSE'],
+            ['mine', 'MY ITEMS'],
           ] as const
         ).map(([id, label]) => (
-          <Pressable key={id} onPress={() => setView(id)} style={[styles.segBtn, view === id && styles.segOn]} accessibilityRole="tab" accessibilityState={{ selected: view === id }}>
-            <T v="bold" style={{ fontSize: 13, color: view === id ? COLORS.text : COLORS.muted }}>
-              {label}
-            </T>
-          </Pressable>
+          <Choice key={id} label={label} on={view === id} onPress={() => setView(id)} />
         ))}
       </View>
       {view === 'browse' ? <Browse /> : <MyItems />}
@@ -127,12 +126,7 @@ function KindChips({ kind, onKind }: { kind: GearKind | 'all'; onKind: (k: GearK
   return (
     <View style={styles.chips}>
       {all.map((k) => (
-        <Pressable key={k.kind} onPress={() => onKind(k.kind)} style={[styles.chip, kind === k.kind && styles.chipOn]}>
-          <T v="bold" style={{ fontSize: 12, color: kind === k.kind ? COLORS.gold : COLORS.muted }}>
-            {k.kind === 'all' ? '' : `${GEAR_ICON[k.kind]} `}
-            {k.label}
-          </T>
-        </Pressable>
+        <Choice key={k.kind} grow={false} label={k.label.toUpperCase()} on={kind === k.kind} onPress={() => onKind(k.kind)} icon={k.kind === 'all' ? undefined : <PixIcon name={GEAR_ICON[k.kind]} size={18} />} />
       ))}
     </View>
   );
@@ -146,6 +140,7 @@ function Browse() {
   const shown = listings
     .filter((l) => kind === 'all' || l.gear.kind === kind)
     .sort((a, b) => Number(Boolean(b.drop)) - Number(Boolean(a.drop)) || b.gear.priceSkr - a.gear.priceSkr);
+  const { desktop } = useLayout();
   const floor = (g: Gear) => Math.min(...listings.filter((l) => l.gear.id === g.id && l.unit === 'SKR' && !l.drop).map((l) => l.price));
   return (
     <>
@@ -153,17 +148,18 @@ function Browse() {
       <T v="muted" style={{ fontSize: 11 }}>
         {shown.length} sample listings · Gali drops first, then resales, rarest first
       </T>
+      <View style={[styles.list, desktop && styles.grid]}>
       {shown.map((l) => {
         const g = l.gear;
         const on = open === l.id;
         const fl = floor(g);
         return (
-          <Pressable key={l.id} onPress={() => setOpen(on ? null : l.id)} accessibilityRole="button" accessibilityLabel={`${g.name} for ${fmtPrice(l)}`}>
-            <Card style={{ borderColor: RARITY_COLOR[g.rarity] + '99' }} glow={l.drop ? COLORS.gold : undefined}>
+          <Pressable key={l.id} onPress={() => setOpen(on ? null : l.id)} accessibilityRole="button" accessibilityLabel={`${g.name} for ${fmtPrice(l)}`} style={desktop ? styles.cell : undefined}>
+            <Card glow={l.drop ? COLORS.gold : RARITY_COLOR[g.rarity]} style={{ padding: 12 }}>
               <View style={styles.row}>
                 <GearIcon g={g} />
                 <View style={{ flex: 1 }}>
-                  <T v="bold">
+                  <T v="display" style={{ fontSize: 19, lineHeight: 20 }}>
                     {g.name} <T v="muted">#{String(l.edition).padStart(3, '0')}</T>
                   </T>
                   <T v="bold" style={{ fontSize: 11, color: RARITY_COLOR[g.rarity], textTransform: 'capitalize' }}>
@@ -191,6 +187,7 @@ function Browse() {
           </Pressable>
         );
       })}
+      </View>
     </>
   );
 }
@@ -232,11 +229,11 @@ function MyItems() {
         const on = equipped.includes(g.key);
         const open = selling === g.key;
         return (
-          <Card key={g.key} style={{ borderColor: RARITY_COLOR[g.rarity] + '99' }}>
+          <Card key={g.key} glow={RARITY_COLOR[g.rarity]}>
             <View style={styles.row}>
               <GearIcon g={g} />
               <View style={{ flex: 1 }}>
-                <T v="bold">{g.name}</T>
+                <T v="display" style={{ fontSize: 19, lineHeight: 20 }}>{g.name}</T>
                 <T v="bold" style={{ fontSize: 11, color: RARITY_COLOR[g.rarity], textTransform: 'capitalize' }}>
                   {g.rarity} {g.kind}
                   {on ? ' · equipped' : ''}
@@ -260,23 +257,17 @@ function MyItems() {
             {open ? (
               <View style={styles.detail}>
                 <View style={styles.row}>
-                  <View style={styles.priceBox}>
-                    <TextInput
-                      value={price}
-                      onChangeText={(t) => setPrice(t.replace(/[^0-9.]/g, ''))}
-                      keyboardType="decimal-pad"
-                      placeholder="Price"
-                      placeholderTextColor={COLORS.muted}
-                      style={[styles.input, WEB_NO_OUTLINE]}
-                      accessibilityLabel="Listing price"
-                    />
-                  </View>
+                  <TextInput
+                    value={price}
+                    onChangeText={(t) => setPrice(t.replace(/[^0-9.]/g, ''))}
+                    keyboardType="decimal-pad"
+                    placeholder="Price"
+                    placeholderTextColor={COLORS.muted}
+                    style={[INPUT, { flex: 1, fontFamily: 'Jersey15_400Regular', fontSize: 22 }]}
+                    accessibilityLabel="Listing price"
+                  />
                   {(['SKR', 'SOL'] as const).map((u) => (
-                    <Pressable key={u} onPress={() => setUnit(u)} style={[styles.chip, unit === u && styles.chipOn]}>
-                      <T v="bold" style={{ fontSize: 12, color: unit === u ? COLORS.gold : COLORS.muted }}>
-                        {u}
-                      </T>
-                    </Pressable>
+                    <Choice key={u} grow={false} label={u} on={unit === u} onPress={() => setUnit(u)} icon={<PixIcon name={u === 'SOL' ? 'sol' : 'skr'} size={16} />} />
                   ))}
                 </View>
                 <Trait k={`Royalty ${ROYALTY_BPS / 100}%`} v={`${fmtAmt(fee)} ${unit}`} />
@@ -293,19 +284,14 @@ function MyItems() {
 
 const fmtAmt = (v: number) => (v >= 100 ? Math.round(v).toLocaleString() : Number(v.toFixed(4)).toString());
 
-const WEB_NO_OUTLINE = (Platform.OS === 'web' ? { outlineStyle: 'none' } : {}) as object;
-
 const styles = StyleSheet.create({
-  icon: { borderRadius: 14, borderWidth: 2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  icon: { alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  seg: { flexDirection: 'row', gap: 4, backgroundColor: '#00000055', borderRadius: 14, padding: 4 },
-  segBtn: { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 10 },
-  segOn: { backgroundColor: COLORS.card2 },
+  seg: { flexDirection: 'row', gap: 8 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  chip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, borderWidth: 1, borderColor: COLORS.line, backgroundColor: '#00000033' },
-  chipOn: { borderColor: COLORS.gold, backgroundColor: COLORS.card2 },
-  detail: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderColor: COLORS.line, gap: 6 },
+  list: { gap: 10 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
+  cell: { width: '49.2%' },
+  detail: { marginTop: 10, paddingTop: 10, borderTopWidth: U, borderColor: '#22356f', borderStyle: 'dashed', gap: 6 },
   trait: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
-  priceBox: { flex: 1, borderWidth: 1, borderColor: COLORS.line, borderRadius: 10, paddingHorizontal: 10, backgroundColor: '#00000044' },
-  input: { color: COLORS.text, fontSize: 16, paddingVertical: 8, fontFamily: Platform.OS === 'web' ? 'inherit' : undefined },
 });
