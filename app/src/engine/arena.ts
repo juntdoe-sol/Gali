@@ -372,7 +372,10 @@ export class ArenaEngine {
     if (!this.fighting() || this.downed(wall) || wall - this.lastSwing < 450) return;
     this.lastSwing = wall;
     const me = this.me;
-    const t = pickTarget(me, this.targets(), wall);
+    let t = pickTarget(me, this.targets(), wall);
+    // the boss is big: it can be hit from a little further away
+    const boss = this.snap?.match.boss;
+    if (!t && boss && boss.hp > 0 && Math.hypot(boss.x - me.x, (boss.y - me.y) * 1.6) < 36) t = { id: 'boss', facing: boss.x >= me.x ? 1 : -1 };
     if (t) me.facing = t.facing;
     this.swingUntil = performance.now() + 540;
     me.pose = 'swing';
@@ -816,11 +819,11 @@ export class ArenaEngine {
           c.beginPath();
           c.ellipse(sx(boss.x), sy(boss.y), 16 * z, 5 * z, 0, 0, Math.PI * 2);
           c.fill();
-          if (has(name)) draw(c, name, sx(boss.x), sy(boss.y - up), z * 3, boss.facing < 0, boss.hitAt && wall - boss.hitAt < 120 ? 0.5 : 1);
+          if (has(name)) draw(c, name, sx(boss.x), sy(boss.y - up), z * 2, boss.facing < 0, boss.hitAt && wall - boss.hitAt < 120 ? 0.5 : 1);
           // its HP bar
           const w = 50 * z;
           const X = sx(boss.x) - w / 2;
-          const Y = sy(boss.y - 52);
+          const Y = sy(boss.y - 40);
           c.fillStyle = 'rgba(4,6,15,0.9)';
           c.fillRect(X - z, Y - z, w + 2 * z, 5 * z);
           c.fillStyle = '#ff4f5e';

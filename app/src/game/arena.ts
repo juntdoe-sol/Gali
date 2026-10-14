@@ -585,7 +585,7 @@ function bossThink(b: Boss, alive: string[], now: number) {
   if (!targets.length) return;
   const near = targets.map((id) => ({ id, p: pos(id), d: Math.hypot(pos(id)[0] - b.x, pos(id)[1] - b.y) })).sort((a, c) => a.d - c.d)[0];
   let { x, y } = b;
-  if (near.d > 18) {
+  if (near.d > 26) {
     const k = Math.min(1, (BOSS_SPEED * 0.25) / near.d);
     const nx = x + (near.p[0] - x) * k;
     const ny = y + (near.p[1] - y) * k;
