@@ -18,7 +18,8 @@ import { draw, has, makeCanvas, ctx2d, rect, sprite, text, textCentered, textWid
 import { drawMiner, drawPet, frameAt, lampOf, stepBody, type Body } from './actors';
 import { Particles } from './particles';
 import { Sky } from './sky';
-import type { Look, Pose } from './types';
+import type { BrawlSnap, Look, Pose } from './types';
+import { drawHp, drawKo, drawShield, hitFlash, koAge, pickTarget } from './brawlfx';
 import { CLIFF, DOORS, PAVILIONS, STRUCTURES, doorAt, GRASS, HALL, LCOLS, LH, LROWS, LT, LW, lidx, lobbyMap, lobbyPath, PLANK, PLAZA, ROAD, SAND, SPAWNS, standable, tileCentre, tileOf, WATER, type DoorId } from '../game/lobbyMap';
 
 export type LobbyEvent =
@@ -27,7 +28,9 @@ export type LobbyEvent =
   | { t: 'door'; id: DoorId }
   | { t: 'dance-off' }
   | { t: 'peer'; id: string }
-  | { t: 'sfx'; name: 'step' | 'door' | 'pop' };
+  | { t: 'sfx'; name: 'step' | 'door' | 'pop' | 'swing' }
+  /** your miner swung its pickaxe; target is the player it hit, if any */
+  | { t: 'swing'; target: string | null; x: number; y: number };
 
 export interface LobbyPeerView {
   id: string;
@@ -47,6 +50,7 @@ export interface LobbySnap {
   say: string | null;
   emoji: string | null;
   dance?: number;
+  brawl?: BrawlSnap;
 }
 export interface LobbyOpts {
   spawn: 'start' | DoorId;
@@ -133,6 +137,12 @@ export class LobbyEngine {
    * and the touch controls it names step aside. The app never sets it.
    */
   director: { x: number; y: number; z?: number; hide?: { stick?: boolean; mini?: boolean; signs?: boolean } } | null = null;
+  /** Brawl: when the current swing ends, the last stand-up and hit we reacted to */
+  private swingUntil = 0;
+  private lastSwingWall = 0;
+  private lastRs = -1;
+  private lastHit = 0;
+  private peerHits = new Map<string, number>();
   private onKey = (e: KeyboardEvent) => this.key(e, true);
   private onKeyUp = (e: KeyboardEvent) => this.key(e, false);
 
@@ -159,11 +169,72 @@ export class LobbyEngine {
   push(s: LobbySnap) {
     this.snap = s;
     this.syncPeers(s.peers);
+    if (s.brawl) this.brawlEvents(s.brawl);
     if (s.say && s.say !== this.lastSay) this.mySayAt = Date.now();
     this.lastSay = s.say;
     if (s.emoji && s.emoji !== this.lastEmoji) this.myEmojiAt = Date.now();
     this.lastEmoji = s.emoji;
   }
+  /** Brawl: react to what changed (a hit taken, standing up after a knockdown, a hit landing on someone). */
+  private brawlEvents(b: BrawlSnap) {
+    const me = this.me;
+    if (this.lastRs < 0) this.lastRs = b.me.rs;
+    if (b.me.rs !== this.lastRs) {
+      this.lastRs = b.me.rs;
+      // stand up back at the lobby's start, inside a shield
+      const [sx, sy] = tileCentre(...SPAWNS.start);
+      me.x = sx;
+      me.y = sy;
+      me.path = [];
+      me.tx = sx;
+      me.ty = sy;
+      this.parts.burst('dust', sx, sy, 10, 22, 14, ['#f2e6c8', '#d8c8a8'], 0.7);
+    }
+    if (b.me.hit && b.me.hit !== this.lastHit) {
+      this.lastHit = b.me.hit;
+      // knocked back a step, away from the swing
+      const dx = me.x - b.me.hx;
+      const d = Math.abs(dx) || 1;
+      const m = lobbyMap();
+      const nx = me.x + (dx / d) * 6;
+      if (standable(m, nx, me.y)) me.x = nx;
+      me.path = [];
+      this.parts.burst('star', me.x, me.y - 14, 5, 18, 16, ['#ffffff', '#ffd84a'], 0.45);
+      this.emit({ t: 'sfx', name: 'pop' });
+    }
+    for (const [id, v] of Object.entries(b.peers)) {
+      if (v.hit && v.hit !== (this.peerHits.get(id) ?? 0)) {
+        const first = !this.peerHits.has(id);
+        this.peerHits.set(id, v.hit);
+        const p = this.peers.get(id);
+        if (p && !first && Date.now() - v.hit < 800) this.parts.burst('star', p.x, p.y - 14, 5, 18, 16, ['#ffffff', '#ffd84a'], 0.45);
+      }
+    }
+    if (this.peerHits.size > 200) this.peerHits.clear();
+  }
+
+  /** Swing your pickaxe (F, or the FIGHT button). Hits the nearest fair fighter in reach, if any. */
+  attack() {
+    const b = this.snap.brawl;
+    if (!b || !b.on || this.leaving) return;
+    const wall = Date.now();
+    if (koAge(b.me, wall) >= 0 || wall - this.lastSwingWall < 450) return;
+    this.lastSwingWall = wall;
+    const me = this.me;
+    const others = [...this.peers.values()].map((p) => ({ id: p.view.id, x: p.x, y: p.y, v: b.peers[p.view.id] }));
+    const t = pickTarget(me, others, wall);
+    if (t) me.facing = t.facing;
+    const now = performance.now();
+    me.path = [];
+    me.tx = me.x;
+    me.ty = me.y;
+    me.pose = 'swing';
+    me.since = now;
+    this.swingUntil = now + 540;
+    this.emit({ t: 'swing', target: t?.id ?? null, x: me.x, y: me.y });
+    this.emit({ t: 'sfx', name: 'swing' });
+  }
+
   /** Walk to a door (the buttons in the app use this). */
   goTo(id: DoorId) {
     const d = DOORS.find((k) => k.id === id);
@@ -932,6 +1003,11 @@ export class LobbyEngine {
     const t = e.target as HTMLElement | null;
     if (t && /^(INPUT|TEXTAREA)$/.test(t.tagName)) return;
     const k = e.key.toLowerCase();
+    if (k === 'f' && down && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      this.attack();
+      e.preventDefault();
+      return;
+    }
     if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'w', 'a', 's', 'd'].includes(k)) {
       if (down) this.keys.add(k);
       else this.keys.delete(k);
@@ -1008,7 +1084,16 @@ export class LobbyEngine {
     const ix = this.stick ? this.stick.dx : kx;
     const iy = this.stick ? this.stick.dy : ky;
     this.direct = false;
-    if ((this.stick || kx || ky) && !this.leaving) {
+    // knocked down: you can't move until you stand up
+    const downed = this.snap.brawl ? koAge(this.snap.brawl.me, Date.now()) >= 0 : false;
+    if (downed) {
+      me.path = [];
+      kx = 0;
+      ky = 0;
+    }
+    const swinging = now < this.swingUntil && !downed;
+    if ((this.stick || kx || ky) && !this.leaving && !downed) {
+      this.swingUntil = 0;
       this.direct = this.moveDir(ix, iy, dt, now);
       if (!this.direct && me.pose === 'walk') {
         me.pose = 'idle';
@@ -1065,9 +1150,9 @@ export class LobbyEngine {
       const ty = moving ? me.ty : me.y;
       const dance = this.snap.dance ?? 0;
       if (moving && dance) this.emit({ t: 'dance-off' });
-      const pose = moving ? 'walk' : dance ? `dance${dance}` : this.snap.emoji && now - this.myEmojiAt < 2200 ? 'cheer' : 'idle';
+      const pose = moving ? 'walk' : swinging ? 'swing' : dance ? `dance${dance}` : this.snap.emoji && now - this.myEmojiAt < 2200 ? 'cheer' : 'idle';
       if (!moving) {
-        const want = dance ? (`dance${dance}` as Walker['pose']) : /^dance/.test(me.pose) ? 'idle' : me.pose;
+        const want = swinging ? 'swing' : dance ? (`dance${dance}` as Walker['pose']) : /^dance/.test(me.pose) || me.pose === 'swing' ? 'idle' : me.pose;
         if (want !== me.pose) {
           me.pose = want;
           me.since = now;
@@ -1242,11 +1327,25 @@ export class LobbyEngine {
             c.stroke();
           }
           if (pr.look.pet) drawPet(c, pr.look.pet, now, X - 15 * z * b.facing, Y + 1 * z, z, b.facing);
-          drawMiner(c, pr.look, b.pose as never, f, X, Y, z, b.facing);
+          const bs = this.snap.brawl;
+          const bv = bs ? (pr.mine ? bs.me : bs.peers[pr.id]) : undefined;
+          const wall = Date.now();
+          const ko = bv ? koAge(bv, wall) : -1;
+          if (ko < 0 || !drawKo(c, pr.look, X, Y, z, b.facing, ko, wall)) {
+            // someone else's swing, as their client told us
+            const sw = !pr.mine && bv && bv.sw && wall - bv.sw < 540 ? wall - bv.sw : -1;
+            const pose = (sw >= 0 ? 'swing' : b.pose) as never;
+            const pf = sw >= 0 ? Math.min(5, Math.floor(sw / 90)) : f;
+            drawMiner(c, pr.look, pose, pf, X, Y, z, b.facing, hitFlash(bv, wall) ? 0.45 : 1);
+          }
+          if (bs?.on && bv?.on) {
+            if (bv.sh) drawShield(c, X, Y, z, wall, bv.sh);
+            if (ko < 0) drawHp(c, bv, X, Y, z, wall, pr.mine);
+          }
           const lamp = lampOf(pr.look, b.pose as never, f, b.facing);
           if (lamp && (this.quality || pr.mine)) lights.push({ x: (X + lamp[0] * z) * dpr, y: (Y + lamp[1] * z) * dpr, r: 34 * z * dpr, c: '#ffe3a0', k: 1 });
           const show = pr.mine || pr.say || named.has(pr.id);
-          if (show) labels.push(() => this.tag(c, pr.name, pr.say, pr.emoji, now - pr.emojiAt, X, Y - 30 * z, z, pr.mine));
+          if (show) labels.push(() => this.tag(c, pr.name, pr.say, pr.emoji, now - pr.emojiAt, X, Y - (bs?.on && bv?.on ? 33 : 30) * z, z, pr.mine));
         },
       });
     }

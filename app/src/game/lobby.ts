@@ -14,9 +14,10 @@ import { cleanChat, cleanName, LH, LOBBY_CAP, LW, SPAWNS, type DoorId } from './
 import { loadJson, saveJson } from './storage';
 import { useName } from './username';
 import { useWorld, worldClient, worldReady } from './world';
+import { roomHooks } from './rx';
 
-export type LobbyPose = 'idle' | 'walk' | 'cheer' | 'dance1' | 'dance2' | 'dance3';
-const POSE_OK = ['walk', 'cheer', 'dance1', 'dance2', 'dance3'];
+export type LobbyPose = 'idle' | 'walk' | 'cheer' | 'dance1' | 'dance2' | 'dance3' | 'swing';
+const POSE_OK = ['walk', 'cheer', 'dance1', 'dance2', 'dance3', 'swing'];
 export const asPose = (v: unknown): LobbyPose => (typeof v === 'string' && POSE_OK.includes(v) ? (v as LobbyPose) : 'idle');
 export type Where = 'lobby' | 'island';
 export type Say = { t: string; at: number };
@@ -56,7 +57,8 @@ export type Act =
   | { id: number; at: number; k: 'tip'; n: string; tn: string; a: number; tk: 'SOL' | 'ORE' | 'SKR'; toMe: boolean; mine?: boolean }
   | { id: number; at: number; k: 'xp'; n: string; xp: number }
   | { id: number; at: number; k: 'play'; n: string; g: 'tunnel' | 'pot' | 'crash'; a: number; tk: 'ORE' | 'SKR'; win: boolean; mine?: boolean }
-  | { id: number; at: number; k: 'join'; n: string };
+  | { id: number; at: number; k: 'join'; n: string }
+  | { id: number; at: number; k: 'ko'; n: string; tn: string; mine?: boolean };
 export const ACT_LIFE_MS = 5200;
 const B58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
@@ -202,6 +204,7 @@ function onState(p: any) {
     emojiAt: prev?.emojiAt ?? 0,
   };
   useLobby.setState((s) => ({ peers: { ...s.peers, [id]: peer } }));
+  if (p.bw !== undefined) roomHooks.onBw?.('lobby', id, p.bw);
   if (!prev && Date.now() - joinedAt > 3000) pushAct({ k: 'join', n: nm });
 }
 
@@ -231,6 +234,9 @@ function onAct(p: any) {
   } else if (p.k === 'play' && (p.tk === 'ORE' || p.tk === 'SKR') && (p.g === 'tunnel' || p.g === 'pot' || p.g === 'crash')) {
     const a = amt(p.a, 1e6);
     if (a > 0) pushAct({ k: 'play', n, g: p.g, a, tk: p.tk, win: p.win === true });
+  } else if (p.k === 'ko') {
+    const tn = cleanName(p.tn);
+    if (tn) pushAct({ k: 'ko', n, tn });
   } else if (p.k === 'tip' && (p.tk === 'SOL' || p.tk === 'ORE' || p.tk === 'SKR')) {
     const tn = cleanName(p.tn);
     const a = amt(p.a, 1e6);
@@ -238,13 +244,14 @@ function onAct(p: any) {
   }
 }
 /** Tell the lobby what this player just did. Cosmetic: a feed line shows to everyone, and nothing here moves money. */
-export function announce(a: { k: 'win'; sol: number; pts: number } | { k: 'xp'; xp: number } | { k: 'play'; g: 'tunnel' | 'pot' | 'crash'; a: number; tk: 'ORE' | 'SKR'; win: boolean } | { k: 'tip'; to: string; tn: string; a: number; tk: 'SOL' | 'ORE' | 'SKR' }) {
+export function announce(a: { k: 'win'; sol: number; pts: number } | { k: 'xp'; xp: number } | { k: 'ko'; tn: string } | { k: 'play'; g: 'tunnel' | 'pot' | 'crash'; a: number; tk: 'ORE' | 'SKR'; win: boolean } | { k: 'tip'; to: string; tn: string; a: number; tk: 'SOL' | 'ORE' | 'SKR' }) {
   const name = useName.getState().name;
   if (!name) return;
   const me = useLobby.getState().me;
   if (a.k === 'win') pushAct({ k: 'win', n: name, sol: a.sol, pts: a.pts });
   else if (a.k === 'xp') pushAct({ k: 'xp', n: name, xp: a.xp });
   else if (a.k === 'play') pushAct({ k: 'play', n: name, g: a.g, a: a.a, tk: a.tk, win: a.win, mine: true });
+  else if (a.k === 'ko') pushAct({ k: 'ko', n: name, tn: a.tn, mine: true });
   else pushAct({ k: 'tip', n: name, tn: a.tn, a: a.a, tk: a.tk, toMe: false, mine: true });
   void chatChannel?.send({ type: 'broadcast', event: 'act', payload: { id: me, nm: name, ...(a.k === 'tip' ? { k: 'tip', to: a.to, tn: a.tn, a: a.a, tk: a.tk } : a) } });
 }
@@ -411,6 +418,7 @@ export function joinLobby() {
   ch.on('broadcast', { event: 'state' }, ({ payload }) => onState(payload))
     .on('broadcast', { event: 'emote' }, ({ payload }) => onEmote(payload))
     .on('broadcast', { event: 'bye' }, ({ payload }) => onBye(payload))
+    .on('broadcast', { event: 'bx' }, ({ payload }) => roomHooks.onBx?.('lobby', payload))
     // someone new: send them our full look with the next update
     .on('broadcast', { event: 'hi' }, () => {
       lastKey = '';
@@ -515,7 +523,8 @@ export function publishLobbyMe(m: { x: number; y: number; tx: number; ty: number
   if (![m.x, m.y, m.tx, m.ty].every(Number.isFinite)) return;
   const now = Date.now();
   const r = (v: number) => Math.round(v);
-  const move = { id: me, nm: name, x: r(m.x), y: r(m.y), tx: r(m.tx), ty: r(m.ty), f: m.facing, p: asPose(m.pose) };
+  const bw = roomHooks.myBw?.();
+  const move = { id: me, nm: name, x: r(m.x), y: r(m.y), tx: r(m.tx), ty: r(m.ty), f: m.facing, p: asPose(m.pose), ...(bw ? { bw } : {}) };
   const look = {
     h: m.look.hat,
     c: m.look.fit,
@@ -542,6 +551,13 @@ export function publishLobbyMe(m: { x: number; y: number; tx: number; ty: number
 }
 let lastLook = '';
 let lastLookAt = 0;
+
+/** Send a Brawl message to everyone in the lobby room. False when the room is not joined. */
+export function sendLobbyBx(payload: Record<string, unknown>): boolean {
+  if (!channel || useLobby.getState().status !== 'online') return false;
+  void channel.send({ type: 'broadcast', event: 'bx', payload });
+  return true;
+}
 
 export const lobbySpawn = (k: 'start' | DoorId) => SPAWNS[k];
 export const lobbyJoinedAt = () => joinedAt;

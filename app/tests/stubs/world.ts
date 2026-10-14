@@ -15,3 +15,4 @@ export const worldClient = () => ({
     return ch;
   },
 });
+export const sendWorldBx = () => false;

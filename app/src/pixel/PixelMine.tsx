@@ -22,6 +22,7 @@ import { atlasSource } from './atlasSource';
 import GameView, { type GameRef } from './GameView';
 import { useView } from './view';
 import { useLobby } from '../game/lobby';
+import { brawlSnap, enterScope, initBrawl, setMyPos, swing } from '../game/brawl';
 
 const STANDS = CLAIMS.map((c) => c.stand as unknown as [number, number]);
 const GLOW: Record<Gear['rarity'], Look['glow']> = { common: 'none', rare: 'rare', epic: 'epic', legendary: 'legendary' };
@@ -125,6 +126,7 @@ function snapshot(): Snapshot {
     amounts: st.dockTab === 'pro',
     claimedAt: st.claimedAt,
     onIsland: useLobby.getState().where === 'island',
+    brawl: brawlSnap(now),
   };
 }
 
@@ -158,12 +160,47 @@ function stepPeers(dt: number) {
 
 const SFX: Record<string, Sound> = { hit: 'hit', pop: 'pop', crack: 'crack', select: 'select', deselect: 'deselect', whoosh: 'dig', bonk: 'bonk' };
 
+let fightFn: (() => void) | null = null;
+/** The island's FIGHT button: swing at whoever is in reach. */
+export const islandFight = () => fightFn?.();
+
 export default function PixelMine() {
   const ref = useRef<GameRef>(null);
   const request = useView((s) => s.request);
   const [atlas, setAtlas] = useState<string | null>(null);
   useEffect(() => {
     atlasSource().then(setAtlas, () => setAtlas('/pixel/atlas.png'));
+  }, []);
+
+  // Brawl: wire it once, and start fresh (with a shield) every time you change rooms
+  useEffect(() => {
+    initBrawl({
+      busy: () => Boolean(useGame.getState().wallet.busy),
+      level: () => {
+        const g = useGame.getState();
+        return levelFromXp(g.wallet.player ? g.wallet.player.xp + g.save.bonusXp : g.save.xp);
+      },
+      canFight: (scope) => {
+        if (scope === 'lobby') return useLobby.getState().status === 'online' && Boolean(useName.getState().name);
+        return useWorld.getState().status === 'online' && (!oreLive || Boolean(useGame.getState().wallet.owner));
+      },
+      gainXp: (n) => useGame.getState().gainXp(n),
+    });
+    enterScope(useLobby.getState().where);
+    let where = useLobby.getState().where;
+    return useLobby.subscribe((l) => {
+      if (l.where !== where) {
+        where = l.where;
+        enterScope(where);
+      }
+    });
+  }, []);
+  // F on the keyboard is handled inside the canvas; the FIGHT button calls islandFight
+  useEffect(() => {
+    fightFn = () => ref.current?.attack?.();
+    return () => {
+      fightFn = null;
+    };
   }, []);
 
   useEffect(() => {
@@ -222,7 +259,11 @@ export default function PixelMine() {
         st.doEmote();
         useWorld.getState().emote(EMOTES[Math.floor(Math.random() * EMOTES.length)]);
         break;
+      case 'swing':
+        swing('island', e.target, e.x, e.y);
+        break;
       case 'me': {
+        setMyPos('island', e.x, e.y);
         if (oreLive && !st.wallet.owner) break;
         const { pick, hat, fit, pet } = myGear();
         const session = st.session();

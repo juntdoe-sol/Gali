@@ -1,3 +1,4 @@
+import { useBrawl, _test } from './game/brawl';
 import { useAppFonts } from './fonts';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
@@ -31,7 +32,7 @@ import { useArcade } from './game/arcade';
 
 
 // lets browser tests watch the game state
-if (Platform.OS === 'web') Object.assign(globalThis, { __gali: useGame, __galiWorld: useWorld, __galiLobbyStore: useLobby, __galiCaveStore: useCave, __galiArcadeStore: useArcade });
+if (Platform.OS === 'web') Object.assign(globalThis, { __gali: useGame, __galiWorld: useWorld, __galiLobbyStore: useLobby, __galiCaveStore: useCave, __galiArcadeStore: useArcade, __galiBrawl: useBrawl, __galiBrawlTest: _test });
 // pixel art in the interface (gear icons) stays crisp when the browser scales it
 if (Platform.OS === 'web' && typeof document !== 'undefined' && !document.getElementById('gali-pixel-css')) {
   const el = document.createElement('style');
