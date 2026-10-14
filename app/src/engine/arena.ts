@@ -2,8 +2,8 @@
  * The Arena, drawn and played: one screen, the whole pit in view.
  *
  * A sand oval with four stone pillars and a ring in the middle, walled in, with stands full of a pixel
- * crowd along the top. Fighters move with WASD or the arrows (PC) or the stick (phone). On PC the right mouse
- * button swings, the left throws ORE at the cursor, Space jumps, and every unlocked power has its own key
+ * crowd along the top. Fighters move with WASD or the arrows (PC) or the stick (phone). On PC the left mouse
+ * button swings, the right throws ORE at the cursor, Space jumps, and every unlocked power has its own key
  * (Q E R C V X, or 1 to 6). F and G still swing and throw. Spectators stand in the stands and cheer.
  *
  * The engine owns movement, aiming and the flight of your own ORE shards (it knows where everyone is
@@ -472,7 +472,7 @@ export class ArenaEngine {
       const r = cv.getBoundingClientRect();
       return { x: e.clientX - r.left, y: e.clientY - r.top };
     };
-    // the right button swings: no browser menu over the pit
+    // the right button throws: no browser menu over the pit
     cv.addEventListener('contextmenu', (e) => e.preventDefault());
     cv.addEventListener('pointerdown', (e) => {
       const p = pos(e);
@@ -494,10 +494,11 @@ export class ArenaEngine {
       }
       e.preventDefault();
       this.aim = this.toMap(p.x, p.y);
-      if (e.button === 2) return this.attack();
+      // right button: throw at the cursor
+      if (e.button === 2) return this.throwOre(this.aim);
       if (e.button !== 0) return;
-      // left button: throw while you fight; else a click on a miner opens them
-      if (this.fighting()) return this.throwOre(this.aim);
+      // left button: swing while you fight; else a click on a miner opens them
+      if (this.fighting()) return this.attack();
       const [mx, my] = this.aim;
       const hitPeer = [...this.others.values()].find((o) => Math.abs(o.x - mx) < 8 && my < o.y + 2 && my > o.y - 24);
       if (hitPeer) this.emit({ t: 'peer', id: hitPeer.view.id });
