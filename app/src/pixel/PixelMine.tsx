@@ -22,7 +22,7 @@ import { atlasSource } from './atlasSource';
 import GameView, { type GameRef } from './GameView';
 import { useView } from './view';
 import { useLobby } from '../game/lobby';
-import { brawlSnap, enterScope, initBrawl, setMyPos, swing } from '../game/brawl';
+import { brawlSnap, enterScope, initBrawl, jump, setMyPos, swing } from '../game/brawl';
 
 const STANDS = CLAIMS.map((c) => c.stand as unknown as [number, number]);
 const GLOW: Record<Gear['rarity'], Look['glow']> = { common: 'none', rare: 'rare', epic: 'epic', legendary: 'legendary' };
@@ -161,8 +161,11 @@ function stepPeers(dt: number) {
 const SFX: Record<string, Sound> = { hit: 'hit', pop: 'pop', crack: 'crack', select: 'select', deselect: 'deselect', whoosh: 'dig', bonk: 'bonk' };
 
 let fightFn: (() => void) | null = null;
+let jumpFn: (() => void) | null = null;
 /** The island's FIGHT button: swing at whoever is in reach. */
 export const islandFight = () => fightFn?.();
+/** The island's JUMP button. */
+export const islandJump = () => jumpFn?.();
 
 export default function PixelMine() {
   const ref = useRef<GameRef>(null);
@@ -198,8 +201,10 @@ export default function PixelMine() {
   // F on the keyboard is handled inside the canvas; the FIGHT button calls islandFight
   useEffect(() => {
     fightFn = () => ref.current?.attack?.();
+    jumpFn = () => ref.current?.jump?.();
     return () => {
       fightFn = null;
+      jumpFn = null;
     };
   }, []);
 
@@ -261,6 +266,9 @@ export default function PixelMine() {
         break;
       case 'swing':
         swing('island', e.target, e.x, e.y);
+        break;
+      case 'jump':
+        jump('island');
         break;
       case 'me': {
         setMyPos('island', e.x, e.y);

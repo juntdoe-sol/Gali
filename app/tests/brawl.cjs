@@ -147,6 +147,16 @@ const id = (P) => P.useLobby.getState().me;
   assert.equal(B.useBrawl.getState().me.hp, 100, 'deploying: no damage');
   B.busy = false;
 
+  // a jump: Alice sees the hop, and a swing that lands mid-air misses
+  await wait(500);
+  assert.equal(B.jump('lobby'), true);
+  assert.equal(B.jump('lobby'), false, 'no double jump');
+  await wait(20);
+  assert.ok(A.useBrawl.getState().jumps[id(B)] > 0, 'Alice sees Bob jump');
+  A.swing('lobby', id(B), 100, 100);
+  await wait(40);
+  assert.equal(B.useBrawl.getState().me.hp, 100, 'mid-air: the swing misses');
+
   // the same foe again soon after: the fight still works, but no more XP
   await wait(500);
   B.say();

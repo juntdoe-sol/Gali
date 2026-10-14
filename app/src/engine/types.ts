@@ -86,6 +86,8 @@ export interface BrawlSnap {
   me: BrawlView & { rs: number; hx: number; hy: number };
   /** players running a build with Brawl (others have no entry and no HP bar) */
   peers: Record<string, BrawlView>;
+  /** when each player last jumped (wall ms), so everyone sees the hop */
+  jumps?: Record<string, number>;
 }
 
 export type EngineEvent =
@@ -99,4 +101,6 @@ export type EngineEvent =
   | { t: 'emote' }
   | { t: 'perf'; fps: number; quality: number }
   /** your miner swung its pickaxe; target is the player it hit, if any */
-  | { t: 'swing'; target: string | null; x: number; y: number };
+  | { t: 'swing'; target: string | null; x: number; y: number }
+  /** your miner jumped */
+  | { t: 'jump' };

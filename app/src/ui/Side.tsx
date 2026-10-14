@@ -31,9 +31,9 @@ export function SidePanel() {
       {mouse ? (
         <View style={styles.keys} accessibilityElementsHidden importantForAccessibility="no">
           <KeyHint k="CLICK" t="pick spot" />
-          <KeyHint k="WHEEL" t="zoom" />
-          <KeyHint k="DRAG" t="pan" />
-          <KeyHint k="L" t="lobby" />
+          <KeyHint k="WASD" t="walk" />
+          <KeyHint k="SPC" t="jump" />
+          <KeyHint k="F" t="fight" />
           <KeyHint k="?" t="help" />
         </View>
       ) : null}
