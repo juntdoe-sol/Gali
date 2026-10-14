@@ -111,8 +111,8 @@ interface ArenaState {
   pickups: Pickup[];
   shots: Shot[];
   ammo: number;
-  /** wall ms the active power can be used again */
-  readyAt: number;
+  /** wall ms each active power can be used again */
+  readyAt: Partial<Record<ActiveId, number>>;
   loadout: Loadout;
   /** spectators cheering: the last few */
   cheers: { id: string; at: number }[];
@@ -135,7 +135,7 @@ export const useArena = create<ArenaState>((set, get) => ({
   pickups: [],
   shots: [],
   ammo: 0,
-  readyAt: 0,
+  readyAt: {},
   loadout: { active: null, passive: null, trail: 'plain' },
   cheers: [],
   spectator: false,
@@ -164,12 +164,12 @@ void loadJson<Loadout>(LO_KEY, { active: null, passive: null, trail: 'plain' }).
   useArena.setState({ loadout: { active: ok(lo.active, ACTIVES) as ActiveId | null, passive: ok(lo.passive, PASSIVES) as PassiveId | null, trail: typeof lo.trail === 'string' ? lo.trail : 'plain' } });
 });
 
-/** The powers you can actually use at this level (falls back to the first unlocked). */
-export function effectiveLoadout(lvl: number): { active: ActiveId | null; passive: PassiveId | null } {
+/** The powers you can actually use at this level: every unlocked active, and your passive (or the first unlocked). */
+export function effectiveLoadout(lvl: number): { actives: ActiveId[]; passive: PassiveId | null } {
   const lo = useArena.getState().loadout;
-  const active = lo.active && unlocked(lo.active, lvl) ? lo.active : ACTIVES.find((p) => unlocked(p, lvl)) ?? null;
+  const actives = ACTIVES.filter((p) => unlocked(p, lvl));
   const passive = lo.passive && unlocked(lo.passive, lvl) ? lo.passive : PASSIVES.find((p) => unlocked(p, lvl)) ?? null;
-  return { active, passive };
+  return { actives, passive };
 }
 
 /* ---------------- the network ---------------- */
@@ -554,7 +554,7 @@ export function sharePower(p: string) {
   send('pw', { id: useArena.getState().me, p });
 }
 function onPower(p: any) {
-  if (!p || typeof p.id !== 'string' || typeof p.p !== 'string' || !/^(dash|slam|guard|splash)$/.test(p.p)) return;
+  if (!p || typeof p.id !== 'string' || typeof p.p !== 'string' || !/^(dash|slam|guard|splash|spin|mend)$/.test(p.p)) return;
   const peer = useArena.getState().peers[p.id];
   if (peer) useArena.setState((s) => ({ peers: { ...s.peers, [p.id]: { ...peer, fx: { p: p.p, at: Date.now() } } } }));
 }
@@ -663,7 +663,7 @@ function onMatchChanged(m: Match) {
   if (m.phase === 'count' && appliedN !== m.n) {
     appliedN = m.n;
     const i = m.fighters.indexOf(s.me);
-    useArena.setState({ spectator: i < 0, ammo: 0, readyAt: 0 });
+    useArena.setState({ spectator: i < 0, ammo: 0, readyAt: {} });
     resetMe(COUNT_MS + 600);
     matchListeners.forEach((f) => f(m));
   }
