@@ -11,7 +11,10 @@ import { useView } from '../pixel/view';
 import { useMinersHere } from './World';
 import { PixIcon } from './PixIcon';
 import type { PixName } from './pixIcons';
-import { GUTTER, RAIL_W, TOP_H, useLayout } from './layout';
+import { GUTTER, LANDSCAPE_APP, RAIL_W, TOP_H, useLayout } from './layout';
+
+/** the landscape app's top bar is narrow: numbers keep their width, labels and the address go */
+const TIGHT = LANDSCAPE_APP;
 
 const fmtOre = (v: number) => (v >= 10 ? Math.floor(v).toLocaleString() : v >= 1 ? v.toFixed(2) : v.toFixed(3));
 
@@ -50,10 +53,12 @@ function WalletChip({ onMenu }: { onMenu: () => void }) {
           <T v="display" style={{ fontSize: 18, lineHeight: 20 }}>
             {live ? `${ore.toLocaleString(undefined, { maximumFractionDigits: ore < 1 ? 4 : 2 })}` : `${skr.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
           </T>
-          <T v="display" style={{ fontSize: 15, color: COLORS.muted }}>
-            {live ? 'ORE' : 'SKR'}
-          </T>
-          {desktop ? (
+          {TIGHT ? null : (
+            <T v="display" style={{ fontSize: 15, color: COLORS.muted }}>
+              {live ? 'ORE' : 'SKR'}
+            </T>
+          )}
+          {desktop && !TIGHT ? (
             <T v="bold" style={{ fontSize: 12, color: COLORS.muted, marginLeft: 2 }}>
               {short(owner)}
             </T>
@@ -88,15 +93,16 @@ function Stat({ icon, color, value, label, tip }: { icon: PixName; color?: strin
       <T v="display" numberOfLines={1} style={{ fontSize: 18, lineHeight: 20, color: color ?? COLORS.text }}>
         {value}
       </T>
-      {label ? <T v="display" style={{ fontSize: 14, color: COLORS.muted }}>{label}</T> : null}
+      {label && !TIGHT ? <T v="display" style={{ fontSize: 14, color: COLORS.muted }}>{label}</T> : null}
     </PixelBox>
   );
-  return tip ? <Tip text={tip} side="bottom" width={200} style={{ flexGrow: 1, flexShrink: 1 }}>{body}</Tip> : <View style={{ flexGrow: 1, flexShrink: 1 }}>{body}</View>;
+  const grow = TIGHT ? { flexGrow: 0, flexShrink: 0 } : { flexGrow: 1, flexShrink: 1 };
+  return tip ? <Tip text={tip} side="bottom" width={200} style={grow}>{body}</Tip> : <View style={grow}>{body}</View>;
 }
 
 function LevelStat({ lvl, pct, xp }: { lvl: number; pct: number; xp: number }) {
   return (
-    <Tip text={`Level ${lvl}. ${Math.round(pct)}% of the way to level ${lvl + 1} (${xp.toLocaleString()} XP).`} side="bottom" width={210} style={{ flexGrow: 1.4, flexShrink: 1 }}>
+    <Tip text={`Level ${lvl}. ${Math.round(pct)}% of the way to level ${lvl + 1} (${xp.toLocaleString()} XP).`} side="bottom" width={210} style={{ flexGrow: 1.4, flexShrink: 1, minWidth: TIGHT ? 58 : undefined }}>
       <PixelBox fill="rgba(8,13,32,0.86)" hi="rgba(60,86,160,0.5)" lo="#04060f" style={styles.stat}>
         <PixelBox fill={COLORS.teal} hi="#d9fbff" lo="#15809a" edge="#021418" style={styles.lvl}>
           <T v="display" style={{ color: '#032026', fontSize: 16, lineHeight: 17 }}>
@@ -119,7 +125,7 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
 
   if (desktop) {
     return (
-      <View style={[styles.deskTop, { left: RAIL_W + GUTTER, right: side + GUTTER * 2 }]} pointerEvents="box-none">
+      <View style={[styles.deskTop, { left: RAIL_W + GUTTER, right: side + GUTTER * 2 }, TIGHT && { gap: 6 }]} pointerEvents="box-none">
         {w >= 1180 ? (
         <PixelBox fill="rgba(8,13,32,0.9)" hi={COLORS.trim} lo="#04060f" shadow={1} style={styles.deskTitle}>
           <PixIcon name="ore" size={24} />
@@ -385,7 +391,7 @@ const styles = StyleSheet.create({
   bigStat: { flex: 1, alignItems: 'center', gap: 2 },
   divider: { width: U, alignSelf: 'stretch', marginVertical: 2, backgroundColor: '#22356f' },
   liveTag: { paddingHorizontal: 4, paddingVertical: 2 },
-  stat: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, height: 36 },
+  stat: { flexDirection: 'row', alignItems: 'center', gap: TIGHT ? 4 : 6, paddingHorizontal: TIGHT ? 7 : 10, height: 36 },
   lvl: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
   round: { position: 'absolute', left: 12, right: 12, paddingHorizontal: 14, paddingVertical: 10 },
   roundEmbedded: { paddingHorizontal: 14, paddingVertical: 12 },

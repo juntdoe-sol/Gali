@@ -66,12 +66,14 @@ function SkillButton({ size, round, icon, label, kbd, left = 0, total = 1, locke
   );
 }
 
-/** HIT (big) and JUMP, bottom right. */
-export function FightPad({ bottom, right, onHit, onJump, hit = true }: { bottom: number; right: number; onHit: () => void; onJump: () => void; hit?: boolean }) {
+/** HIT (big) and JUMP, bottom right. `small` keeps the island's map clear. */
+export function FightPad({ bottom, right, onHit, onJump, hit = true, small }: { bottom: number; right: number; onHit: () => void; onJump: () => void; hit?: boolean; small?: boolean }) {
+  const H = small ? 62 : 80;
+  const J = small ? 46 : 56;
   return (
-    <View style={{ position: 'absolute', right, bottom, width: 150, height: 120 }} pointerEvents="box-none">
-      {hit ? <SkillButton size={80} round gold icon="fist" label="HIT" style={{ position: 'absolute', right: 0, bottom: 0 }} onPress={onHit} /> : null}
-      <SkillButton size={56} round icon="jump" label="JUMP" style={{ position: 'absolute', right: hit ? 88 : 0, bottom: hit ? 44 : 0 }} onPress={onJump} />
+    <View style={{ position: 'absolute', right, bottom, width: H + J + 12, height: H + J / 2 + 6 }} pointerEvents="box-none">
+      {hit ? <SkillButton size={H} round gold icon="fist" label="HIT" style={{ position: 'absolute', right: 0, bottom: 0 }} onPress={onHit} /> : null}
+      <SkillButton size={J} round icon="jump" label="JUMP" style={{ position: 'absolute', right: hit ? H + 6 : 0, bottom: hit ? H / 2 + 2 : 0 }} onPress={onJump} />
     </View>
   );
 }
