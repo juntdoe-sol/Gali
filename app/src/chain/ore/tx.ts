@@ -229,11 +229,17 @@ export async function stopOreAutomation(session: Keypair): Promise<string> {
 }
 
 /* ---------------- live autopilot: ORE's own automation ----------------
- * One wallet approval funds an ORE automation account and names a small device key as its
- * executor. After that the device key deploys each round with no pop-up. What the key can do
- * is fixed by ORE: it can only deploy the automation's balance onto the board (never withdraw
- * it), and the player can close the automation any time and get the balance back.
+ * One wallet approval funds an ORE automation account. ORE itself decides the spots each round:
+ * the Preferred strategy plays a fixed set (ALL, or the spots you picked), Random plays a fresh
+ * random set of the same size every round (Smart). Because the spots and the amount are fixed
+ * on chain, the automation is open to any executor: Gali's server presses deploy every round
+ * (so autopilot keeps going with the app closed), the device does too while the app is open,
+ * and ORE ignores a second deploy in the same round. Whoever deploys first earns a flat
+ * AUTOPILOT_FEE_LAMPORTS from the automation, which covers the network fee. Nobody but the
+ * player can withdraw: closing the automation returns the balance to the player.
  */
+/** What each round's deploy pays its executor: the network fee, no margin. */
+export const AUTOPILOT_FEE_LAMPORTS = 10_000n;
 /** SOL left on the executor key to pay its own transaction fees. A system account must stay above rent-exempt (~0.00089 SOL). */
 export const EXECUTOR_TOPUP_LAMPORTS = 2_000_000;
 const EXECUTOR_MIN_LAMPORTS = 1_500_000;
@@ -259,7 +265,7 @@ export async function readAutomation(owner: PublicKey) {
     perSpot: toSol(a.amount),
     spent: toSol(a.totalSolSpent),
     executor: a.executor,
-    runnable: Boolean(mine && a.executor.equals(mine)),
+    runnable: a.executor.equals(EXECUTOR_ADDRESS) || Boolean(mine && a.executor.equals(mine)),
   };
 }
 
@@ -271,10 +277,18 @@ export async function startLiveAutomation(args: {
   lamportsPerSquare: bigint;
   maxSquares: number;
   rounds: number;
+  /** the spots to play (Preferred), or the first round's spots when `random` (their count is kept) */
+  squares: number[];
+  /** a fresh random set of the same size each round (Smart) */
+  random: boolean;
   expectedOwner?: PublicKey;
 }): Promise<void> {
   if (args.rounds < 1 || args.maxSquares < 1 || args.maxSquares > 25) throw new Error('Bad autopilot setup');
-  const deposit = args.lamportsPerSquare * BigInt(args.maxSquares) * BigInt(args.rounds);
+  const mask = squaresToMask(args.squares);
+  const n = maskToSquares(mask).length;
+  if (n < 1 || n !== args.maxSquares) throw new Error('Bad autopilot setup');
+  const perRound = args.lamportsPerSquare * BigInt(n) + AUTOPILOT_FEE_LAMPORTS;
+  const deposit = perRound * BigInt(args.rounds);
   if (Number(deposit) / LAMPORTS_PER_SOL > LIVE_AUTOPILOT_MAX_SOL + 1e-9) throw new Error(`Autopilot is capped at ${LIVE_AUTOPILOT_MAX_SOL} SOL`);
   await sendWithWallet(async (owner) => {
     if (await fetchOreAutomation(connection, owner)) throw new Error('Autopilot is already on. Stop it first');
@@ -287,11 +301,11 @@ export async function startLiveAutomation(args: {
         authority: owner,
         amount: args.lamportsPerSquare,
         deposit,
-        fee: 0n,
-        mask: 0,
-        strategy: AUTOMATION_STRATEGY.DiscretionaryBps,
+        fee: AUTOPILOT_FEE_LAMPORTS,
+        mask,
+        strategy: args.random ? AUTOMATION_STRATEGY.Random : AUTOMATION_STRATEGY.Preferred,
         reload: false,
-        executor: exec.publicKey,
+        executor: EXECUTOR_ADDRESS,
       }),
     );
     return ixs;
@@ -307,6 +321,8 @@ export async function deployFromAutomation(owner: PublicKey, squares: number[], 
   if (!exec) throw new Error('This device does not hold the autopilot key. Stop autopilot from the wallet panel');
   const [clock, miner] = await Promise.all([fetchClock(connection), fetchOreMiner(connection, owner)]);
   if (clock.phase === 'intermission' || (clock.phase === 'mining' && clock.slotsLeft < LIVE_LOCK_SLOTS)) throw new Error('RoundLocked');
+  // Gali's server (or another executor) already played this round: nothing to do, and no fee to waste
+  if (miner && miner.roundId === clock.roundId && miner.deployed.some((d) => d > 0n)) return clock.roundId;
   const ixs: TransactionInstruction[] = [priorityIx()];
   const pending = needsCheckpoint(miner, clock);
   if (pending !== null) ixs.push(checkpointIx({ signer: exec.publicKey, authority: owner, roundId: pending }));

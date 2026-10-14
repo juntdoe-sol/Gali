@@ -521,7 +521,7 @@ function ProPanel({ compact }: { compact: boolean }) {
             <Row
               icon="bot"
               label="Autopilot on"
-              info="Your SOL sits in ORE's automation and is deployed round by round while this app is open. Stopping closes it and sends what is left back to your wallet."
+              info="Your SOL sits in ORE's automation and is deployed round by round, even with the app closed (0.00001 SOL a round covers the network fee). Stopping closes it and sends what is left back to your wallet."
               right={
                 <>
                   <T v="black" style={{ fontSize: 12, color: COLORS.teal, marginRight: 6 }}>

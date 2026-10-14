@@ -397,7 +397,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
         {!L.desktop ? (
           <View style={styles.fightRow} pointerEvents="box-none">
             <MapButton label="JUMP" icon={<PixIcon name="jump" size={20} />} accessibilityLabel="Jump" onPress={() => ref.current?.jump?.()} />
-            {brawlOn ? <MapButton label="FIGHT" icon={<PixIcon name="fist" size={20} />} accessibilityLabel="Fight: swing your pickaxe" onPress={() => ref.current?.attack?.()} /> : null}
+            {brawlOn ? <MapButton label="HIT" icon={<PixIcon name="fist" size={20} />} accessibilityLabel="Hit: swing your pickaxe" onPress={() => ref.current?.attack?.()} /> : null}
           </View>
         ) : null}
         <PixelBox fill="rgba(8,13,32,0.9)" hi="#2d4282" lo="#04060f" shadow={2} style={[styles.emotes, L.w < 390 && { gap: 3, paddingHorizontal: 6 }]}>
@@ -410,7 +410,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
             <>
               <View style={styles.emoteSep} />
               <EmoteKey icon="jump" label="Jump" kbd="SPC" onPress={() => ref.current?.jump?.()} />
-              {brawlOn ? <EmoteKey icon="fist" label="Fight: swing your pickaxe" kbd="F" onPress={() => ref.current?.attack?.()} /> : null}
+              {brawlOn ? <EmoteKey icon="fist" label="Hit: swing your pickaxe" kbd="F" onPress={() => ref.current?.attack?.()} /> : null}
             </>
           ) : null}
         </PixelBox>
@@ -538,7 +538,7 @@ const HOWTO_KEY = 'gali-lobby-howto-v1';
 const HOWTO: { icon: PixName; title: string; body: string }[] = [
   { icon: 'star', title: 'Walk around', body: 'Use the joystick or tap the map on a phone; WASD, the arrow keys or a click on a computer. Pinch or scroll to zoom. Other players are real people in the lobby right now.' },
   { icon: 'chat', title: 'Talk and react', body: 'Pick a name, then use CHAT to message everyone (Enter on a keyboard). Tap an icon to wave, laugh or show off, or the note to dance. Keys 1 to 7 do the same.' },
-  { icon: 'fist', title: 'Brawl', body: 'Tap FIGHT (F on a keyboard) to swing at the miner next to you, in the lobby or on the island. JUMP (Space) makes a swing miss you. At 0 HP a miner is knocked down, then stands up with full HP and a short shield. A KO gives XP. Nothing real is lost: no ORE, SOL or gear. Turn Brawl off any time in PROFILE.' },
+  { icon: 'fist', title: 'Brawl', body: 'Tap HIT (F on a keyboard) to swing at the miner next to you, in the lobby or on the island. JUMP (Space) makes a swing miss you. At 0 HP a miner is knocked down, then stands up with full HP and a short shield. A KO gives XP. Nothing real is lost: no ORE, SOL or gear. Turn Brawl off any time in PROFILE.' },
   { icon: 'gem', title: 'Island: mine ORE', body: 'Walk onto the jetty, or tap GO then ISLAND. Pick spots on the map, deploy SOL, and win ORE when your spot is the gold one. Your wallet approves every deploy. Only play with SOL you can afford to lose.' },
   { icon: 'cart', title: 'Mini games', body: 'South of the plaza are three pavilions: Tunnel Collapse, Gold Rush Pot and Crash Cart. Walk into one, or tap GO then its name, to open it. Each has an ORE table and an SKR table, with a new round every 40 seconds shared by everyone.' },
   { icon: 'tunnel', title: 'Tunnel Collapse', body: 'Pick one of five tunnels. One caves in. Miners in the other four split the stakes of the collapsed one, minus a 5% fee.' },
@@ -547,7 +547,7 @@ const HOWTO: { icon: PixName; title: string; body: string }[] = [
   { icon: 'lock', title: 'Staking safely', body: 'Stakes are real ORE or SKR sent from your wallet, and your wallet approves each one. Winners are paid automatically, and every round can be checked with the hash shown in the game. 18+ only. Stake only what you can afford to lose.' },
   { icon: 'pick', title: 'Cave: Cave Run', body: 'Go into the cave for the Cave Run mini game. It earns XP and does not spend SOL.' },
   { icon: 'gift', title: 'Market: gear', body: 'Walk into the shop to see pickaxes, hats and pets for your miner.' },
-  { icon: 'fire', title: 'Autopilot', body: 'On the island, open MINE, then PRO and set Rounds above 1. One wallet approval funds ORE automation, and your rounds then deploy by themselves while the app is open. STOP gets the unused SOL back.' },
+  { icon: 'fire', title: 'Autopilot', body: 'On the island, open MINE, then PRO and set Rounds above 1. One wallet approval funds ORE automation. Your rounds then deploy by themselves, even with the app closed or your phone locked. Each round costs 0.00001 SOL extra for the network fee. STOP gets the unused SOL back.' },
   { icon: 'wave', title: 'Back to the lobby', body: 'Every place has a LOBBY button. The GO button in the bar jumps straight to the island, cave, games or market.' },
 ];
 
@@ -946,7 +946,7 @@ export function LobbyBack() {
   const brawlOn = useBrawl((b) => !b.off);
   if (where !== 'island' || (dockOpen && !ch.desktop) || inside) return null;
   const bottom = ch.desktop ? ch.bottom : insets.bottom + BAR_H + 46;
-  const fight = brawlOn ? <MapButton label="FIGHT" kbd={ch.desktop ? 'F' : undefined} icon={<PixIcon name="fist" size={20} />} accessibilityLabel="Fight: swing your pickaxe" onPress={islandFight} /> : null;
+  const fight = brawlOn ? <MapButton label="HIT" kbd={ch.desktop ? 'F' : undefined} icon={<PixIcon name="fist" size={20} />} accessibilityLabel="Hit: swing your pickaxe" onPress={islandFight} /> : null;
   return (
     <>
       <View style={[styles.backWrap, styles.backRow, { left: ch.left, bottom }]} pointerEvents="box-none">
