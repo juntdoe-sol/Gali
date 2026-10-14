@@ -25,6 +25,19 @@ PAL = {
 }
 
 ART = {
+    'fist': """
+..............
+...ssssssss...
+..sswswswswS..
+..ssSsSsSsSS..
+..ssssssssss..
+..ssSSSSSSSS..
+.rrsssssssSS..
+.rrsssssssS...
+.RRSsssssSS...
+..RRSSSSSS....
+...RRRR.......
+""",
     'sol': """
 ...mmmmmmmmmm.
 ..mmmmmmmmmm..

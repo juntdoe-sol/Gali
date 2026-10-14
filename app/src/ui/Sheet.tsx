@@ -1,3 +1,4 @@
+import { useBrawl } from '../game/brawl';
 import { useEffect, useState } from 'react';
 import { Linking, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -438,6 +439,23 @@ function Ranks() {
   );
 }
 
+/** Brawl on or off. Off: no HP bar, nobody can hit you, and you can't swing at anyone. */
+function BrawlSwitch() {
+  const off = useBrawl((b) => b.off);
+  return (
+    <Card style={styles.rowCard}>
+      <View style={{ flex: 1 }}>
+        <T>Brawl</T>
+        <T v="muted" style={{ fontSize: 12 }}>
+          Fights in the lobby and on the island. Free, for XP only. Nothing real is lost.
+        </T>
+      </View>
+      <PixIcon name="fist" size={22} />
+      <PixSwitch value={!off} onChange={(v: boolean) => useBrawl.getState().setOff(!v)} label="Brawl" />
+    </Card>
+  );
+}
+
 function Me() {
   const w = useGame((s) => s.wallet);
   const save = useGame((s) => s.save);
@@ -493,6 +511,7 @@ function Me() {
           </PixelBox>
         ))}
       </View>
+      <BrawlSwitch />
       <Card style={styles.rowCard}>
         <T style={{ flex: 1 }}>Mute sound</T>
         <PixIcon name={save.muted ? 'mute' : 'sound'} size={22} />

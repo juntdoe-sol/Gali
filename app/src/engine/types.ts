@@ -63,6 +63,29 @@ export interface Snapshot {
   claimedAt?: number;
   /** true while the player is on the island (not in the lobby). Arriving lands the miner on the helipad. */
   onIsland?: boolean;
+  brawl?: BrawlSnap;
+}
+
+/** One fighter, as the canvas sees it. Times are wall-clock ms (Date.now), 0 when not set. */
+export interface BrawlView {
+  hp: number;
+  /** when the knockdown started */
+  ko: number;
+  /** when the shield ends */
+  sh: number;
+  /** last hit taken, last swing */
+  hit: number;
+  sw: number;
+  /** Brawl on for them: show the HP bar, and they can be hit */
+  on: boolean;
+}
+export interface BrawlSnap {
+  /** your own Brawl switch */
+  on: boolean;
+  /** you; rs counts stand-ups (move back to the spawn), hx/hy where the last hit came from */
+  me: BrawlView & { rs: number; hx: number; hy: number };
+  /** players running a build with Brawl (others have no entry and no HP bar) */
+  peers: Record<string, BrawlView>;
 }
 
 export type EngineEvent =
@@ -74,4 +97,6 @@ export type EngineEvent =
   | { t: 'me'; x: number; y: number; tx: number; ty: number; facing: 1 | -1; pose: Pose }
   | { t: 'peer'; id: string }
   | { t: 'emote' }
-  | { t: 'perf'; fps: number; quality: number };
+  | { t: 'perf'; fps: number; quality: number }
+  /** your miner swung its pickaxe; target is the player it hit, if any */
+  | { t: 'swing'; target: string | null; x: number; y: number };

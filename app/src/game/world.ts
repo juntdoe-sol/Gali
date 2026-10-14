@@ -13,6 +13,7 @@ import { short } from '../chain/light';
 import cfg from '../chain/chat.json';
 import { useName } from './username';
 import { cleanName } from './lobbyMap';
+import { roomHooks } from './rx';
 
 export type Pose = 'idle' | 'walk' | 'swing';
 export interface Avatar {
@@ -148,6 +149,7 @@ function connect(RealtimeClientCtor: typeof RealtimeClient) {
       if (id && EMOTES.includes(e) && useWorld.getState().peers[id])
         useWorld.setState((s) => ({ emotes: { ...s.emotes, [id]: { emoji: e, at: Date.now() } } }));
     })
+    .on('broadcast', { event: 'bx' }, ({ payload }) => roomHooks.onBx?.('island', payload))
     .on('broadcast', { event: 'bye' }, ({ payload }) => {
       const id = payload?.id;
       if (typeof id !== 'string') return;
@@ -222,6 +224,7 @@ function onState(p: any) {
     sx: p.sx === 'f' ? 'f' : 'm',
   };
   useWorld.setState((s) => ({ peers: { ...s.peers, [id]: av } }));
+  if (p.bw !== undefined) roomHooks.onBw?.('island', id, p.bw);
   // identity claim: wallet + session key + signature over a fresh timestamp
   if (typeof p.wallet === 'string' && typeof p.session === 'string' && typeof p.sig === 'string' && typeof p.ts === 'number') {
     if (Math.abs(Date.now() - p.ts) > 120_000) return;
@@ -278,6 +281,8 @@ export function publishMe(me: MeState, identity: { wallet: string | null; sessio
     sx: me.sx === 'f' ? 'f' : 'm',
     nm: useName.getState().name || undefined,
   };
+  const bw = roomHooks.myBw?.();
+  if (bw) payload.bw = bw;
   const key = JSON.stringify(payload);
   if (now - lastSent < SEND_MS || (key === lastKey && now - lastSent < BEAT_MS)) return;
   const claimable = identity.wallet && identity.session && identity.sessionValid;
@@ -297,6 +302,13 @@ export function publishMe(me: MeState, identity: { wallet: string | null; sessio
   void channel.send({ type: 'broadcast', event: 'state', payload });
 }
 
+
+/** Send a Brawl message to everyone on the island. False when the room is not joined. */
+export function sendWorldBx(payload: Record<string, unknown>): boolean {
+  if (!channel || useWorld.getState().status !== 'online') return false;
+  void channel.send({ type: 'broadcast', event: 'bx', payload });
+  return true;
+}
 
 /* ---------------- practice bots ---------------- */
 const BOT_NAMES = ['Bot Ayu', 'Bot Raj', 'Bot Mei', 'Bot Tomi'];

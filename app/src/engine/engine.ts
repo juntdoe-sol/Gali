@@ -19,6 +19,8 @@ import { findPath } from './path';
 import { Sky } from './sky';
 import type { EngineEvent, Look, PeerView, Pose, Snapshot } from './types';
 import { Water } from './water';
+import { drawHp, drawKo, drawShield, hitFlash, koAge, pickTarget } from './brawlfx';
+import type { BrawlSnap } from './types';
 
 const BLOCKS = 25;
 const SWING_MS = POSES.swing.n * POSES.swing.ms;
@@ -136,6 +138,12 @@ export class Engine {
   private keyAim: [number, number] = [0, 0];
   private onIsland = false;
   private offKeys: (() => void) | null = null;
+  /** Brawl: when the current swing ends, the last stand-up and hit we reacted to */
+  private swingUntil = 0;
+  private lastSwingWall = 0;
+  private lastRs = -1;
+  private lastHit = 0;
+  private peerHits = new Map<string, number>();
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -181,6 +189,64 @@ export class Engine {
     if (on && !this.onIsland) this.land();
     if (!on) this.keys.clear();
     this.onIsland = on;
+    if (s.brawl) this.brawlEvents(s.brawl);
+  }
+
+  /** Brawl: react to what changed (a hit taken, standing up after a knockdown, a hit landing on someone). */
+  private brawlEvents(b: BrawlSnap) {
+    const me = this.me;
+    if (this.lastRs < 0) this.lastRs = b.me.rs;
+    if (b.me.rs !== this.lastRs) {
+      this.lastRs = b.me.rs;
+      // stand up again on the helipad
+      if (this.onIsland) this.land();
+    }
+    if (b.me.hit && b.me.hit !== this.lastHit) {
+      this.lastHit = b.me.hit;
+      const dx = me.x - b.me.hx;
+      const d = Math.abs(dx) || 1;
+      const nx = me.x + (dx / d) * 6;
+      if (isLand(nx, me.y)) me.x = nx;
+      me.path = [];
+      me.target = -1;
+      me.manualUntil = performance.now() + 3000;
+      if (this.mode === 'island') {
+        this.parts.burst('star', me.x, me.y - 14, 5, 18, 16, ['#ffffff', '#ffd84a'], 0.45);
+        this.emit({ t: 'sfx', name: 'bonk' });
+      }
+    }
+    for (const [id, v] of Object.entries(b.peers)) {
+      if (v.hit && v.hit !== (this.peerHits.get(id) ?? 0)) {
+        const first = !this.peerHits.has(id);
+        this.peerHits.set(id, v.hit);
+        const p = this.peers.get(id);
+        if (p && !first && Date.now() - v.hit < 800 && this.mode === 'island') this.parts.burst('star', p.x, p.y - 14, 5, 18, 16, ['#ffffff', '#ffd84a'], 0.45);
+      }
+    }
+    if (this.peerHits.size > 200) this.peerHits.clear();
+  }
+
+  /** Swing your pickaxe at whoever is in reach (F, or the FIGHT button). */
+  attack() {
+    const b = this.snap?.brawl;
+    if (!b || !b.on || !this.onIsland || this.mode !== 'island') return;
+    const wall = Date.now();
+    if (koAge(b.me, wall) >= 0 || wall - this.lastSwingWall < 450) return;
+    this.lastSwingWall = wall;
+    const me = this.me;
+    const others = [...this.peers.entries()].map(([id, p]) => ({ id, x: p.x, y: p.y, v: b.peers[id] }));
+    const t = pickTarget(me, others, wall);
+    if (t) me.facing = t.facing;
+    const now = performance.now();
+    me.path = [];
+    me.target = -1;
+    me.pose = 'swing';
+    me.since = now;
+    me.hitCycle = -1;
+    me.manualUntil = now + 4000;
+    this.swingUntil = now + 540;
+    this.emit({ t: 'swing', target: t?.id ?? null, x: me.x, y: me.y });
+    this.emit({ t: 'sfx', name: 'whoosh' });
   }
 
   /** Arriving on the island: the miner steps off at the helipad, and the camera goes to meet them. */
@@ -274,6 +340,11 @@ export class Engine {
     const down = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey || typing(e)) return;
       const k = e.key.toLowerCase();
+      if (k === 'f' && !e.repeat && this.onIsland && this.mode === 'island') {
+        this.attack();
+        e.preventDefault();
+        return;
+      }
       if (!MOVE.includes(k) || !this.onIsland || this.mode !== 'island') return;
       this.keys.add(k);
       e.preventDefault();
@@ -503,13 +574,24 @@ export class Engine {
     };
     const winner = s?.winner ?? null;
     const won = winner !== null && pend & (1 << winner) && el > 2600;
-    const keyed = this.keyStep(dt, now);
+    // knocked down in a brawl: lie there until you stand up
+    const downed = s?.brawl ? koAge(s.brawl.me, Date.now()) >= 0 : false;
+    const keyed = !downed && this.keyStep(dt, now);
     if (!keyed && this.keyWalk && me.pose === 'walk' && !me.path.length) {
       me.pose = 'idle';
       me.since = now;
     }
     this.keyWalk = keyed;
-    if (keyed) {
+    // a brawl swing (no spot to dig) ends after one stroke
+    if (me.pose === 'swing' && me.target < 0 && now >= this.swingUntil) {
+      me.pose = 'idle';
+      me.since = now;
+    }
+    if (downed) {
+      me.path = [];
+      me.target = -1;
+      me.manualUntil = now + 1500;
+    } else if (keyed) {
       // walking by hand: the miner goes where the keys say
     } else if (me.path.length) {
       if (this.mode === 'island' && now - this.lastStep > 190) {
@@ -841,14 +923,30 @@ export class Engine {
     const me = this.me;
     const look = s?.me.look ?? DEFAULT_LOOK;
     const mf = frameAt(me.pose, me.since, now);
-    items.push({ z: me.y, f: () => drawMiner(c, look, me.pose, mf, OX + me.x * S, OY + me.y * S, S, me.facing) });
+    const bs = s?.brawl;
+    const wall = Date.now();
+    /** a miner in a brawl: knocked down, flashing from a hit, with its shield and HP bar */
+    const fighter = (lk: Look, pose: Pose, f: number, x: number, y: number, facing: number, v: BrawlSnap['me'] | BrawlSnap['peers'][string] | undefined, mine: boolean) => {
+      const X = OX + x * S;
+      const Y = OY + y * S;
+      const ko = v ? koAge(v, wall) : -1;
+      if (ko < 0 || !drawKo(c, lk, X, Y, S, facing, ko, wall)) {
+        const sw = !mine && v && v.sw && wall - v.sw < 540 ? wall - v.sw : -1;
+        drawMiner(c, lk, sw >= 0 ? 'swing' : pose, sw >= 0 ? Math.min(5, Math.floor(sw / 90)) : f, X, Y, S, facing, hitFlash(v, wall) ? 0.45 : 1);
+      }
+      if (bs?.on && v?.on && this.mode === 'island') {
+        if (v.sh) drawShield(c, X, Y, S, wall, v.sh);
+        if (ko < 0) drawHp(c, v, X, Y, S, wall, mine);
+      }
+    };
+    items.push({ z: me.y, f: () => fighter(look, me.pose, mf, me.x, me.y, me.facing, bs?.me, true) });
     items.push({ z: me.y + 1000, f: () => { if (!s?.pending && !s?.selected.length) draw(c, 'fx-sparkle-' + (Math.floor(now / 120) % 3), OX + me.x * S, OY + (me.y - 30 + Math.sin(now / 220) * 2) * S, S * 0.55, false, 0.8); } });
     if (look.pet) items.push({ z: this.petPos.y + (petFlies(look.pet) ? 16 : 0), f: () => drawPet(c, look.pet!, now, OX + this.petPos.x * S, OY + this.petPos.y * S, S, me.facing) });
     for (const p of s?.peers ?? []) {
       const d = this.peers.get(p.id);
       if (!d) continue;
       const pf = frameAt(d.pose, d.since, now);
-      items.push({ z: d.y, f: () => drawMiner(c, p.look, d.pose, pf, OX + d.x * S, OY + d.y * S, S, p.facing) });
+      items.push({ z: d.y, f: () => fighter(p.look, d.pose, pf, d.x, d.y, p.facing, bs?.peers[p.id], false) });
       if (p.look.pet) {
         const fly = petFlies(p.look.pet);
         const px = d.x - 11 * p.facing;
@@ -1034,10 +1132,11 @@ export class Engine {
     }
     c.globalAlpha = 1;
     // name tags
-    const tag = (label: string, x: number, y: number, col: string, emoji: string | null) => {
+    const bsT = s?.brawl;
+    const tag = (label: string, x: number, y: number, col: string, emoji: string | null, lift = false) => {
       const w = (textWidth(label) + 4) * fs;
       const X = Math.round(OX + x * S - w / 2);
-      const Y = Math.round(OY + (y - 31) * S - 9 * fs);
+      const Y = Math.round(OY + (y - (lift ? 34 : 31)) * S - 9 * fs);
       c.fillStyle = 'rgba(7,13,32,0.85)';
       c.fillRect(X, Y, w, 8 * fs);
       c.fillStyle = col;
@@ -1050,14 +1149,14 @@ export class Engine {
       }
     };
     const me = this.me;
-    tag('YOU', me.x, me.y, '#ffcf4a', s && now - s.me.emoteAt < 2500 ? s.me.emoji : null);
+    tag('YOU', me.x, me.y, '#ffcf4a', s && now - s.me.emoteAt < 2500 ? s.me.emoji : null, Boolean(bsT?.on && bsT.me.on));
     for (const p of s?.peers ?? []) {
       const d = this.peers.get(p.id);
       if (!d) continue;
       // other people's names only once you've zoomed in, or when they wave
       if (zoomK < 1.5 && !p.emoji) continue;
       const near = Math.hypot(d.x - me.x, d.y - me.y) < 28;
-      tag(`${p.name}${near ? ' - TAP' : ''}`, d.x, d.y, p.tone === 'bot' ? '#8ea2cc' : p.tone === 'verified' ? '#14f195' : '#f2f5ff', p.emoji);
+      tag(`${p.name}${near ? ' - TAP' : ''}`, d.x, d.y, p.tone === 'bot' ? '#8ea2cc' : p.tone === 'verified' ? '#14f195' : '#f2f5ff', p.emoji, Boolean(bsT?.on && bsT.peers[p.id]?.on));
     }
   }
 

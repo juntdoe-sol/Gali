@@ -18,11 +18,12 @@ import { ACT_LIFE_MS, announce, joinChat, joinLobby, leaveLobby, LOBBY_EMOTES, p
 import { cleanName, LOBBY_CAP, type DoorId } from '../game/lobbyMap';
 import { isOnChain, useGame, useLevelXp } from '../game/store';
 import { play } from '../game/sfx';
+import { brawlSnap, setMyPos, swing, useBrawl } from '../game/brawl';
 import { useName } from '../game/username';
 import type { LobbyEvent, LobbyPeerView, LobbySnap } from '../engine/lobby';
 import { atlasSource } from '../pixel/atlasSource';
 import LobbyView, { type LobbyRef } from '../pixel/LobbyView';
-import { myLook } from '../pixel/PixelMine';
+import { islandFight, myLook } from '../pixel/PixelMine';
 import { useView } from '../pixel/view';
 import { Btn, Choice, F, FocusRing, Frame, IconBtn, INPUT, Kbd, MapButton, PixelBox, Scrim, T, Tip, U, Window } from './kit';
 import { GUTTER, RAIL_W, TOP_H, sideWidth, useChrome, useLayout } from './layout';
@@ -69,6 +70,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
   const sol = useGame((s) => (isOnChain(s) ? s.wallet.sol + s.wallet.sessionSol : s.save.practiceSol));
   const [navOpen, setNavOpen] = useState(false);
   const [danceOpen, setDanceOpen] = useState(false);
+  const brawlOn = useBrawl((b) => !b.off);
   const myDance = useLobby((s) => s.myDance);
   const [howTo, setHowTo] = useState(false);
   const [tipTo, setTipTo] = useState<{ id: string; name: string; wallet: string } | null>(null);
@@ -127,6 +129,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
         say: s.mySay && now - s.mySay.at < 6000 ? s.mySay.t : null,
         emoji: s.myEmoji && now - s.myEmoji.at < 3000 ? s.myEmoji.e : null,
         dance: s.myDance,
+        brawl: brawlSnap(now),
       };
       const json = JSON.stringify(snap);
       // On Android the ref's methods only exist once the WebView has loaded.
@@ -223,7 +226,11 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
 
   const onEvent = useCallback((e: LobbyEvent) => {
     switch (e.t) {
+      case 'swing':
+        swing('lobby', e.target, e.x, e.y);
+        break;
       case 'me':
+        setMyPos('lobby', e.x, e.y);
         publishLobbyMe({ x: e.x, y: e.y, tx: e.tx, ty: e.ty, facing: e.facing, pose: e.pose, look, lvl: lvlRef.current, wallet: useGame.getState().wallet.owner });
         break;
       case 'peer': {
@@ -238,6 +245,8 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
       }
       case 'sfx':
         if (e.name === 'door') play('select');
+        else if (e.name === 'swing') play('dig');
+        else if (e.name === 'pop') play('bonk');
         break;
       case 'door':
         enter(e.id);
@@ -382,12 +391,23 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
             </View>
           </Frame>
         ) : null}
+        {brawlOn && !L.desktop ? (
+          <View style={styles.fightRow} pointerEvents="box-none">
+            <MapButton label="FIGHT" icon={<PixIcon name="fist" size={20} />} accessibilityLabel="Fight: swing your pickaxe" onPress={() => ref.current?.attack?.()} />
+          </View>
+        ) : null}
         <PixelBox fill="rgba(8,13,32,0.9)" hi="#2d4282" lo="#04060f" shadow={2} style={[styles.emotes, L.w < 390 && { gap: 3, paddingHorizontal: 6 }]}>
           {LOBBY_EMOTES.map((e, i) => (
             <EmoteKey key={e} icon={e} label={`Emote ${EMOTE_NAME[e] ?? e}`} kbd={String(i + 1)} onPress={() => useLobby.getState().emote(e)} />
           ))}
           <View style={styles.emoteSep} />
           <EmoteKey icon="note" label="Dance" kbd={String(LOBBY_EMOTES.length + 1)} on={Boolean(myDance) || danceOpen} onPress={() => setDanceOpen((o) => !o)} />
+          {brawlOn && L.desktop ? (
+            <>
+              <View style={styles.emoteSep} />
+              <EmoteKey icon="fist" label="Fight: swing your pickaxe" kbd="F" onPress={() => ref.current?.attack?.()} />
+            </>
+          ) : null}
         </PixelBox>
       </View>
 
@@ -513,6 +533,7 @@ const HOWTO_KEY = 'gali-lobby-howto-v1';
 const HOWTO: { icon: PixName; title: string; body: string }[] = [
   { icon: 'star', title: 'Walk around', body: 'Use the joystick or tap the map on a phone; WASD, the arrow keys or a click on a computer. Pinch or scroll to zoom. Other players are real people in the lobby right now.' },
   { icon: 'chat', title: 'Talk and react', body: 'Pick a name, then use CHAT to message everyone (Enter on a keyboard). Tap an icon to wave, laugh or show off, or the note to dance. Keys 1 to 7 do the same.' },
+  { icon: 'fist', title: 'Brawl', body: 'Tap FIGHT (F on a keyboard) to swing at the miner next to you, in the lobby or on the island. At 0 HP a miner is knocked down, then stands up with full HP and a short shield. A KO gives XP. Nothing real is lost: no ORE, SOL or gear. Turn Brawl off any time in PROFILE.' },
   { icon: 'gem', title: 'Island: mine ORE', body: 'Walk onto the jetty, or tap GO then ISLAND. Pick spots on the map, deploy SOL, and win ORE when your spot is the gold one. Your wallet approves every deploy. Only play with SOL you can afford to lose.' },
   { icon: 'cart', title: 'Mini games', body: 'South of the plaza are three pavilions: Tunnel Collapse, Gold Rush Pot and Crash Cart. Walk into one, or tap GO then its name, to open it. Each has an ORE table and an SKR table, with a new round every 40 seconds shared by everyone.' },
   { icon: 'tunnel', title: 'Tunnel Collapse', body: 'Pick one of five tunnels. One caves in. Miners in the other four split the stakes of the collapsed one, minus a 5% fee.' },
@@ -568,6 +589,8 @@ function actText(a: Act): { icon: PixName; text: string; color: string } {
     }
     case 'xp':
       return { icon: 'star', text: `${a.n} earned ${a.xp} XP`, color: '#7fe3ff' };
+    case 'ko':
+      return { icon: 'pick', text: `${a.mine ? 'You' : a.n} knocked out ${a.tn}`, color: '#ff8a70' };
     default:
       return { icon: 'wave', text: `${a.n} entered the lobby`, color: '#9ff0a8' };
   }
@@ -915,10 +938,12 @@ export function LobbyBack() {
   const inside = useView((s) => s.focus >= 0);
   const where = useLobby((s) => s.where);
   const ch = useChrome(insets);
+  const brawlOn = useBrawl((b) => !b.off);
   if (where !== 'island' || (dockOpen && !ch.desktop) || inside) return null;
   return (
-    <View style={[styles.backWrap, { left: ch.left, bottom: ch.desktop ? ch.bottom : insets.bottom + BAR_H + 46 }]} pointerEvents="box-none">
+    <View style={[styles.backWrap, styles.backRow, { left: ch.left, bottom: ch.desktop ? ch.bottom : insets.bottom + BAR_H + 46 }]} pointerEvents="box-none">
       <BackPill kbd={ch.desktop ? 'L' : undefined} />
+      {brawlOn ? <MapButton label="FIGHT" kbd={ch.desktop ? 'F' : undefined} icon={<PixIcon name="fist" size={20} />} accessibilityLabel="Fight: swing your pickaxe" onPress={islandFight} /> : null}
     </View>
   );
 }
@@ -976,5 +1001,7 @@ const styles = StyleSheet.create({
   howRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
   howIcon: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center' },
   backWrap: { position: 'absolute', left: 12 },
+  backRow: { flexDirection: 'row', gap: 8 },
+  fightRow: { flexDirection: 'row', justifyContent: 'flex-end' },
 });
 
