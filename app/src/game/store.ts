@@ -95,6 +95,8 @@ export interface Save {
   questDay: string;
   questProgress: Record<string, number>;
   questClaimed: string[];
+  /** lifetime counts of things done around Gali (track()), for achievements */
+  counts: Record<string, number>;
   history: RoundResult[];
   pickaxe: string;
   helmet: string;
@@ -131,6 +133,7 @@ const freshSave = (): Save => ({
   questDay: localDay(),
   questProgress: {},
   questClaimed: [],
+  counts: {},
   history: [],
   pickaxe: 'pick-wood',
   helmet: 'hat-yellow',
@@ -227,6 +230,8 @@ interface GameState {
   clearSelection: () => void;
   shakePick: () => void;
   bonkMole: () => void;
+  /** Count something done around Gali: moves its daily quest and lifetime achievements along. */
+  track: (k: TrackKind, n?: number) => void;
   /** XP from Cave Run. Local game XP only: it feeds the miner level and nothing else. */
   gainXp: (n: number) => void;
   doEmote: () => void;
@@ -328,6 +333,10 @@ function rollDay(s: Save): Save {
   return out;
 }
 
+export type TrackKind = 'cave' | 'arena' | 'ko' | 'win' | 'smash' | 'arcade' | 'chat' | 'sticker' | 'tip' | 'autopilot' | 'visit-island' | 'visit-cave' | 'visit-arena' | 'visit-games' | 'visit-market';
+/** which daily quest each tracked thing moves */
+const TRACK_QUEST: Partial<Record<TrackKind, string>> = { cave: 'cave1', arena: 'arena1', ko: 'ko1', smash: 'smash5', arcade: 'arcade1', sticker: 'chat1' };
+
 function checkAchievements(s: Save, extra: { staked: number; wins: number; xp: number }, push: (t: string) => void): Save {
   const has = new Set(s.achievements);
   const last = s.history[0];
@@ -342,6 +351,15 @@ function checkAchievements(s: Save, extra: { staked: number; wins: number; xp: n
     'moles-10': s.moles >= 10,
     staker: extra.staked > 0,
     'streak-3': s.dayStreak >= 3,
+    brawler: (s.counts?.ko ?? 0) >= 1,
+    champion: (s.counts?.win ?? 0) >= 1,
+    spelunker: (s.counts?.cave ?? 0) >= 10,
+    'high-roller': (s.counts?.arcade ?? 0) >= 10,
+    smasher: (s.counts?.smash ?? 0) >= 50,
+    autopilot: (s.counts?.autopilot ?? 0) >= 1,
+    generous: (s.counts?.tip ?? 0) >= 1,
+    chatty: (s.counts?.sticker ?? 0) >= 10,
+    explorer: ['island', 'cave', 'arena', 'games', 'market'].every((k) => (s.counts?.[`visit-${k}`] ?? 0) > 0),
   };
   const add = ACHIEVEMENTS.filter((a) => checks[a.id] && !has.has(a.id));
   if (!add.length) return s;
@@ -979,6 +997,24 @@ export const useGame = create<GameState>((set, get) => {
       get().toast('Bonk! +3 XP', 'good');
     },
 
+    track: (k, n = 1) => {
+      const quest = TRACK_QUEST[k];
+      const cur = get().save;
+      const visit = k.startsWith('visit-');
+      // a visit only matters once
+      if (visit && (cur.counts?.[k] ?? 0) > 0) return;
+      updateSave((s) => ({
+        ...s,
+        counts: { ...(s.counts ?? {}), [k]: (s.counts?.[k] ?? 0) + n },
+        questProgress: quest ? { ...s.questProgress, [quest]: (s.questProgress[quest] ?? 0) + n } : s.questProgress,
+      }));
+      if (quest) {
+        const q = QUESTS.find((x) => x.id === quest);
+        const after = get().save.questProgress[quest] ?? 0;
+        if (q && after >= q.target && after - n < q.target) get().toast(`Quest ready: ${q.label}. Claim it in QUEST`, 'gold');
+      }
+    },
+
     gainXp: (n) => {
       const add = Math.max(0, Math.min(100, Math.floor(n)));
       if (add) {
@@ -1290,6 +1326,7 @@ export const useGame = create<GameState>((set, get) => {
           setWallet({ busy: `Approve autopilot in your wallet: ${deposit.toFixed(4)} SOL for ${r.total} rounds` });
           await board.startAutopilot(per, squares, r.blocks === 'smart', r.total, owner);
           setWallet({ busy: null });
+          get().track('autopilot');
           run = { ...r, automated: true };
           void get().refreshWallet();
         } catch (e) {

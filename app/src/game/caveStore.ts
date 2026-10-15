@@ -54,7 +54,10 @@ export const useCave = create<CaveStore>((set, get) => {
     close: () => set({ open: false }),
     spend: () => update(spendRun),
     xp: (n) => useGame.getState().gainXp(n),
-    ended: (depth) => update((s) => recordDepth(s, depth)),
+    ended: (depth) => {
+      update((s) => recordDepth(s, depth));
+      useGame.getState().track('cave');
+    },
   };
 });
 void load();

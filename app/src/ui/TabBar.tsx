@@ -12,7 +12,7 @@ import { COLORS } from '../game/constants';
 import { useGame } from '../game/store';
 import { useView } from '../pixel/view';
 import { FocusRing, Kbd, PixelBox, T, TONE, U } from './kit';
-import { LANDSCAPE_APP, RAIL_W, useLayout } from './layout';
+import { LANDSCAPE_APP, layoutNow, RAIL_W, useLayout } from './layout';
 
 /** the landscape app's rail: smaller icons and labels, no logo, scrolls if a short screen needs it */
 const C = LANDSCAPE_APP;
@@ -91,7 +91,7 @@ export function useTabActions(active: SheetTab | null, onTab: (t: SheetTab | nul
     if (id === 'chat') {
       onTab(null);
       const L = useLobby.getState();
-      L.setChatOpen(!L.chatOpen);
+      L.toggleChat(layoutNow().desktop && !LANDSCAPE_APP && L.where === 'lobby');
       return;
     }
     useGame.getState().setDockOpen(false);
@@ -215,7 +215,7 @@ function MineButton({ lobby, on, pressed, running, size }: { lobby: boolean; on:
 function Rail({ active, onTab, inSheet, lobby }: { active: SheetTab | null; onTab: (t: SheetTab | null) => void; inSheet?: boolean; lobby?: LobbyBar }) {
   const run = useGame((s) => s.run);
   const unread = useLobby((s) => s.unread);
-  const chatOpen = useLobby((s) => s.chatOpen);
+  const chatOpen = useLobby((s) => (s.where === 'lobby' && !LANDSCAPE_APP ? !s.chatHidden : s.chatOpen));
   const picked = useGame((s) => (s.dockTab === 'lite' && s.liteMode === 'all' ? 0 : s.selected.length));
   const { press, mine: mineToggle } = useTabActions(active, onTab, inSheet, lobby);
   // the deploy panel is always open on a desktop, so MINE closes any page and brings the whole island back into view
@@ -268,11 +268,15 @@ function Rail({ active, onTab, inSheet, lobby }: { active: SheetTab | null; onTa
           </View>
         </View>
       )}
+      {C ? null : <View style={{ flex: 1 }} />}
+      {C ? null : <View style={{ gap: 4, alignSelf: 'stretch' }}>{tabs.map(item)}</View>}
+      {C ? null : <View style={{ flex: 1 }} />}
+      {C ? null : <View style={styles.railRule} />}
       <Pressable
         onPress={mine}
         accessibilityRole="button"
         accessibilityLabel={lobby ? 'Quick travel (G)' : 'Mine'}
-        style={styles.railMine}
+        style={C ? styles.railMine : styles.railMineLow}
       >
         {(st) => (
           <>
@@ -289,16 +293,16 @@ function Rail({ active, onTab, inSheet, lobby }: { active: SheetTab | null; onTa
           </>
         )}
       </Pressable>
-      <View style={styles.railRule} />
-      <View style={{ gap: C ? 1 : 4, alignSelf: 'stretch' }}>{tabs.map(item)}</View>
-      <View style={{ flex: 1 }} />
-      {chat ? <View style={{ alignSelf: 'stretch' }}>{item(chat)}</View> : null}
-      {/* the landscape app opens the profile from the wallet chip in the top bar, which saves a row */}
-      {!lobby && !C ? (
-        <View style={{ alignSelf: 'stretch', marginTop: 4 }}>
+      {C ? <View style={styles.railRule} /> : null}
+      {C ? <View style={{ gap: 1, alignSelf: 'stretch' }}>{tabs.map(item)}</View> : null}
+      {C ? <View style={{ flex: 1 }} /> : null}
+      {chat ? <View style={{ alignSelf: 'stretch', marginTop: C ? 0 : 8 }}>{item(chat)}</View> : null}
+      {/* PROFILE is on the rail everywhere: island, lobby, desktop and the landscape app */}
+      {(
+        <View style={{ alignSelf: 'stretch', marginTop: C ? 0 : 4 }}>
           {item({ id: 'me' as SheetTab, label: 'PROFILE' })}
         </View>
-      ) : null}
+      )}
     </>
   );
   return (
@@ -335,6 +339,7 @@ const styles = StyleSheet.create({
   railLogo: { width: 70, height: 31 },
   beta: { marginTop: 3, backgroundColor: COLORS.gold, paddingHorizontal: 5, borderWidth: 1, borderColor: '#04060f' },
   betaText: { fontSize: 12, lineHeight: 13, letterSpacing: 2, color: '#070d20' },
+  railMineLow: { alignItems: 'center', paddingTop: 8, paddingBottom: 4 },
   railMine: { alignItems: 'center', paddingTop: C ? 16 : 30, marginBottom: C ? 0 : 4 },
   railRule: { alignSelf: 'stretch', height: U, backgroundColor: '#22356f', marginVertical: C ? 4 : 12, marginHorizontal: 6 },
   railItem: { alignSelf: 'stretch', alignItems: 'center', paddingVertical: C ? 3 : 8, gap: C ? 1 : 3 },

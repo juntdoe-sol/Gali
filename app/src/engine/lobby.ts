@@ -35,7 +35,9 @@ export type LobbyEvent =
   /** your miner jumped */
   | { t: 'jump' }
   /** your miner broke a pot or crate: give back this much HP */
-  | { t: 'heal'; hp: number };
+  | { t: 'heal'; hp: number }
+  /** your miner broke a pot or crate (for the daily quest) */
+  | { t: 'smash' };
 
 export interface LobbyPeerView {
   id: string;
@@ -1618,6 +1620,7 @@ export class LobbyEngine {
     this.parts.burst('dust', x, y, 8, 22, 10, ['#f2e6c8', '#d8c8a8'], 0.6);
     if (sm.kind === 'pot' && Math.random() < 0.5) this.parts.burst('coin', x, y - 6, 3, 18, 30, ['#ffd24a', '#ffe27a'], 0.9);
     this.fx.say(x, y - 22, 'SMASH!', '#ffcf4a', now);
+    this.emit({ t: 'smash' });
     // breaking it patches you up
     const b = this.snap.brawl;
     const gain = SMASH_HEAL[sm.kind];
@@ -1966,8 +1969,10 @@ export class LobbyEngine {
       const near = Math.hypot(this.me.x - wx, this.me.y - d.y * LT) < 110;
       const col = DOOR_COLOR[d.id];
       if (X > 24 && X < W - 24 && Y > top && Y < bottom) {
+        // ORE Island carries ORE's mark: a ring with a slash through it
+        const logo = d.id === 'island' ? 14 * fs : 0;
         const tw = Math.max(textWidth(d.label), textWidth(d.sub) * 0.6) * fs;
-        const bw = tw + 12 * fs;
+        const bw = tw + 12 * fs + logo;
         const bh = 20 * fs;
         const bx = Math.round(X - bw / 2);
         const by = Math.round(Y - bh);
@@ -1976,8 +1981,26 @@ export class LobbyEngine {
         c.fillStyle = col;
         c.fillRect(bx, by, Math.round(bw), Math.round(2 * fs));
         c.fillRect(bx, by + Math.round(bh - fs), Math.round(bw), Math.round(fs));
-        textCentered(c, d.label, X, by + 5 * fs, fs, near ? '#ffffff' : col);
-        textCentered(c, d.sub.toUpperCase(), X, by + 13 * fs, fs * 0.6 < 1 ? 1 : fs * 0.6, '#c9d4ff');
+        textCentered(c, d.label, X + logo / 2, by + 5 * fs, fs, near ? '#ffffff' : col);
+        textCentered(c, d.sub.toUpperCase(), X + logo / 2, by + 13 * fs, fs * 0.6 < 1 ? 1 : fs * 0.6, '#c9d4ff');
+        if (logo) {
+          const lx = bx + 6 * fs + 4 * fs;
+          const ly = by + bh / 2 + fs * 0.5;
+          c.fillStyle = '#0a0a14';
+          c.fillRect(Math.round(lx - 6 * fs), Math.round(by + 3 * fs), Math.round(12 * fs), Math.round(bh - 5 * fs));
+          c.strokeStyle = '#ffffff';
+          c.lineWidth = Math.max(1.5, 1.7 * fs);
+          c.beginPath();
+          c.arc(lx, ly, 3.4 * fs, 0, Math.PI * 2);
+          c.stroke();
+          c.lineCap = 'butt';
+          c.beginPath();
+          c.moveTo(lx - 5.2 * fs, ly + 5.2 * fs);
+          c.lineTo(lx - 2.2 * fs, ly + 2.2 * fs);
+          c.moveTo(lx + 2.2 * fs, ly - 2.2 * fs);
+          c.lineTo(lx + 5.2 * fs, ly - 5.2 * fs);
+          c.stroke();
+        }
         // an arrow pointing down at the door
         c.fillStyle = col;
         const ay = by + Math.round(bh) + 2;

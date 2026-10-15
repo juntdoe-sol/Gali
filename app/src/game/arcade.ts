@@ -291,6 +291,7 @@ export const useArcade = create<ArcadeState>((set, get) => {
         startLoop();
         announce({ k: 'play', g: game, a: Number(amount), tk: token === 'ore' ? 'ORE' : 'SKR', win: false });
         g.toast(`Staked ${amount} ${token.toUpperCase()}`, 'good');
+        g.track('arcade');
         void loadBalance(token);
       } catch (e) {
         const m = String((e as Error)?.message ?? e);
