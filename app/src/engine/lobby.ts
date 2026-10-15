@@ -14,6 +14,7 @@
  * door, and a few sounds.
  */
 import { canvasDpr, reducedMotion } from './screen';
+import { wheelZoom } from './screen';
 import { draw, has, makeCanvas, ctx2d, rect, sprite, text, textCentered, textWidth, loadAtlas, type Ctx } from './art';
 import { drawMiner, drawPet, frameAt, lampOf, stepBody, type Body } from './actors';
 import { Particles } from './particles';
@@ -1049,7 +1050,8 @@ export class LobbyEngine {
       'wheel',
       (e) => {
         e.preventDefault();
-        this.zoomK = Math.max(0.6, Math.min(2.2, this.zoomK * (e.deltaY < 0 ? 1.1 : 0.91)));
+        // gentle: about 6% a mouse-wheel notch, and a trackpad's many small steps add up smoothly
+        this.zoomK = Math.max(0.6, Math.min(2.2, this.zoomK * wheelZoom(e)));
       },
       { passive: false },
     );

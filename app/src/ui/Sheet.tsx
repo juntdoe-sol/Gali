@@ -1,6 +1,6 @@
 import { useBrawl } from '../game/brawl';
 import { useEffect, useState } from 'react';
-import { Linking, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ACHIEVEMENTS, BOOST_TIERS, COLORS, levelFromXp, localDay, MOTHERLODE_ODDS, MOTHERLODE_POINTS,
@@ -13,7 +13,10 @@ import { loadBoard, loadChain } from '../chain/lazy';
 import { ADMIN_FEE, fmtSol, POT_FEE, practiceMotherlode, practiceOreMotherlode, simPot, soloMask } from '../game/pot';
 import { UnclaimedRow } from './Dock';
 import { Market } from './Market';
-import { Bar, Btn, Card, FocusRing, Frame, IconBtn, INPUT, Kbd, PixelBox, Pill, T, U } from './kit';
+import { Bar, Btn, Card, Choice, FocusRing, Frame, IconBtn, INPUT, Kbd, PixelBox, Pill, T, U } from './kit';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { reloadAppAsync } from 'expo';
+import { ORIENT_KEY, type Orient } from '../boot';
 import { PixIcon } from './PixIcon';
 import { GUTTER, RAIL_W, useLayout } from './layout';
 import { BAR_H, SHEET_TITLE, TAB_PIX, TabBar, type SheetTab } from './TabBar';
@@ -510,6 +513,36 @@ function RankNo({ k }: { k: number }) {
   return <View style={{ width: 34, alignItems: 'center' }}>{k < 3 ? <PixIcon name={(['medal', 'medal2', 'medal3'] as const)[k]} size={28} /> : <T v="display" style={{ fontSize: 22 }}>{k + 1}</T>}</View>;
 }
 
+/** Android only: play sideways (landscape, the default) or upright (portrait). Switching restarts the app. */
+function ScreenSwitch() {
+  const [busy, setBusy] = useState(false);
+  if (Platform.OS !== 'android') return null;
+  const cur: Orient = (globalThis as { __GALI_ORIENT?: Orient }).__GALI_ORIENT === 'portrait' ? 'portrait' : 'landscape';
+  const pick = async (o: Orient) => {
+    if (o === cur || busy) return;
+    setBusy(true);
+    try {
+      await AsyncStorage.setItem(ORIENT_KEY, o);
+      await reloadAppAsync('screen orientation changed');
+    } catch {
+      useGame.getState().toast('Saved. Close and reopen Gali to switch the screen.', 'info');
+      setBusy(false);
+    }
+  };
+  return (
+    <Card>
+      <T>Screen</T>
+      <T v="muted" style={{ fontSize: 12, marginBottom: 6 }}>
+        Play sideways or upright. Gali restarts to switch, in a second or two.
+      </T>
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        <Choice label="Landscape" sub="Sideways, two thumbs" on={cur === 'landscape'} onPress={() => void pick('landscape')} disabled={busy} />
+        <Choice label="Portrait" sub="Upright, one hand" on={cur === 'portrait'} onPress={() => void pick('portrait')} disabled={busy} />
+      </View>
+    </Card>
+  );
+}
+
 /** Brawl on or off. Off: no HP bar, nobody can hit you, and you can't swing at anyone. */
 function BrawlSwitch() {
   const off = useBrawl((b) => b.off);
@@ -583,6 +616,7 @@ function Me() {
         ))}
       </View>
       <BrawlSwitch />
+      <ScreenSwitch />
       <Card style={styles.rowCard}>
         <T style={{ flex: 1 }}>Mute sound</T>
         <PixIcon name={save.muted ? 'mute' : 'sound'} size={22} />

@@ -4,7 +4,7 @@
     "slug": "gali",
     "scheme": "gali",
     "version": "1.6.1",
-    "orientation": "landscape",
+    "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#070d20",
