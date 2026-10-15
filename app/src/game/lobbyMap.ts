@@ -68,15 +68,22 @@ export const SPAWNS: Record<'start' | DoorId, [number, number]> = {
 
 /** Things with a shape of their own: a tent, a stall, the lighthouse. The engine draws each; the tiles under them block. */
 export interface Structure {
-  kind: 'tent' | 'fire' | 'cart' | 'crates' | 'barrel' | 'stall-red' | 'stall-teal' | 'lighthouse' | 'rack' | 'boulder' | 'sol-crystal' | 'ore-vein' | 'arena' | 'sign';
+  kind: 'tent' | 'fire' | 'cart' | 'crates' | 'barrel' | 'stall-red' | 'stall-teal' | 'lighthouse' | 'rack' | 'boulder' | 'sol-crystal' | 'ore-vein' | 'arena' | 'sign' | 'flag';
   /** tiles that block: x, y, width, height */
   at: [number, number, number, number];
+  /** which flag, for a flagpole */
+  v?: 'us' | 'my' | 'id' | 'ng';
 }
 export const STRUCTURES: Structure[] = [
   // the Brawl arena: a round stone colosseum, its gate on the south side, a cobbled drive up to it
   { kind: 'arena', at: [3, 24, 11, 6] },
   // a directory board by the fountain: every place, and an arrow to it
-  { kind: 'sign', at: [39, 32, 2, 1] },
+  { kind: 'sign', at: [32, 19, 2, 1] },
+  // the flag square between Cave Run and the market: where our miners come from
+  { kind: 'flag', at: [31, 14, 1, 1], v: 'us' },
+  { kind: 'flag', at: [33, 14, 1, 1], v: 'my' },
+  { kind: 'flag', at: [35, 14, 1, 1], v: 'id' },
+  { kind: 'flag', at: [37, 14, 1, 1], v: 'ng' },
   { kind: 'tent', at: [8, 14, 3, 2] },
   { kind: 'fire', at: [12, 15, 1, 1] },
   { kind: 'tent', at: [5, 17, 3, 2] },
@@ -230,6 +237,8 @@ export function lobbyMap(): Lobby {
   road(28, 24, 15, 12); // to the cave: west, then north
   road(24, 32, 8, 31, 1); // the drive to the arena: west along the pond, then up to the gate
   rect(4, 30, 9, 2, PLAZA, 0); // the arena forecourt
+  rect(29, 13, 11, 3, PLAZA, 0); // the flag square
+  road(34, 16, 34, 19, 1); // and the path down to the plaza
   road(40, 20, 52, 12); // to the market: east, then north
   road(46, 27, 60, 27, 1); // toward the pier
   // the pier
@@ -254,6 +263,7 @@ export function lobbyMap(): Lobby {
     [65, 27, 6],
     [36, 42, 15], // the games row
     [8, 28, 9], // the arena and its forecourt
+    [34, 14, 6], // the flag square
   ];
   const trees: Tree[] = [];
   const decor: Decor[] = [];
