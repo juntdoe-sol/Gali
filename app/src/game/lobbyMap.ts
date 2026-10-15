@@ -75,8 +75,7 @@ export interface Structure {
 export const STRUCTURES: Structure[] = [
   // the Brawl arena: a round stone colosseum, its gate on the south side, a cobbled drive up to it
   { kind: 'arena', at: [3, 24, 11, 6] },
-  // two directory boards by the fountain: every place, and an arrow to it
-  { kind: 'sign', at: [32, 32, 2, 1] },
+  // a directory board by the fountain: every place, and an arrow to it
   { kind: 'sign', at: [39, 32, 2, 1] },
   { kind: 'tent', at: [8, 14, 3, 2] },
   { kind: 'fire', at: [12, 15, 1, 1] },
@@ -95,13 +94,13 @@ export const STRUCTURES: Structure[] = [
   { kind: 'crates', at: [63, 26, 1, 1] },
   { kind: 'barrel', at: [63, 28, 1, 1] },
   { kind: 'sol-crystal', at: [30, 28, 1, 1] },
-  { kind: 'sol-crystal', at: [42, 24, 1, 1] },
   { kind: 'ore-vein', at: [41, 30, 1, 1] },
   { kind: 'ore-vein', at: [14, 17, 1, 1] },
 ];
 
 /**
- * Things a miner can smash with a swing: pots, crates, barrels. Just for fun, no XP. They always block
+ * Things a miner can smash with a swing: pots, crates, barrels. No XP, but breaking one gives back some HP
+ * (see SMASH_HEAL), so a hurt fighter can patch up between brawls. They always block
  * their tile (broken, they leave rubble, then grow back), so every phone still walks the same routes.
  */
 export interface Smashable {
@@ -111,6 +110,8 @@ export interface Smashable {
   /** swings to break it */
   hp: number;
 }
+/** HP a miner gets back for breaking one */
+export const SMASH_HEAL: Record<Smashable['kind'], number> = { pot: 10, crate: 15, barrel: 15 };
 export const SMASHABLES: Smashable[] = [
   // the arena forecourt
   { kind: 'barrel', x: 4, y: 30, hp: 2 },
