@@ -80,10 +80,10 @@ export const STRUCTURES: Structure[] = [
   // a directory board by the fountain: every place, and an arrow to it
   { kind: 'sign', at: [32, 19, 2, 1] },
   // the flag square between Cave Run and the market: where our miners come from
-  { kind: 'flag', at: [31, 14, 1, 1], v: 'us' },
-  { kind: 'flag', at: [33, 14, 1, 1], v: 'my' },
-  { kind: 'flag', at: [35, 14, 1, 1], v: 'id' },
-  { kind: 'flag', at: [37, 14, 1, 1], v: 'ng' },
+  { kind: 'flag', at: [31, 8, 1, 1], v: 'us' },
+  { kind: 'flag', at: [33, 8, 1, 1], v: 'my' },
+  { kind: 'flag', at: [35, 8, 1, 1], v: 'id' },
+  { kind: 'flag', at: [37, 8, 1, 1], v: 'ng' },
   { kind: 'tent', at: [8, 14, 3, 2] },
   { kind: 'fire', at: [12, 15, 1, 1] },
   { kind: 'tent', at: [5, 17, 3, 2] },
@@ -237,8 +237,8 @@ export function lobbyMap(): Lobby {
   road(28, 24, 15, 12); // to the cave: west, then north
   road(24, 32, 8, 31, 1); // the drive to the arena: west along the pond, then up to the gate
   rect(4, 30, 9, 2, PLAZA, 0); // the arena forecourt
-  rect(29, 13, 11, 3, PLAZA, 0); // the flag square
-  road(34, 16, 34, 19, 1); // and the path down to the plaza
+  rect(29, 7, 11, 3, PLAZA, 0); // the flag square, up in the woods
+  road(34, 10, 34, 19, 1); // and the path down through the trees to the plaza
   road(40, 20, 52, 12); // to the market: east, then north
   road(46, 27, 60, 27, 1); // toward the pier
   // the pier
@@ -263,7 +263,7 @@ export function lobbyMap(): Lobby {
     [65, 27, 6],
     [36, 42, 15], // the games row
     [8, 28, 9], // the arena and its forecourt
-    [34, 14, 6], // the flag square
+    [34, 8, 4], // the flag square: a clearing, with the woods close round it
   ];
   const trees: Tree[] = [];
   const decor: Decor[] = [];
@@ -285,6 +285,17 @@ export function lobbyMap(): Lobby {
         decor.push({ x, y, s: ['prop-flower-a', 'prop-flower-b', 'prop-flower-c', 'prop-tuft-a', 'prop-tuft-b', 'prop-tuft-c', 'prop-bush-a', 'prop-bush-b', 'prop-stone-a', 'prop-boulder-a'][Math.floor(R() * 10)] });
       }
     }
+  // the flag square sits deep in the woods: a ring of trees round the clearing, open only to the path
+  for (const [x, y, k] of [
+    [27, 6, 'pine'], [28, 5, 'oak'], [30, 5, 'pine'], [32, 5, 'oak'], [34, 5, 'pine'], [36, 5, 'oak'], [38, 5, 'pine'], [40, 5, 'oak'], [41, 6, 'pine'],
+    [27, 8, 'oak'], [27, 10, 'pine'], [41, 8, 'oak'], [41, 10, 'pine'],
+    [29, 11, 'oak'], [31, 11, 'pine'], [37, 11, 'pine'], [39, 11, 'oak'], [30, 13, 'pine'], [38, 13, 'oak'],
+  ] as [number, number, Tree['kind']][]) {
+    if (free(x, y)) {
+      trees.push({ x, y, kind: k, v: (x + y) % 3 });
+      block[lidx(x, y)] = 1;
+    }
+  }
   // the border is always closed: nobody walks off the map
   for (let x = 0; x < LCOLS; x++) {
     block[lidx(x, 0)] = 1;
