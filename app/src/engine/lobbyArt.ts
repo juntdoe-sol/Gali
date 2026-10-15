@@ -385,3 +385,51 @@ export function paintSmash(g: G, kind: 'pot' | 'crate' | 'barrel', broken: boole
     P(0, 16, 14, 2, 'rgba(0,0,0,0.25)');
   }
 }
+
+/* ---------- flags on the flag square ---------- */
+
+export const FLAG_W = 26;
+export const FLAG_H = 15;
+/** A flag, flat, at 1 art px per map px. The engine waves it column by column. */
+export function paintFlag(g: G, v: 'us' | 'my' | 'id' | 'ng') {
+  const P = (x: number, y: number, w: number, h: number, c: string) => {
+    g.fillStyle = c;
+    g.fillRect(x, y, w, h);
+  };
+  const W = FLAG_W;
+  const H = FLAG_H;
+  if (v === 'us' || v === 'my') {
+    // stripes: 13 for the USA, 14 for Malaysia's Jalur Gemilang, squeezed into 15 rows
+    const n = v === 'us' ? 13 : 14;
+    for (let y = 0; y < H; y++) P(0, y, W, 1, Math.floor((y * n) / H) % 2 ? '#f4f4f4' : '#c8202e');
+    const cw = v === 'us' ? 11 : 13;
+    const ch = v === 'us' ? 8 : 8;
+    P(0, 0, cw, ch, v === 'us' ? '#2a3a8c' : '#1a2a7a');
+    if (v === 'us') {
+      for (let y = 1; y < ch - 1; y += 2) for (let x = 1 + ((y >> 1) % 2); x < cw - 1; x += 2) P(x, y, 1, 1, '#ffffff');
+    } else {
+      // a yellow crescent and a star
+      const Y = '#ffd200';
+      P(2, 2, 1, 4, Y);
+      P(3, 1, 2, 1, Y);
+      P(3, 6, 2, 1, Y);
+      P(5, 2, 1, 1, Y);
+      P(5, 5, 1, 1, Y);
+      P(8, 3, 3, 1, Y);
+      P(9, 2, 1, 3, Y);
+      P(8, 2, 1, 1, Y);
+      P(10, 4, 1, 1, Y);
+    }
+  } else if (v === 'id') {
+    P(0, 0, W, Math.ceil(H / 2), '#d2232e');
+    P(0, Math.ceil(H / 2), W, H - Math.ceil(H / 2), '#f4f4f4');
+  } else {
+    const t = Math.round(W / 3);
+    P(0, 0, t, H, '#008751');
+    P(t, 0, W - 2 * t, H, '#f4f4f4');
+    P(W - t, 0, t, H, '#008751');
+  }
+  // a soft shade at the bottom edge so it reads as cloth
+  g.fillStyle = 'rgba(0,0,0,0.12)';
+  g.fillRect(0, H - 1, W, 1);
+}

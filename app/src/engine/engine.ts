@@ -13,7 +13,7 @@ import { drawMiner, drawPet, frameAt, HIT_FRAME, IMPACT, lampOf, moleNames, petF
 import { Camera } from './camera';
 import { buildScene, drawScene, newVisit, paintUnderground, SCENE_CX, SH, type Scene, type Visit } from './closeup';
 import { landedSince, rumbleAmp, shouldCelebrate } from './juice';
-import { CLAIMS, MAP_H, MAP_W, REGIONS, claimForTap, isLand, shipAt, toLand } from './island';
+import { CLAIMS, MAP_H, MAP_W, REGIONS, claimAt, claimForTap, isLand, shipAt, toLand } from './island';
 import { Particles } from './particles';
 import { findPath } from './path';
 import { Sky } from './sky';
@@ -315,6 +315,82 @@ export class Engine {
     this.petPos.y = me.y;
     this.parts.burst('dust', me.x, me.y, 10, 22, 14, ['#f2e6c8', '#d8c8a8'], 0.7);
   }
+  /** Tutorial: the mining spot nearest the miner, for the arrow and the arrival check. */
+  private guideClaim(): number {
+    const me = this.me;
+    let best = 0;
+    let bd = Infinity;
+    CLAIMS.forEach((cl, i) => {
+      const d = Math.hypot(cl.cx - me.x, cl.cy - me.y);
+      if (d < bd) {
+        bd = d;
+        best = i;
+      }
+    });
+    return best;
+  }
+  private guideArrived = -1;
+  /** Tutorial: a ring on the nearest spot, a bouncing arrow over it, and dots from the miner to it. */
+  private drawGuide(c: Ctx, OX: number, OY: number, S: number, now: number) {
+    const me = this.me;
+    const i = this.guideClaim();
+    const cl = CLAIMS[i];
+    const here = claimAt(me.x, me.y) >= 0 || Math.hypot(cl.cx - me.x, cl.cy - me.y) < 10;
+    if (here && this.guideArrived !== i) {
+      this.guideArrived = i;
+      this.emit({ t: 'arrived', claim: claimAt(me.x, me.y) >= 0 ? claimAt(me.x, me.y) : i });
+    }
+    const X = OX + cl.cx * S;
+    const Y = OY + cl.cy * S;
+    const pulse = (Math.sin(now / 260) + 1) / 2;
+    c.save();
+    // the trail of dots from the miner to the spot
+    if (!here) {
+      const dx = cl.cx - me.x;
+      const dy = cl.cy - me.y;
+      const d = Math.hypot(dx, dy);
+      const n = Math.max(2, Math.floor(d / 7));
+      const shift = (now / 400) % 1;
+      c.fillStyle = '#ffd24a';
+      for (let k = 1; k < n; k++) {
+        const t = (k + shift) / n;
+        if (t > 0.92) continue;
+        c.globalAlpha = 0.35 + 0.55 * t;
+        const r = Math.max(1.5, S * 1.1);
+        c.fillRect(Math.round(OX + (me.x + dx * t) * S - r), Math.round(OY + (me.y + dy * t) * S - r), r * 2, r * 2);
+      }
+    }
+    // the ring on the spot
+    c.globalAlpha = 0.55 + 0.45 * pulse;
+    c.strokeStyle = '#ffd24a';
+    c.lineWidth = Math.max(2, S * 1.4);
+    c.beginPath();
+    c.ellipse(X, Y, (10 + pulse * 3) * S, (6 + pulse * 2) * S, 0, 0, Math.PI * 2);
+    c.stroke();
+    // the arrow above it, bobbing
+    c.globalAlpha = 1;
+    const ay = Y - (20 + Math.sin(now / 180) * 3) * S;
+    const u = Math.max(1, S);
+    c.fillStyle = '#1a0c10';
+    c.fillRect(X - 5 * u, ay - 9 * u, 10 * u, 8 * u);
+    c.fillRect(X - 8 * u, ay - 2 * u, 16 * u, 3 * u);
+    c.fillRect(X - 5 * u, ay + u, 10 * u, 3 * u);
+    c.fillRect(X - 2 * u, ay + 4 * u, 4 * u, 3 * u);
+    c.fillStyle = '#ffd24a';
+    c.fillRect(X - 4 * u, ay - 8 * u, 8 * u, 7 * u);
+    c.fillRect(X - 7 * u, ay - u, 14 * u, u);
+    c.fillRect(X - 5 * u, ay, 10 * u, 2 * u);
+    c.fillRect(X - 3 * u, ay + 2 * u, 6 * u, 2 * u);
+    c.fillRect(X - u, ay + 4 * u, 2 * u, 2 * u);
+    const label = here ? 'YOU MADE IT' : 'WALK HERE';
+    const fs = Math.max(1, Math.round(S * 0.8));
+    const w = textWidth(label) * fs;
+    c.fillStyle = 'rgba(8,13,32,0.88)';
+    c.fillRect(Math.round(X - w / 2 - 3 * fs), Math.round(ay - 20 * u), Math.round(w + 6 * fs), Math.round(9 * fs));
+    text(c, label, Math.round(X - w / 2), Math.round(ay - 20 * u + 2 * fs), fs, '#ffd24a');
+    c.restore();
+  }
+
   /** Dive into claim `i`, or -1 to come back up. */
   setFocus(i: number) {
     if (i === this.focus) return;
@@ -371,7 +447,8 @@ export class Engine {
     const inside = (pad: number) => me.x > FIT_X + pad && me.x < FIT_X + FIT_W - pad && me.y > FIT_Y + pad && me.y < FIT_Y + FIT_H - pad;
     if (cam.follow) {
       cam.setFocus(me.x, me.y - 6);
-      if (inside(10) && !cam.userZoomed) cam.home(520);
+      // walking back in among the mining spots zooms out to show all 25, even after a pinch
+      if (inside(6)) cam.home(520);
     } else if (!inside(-4)) {
       cam.follow = true;
       cam.setFocus(me.x, me.y - 6);
@@ -1027,6 +1104,7 @@ export class Engine {
 
     this.parts.draw(c, OX, OY, S);
     if (!forClose) this.fx.draw(c, OX, OY, S, Date.now());
+    if (!forClose && s?.guide && this.mode === 'island') this.drawGuide(c, OX, OY, S, now);
     if (this.quality && el < 1400) this.sky.drawShadows(c, OX, OY, S);
 
     // falling rock on a cave-in round

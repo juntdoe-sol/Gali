@@ -6,6 +6,7 @@
  * picture needs into a Snapshot and pushes it if anything changed. The engine
  * sends back taps, sounds and where your miner is. Nothing here draws.
  */
+import { useTutorial } from '../game/tutorial';
 import { useName } from '../game/username';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -129,6 +130,7 @@ function snapshot(): Snapshot {
     claimedAt: st.claimedAt,
     onIsland: useLobby.getState().where === 'island',
     brawl: brawlSnap(now),
+    guide: useTutorial.getState().step === 1,
   };
 }
 
@@ -293,6 +295,9 @@ export default function PixelMine() {
         break;
       case 'jump':
         jump('island');
+        break;
+      case 'arrived':
+        useTutorial.getState().arrived();
         break;
       case 'me': {
         setMyPos('island', e.x, e.y);

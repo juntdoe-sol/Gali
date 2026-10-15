@@ -25,6 +25,7 @@ import { Busy, GearReveal, LevelUp, LiveNotice, Onboarding, ResultPop, WalletGat
 import { Sheet } from './ui/Sheet';
 import { ClaimPanel } from './ui/ClaimPanel';
 import { MapHint } from './ui/MapHint';
+import { MineTutorial } from './ui/MineTutorial';
 import { Splash } from './ui/Splash';
 import { PeerCard } from './ui/World';
 import { CaveScreen } from './ui/Cave';
@@ -237,6 +238,7 @@ function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTa
         {desktop ? null : <Dock />}
         <TabBar active={sheet} onTab={setSheet} />
         <MapHint />
+        <MineTutorial />
         <LobbyBack />
         <ClaimPanel />
         <PeerCard />

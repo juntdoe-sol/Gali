@@ -20,7 +20,7 @@ import { Particles } from './particles';
 import { Sky } from './sky';
 import type { BrawlSnap, Look, Pose } from './types';
 import { drawHp, drawKo, drawShield, FightFx, hitFlash, jumpLift, koAge, pickTarget, swingTilt } from './brawlfx';
-import { ARENA_FLAGS, ARENA_TORCHES, paintColosseum, paintSign, paintSmash, paintSolBase, paintSolLogo, SIGN_H, SIGN_W, SMASH_COLORS, SMASH_DIM, SOL_BASE, SOL_LOGO } from './lobbyArt';
+import { FLAG_H, FLAG_W, paintFlag, ARENA_FLAGS, ARENA_TORCHES, paintColosseum, paintSign, paintSmash, paintSolBase, paintSolLogo, SIGN_H, SIGN_W, SMASH_COLORS, SMASH_DIM, SOL_BASE, SOL_LOGO } from './lobbyArt';
 import { CLIFF, DOORS, PAVILIONS, SMASH_HEAL, SMASHABLES, STRUCTURES, doorAt, GRASS, HALL, LCOLS, LH, LROWS, LT, LW, lidx, lobbyMap, lobbyPath, PLANK, PLAZA, ROAD, SAND, SPAWNS, standable, tileCentre, tileOf, WATER, type DoorId } from '../game/lobbyMap';
 
 export type LobbyEvent =
@@ -1390,6 +1390,11 @@ export class LobbyEngine {
       const wx = (st.at[0] + st.at[2] / 2) * LT;
       const wy = (st.at[1] + st.at[3]) * LT - 1;
       if (!inView(wx, wy, st.kind === 'arena' ? 110 : 40)) continue;
+      if (st.kind === 'flag' && st.v) {
+        const v = st.v;
+        items.push({ y: wy, draw: () => this.drawFlagPole(c, v, sx(wx), sy(wy), z, now) });
+        continue;
+      }
       if (st.kind === 'sign') {
         const sp = this.signSprite(st.at[0], st.at[1]);
         items.push({ y: wy, draw: () => c.drawImage(sp, 0, 0, sp.width, sp.height, Math.round((sx(wx) - (sp.width / 2) * z) * dpr) / dpr, Math.round((sy(wy) - sp.height * z) * dpr) / dpr, sp.width * z, sp.height * z) });
@@ -1557,6 +1562,42 @@ export class LobbyEngine {
     paintSign(ctx2d(cv), tx, ty);
     this.structCache.set(key, cv);
     return cv;
+  }
+  /** A tall pole with its flag waving in the wind. */
+  private drawFlagPole(c: Ctx, v: 'us' | 'my' | 'id' | 'ng', X: number, Y: number, z: number, now: number) {
+    const key = `flag-${v}`;
+    let fl = this.structCache.get(key);
+    if (!fl) {
+      fl = makeCanvas(FLAG_W, FLAG_H);
+      paintFlag(ctx2d(fl), v);
+      this.structCache.set(key, fl);
+    }
+    const u = z;
+    const POLE = 48;
+    // base and pole
+    c.fillStyle = 'rgba(0,0,0,0.22)';
+    c.fillRect(X - 5 * u, Y - u, 10 * u, 2 * u);
+    c.fillStyle = '#5a5468';
+    c.fillRect(X - 4 * u, Y - 3 * u, 8 * u, 3 * u);
+    c.fillStyle = '#c9c9d2';
+    c.fillRect(X - u, Y - POLE * u, 2 * u, (POLE - 3) * u);
+    c.fillStyle = '#8a8a96';
+    c.fillRect(X, Y - POLE * u, u, (POLE - 3) * u);
+    c.fillStyle = '#ffd24a';
+    c.fillRect(X - 1.5 * u, Y - (POLE + 2) * u, 3 * u, 3 * u);
+    // the flag, one column at a time, each a little further along the wave
+    const top = Y - (POLE - 1) * u;
+    const wind = 0.7 + 0.3 * this.sky.wind;
+    for (let x = 0; x < FLAG_W; x++) {
+      const k = x / FLAG_W;
+      const off = Math.sin(now / 170 - x * 0.45 + v.charCodeAt(0)) * 1.6 * k * wind;
+      const shade = Math.cos(now / 170 - x * 0.45 + v.charCodeAt(0)) * k;
+      c.drawImage(fl, x, 0, 1, FLAG_H, X + (1 + x) * u, top + off * u, u + 0.5, FLAG_H * u);
+      if (shade < -0.25) {
+        c.fillStyle = `rgba(0,0,0,${Math.min(0.25, -shade * 0.3)})`;
+        c.fillRect(X + (1 + x) * u, top + off * u, u + 0.5, FLAG_H * u);
+      }
+    }
   }
   private smashSprite(kind: 'pot' | 'crate' | 'barrel', broken: boolean): HTMLCanvasElement {
     const key = `smash-${kind}-${broken ? 1 : 0}`;

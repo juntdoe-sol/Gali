@@ -33,6 +33,7 @@ import { Arcade } from './Arcade';
 import { PixIcon } from './PixIcon';
 import { DisconnectBtn } from './Hud';
 import { Sticker } from './Sticker';
+import { useTutorial } from '../game/tutorial';
 import { FightPad } from './ActionPad';
 import type { PixName } from './pixIcons';
 import { GAME_IDS, GAME_META, useArcade, type GameId } from '../game/arcade';
@@ -598,7 +599,19 @@ function HowToPlay({ onClose }: { onClose: () => void }) {
             </View>
           ))}
         </ScrollView>
-        <Btn kind="gold" label="GOT IT" onPress={onClose} />
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <Btn
+            kind="ghost"
+            label="REPLAY MINING TUTORIAL"
+            onPress={() => {
+              useTutorial.setState({ done: false, step: -1 });
+              onClose();
+              useLobby.getState().go('island');
+            }}
+            style={{ flex: 1 }}
+          />
+          <Btn kind="gold" label="GOT IT" onPress={onClose} style={{ flex: 1 }} />
+        </View>
       </Window>
     </Scrim>
   );
