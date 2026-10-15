@@ -104,13 +104,25 @@ export interface QuestDef {
   label: string;
   target: number;
   rewardXp: number;
+  /** where it is played, for the little tag on the card */
+  where: 'ISLAND' | 'LOBBY' | 'CAVE' | 'ARENA' | 'GAMES' | 'CHAT';
+  /** the pixel icon on the card */
+  icon: 'ore' | 'trophy' | 'pick' | 'fist' | 'cart' | 'chat' | 'gem' | 'star';
 }
+/**
+ * Daily quests: one for each part of Gali, so a day's quests walk a miner through the whole game.
+ * Progress keys are what store.track() counts (rounds and wins are counted by the round code itself).
+ */
 export const QUESTS: QuestDef[] = [
-  { id: 'dig5', label: 'Play 5 rounds', target: 5, rewardXp: 60 },
-  { id: 'win1', label: 'Strike gold once', target: 1, rewardXp: 80 },
-  { id: 'sharp', label: 'Win with 5 spots or fewer', target: 1, rewardXp: 120 },
-  { id: 'shake', label: 'Shake your phone to Smart-pick', target: 1, rewardXp: 40 },
-  { id: 'mole3', label: 'Bonk 3 moles', target: 3, rewardXp: 50 },
+  { id: 'dig5', label: 'Mine 3 rounds on ORE Island', target: 3, rewardXp: 60, where: 'ISLAND', icon: 'ore' },
+  { id: 'win1', label: 'Strike gold once', target: 1, rewardXp: 80, where: 'ISLAND', icon: 'trophy' },
+  { id: 'mole3', label: 'Bonk 3 moles on the island', target: 3, rewardXp: 40, where: 'ISLAND', icon: 'star' },
+  { id: 'cave1', label: 'Finish a Cave Run', target: 1, rewardXp: 60, where: 'CAVE', icon: 'pick' },
+  { id: 'arena1', label: 'Fight a match in the Arena', target: 1, rewardXp: 70, where: 'ARENA', icon: 'fist' },
+  { id: 'ko1', label: 'Knock out a miner in a Brawl', target: 1, rewardXp: 60, where: 'LOBBY', icon: 'fist' },
+  { id: 'smash5', label: 'Smash 5 pots or crates in the lobby', target: 5, rewardXp: 40, where: 'LOBBY', icon: 'gem' },
+  { id: 'arcade1', label: 'Play a round of a mini game', target: 1, rewardXp: 60, where: 'GAMES', icon: 'cart' },
+  { id: 'chat1', label: 'Send a sticker in the chat', target: 1, rewardXp: 20, where: 'CHAT', icon: 'chat' },
 ];
 
 export interface AchDef {
@@ -129,6 +141,15 @@ export const ACHIEVEMENTS: AchDef[] = [
   { id: 'moles-10', label: 'Mole Whacker', desc: 'Bonk 10 moles' },
   { id: 'staker', label: 'Seeker Backer', desc: 'Stake SKR for a boost' },
   { id: 'streak-3', label: 'Regular', desc: '3-day mining streak' },
+  { id: 'brawler', label: 'Brawler', desc: 'Knock out your first miner' },
+  { id: 'champion', label: 'Champion', desc: 'Win an Arena match' },
+  { id: 'spelunker', label: 'Spelunker', desc: 'Finish 10 Cave Runs' },
+  { id: 'high-roller', label: 'High Roller', desc: 'Play 10 mini game rounds' },
+  { id: 'smasher', label: 'Smasher', desc: 'Smash 50 pots and crates' },
+  { id: 'autopilot', label: 'Autopilot', desc: 'Start an autopilot run' },
+  { id: 'generous', label: 'Generous', desc: 'Tip another miner' },
+  { id: 'chatty', label: 'Sticker Pro', desc: 'Send 10 stickers' },
+  { id: 'explorer', label: 'Explorer', desc: 'Visit the island, cave, arena, games and market' },
 ];
 
 export const levelFromXp = (xp: number) => {

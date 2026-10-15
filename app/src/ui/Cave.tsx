@@ -22,6 +22,7 @@ import { MapButton, T } from './kit';
 import { useChrome } from './layout';
 import { BAR_H } from './TabBar';
 import { BackPill } from './Lobby';
+import { DisconnectBtn } from './Hud';
 
 const PIXEL = { dataSet: { pixelart: '1' } } as object;
 const SFX: Record<string, Sound> = { hit: 'hit', crack: 'crack', pop: 'pop', gem: 'mint', hurt: 'bonk', descend: 'dig', over: 'lose', start: 'select', tick: 'tick', oil: 'claim' };
@@ -119,6 +120,7 @@ export function CaveScreen() {
         ) : null}
         <View style={[styles.caveBack, { top: insets.top + 8 }]} pointerEvents="box-none">
           <BackPill door="cave" onBefore={() => useCave.getState().close()} />
+          <DisconnectBtn />
         </View>
       </View>
     </Modal>
@@ -128,5 +130,5 @@ export function CaveScreen() {
 const styles = StyleSheet.create({
   entryWrap: { position: 'absolute', right: 12 },
   screen: { flex: 1, backgroundColor: '#0a0810' },
-  caveBack: { position: 'absolute', left: 12 },
+  caveBack: { position: 'absolute', left: 12, flexDirection: 'row', alignItems: 'center', gap: 8 },
 });

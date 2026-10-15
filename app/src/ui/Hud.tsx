@@ -18,6 +18,20 @@ const TIGHT = LANDSCAPE_APP;
 
 const fmtOre = (v: number) => (v >= 10 ? Math.floor(v).toLocaleString() : v >= 1 ? v.toFixed(2) : v.toFixed(3));
 
+/** The power button that disconnects the wallet: on every screen, not only the island. Nothing when no wallet. */
+export function DisconnectBtn() {
+  const owner = useGame((s) => s.wallet.owner);
+  const disconnect = useGame((s) => s.disconnect);
+  if (!owner) return null;
+  return (
+    <Tip text="Disconnect your wallet" side="bottom" width={170}>
+      <IconBtn onPress={() => void disconnect()} label={`Disconnect wallet ${short(owner)}`}>
+        <PixIcon name="power" size={20} style={{ opacity: 0.85 }} />
+      </IconBtn>
+    </Tip>
+  );
+}
+
 /* ---------------- the wallet chip, shared by both top bars ---------------- */
 function WalletChip({ onMenu }: { onMenu: () => void }) {
   const owner = useGame((s) => s.wallet.owner);

@@ -85,6 +85,10 @@ interface LobbyState {
   chatOpen: boolean;
   unread: number;
   setChatOpen: (open: boolean) => void;
+  /** desktop lobby: the docked chat down the right side is folded away (CHAT or C brings it back) */
+  chatHidden: boolean;
+  /** CHAT pressed: fold the docked desktop chat, or open and close the chat window everywhere else */
+  toggleChat: (docked: boolean) => void;
   go: (where: Where, spawn?: 'start' | DoorId) => void;
   say: (text: string) => boolean;
   emote: (e: string) => void;
@@ -114,6 +118,14 @@ const MAX_MSGS = 60;
 
 let msgId = 1;
 
+function readChatHidden(): boolean {
+  try {
+    return globalThis.localStorage?.getItem('gali-chat-hidden') === '1';
+  } catch {
+    return false;
+  }
+}
+
 export const useLobby = create<LobbyState>((set, get) => ({
   where: 'lobby',
   spawn: 'start',
@@ -128,6 +140,17 @@ export const useLobby = create<LobbyState>((set, get) => ({
   chatOpen: false,
   unread: 0,
   setChatOpen: (open) => set(open ? { chatOpen: true, unread: 0 } : { chatOpen: false }),
+  chatHidden: readChatHidden(),
+  toggleChat: (docked) => {
+    if (!docked) return get().setChatOpen(!get().chatOpen);
+    const hidden = !get().chatHidden;
+    set(hidden ? { chatHidden: true } : { chatHidden: false, unread: 0 });
+    try {
+      globalThis.localStorage?.setItem('gali-chat-hidden', hidden ? '1' : '0');
+    } catch {
+      /* private window */
+    }
+  },
   go: (where, spawn) => set({ where, spawn: spawn ?? get().spawn }),
   say: (raw) => {
     const text = cleanChat(raw);

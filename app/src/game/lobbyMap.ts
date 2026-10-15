@@ -39,7 +39,7 @@ export interface Door {
 }
 
 export const DOORS: Door[] = [
-  { id: 'island', x: 66, y: 26, w: 3, h: 3, label: 'GALI ISLAND', sub: 'Mine ORE' },
+  { id: 'island', x: 66, y: 26, w: 3, h: 3, label: 'ORE ISLAND', sub: 'Mine ORE' },
   { id: 'cave', x: 14, y: 10, w: 3, h: 1, label: 'CAVE RUN', sub: 'Dig for XP' },
   { id: 'market', x: 51, y: 9, w: 3, h: 1, label: 'MARKET', sub: 'Gear and items' },
   { id: 'tunnel', x: 26, y: 42, w: 3, h: 1, label: 'TUNNEL', sub: 'ORE and SKR' },
@@ -434,4 +434,32 @@ export function cleanChat(raw: unknown): string {
   if (typeof raw !== 'string') return '';
   // eslint-disable-next-line no-control-regex
   return raw.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+}
+
+/**
+ * Chat stickers: a message that is exactly `[s:<id>]` shows as an animated pixel sticker
+ * (assets/stickers/<id>.png). Over a miner's head, and in older builds, it reads as its caption.
+ */
+export const STICKERS: { id: string; caption: string }[] = [
+  { id: 'gm', caption: 'GM' },
+  { id: 'letsmine', caption: "LET'S MINE" },
+  { id: 'lfg', caption: 'LFG' },
+  { id: 'gold', caption: 'GOLD!' },
+  { id: 'motherlode', caption: 'MOTHERLODE!' },
+  { id: 'wagmi', caption: 'WAGMI' },
+  { id: 'bonk', caption: 'BONK!' },
+  { id: 'rekt', caption: 'REKT' },
+  { id: 'gg', caption: 'GG' },
+  { id: 'gn', caption: 'GN' },
+];
+const STICKER_RE = /^\[s:([a-z]{2,12})\]$/;
+/** The sticker id a chat line carries, or null for plain text. */
+export function stickerOf(text: string): string | null {
+  const m = STICKER_RE.exec(text.trim());
+  return m && STICKERS.some((s) => s.id === m[1]) ? m[1] : null;
+}
+/** A chat line as words: a sticker becomes its caption. */
+export function chatWords(text: string): string {
+  const id = stickerOf(text);
+  return id ? (STICKERS.find((s) => s.id === id)?.caption ?? text) : text;
 }

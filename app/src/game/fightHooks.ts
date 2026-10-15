@@ -6,6 +6,7 @@ import { hostResultListeners, resultListeners, useArena } from './arena';
 import { brawlHooks } from './brawl';
 import { useFightStats } from './fightGear';
 import { reportKo, reportWin } from './ranks';
+import { useGame } from './store';
 
 let done = false;
 export function initFightHooks(myName: () => string) {
@@ -15,6 +16,7 @@ export function initFightHooks(myName: () => string) {
   brawlHooks.koed = (scope, foe, name, xp) => {
     koed?.(scope, foe, name, xp);
     useFightStats.getState().add('kos');
+    useGame.getState().track('ko');
   };
   const kod = brawlHooks.kodBy;
   brawlHooks.kodBy = (scope, by, byName) => {
@@ -24,6 +26,8 @@ export function initFightHooks(myName: () => string) {
   };
   resultListeners.add((m) => {
     const me = useArena.getState().me;
+    useGame.getState().track('arena');
+    if (m.winner === me && m.fighters.length >= 2) useGame.getState().track('win');
     if (m.mode === 'boss' && m.winner === 'boss-down') useFightStats.getState().add('bossWins');
     else if (m.winner === me && m.fighters.length >= 2) useFightStats.getState().add('wins');
   });

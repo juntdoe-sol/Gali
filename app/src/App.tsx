@@ -3,7 +3,7 @@ import { useAppFonts } from './fonts';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState, type ReactNode } from 'react';
 import { SidePanel } from './ui/Side';
-import { LANDSCAPE_APP, useLayout } from './ui/layout';
+import { LANDSCAPE_APP, layoutNow, useLayout } from './ui/layout';
 import { TAB_KEY } from './ui/TabBar';
 import { useView } from './pixel/view';
 import { BLOCKS } from './game/constants';
@@ -13,6 +13,9 @@ import { COLORS } from './game/constants';
 import { oreLive } from './chain/light';
 import { initAudio } from './game/sfx';
 import { useGame } from './game/store';
+import { reportMiner } from './game/ranks';
+import { useName } from './game/username';
+import { levelFromXp } from './game/constants';
 import PixelMine from './pixel/PixelMine';
 import { useWorld } from './game/world';
 import { TabBar, type SheetTab } from './ui/TabBar';
@@ -24,7 +27,7 @@ import { ClaimPanel } from './ui/ClaimPanel';
 import { MapHint } from './ui/MapHint';
 import { Splash } from './ui/Splash';
 import { PeerCard } from './ui/World';
-import { CaveEntry, CaveScreen } from './ui/Cave';
+import { CaveScreen } from './ui/Cave';
 import { ArenaScreen } from './ui/Arena';
 import { useArena } from './game/arena';
 import { LobbyBack, LobbyScreen, SharedChat } from './ui/Lobby';
@@ -85,6 +88,32 @@ export default function App() {
       window.addEventListener('pointerdown', unlock, true);
     } else initAudio();
     void useGame.getState().boot();
+    // Check this wallet in on the miner ranks whenever its level, XP or points change (throttled)
+    const checkIn = () => {
+      const g = useGame.getState();
+      const owner = g.wallet.owner;
+      if (!owner) return;
+      const xp = g.wallet.player ? g.wallet.player.xp + g.save.bonusXp : g.save.xp;
+      const points = g.wallet.player ? g.wallet.player.points : g.save.points;
+      reportMiner({ wallet: owner, name: useName.getState().name, level: levelFromXp(xp), xp, points });
+    };
+    const unGame = useGame.subscribe(checkIn);
+    const unName = useName.subscribe(checkIn);
+    const seenId = setInterval(checkIn, 60_000);
+    // the Explorer achievement: each place counts once
+    const track = useGame.getState().track;
+    const unWhere = useLobby.subscribe((s, p) => {
+      if (s.where === 'island' && p.where !== 'island') track('visit-island');
+    });
+    const unCave = useCave.subscribe((s, p) => {
+      if (s.open && !p.open) track('visit-cave');
+    });
+    const unArena = useArena.subscribe((s, p) => {
+      if (s.open && !p.open) track('visit-arena');
+    });
+    const unGames = useArcade.subscribe((s, p) => {
+      if (s.game && !p.game) track('visit-games');
+    });
     const id = setInterval(() => useGame.getState().tick(), 100);
     // Back from a wallet approval or the home screen: re-read the live board and wallet at once.
     const sub = AppState.addEventListener('change', (state) => {
@@ -92,9 +121,20 @@ export default function App() {
     });
     return () => {
       clearInterval(id);
+      clearInterval(seenId);
+      unWhere();
+      unCave();
+      unArena();
+      unGames();
+      unGame();
+      unName();
       sub.remove();
     };
   }, []);
+
+  useEffect(() => {
+    if (sheet === 'gear') useGame.getState().track('visit-market');
+  }, [sheet]);
 
   useEffect(() => {
     if (onboarded) void scheduleDailyReminder();
@@ -170,7 +210,7 @@ function useHotkeys(sheet: SheetTab | null, setSheet: (t: SheetTab | null) => vo
       if (!tab) return;
       if (tab === 'chat') {
         setSheet(null);
-        L.setChatOpen(!L.chatOpen);
+        L.toggleChat(layoutNow().desktop && !LANDSCAPE_APP && L.where === 'lobby');
       } else setSheet(sheet === tab ? null : tab);
     };
     window.addEventListener('keydown', onKey);
@@ -197,7 +237,6 @@ function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTa
         {desktop ? null : <Dock />}
         <TabBar active={sheet} onTab={setSheet} />
         <MapHint />
-        <CaveEntry />
         <LobbyBack />
         <ClaimPanel />
         <PeerCard />

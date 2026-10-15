@@ -15,7 +15,7 @@ import { useCave } from '../game/caveStore';
 import { loadChain } from '../chain/lazy';
 import { TIP_LIMITS, TIP_SKR_MINT, short } from '../chain/light';
 import { ACT_LIFE_MS, announce, joinChat, joinLobby, leaveLobby, LOBBY_EMOTES, publishLobbyMe, useLobby, type Act, type LobbyMsg } from '../game/lobby';
-import { cleanName, LOBBY_CAP, type DoorId } from '../game/lobbyMap';
+import { chatWords, cleanName, LOBBY_CAP, STICKERS, stickerOf, type DoorId } from '../game/lobbyMap';
 import { isOnChain, useGame, useLevelXp } from '../game/store';
 import { play } from '../game/sfx';
 import { brawlSnap, heal, jump, setMyPos, swing, useBrawl } from '../game/brawl';
@@ -31,6 +31,8 @@ import { GUTTER, LANDSCAPE_APP, RAIL_W, TOP_H, sideWidth, useChrome, useLayout }
 import { BAR_H, TabBar, type SheetTab } from './TabBar';
 import { Arcade } from './Arcade';
 import { PixIcon } from './PixIcon';
+import { DisconnectBtn } from './Hud';
+import { Sticker } from './Sticker';
 import { FightPad } from './ActionPad';
 import type { PixName } from './pixIcons';
 import { GAME_IDS, GAME_META, useArcade, type GameId } from '../game/arcade';
@@ -124,12 +126,12 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
         f: p.facing,
         p: p.pose,
         look: p.look,
-        say: p.say && now - p.say.at < 6000 ? p.say.t : null,
+        say: p.say && now - p.say.at < 6000 ? chatWords(p.say.t) : null,
         emoji: p.emoji && now - p.emojiAt < 3000 ? p.emoji : null,
       }));
       const snap: LobbySnap = {
         peers,
-        say: s.mySay && now - s.mySay.at < 6000 ? s.mySay.t : null,
+        say: s.mySay && now - s.mySay.at < 6000 ? chatWords(s.mySay.t) : null,
         emoji: s.myEmoji && now - s.myEmoji.at < 3000 ? s.myEmoji.e : null,
         dance: s.myDance,
         brawl: brawlSnap(now),
@@ -147,7 +149,8 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
 
   const L = useLayout();
   // the landscape app opens chat on demand: the map gets the whole width
-  const chatW = L.desktop && !LANDSCAPE_APP ? sideWidth(L.w) : 0;
+  const chatHidden = useLobby((s) => s.chatHidden);
+  const chatW = L.desktop && !LANDSCAPE_APP && !chatHidden ? sideWidth(L.w) : 0;
   const bottom = L.desktop ? 96 : bottomInset + BAR_H + 150;
   const topH = L.desktop ? TOP_H + GUTTER : top + 104;
   const left = L.desktop ? RAIL_W : 0;
@@ -243,6 +246,9 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
       case 'heal':
         heal(e.hp);
         break;
+      case 'smash':
+        useGame.getState().track('smash');
+        break;
       case 'me':
         setMyPos('lobby', e.x, e.y);
         publishLobbyMe({ x: e.x, y: e.y, tx: e.tx, ty: e.ty, facing: e.facing, pose: e.pose, look, lvl: lvlRef.current, wallet: useGame.getState().wallet.owner });
@@ -315,6 +321,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
                 </T>
               </IconBtn>
             </Tip>
+            <DisconnectBtn />
           </View>
         </View>
       ) : (
@@ -347,6 +354,10 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
                   {status === 'full' ? 'FULL' : status === 'online' ? `${count}` : status === 'joining' ? '...' : 'OFF'}
                 </T>
               </PixelBox>
+              <IconBtn onPress={() => onTab(sheet === 'me' ? null : 'me')} label="Profile">
+                <PixIcon name="user" size={20} />
+              </IconBtn>
+              <DisconnectBtn />
             </View>
           </View>
         </View>
@@ -369,7 +380,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
                   {m.name}
                 </T>
                 <T v="body" style={{ fontSize: 13, flex: 1 }} numberOfLines={2}>
-                  {m.text}
+                  {chatWords(m.text)}
                 </T>
               </View>
             ))}
@@ -546,22 +557,21 @@ function NavTile({ label, sub, color, icon, onPress }: { label: string; sub: str
   );
 }
 
-const HOWTO_KEY = 'gali-lobby-howto-v1';
+const HOWTO_KEY = 'gali-lobby-howto-v2';
 
 const HOWTO: { icon: PixName; title: string; body: string }[] = [
-  { icon: 'star', title: 'Walk around', body: 'Use the joystick or tap the map on a phone; WASD, the arrow keys or a click on a computer. Pinch or scroll to zoom. Other players are real people in the lobby right now.' },
-  { icon: 'chat', title: 'Talk and react', body: 'Pick a name, then use CHAT to message everyone (Enter on a keyboard). Tap an icon to wave, laugh or show off, or the note to dance. Keys 1 to 7 do the same.' },
-  { icon: 'fist', title: 'Brawl', body: 'Tap HIT (F on a keyboard) to swing at the miner next to you, in the lobby or on the island. JUMP (Space) makes a swing miss you. At 0 HP a miner is knocked down, then stands up with full HP and a short shield. A KO gives XP. Nothing real is lost: no ORE, SOL or gear. Turn Brawl off any time in PROFILE.' },
-  { icon: 'gem', title: 'Island: mine ORE', body: 'Walk onto the jetty, or tap GO then ISLAND. Pick spots on the map, deploy SOL, and win ORE when your spot is the gold one. Your wallet approves every deploy. Only play with SOL you can afford to lose.' },
-  { icon: 'cart', title: 'Mini games', body: 'South of the plaza are three pavilions: Tunnel Collapse, Gold Rush Pot and Crash Cart. Walk into one, or tap GO then its name, to open it. Each has an ORE table and an SKR table, with a new round every 40 seconds shared by everyone.' },
-  { icon: 'tunnel', title: 'Tunnel Collapse', body: 'Pick one of five tunnels. One caves in. Miners in the other four split the stakes of the collapsed one, minus a 5% fee.' },
-  { icon: 'pot', title: 'Gold Rush Pot', body: 'Buy in with a stake. One miner is drawn to take the whole pot minus 5%. Bigger stakes hold more tickets, so better odds.' },
-  { icon: 'cart', title: 'Crash Cart', body: 'Pick a cash-out from 1.2x to 10x. If the cart climbs that high before it crashes you win your stake times the cash-out. If it crashes first the stake is lost.' },
-  { icon: 'lock', title: 'Staking safely', body: 'Stakes are real ORE or SKR sent from your wallet, and your wallet approves each one. Winners are paid automatically, and every round can be checked with the hash shown in the game. 18+ only. Stake only what you can afford to lose.' },
-  { icon: 'pick', title: 'Cave: Cave Run', body: 'Go into the cave for the Cave Run mini game. It earns XP and does not spend SOL.' },
-  { icon: 'gift', title: 'Market: gear', body: 'Walk into the shop to see pickaxes, hats and pets for your miner.' },
-  { icon: 'fire', title: 'Autopilot', body: 'On the island, open MINE, then PRO and set Rounds above 1. One wallet approval funds ORE automation. Your rounds then deploy by themselves, even with the app closed or your phone locked. Each round costs 0.00001 SOL extra for the network fee. STOP gets the unused SOL back.' },
-  { icon: 'wave', title: 'Back to the lobby', body: 'Every place has a LOBBY button. The GO button in the bar jumps straight to the island, cave, games or market.' },
+  { icon: 'star', title: 'Walk around', body: 'Joystick or tap on a phone. WASD, the arrow keys or a click on a computer. Scroll or pinch to zoom. Every miner you see is a real player. The board by the fountain points the way to every place.' },
+  { icon: 'chat', title: 'Chat and stickers', body: 'Pick a name, then open CHAT to talk to everyone in the lobby and on the island. Tap a sticker to post it: GM, LFG, LET\'S MINE and more. On a computer, C shows or hides the chat.' },
+  { icon: 'fist', title: 'Brawl', body: 'HIT (F or a left click) swings at the miner next to you. JUMP (Space) dodges. At 0 HP a miner is knocked down, then stands up with full HP and a shield. A KO gives XP. Nothing real is lost. Turn Brawl off in PROFILE.' },
+  { icon: 'gem', title: 'Smash for HP', body: 'Hit a pot, crate or barrel to smash it. Breaking one heals you: 10 HP for a pot, 15 for a crate or barrel. They grow back after 18 seconds.' },
+  { icon: 'ore', title: 'ORE Island: mine ORE', body: 'Walk down the pier, or tap GO then ORE ISLAND. Pick spots, deploy SOL, and win ORE when your spot is the gold one. Your wallet approves every deploy. Only play with SOL you can afford to lose.' },
+  { icon: 'fire', title: 'Autopilot', body: 'On the island, open MINE, then PRO, and set Rounds above 1. One approval funds ORE automation, and your rounds deploy by themselves even with the app closed. STOP returns the unused SOL.' },
+  { icon: 'trophy', title: 'Arena', body: 'The colosseum west of the plaza. Last Miner Standing, King of the Ring, or team up against the boss. Q, E, R, C, V and X fire your powers as you level up. Wins and KOs put you on the Brawl ranks.' },
+  { icon: 'pick', title: 'Cave Run', body: 'Walk into the cave in the north west. Dig down, dodge the rocks, and earn XP. It never spends SOL.' },
+  { icon: 'cart', title: 'Mini games', body: 'Three pavilions south of the plaza: Tunnel Collapse, Gold Rush Pot and Crash Cart. Stake ORE or SKR, with a new round every 40 seconds. 5% house fee. 18+ only, stake only what you can afford to lose.' },
+  { icon: 'quest', title: 'Quests and ranks', body: 'QUEST has nine daily quests across the whole game, plus achievements. Claim each one for XP. RANKS shows every miner by level, by ORE mined on chain, and the week\'s Brawl board.' },
+  { icon: 'user', title: 'Profile and wallet', body: 'PROFILE holds your wallet, gear and settings. The power button next to it disconnects your wallet from any screen.' },
+  { icon: 'wave', title: 'Back to the lobby', body: 'Every place has a LOBBY button. GO jumps straight to the island, cave, arena, games or market.' },
 ];
 
 /** A short guide for new players, shown once and always one tap away from the lobby header. */
@@ -676,6 +686,7 @@ export function TipSheet({ to, onClose }: { to: { id: string; name: string; wall
       await chain.sendTip(token, new chain.PublicKey(to.wallet), amount);
       announce({ k: 'tip', to: to.id, tn: to.name, a: amount, tk: token });
       g.toast(`Sent ${amount} ${token} to ${to.name}`, 'good');
+      g.track('tip');
       void g.refreshWallet();
       onClose();
     } catch (e) {
@@ -730,10 +741,12 @@ export function SharedChat({ inLobby }: { inLobby?: boolean } = {}) {
     if (open) setTimeout(() => list.current?.scrollToEnd({ animated: false }), 50);
   }, [open, msgs.length]);
   // a desktop lobby keeps the chat docked down the right side; everywhere else it opens on demand
+  const hidden = useLobby((s) => s.chatHidden);
   const docked = L.desktop && !LANDSCAPE_APP && where === 'lobby';
   // the docked lobby chat is drawn by the lobby itself, under its menus and dialogs
   if (docked !== Boolean(inLobby)) return null;
   if (!open && !docked) return null;
+  if (docked && hidden) return null;
   const close = () => useLobby.getState().setChatOpen(false);
   const send = () => {
     if (!text.trim()) return;
@@ -755,7 +768,11 @@ export function SharedChat({ inLobby }: { inLobby?: boolean } = {}) {
             </T>
           </View>
         </View>
-        {docked ? null : (
+        {docked ? (
+          <IconBtn onPress={() => useLobby.getState().toggleChat(true)} label="Hide chat" kbd="C">
+            <PixIcon name="close" size={18} />
+          </IconBtn>
+        ) : (
           <IconBtn onPress={close} label="Close chat" kbd="ESC">
             <PixIcon name="close" size={18} />
           </IconBtn>
@@ -785,7 +802,7 @@ export function SharedChat({ inLobby }: { inLobby?: boolean } = {}) {
                         {m.name}
                       </T>
                     ) : null}
-                    <T style={{ color: m.mine ? '#2b1600' : COLORS.text }}>{m.text}</T>
+                    {stickerOf(m.text) ? <Sticker id={stickerOf(m.text) as string} size={96} /> : <T style={{ color: m.mine ? '#2b1600' : COLORS.text }}>{m.text}</T>}
                     <T v="muted" style={{ fontSize: 11, alignSelf: 'flex-end', color: m.mine ? '#6b3a00' : COLORS.muted }}>
                       {time}
                     </T>
@@ -794,11 +811,23 @@ export function SharedChat({ inLobby }: { inLobby?: boolean } = {}) {
               );
             }}
           />
-          <View style={cs.emoteRow}>
-            {LOBBY_EMOTES.map((e) => (
-              <EmoteKey key={e} icon={e} label={`Emote ${EMOTE_NAME[e] ?? e}`} kbd="" onPress={() => useLobby.getState().emote(e)} />
+          {/* stickers: tap one to post it to the room */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={cs.stickerRow} style={{ flexGrow: 0 }}>
+            {STICKERS.map((s) => (
+              <Pressable
+                key={s.id}
+                onPress={() => {
+                  if (name && useLobby.getState().say(`[s:${s.id}]`)) useGame.getState().track('sticker');
+                }}
+                disabled={!name || chatStatus !== 'online'}
+                accessibilityRole="button"
+                accessibilityLabel={`Send the ${s.caption} sticker`}
+                style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [cs.stickerKey, { transform: [{ translateY: pressed ? 2 : hovered ? -2 : 0 }], opacity: !name || chatStatus !== 'online' ? 0.45 : 1 }]}
+              >
+                <Sticker id={s.id} size={48} still />
+              </Pressable>
             ))}
-          </View>
+          </ScrollView>
           {name ? (
             <View style={cs.inputRow}>
               <TextInput
@@ -895,6 +924,8 @@ const cs = StyleSheet.create({
   bubbleRow: { flexDirection: 'row' },
   bubble: { maxWidth: '86%', paddingHorizontal: 12, paddingVertical: 7 },
   emoteRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 4, marginVertical: 4 },
+  stickerRow: { gap: 6, paddingVertical: 4 },
+  stickerKey: { borderRadius: 8 },
   inputRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
 });
 

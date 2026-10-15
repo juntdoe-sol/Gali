@@ -24,6 +24,7 @@ import { Btn, Card, Choice, MapButton, PixelBox, Scrim, T, Window } from './kit'
 import { LANDSCAPE_APP, useLayout } from './layout';
 import { BackPill, TipSheet } from './Lobby';
 import { PixIcon } from './PixIcon';
+import { DisconnectBtn } from './Hud';
 import { SkillButton } from './ActionPad';
 import type { PixName } from './pixIcons';
 
@@ -227,6 +228,7 @@ function TopBar({ top, onPanel }: { top: number; onPanel: (p: 'powers' | 'ranks'
       <View style={styles.topBtns}>
         <MapButton label="POWERS" icon={<PixIcon name="bolt" size={18} />} onPress={() => onPanel('powers')} />
         <MapButton label="RANKS" icon={<PixIcon name="trophy" size={18} />} onPress={() => onPanel('ranks')} />
+        <DisconnectBtn />
       </View>
     </View>
   );

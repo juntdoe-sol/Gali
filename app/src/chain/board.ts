@@ -26,7 +26,8 @@ import {
   readRewards,
 } from './ore/read';
 import { closeLiveAutomation, deployFromAutomation, oreCheckpoint, oreClaimOre, oreClaimSol, oreDeploy, oreDeployWithWallet, readAutomation, startLiveAutomation, toOre, toSol } from './ore/tx';
-import { distributionMask, type OreMiner, type OreRound } from './ore/accounts';
+import { decodeMiner, distributionMask, type OreMiner, type OreRound } from './ore/accounts';
+import { minerPda } from './ore/consts';
 
 export type { OreClock } from './ore/read';
 
@@ -396,3 +397,30 @@ export async function fetchOreMotherlode(): Promise<number> {
 
 export const claimBoardSol = (expectedOwner?: PublicKey) => oreClaimSol(expectedOwner);
 export const claimBoardOre = (expectedOwner?: PublicKey) => oreClaimOre(10_000, expectedOwner);
+
+/** Lifetime ORE mined and SOL deployed for each wallet, read from ORE's Miner accounts (100 per call). */
+export async function fetchMinerLifetimes(wallets: string[]): Promise<Record<string, { ore: number; deployed: number }>> {
+  const out: Record<string, { ore: number; deployed: number }> = {};
+  const keys: { w: string; pda: PublicKey }[] = [];
+  for (const w of wallets) {
+    try {
+      keys.push({ w, pda: minerPda(new PublicKey(w)) });
+    } catch {
+      /* not a wallet */
+    }
+  }
+  for (let i = 0; i < keys.length; i += 100) {
+    const chunk = keys.slice(i, i + 100);
+    const infos = await connection.getMultipleAccountsInfo(chunk.map((k) => k.pda));
+    infos.forEach((info, j) => {
+      if (!info) return;
+      try {
+        const m = decodeMiner(info.data);
+        out[chunk[j].w] = { ore: toOre(m.lifetimeRewardsOre), deployed: toSol(m.lifetimeDeployed) };
+      } catch {
+        /* an older layout: skip */
+      }
+    });
+  }
+  return out;
+}
