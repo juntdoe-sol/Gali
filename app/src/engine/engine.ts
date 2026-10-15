@@ -8,6 +8,7 @@
  * effects down on its own if a phone can't keep up.
  */
 import { canvasDpr, reducedMotion } from './screen';
+import { wheelZoom } from './screen';
 import { ACTORS, ISLE, blit, draw, drawCanvas, has, makeCanvas, ctx2d, sprite, text, textCentered, textWidth, loadAtlas, type Ctx } from './art';
 import { drawMiner, drawPet, frameAt, HIT_FRAME, IMPACT, lampOf, moleNames, petFlies, petLight, POSES, stepBody, type Body } from './actors';
 import { Camera } from './camera';
@@ -1488,7 +1489,7 @@ export class Engine {
         if (this.mode !== 'island') return;
         e.preventDefault();
         const r = cv.getBoundingClientRect();
-        this.cam.zoomAt(e.clientX - r.left, e.clientY - r.top, Math.exp(-e.deltaY * 0.0015));
+        this.cam.zoomAt(e.clientX - r.left, e.clientY - r.top, wheelZoom(e));
       },
       { passive: false },
     );

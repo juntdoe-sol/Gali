@@ -19,7 +19,7 @@ export type Shape = 'phone' | 'tablet' | 'desktop';
 
 /** The landscape Android app (or its web test mode). */
 export const LANDSCAPE_APP =
-  Platform.OS === 'android' || (Platform.OS === 'web' && typeof window !== 'undefined' && /[?&]land=1\b/.test(window.location?.search ?? ''));
+  (Platform.OS === 'android' && (globalThis as { __GALI_ORIENT?: string }).__GALI_ORIENT !== 'portrait') || (Platform.OS === 'web' && typeof window !== 'undefined' && /[?&]land=1\b/.test(window.location?.search ?? ''));
 
 /** Desktop rail width, side panel width and the top bar height, in CSS px. */
 export const RAIL_W = LANDSCAPE_APP ? 66 : 88;
