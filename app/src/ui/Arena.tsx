@@ -467,7 +467,7 @@ function RanksPanel({ onClose }: { onClose: () => void }) {
   }, []);
   return (
     <Scrim onPress={onClose}>
-      <Window title="BRAWL RANKS" sub="This week. A KO counts when the miner who went down reports it." onClose={onClose} width={480}>
+      <Window title="BRAWL RANKS" sub="This week: 1 point a KO, 3 a match win, 2 a Mole King down." onClose={onClose} width={480}>
         <ScrollView style={{ maxHeight: 460 }}>
           {r.status === 'off' ? <T v="muted">Ranks are not set up on this server yet.</T> : null}
           {r.status === 'error' ? <T v="muted">Could not load the ranks. Try again in a moment.</T> : null}
@@ -481,8 +481,8 @@ function RanksPanel({ onClose }: { onClose: () => void }) {
               <T v="bold" style={{ flex: 1, fontSize: 14 }} numberOfLines={1}>
                 {row.name}
               </T>
-              <T v="label" style={{ width: 120, textAlign: 'right' }}>
-                {row.kos} KO · {row.wins} WIN
+              <T v="label" style={{ width: 150, textAlign: 'right' }}>
+                {row.kos} KO · {row.wins} W{row.bosses ? ` · ${row.bosses} BOSS` : ''}
               </T>
               <T v="display" style={{ width: 54, textAlign: 'right', fontSize: 18, color: COLORS.gold }}>
                 {row.points}

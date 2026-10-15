@@ -15,6 +15,8 @@ export interface RankRow {
   points: number;
   kos: number;
   wins: number;
+  /** Mole King fights won this week */
+  bosses: number;
 }
 interface RanksState {
   rows: RankRow[];
@@ -36,10 +38,10 @@ export const useRanks = create<RanksState>((set, get) => ({
     if (get().status === 'loading' || Date.now() - get().at < 15_000) return;
     set({ status: 'loading' });
     try {
-      const r = await fetch(`${base}/rest/v1/brawl_ranks?select=name,points,kos,wins&order=points.desc&limit=50`, { headers: headers() });
+      const r = await fetch(`${base}/rest/v1/brawl_ranks?select=*&order=points.desc&limit=50`, { headers: headers() });
       if (!r.ok) throw new Error(String(r.status));
       const data = (await r.json()) as RankRow[];
-      const rows = (Array.isArray(data) ? data : []).filter((x) => x && typeof x.name === 'string').map((x) => ({ name: clean(x.name), points: Number(x.points) || 0, kos: Number(x.kos) || 0, wins: Number(x.wins) || 0 }));
+      const rows = (Array.isArray(data) ? data : []).filter((x) => x && typeof x.name === 'string').map((x) => ({ name: clean(x.name), points: Number(x.points) || 0, kos: Number(x.kos) || 0, wins: Number(x.wins) || 0, bosses: Number(x.bosses) || 0 }));
       set({ rows, at: Date.now(), status: 'ok' });
     } catch {
       set({ status: 'error', at: Date.now() });
@@ -57,7 +59,7 @@ export function reportKo(o: { killer: string; victim: string; scope: string }) {
 /** The arena host reports a match winner. */
 export function reportWin(o: { winner: string; host: string; mode: string; players: number }) {
   const base = restBase();
-  if (!base || !o.winner || o.players < 2) return;
+  if (!base || !o.winner || o.players < (o.mode === 'boss' ? 1 : 2)) return;
   void fetch(`${base}/rest/v1/brawl_wins`, { method: 'POST', headers: { ...headers(), prefer: 'return=minimal' }, body: JSON.stringify({ winner: clean(o.winner), host: clean(o.host), mode: o.mode, players: Math.min(12, o.players) }) }).catch(() => undefined);
 }
 
