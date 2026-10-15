@@ -20,7 +20,8 @@ import { Particles } from './particles';
 import { Sky } from './sky';
 import type { BrawlSnap, Look, Pose } from './types';
 import { drawHp, drawKo, drawShield, FightFx, hitFlash, jumpLift, koAge, pickTarget, swingTilt } from './brawlfx';
-import { CLIFF, DOORS, PAVILIONS, STRUCTURES, doorAt, GRASS, HALL, LCOLS, LH, LROWS, LT, LW, lidx, lobbyMap, lobbyPath, PLANK, PLAZA, ROAD, SAND, SPAWNS, standable, tileCentre, tileOf, WATER, type DoorId } from '../game/lobbyMap';
+import { ARENA_FLAGS, ARENA_TORCHES, paintColosseum, paintSign, paintSmash, paintSolBase, paintSolLogo, SIGN_H, SIGN_W, SMASH_COLORS, SMASH_DIM, SOL_BASE, SOL_LOGO } from './lobbyArt';
+import { CLIFF, DOORS, PAVILIONS, SMASHABLES, STRUCTURES, doorAt, GRASS, HALL, LCOLS, LH, LROWS, LT, LW, lidx, lobbyMap, lobbyPath, PLANK, PLAZA, ROAD, SAND, SPAWNS, standable, tileCentre, tileOf, WATER, type DoorId } from '../game/lobbyMap';
 
 export type LobbyEvent =
   | { t: 'ready' }
@@ -71,6 +72,8 @@ const seeded = (n: number) => {
   const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
   return x - Math.floor(x);
 };
+/** how long a smashed pot or crate stays rubble before it grows back (ms) */
+const SMASH_BACK_MS = 18000;
 const DOOR_COLOR: Record<DoorId, string> = { island: '#3de0c8', cave: '#ff9a3d', market: '#b86bff', tunnel: '#ff9a3d', pot: '#ffcf4a', crash: '#3de0c8', arena: '#ff4f5e' };
 
 interface Walker extends Body {
@@ -151,6 +154,9 @@ export class LobbyEngine {
   private myJumpAt = 0;
   /** fight effects, the lunge of a swing, and what HP and swings we last saw */
   private fx = new FightFx();
+  /** each smashable's state, only on this phone: hits left, when it last got hit and when it broke */
+  private smash = SMASHABLES.map((s) => ({ hp: s.hp, hitAt: 0, dir: 1, broke: 0 }));
+  private smashDue: { i: number; at: number; dir: number }[] = [];
   private lungeUntil = 0;
   private lungeDir = 0;
   private myHp = 100;
@@ -253,6 +259,13 @@ export class LobbyEngine {
     const others = [...this.peers.values()].map((p) => ({ id: p.view.id, x: p.x, y: p.y, v: b.peers[p.view.id] }));
     const t = pickTarget(me, others, wall);
     if (t) me.facing = t.facing;
+    // nobody to hit: a pot or crate in reach takes it instead
+    const prop = t ? -1 : this.smashTarget();
+    if (prop >= 0) {
+      const dx = SMASHABLES[prop].x * LT + 8 - me.x;
+      if (Math.abs(dx) > 2) me.facing = dx > 0 ? 1 : -1;
+      this.smashDue.push({ i: prop, at: wall + 210, dir: me.facing });
+    }
     const now = performance.now();
     me.path = [];
     me.tx = me.x;
@@ -266,10 +279,30 @@ export class LobbyEngine {
     const room = foe ? Math.max(0, Math.min(8, Math.abs(foe.x - me.x) - 12)) : 8;
     this.lungeUntil = now + (room / 60) * 1000;
     this.lungeDir = me.facing;
-    this.fx.slash(me.x, me.y, me.facing, wall, Boolean(t));
+    this.fx.slash(me.x, me.y, me.facing, wall, Boolean(t) || prop >= 0);
     if (t) this.fx.shake(140, 1.4, wall + 200);
     this.emit({ t: 'swing', target: t?.id ?? null, x: me.x, y: me.y });
     this.emit({ t: 'sfx', name: 'swing' });
+  }
+
+  /** The nearest whole smashable in reach, the side you face first, or -1. */
+  private smashTarget(): number {
+    const me = this.me;
+    const now = Date.now();
+    let best = -1;
+    let bd = Infinity;
+    SMASHABLES.forEach((sm, i) => {
+      const st = this.smash[i];
+      if (st.broke > 0 && now < st.broke + SMASH_BACK_MS) return;
+      const dx = sm.x * LT + 8 - me.x;
+      const dy = (sm.y * LT + 12 - me.y) * 1.4;
+      const d = Math.hypot(dx, dy) + (Math.sign(dx || me.facing) !== me.facing ? 6 : 0);
+      if (Math.hypot(dx, dy) < 27 && d < bd) {
+        bd = d;
+        best = i;
+      }
+    });
+    return best;
   }
 
   /** Jump (Space, or the JUMP button). A swing at you mid-air misses. */
@@ -1112,6 +1145,11 @@ export class LobbyEngine {
     this.parts.budget = this.quality ? 1 : 0.4;
     this.parts.update(dt, 0.2 + this.sky.wind * 0.5);
     this.think(dt, now);
+    if (this.smashDue.length) {
+      const due = this.smashDue.filter((h) => now >= h.at);
+      this.smashDue = this.smashDue.filter((h) => now < h.at);
+      for (const h of due) this.smashHit(h.i, h.dir);
+    }
     this.draw(now);
     if (!this.ready && this.ground) {
       this.ready = true;
@@ -1347,9 +1385,19 @@ export class LobbyEngine {
     for (const st of STRUCTURES) {
       const wx = (st.at[0] + st.at[2] / 2) * LT;
       const wy = (st.at[1] + st.at[3]) * LT - 1;
-      if (!inView(wx, wy, 40)) continue;
+      if (!inView(wx, wy, st.kind === 'arena' ? 110 : 40)) continue;
+      if (st.kind === 'sign') {
+        const sp = this.signSprite(st.at[0], st.at[1]);
+        items.push({ y: wy, draw: () => c.drawImage(sp, 0, 0, sp.width, sp.height, Math.round((sx(wx) - (sp.width / 2) * z) * dpr) / dpr, Math.round((sy(wy) - sp.height * z) * dpr) / dpr, sp.width * z, sp.height * z) });
+        continue;
+      }
       items.push({ y: wy, draw: () => this.drawStruct(c, st.kind, sx(wx), sy(wy), z, now, lights) });
     }
+    SMASHABLES.forEach((sm, i) => {
+      const wx = sm.x * LT + 8;
+      const wy = sm.y * LT + 14;
+      if (inView(wx, wy)) items.push({ y: wy, draw: () => this.drawSmash(c, i, sx(wx), sy(wy), z, Date.now()) });
+    });
 
     // people
     const meSay = this.snap.say && now - this.mySayAt < 6000 ? this.snap.say : null;
@@ -1487,10 +1535,95 @@ export class LobbyEngine {
 
   /** Each structure is painted once into its own small canvas, then drawn scaled. */
   private structCache = new Map<string, HTMLCanvasElement>();
+  /** the Solana logo, plain (frame -1) and with its glint at eight places */
+  private solLogo(frame: number): HTMLCanvasElement {
+    const key = `sol-logo-${frame}`;
+    const hit = this.structCache.get(key);
+    if (hit) return hit;
+    const cv = makeCanvas(SOL_LOGO[0], SOL_LOGO[1]);
+    paintSolLogo(ctx2d(cv), frame < 0 ? -1 : -0.1 + (frame / 7) * 1.2);
+    this.structCache.set(key, cv);
+    return cv;
+  }
+  private signSprite(tx: number, ty: number): HTMLCanvasElement {
+    const key = `sign-${tx}-${ty}`;
+    const hit = this.structCache.get(key);
+    if (hit) return hit;
+    const cv = makeCanvas(SIGN_W, SIGN_H);
+    paintSign(ctx2d(cv), tx, ty);
+    this.structCache.set(key, cv);
+    return cv;
+  }
+  private smashSprite(kind: 'pot' | 'crate' | 'barrel', broken: boolean): HTMLCanvasElement {
+    const key = `smash-${kind}-${broken ? 1 : 0}`;
+    const hit = this.structCache.get(key);
+    if (hit) return hit;
+    const [w, h] = SMASH_DIM[kind];
+    const cv = makeCanvas(w, h);
+    paintSmash(ctx2d(cv), kind, broken);
+    this.structCache.set(key, cv);
+    return cv;
+  }
+  /** A pot, crate or barrel: whole, wobbling from a hit, rubble, or growing back. */
+  private drawSmash(c: Ctx, i: number, X: number, Y: number, z: number, now: number) {
+    const sm = SMASHABLES[i];
+    const st = this.smash[i];
+    const broken = st.broke > 0 && now < st.broke + SMASH_BACK_MS;
+    const sp = this.smashSprite(sm.kind, broken);
+    let sxk = 1;
+    let syk = 1;
+    let rot = 0;
+    if (!broken && st.broke > 0 && now < st.broke + SMASH_BACK_MS + 260) {
+      // just back: pop up out of the ground
+      const t = (now - st.broke - SMASH_BACK_MS) / 260;
+      syk = Math.min(1.12, t * 1.2);
+      sxk = 0.8 + 0.2 * Math.min(1, t);
+    }
+    const w = now - st.hitAt;
+    if (!broken && w >= 0 && w < 260) {
+      rot = Math.sin(w / 26) * 0.18 * (1 - w / 260) * st.dir;
+      sxk *= 1 + 0.12 * (1 - w / 260);
+      syk *= 1 - 0.1 * (1 - w / 260);
+    }
+    c.save();
+    c.translate(Math.round(X), Math.round(Y));
+    if (rot) c.rotate(rot);
+    c.scale(sxk, syk);
+    c.drawImage(sp, 0, 0, sp.width, sp.height, -(sp.width / 2) * z, -sp.height * z, sp.width * z, sp.height * z);
+    c.restore();
+  }
+  /** Land a swing on a smashable: chips fly, and the last hit breaks it. Cosmetic, no XP. */
+  private smashHit(i: number, dir: number) {
+    const sm = SMASHABLES[i];
+    const st = this.smash[i];
+    const now = Date.now();
+    if (st.broke > 0 && now < st.broke + SMASH_BACK_MS) return;
+    const x = sm.x * LT + 8;
+    const y = sm.y * LT + 12;
+    const cols = SMASH_COLORS[sm.kind];
+    st.hitAt = now;
+    st.dir = dir;
+    st.hp--;
+    this.fx.impact(x, y - 6, now, '#ffe9a0', 0.8);
+    if (st.hp > 0) {
+      this.parts.burst('chip', x, y - 4, 5, 22, 18, cols, 0.5);
+      this.emit({ t: 'sfx', name: 'pop' });
+      return;
+    }
+    st.broke = now;
+    st.hp = sm.hp;
+    this.parts.burst('chip', x, y - 6, 16, 46, 34, cols, 0.8);
+    this.parts.burst('dust', x, y, 8, 22, 10, ['#f2e6c8', '#d8c8a8'], 0.6);
+    if (sm.kind === 'pot' && Math.random() < 0.5) this.parts.burst('coin', x, y - 6, 3, 18, 30, ['#ffd24a', '#ffe27a'], 0.9);
+    this.fx.say(x, y - 22, 'SMASH!', '#ffcf4a', now);
+    this.fx.impact(x, y - 6, now + 40, '#ffcf4a', 1.3);
+    this.fx.shake(120, 1.2, now);
+    this.emit({ t: 'sfx', name: 'pop' });
+  }
   private structSprite(kind: string): HTMLCanvasElement {
     const hit = this.structCache.get(kind);
     if (hit) return hit;
-    const dims: Record<string, [number, number]> = { arena: [116, 74], tent: [50, 40], fire: [20, 8], cart: [44, 26], crates: [20, 22], barrel: [14, 18], 'stall-red': [52, 46], 'stall-teal': [52, 46], rack: [36, 24], boulder: [30, 22], 'sol-crystal': [30, 54], 'ore-vein': [34, 26], lighthouse: [1, 1] };
+    const dims: Record<string, [number, number]> = { arena: [176, 128], tent: [50, 40], fire: [20, 8], cart: [44, 26], crates: [20, 22], barrel: [14, 18], 'stall-red': [52, 46], 'stall-teal': [52, 46], rack: [36, 24], boulder: [30, 22], 'sol-crystal': SOL_BASE, 'ore-vein': [34, 26], lighthouse: [1, 1] };
     const [w, h] = dims[kind] ?? [16, 16];
     const cv = makeCanvas(w, h);
     const g = ctx2d(cv);
@@ -1576,56 +1709,9 @@ export class LobbyEngine {
       const r = rect('prop-boulder-b-0');
       if (sp && r) g.drawImage(sp, 0, 0, r[2], r[3], 0, 0, 30, 22);
     } else if (kind === 'sol-crystal') {
-      // our own crystal pillar: a stone plinth under a tall faceted shard, violet at the root, green at the tip
-      P(3, 46, 24, 8, '#4a4458');
-      P(3, 46, 24, 2, '#6a6480');
-      P(6, 42, 18, 4, '#3b3544');
-      const rows = 40;
-      for (let y = 0; y < rows; y++) {
-        const t = y / (rows - 1);
-        const hw = y < 8 ? 2 + y : 10 - Math.round(Math.max(0, y - 24) * 0.3);
-        const r = Math.round(150 - 110 * (1 - t)), gg = Math.round(60 + 170 * (1 - t)), b = Math.round(240 - 40 * (1 - t));
-        for (let x = -hw; x < hw; x++) {
-          const sh = x > 2 ? 0.72 : x < -5 ? 1.12 : 1;
-          P(15 + x, 2 + y, 1, 1, `rgb(${Math.min(255, Math.round(r * sh))},${Math.min(255, Math.round(gg * sh))},${Math.min(255, Math.round(b * sh))})`);
-        }
-      }
-      P(14, 4, 2, 24, 'rgba(255,255,255,0.35)');
-      P(15, 0, 1, 3, '#d8fff4');
+      paintSolBase(g);
     } else if (kind === 'arena') {
-      // a stone colosseum gate: two towers, an arch over the door, red and gold banners, crossed pickaxes
-      const stone = (x: number, y: number, w: number, h: number) => {
-        P(x, y, w, h, '#7a6e84');
-        for (let yy = y + 3; yy < y + h; yy += 6) P(x, yy, w, 1, '#5e5468');
-        for (let yy = y; yy < y + h; yy += 6) for (let xx = x + ((yy / 6) % 2 ? 4 : 0); xx < x + w; xx += 8) P(xx, yy, 1, 3, '#5e5468');
-        P(x, y, 2, h, '#968aa0');
-      };
-      stone(4, 22, 108, 50);
-      stone(0, 6, 24, 66);
-      stone(92, 6, 24, 66);
-      for (const tx of [0, 92]) for (let k = 0; k < 4; k++) P(tx + k * 6, 2, 4, 5, '#7a6e84');
-      for (let k = 0; k < 14; k++) P(24 + k * 5, 18, 3, 4, '#7a6e84');
-      // the arch and the dark way in
-      for (let y = 0; y < 34; y++) {
-        const hw = y < 12 ? Math.round(Math.sqrt(Math.max(0, 144 - (12 - y) * (12 - y))) + 6) : 18;
-        P(58 - hw, 38 + y, hw * 2, 1, y < 2 ? '#5e5468' : '#140c1c');
-      }
-      P(40, 70, 36, 4, '#3b2a18');
-      // banners
-      for (const [bx, col] of [[7, '#d8483a'], [99, '#d8483a'], [30, '#ffd24a'], [80, '#ffd24a']] as [number, string][]) {
-        P(bx, 24, 10, 22, col);
-        P(bx, 46, 5, 4, col);
-        P(bx + 5, 46, 5, 2, col);
-        P(bx + 3, 30, 4, 4, col === '#ffd24a' ? '#d8483a' : '#ffd24a');
-      }
-      // crossed pickaxes over the arch
-      for (let k = 0; k < 14; k++) {
-        P(50 + k, 24 + k * 0.6, 2, 2, '#9b6b43');
-        P(64 - k, 24 + k * 0.6, 2, 2, '#9b6b43');
-      }
-      P(46, 22, 8, 3, '#c9c9c9');
-      P(62, 22, 8, 3, '#c9c9c9');
-      P(0, 72, 116, 2, 'rgba(0,0,0,0.25)');
+      paintColosseum(g);
     } else if (kind === 'ore-vein') {
       // a dark rock with warm ore running through it
       for (let y = 0; y < 22; y++) {
@@ -1671,15 +1757,63 @@ export class LobbyEngine {
     } else if (kind === 'stall-red' || kind === 'stall-teal') {
       lights.push({ x: X * this.dpr, y: (Y - 30 * z) * this.dpr, r: 40 * z * this.dpr, c: '#ffcf80', k: 1 });
     } else if (kind === 'sol-crystal') {
-      const k = 0.8 + 0.2 * Math.sin(now / 420 + X);
-      lights.push({ x: X * this.dpr, y: (Y - 30 * z) * this.dpr, r: 58 * z * this.dpr, c: '#9a6bff', k });
+      // the Solana logo floats over its pedestal, bobbing, with a glint running across now and then
+      const bob = Math.sin(now / 650 + X * 0.01) * 1.6;
+      const [lw, lh] = SOL_LOGO;
+      const cyc = (now / 2600 + X * 0.0007) % 1;
+      const frame = cyc < 0.4 ? Math.floor((cyc / 0.4) * 8) : -1;
+      const logo = this.solLogo(frame);
+      const ly = Y - (SOL_BASE[1] + 5 + bob + lh) * z;
+      // a soft halo behind it
+      c.globalAlpha = 0.22 + 0.08 * Math.sin(now / 420 + X);
+      c.fillStyle = '#9945ff';
+      c.beginPath();
+      c.ellipse(X, ly + (lh / 2) * z, (lw / 2 + 5) * z, (lh / 2 + 4) * z, 0, 0, Math.PI * 2);
+      c.fill();
+      c.globalAlpha = 1;
+      c.drawImage(logo, 0, 0, lw, lh, Math.round((X - (lw / 2) * z) * this.dpr) / this.dpr, Math.round(ly * this.dpr) / this.dpr, lw * z, lh * z);
+      // a beam of light from the pedestal up into the logo
+      c.globalAlpha = 0.18;
       c.fillStyle = '#7ff5c8';
-      for (let i = 0; i < 3; i++) {
-        const t = (now / 1800 + i / 3) % 1;
+      c.fillRect(X - 7 * z, ly + lh * z, 14 * z, (5 + bob + 1) * z);
+      c.globalAlpha = 1;
+      const k = 0.8 + 0.2 * Math.sin(now / 420 + X);
+      lights.push({ x: X * this.dpr, y: (ly + (lh / 2) * z) * this.dpr, r: 62 * z * this.dpr, c: Math.sin(now / 1300 + X) > 0 ? '#9a6bff' : '#5cf0c0', k });
+      for (let i = 0; i < 4; i++) {
+        const t = (now / 1800 + i / 4) % 1;
+        c.fillStyle = i % 2 ? '#14f195' : '#dc1fff';
         c.globalAlpha = 1 - t;
-        c.fillRect(Math.round(X + Math.sin(i * 2.4 + now / 900) * 9 * z), Math.round(Y - (20 + t * 40) * z), 2 * z, 2 * z);
+        c.fillRect(Math.round(X + Math.sin(i * 2.4 + now / 900) * 14 * z), Math.round(ly + (lh - t * (lh + 18)) * z), 2 * z, 2 * z);
       }
       c.globalAlpha = 1;
+    } else if (kind === 'arena') {
+      const sp0 = X - (sp.width / 2) * z;
+      const sy0 = Y - sp.height * z;
+      // flags on the rim
+      for (const [fx, fy] of ARENA_FLAGS) {
+        const px = sp0 + (fx + 1) * z;
+        const py = sy0 + (fy - 14) * z;
+        for (let k = 0; k < 7; k++) {
+          const wave = Math.round(Math.sin(now / 160 - k * 0.9 + fx) * 1.2);
+          c.fillStyle = k < 2 ? '#ffd24a' : fx === 88 ? '#3de0c8' : '#c8323a';
+          c.fillRect(px + k * z, py + wave * z, z, 4 * z);
+        }
+      }
+      // torches by the gate
+      const f = Math.floor(now / 100) % 3;
+      for (const [tx, ty] of ARENA_TORCHES) {
+        const px = sp0 + tx * z;
+        const py = sy0 + ty * z;
+        const fl = ['#ff9a3d', '#ffd24a', '#ff6a2a'];
+        for (let k = 0; k < 3; k++) {
+          const hgt = 3 + ((f + k) % 3) * 1.5;
+          c.fillStyle = fl[(k + f) % 3];
+          c.fillRect(px + (-1.5 + k) * z, py - (2 + hgt) * z, z, hgt * z);
+        }
+        lights.push({ x: (px + 0.5 * z) * this.dpr, y: (py - 4 * z) * this.dpr, r: 46 * z * this.dpr, c: '#ff9a3d', k: 0.85 + 0.15 * Math.sin(now / 90 + tx) });
+      }
+      // the warm glow of the arena inside the gate
+      lights.push({ x: X * this.dpr, y: (Y - 14 * z) * this.dpr, r: 40 * z * this.dpr, c: '#ffb870', k: 0.8 });
     } else if (kind === 'ore-vein') {
       lights.push({ x: X * this.dpr, y: (Y - 12 * z) * this.dpr, r: 34 * z * this.dpr, c: '#ffcf60', k: 0.7 + 0.3 * Math.sin(now / 300 + Y) });
     } else if (kind === 'tent') {
@@ -1816,7 +1950,7 @@ export class LobbyEngine {
     const bottom = H - this.opts.bottom - 6;
     for (const d of DOORS) {
       const wx = (d.x + d.w / 2) * LT;
-      const wy = d.id === 'cave' ? d.y * LT - 20 : d.id === 'market' ? d.y * LT - 66 : d.id === 'tunnel' || d.id === 'pot' || d.id === 'crash' ? d.y * LT - 4 * LT - 22 : d.y * LT - 34;
+      const wy = d.id === 'cave' ? d.y * LT - 20 : d.id === 'market' ? d.y * LT - 66 : d.id === 'tunnel' || d.id === 'pot' || d.id === 'crash' ? d.y * LT - 4 * LT - 22 : d.id === 'arena' ? d.y * LT - 136 : d.y * LT - 34;
       const X = sx(wx);
       const Y = sy(wy) + Math.sin(now / 420 + d.x) * 2;
       const near = Math.hypot(this.me.x - wx, this.me.y - d.y * LT) < 110;
@@ -1919,7 +2053,7 @@ export class LobbyEngine {
       [36.5, 39.6, 'ui-cart', 'GAMES', DOOR_COLOR.pot],
       [36.5, 25.2, 'ui-star', 'PLAZA', '#ffe27a'],
       [8.5, 17.5, 'ui-fire', 'CAMP', '#ff9a3d'],
-      [10.5, 27, 'ui-trophy', 'ARENA', DOOR_COLOR.arena],
+      [8.5, 26, 'ui-trophy', 'ARENA', DOOR_COLOR.arena],
     ];
     const ms = 10;
     for (const [tx, ty, icon, label, col] of marks) {
