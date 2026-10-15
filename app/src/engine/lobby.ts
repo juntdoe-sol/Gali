@@ -37,7 +37,9 @@ export type LobbyEvent =
   /** your miner broke a pot or crate: give back this much HP */
   | { t: 'heal'; hp: number }
   /** your miner broke a pot or crate (for the daily quest) */
-  | { t: 'smash' };
+  | { t: 'smash' }
+  /** your miner cracked an ore vein: this much XP */
+  | { t: 'xp'; n: number };
 
 export interface LobbyPeerView {
   id: string;
@@ -76,6 +78,45 @@ const seeded = (n: number) => {
   const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
   return x - Math.floor(x);
 };
+/** Anything a swing can break, with where its feet are (map px) and what breaking it gives. */
+interface Tgt {
+  kind: 'pot' | 'crate' | 'barrel' | 'bush' | 'stone' | 'boulder' | 'vein';
+  x: number;
+  y: number;
+  hp: number;
+  maxHp: number;
+  hitAt: number;
+  dir: number;
+  broke: number;
+  /** ms before it grows back */
+  back: number;
+  heal: number;
+  xp: [number, number] | null;
+  /** the decor sprite, for bushes and stones */
+  decor?: string;
+  /** the structure's tile, for ore veins */
+  sx?: number;
+  sy?: number;
+}
+const decorKind = (s: string): 'bush' | 'stone' | 'boulder' | null => (s.includes('bush') ? 'bush' : s.includes('boulder') ? 'boulder' : s.includes('stone') ? 'stone' : null);
+/** Every smashable in the lobby: the placed pots and crates, the small bushes and stones, and the ore veins. */
+function buildTargets(): Tgt[] {
+  const base = { hitAt: 0, dir: 1, broke: 0 };
+  const out: Tgt[] = SMASHABLES.map((sm) => ({ ...base, kind: sm.kind, x: sm.x * LT + 8, y: sm.y * LT + 14, hp: sm.hp, maxHp: sm.hp, back: SMASH_BACK_MS, heal: SMASH_HEAL[sm.kind], xp: null }));
+  for (const d of lobbyMap().decor) {
+    const k = decorKind(d.s);
+    if (!k) continue;
+    // the same spot the ground used to paint it at
+    const x = d.x * LT + 8 + Math.floor((seeded(d.x * 3 + d.y) - 0.5) * 6);
+    const y = d.y * LT + 12 + Math.floor(seeded(d.x + d.y * 5) * 3);
+    const hp = k === 'boulder' ? 2 : 1;
+    out.push({ ...base, kind: k, x, y, hp, maxHp: hp, back: 25_000, heal: 5, xp: null, decor: d.s });
+  }
+  for (const st of STRUCTURES)
+    if (st.kind === 'ore-vein') out.push({ ...base, kind: 'vein', x: (st.at[0] + 0.5) * LT, y: (st.at[1] + 1) * LT - 1, hp: 5, maxHp: 5, back: 120_000, heal: 0, xp: [1, 10], sx: st.at[0], sy: st.at[1] });
+  return out;
+}
+
 /** how long a smashed pot or crate stays rubble before it grows back (ms) */
 const SMASH_BACK_MS = 18000;
 const DOOR_COLOR: Record<DoorId, string> = { island: '#3de0c8', cave: '#ff9a3d', market: '#b86bff', tunnel: '#ff9a3d', pot: '#ffcf4a', crash: '#3de0c8', arena: '#ff4f5e' };
@@ -159,7 +200,7 @@ export class LobbyEngine {
   /** fight effects, the lunge of a swing, and what HP and swings we last saw */
   private fx = new FightFx();
   /** each smashable's state, only on this phone: hits left, when it last got hit and when it broke */
-  private smash = SMASHABLES.map((s) => ({ hp: s.hp, hitAt: 0, dir: 1, broke: 0 }));
+  private smash: Tgt[] = buildTargets();
   private smashDue: { i: number; at: number; dir: number }[] = [];
   private lungeUntil = 0;
   private lungeDir = 0;
@@ -266,7 +307,7 @@ export class LobbyEngine {
     // nobody to hit: a pot or crate in reach takes it instead
     const prop = t ? -1 : this.smashTarget();
     if (prop >= 0) {
-      const dx = SMASHABLES[prop].x * LT + 8 - me.x;
+      const dx = this.smash[prop].x - me.x;
       if (Math.abs(dx) > 2) me.facing = dx > 0 ? 1 : -1;
       this.smashDue.push({ i: prop, at: wall + 210, dir: me.facing });
     }
@@ -289,19 +330,19 @@ export class LobbyEngine {
     this.emit({ t: 'sfx', name: 'swing' });
   }
 
-  /** The nearest whole smashable in reach, the side you face first, or -1. */
+  /** The nearest whole smashable in reach (pots, crates, bushes, stones, ore veins), the side you face first, or -1. */
   private smashTarget(): number {
     const me = this.me;
     const now = Date.now();
     let best = -1;
     let bd = Infinity;
-    SMASHABLES.forEach((sm, i) => {
-      const st = this.smash[i];
-      if (st.broke > 0 && now < st.broke + SMASH_BACK_MS) return;
-      const dx = sm.x * LT + 8 - me.x;
-      const dy = (sm.y * LT + 12 - me.y) * 1.4;
+    this.smash.forEach((st, i) => {
+      if (st.broke > 0 && now < st.broke + st.back) return;
+      const dx = st.x - me.x;
+      const dy = (st.y - 2 - me.y) * 1.4;
+      const reach = st.kind === 'vein' ? 30 : 27;
       const d = Math.hypot(dx, dy) + (Math.sign(dx || me.facing) !== me.facing ? 6 : 0);
-      if (Math.hypot(dx, dy) < 27 && d < bd) {
+      if (Math.hypot(dx, dy) < reach && d < bd) {
         bd = d;
         best = i;
       }
@@ -444,6 +485,8 @@ export class LobbyEngine {
 
     // flowers, tufts, bushes and stones: small things, scaled so they read beside a miner
     for (const d of m.decor) {
+      // bushes and stones are drawn live: they can be smashed
+      if (decorKind(d.s)) continue;
       const sp = sprite(`${d.s}-0`);
       const r = rect(`${d.s}-0`);
       if (!sp || !r) continue;
@@ -1400,12 +1443,18 @@ export class LobbyEngine {
         items.push({ y: wy, draw: () => c.drawImage(sp, 0, 0, sp.width, sp.height, Math.round((sx(wx) - (sp.width / 2) * z) * dpr) / dpr, Math.round((sy(wy) - sp.height * z) * dpr) / dpr, sp.width * z, sp.height * z) });
         continue;
       }
+      if (st.kind === 'ore-vein') {
+        const vi = this.smash.findIndex((t) => t.kind === 'vein' && t.sx === st.at[0] && t.sy === st.at[1]);
+        if (vi >= 0) {
+          items.push({ y: wy, draw: () => this.drawVein(c, vi, sx(wx), sy(wy), z, now, lights) });
+          continue;
+        }
+      }
       items.push({ y: wy, draw: () => this.drawStruct(c, st.kind, sx(wx), sy(wy), z, now, lights) });
     }
-    SMASHABLES.forEach((sm, i) => {
-      const wx = sm.x * LT + 8;
-      const wy = sm.y * LT + 14;
-      if (inView(wx, wy)) items.push({ y: wy, draw: () => this.drawSmash(c, i, sx(wx), sy(wy), z, Date.now()) });
+    this.smash.forEach((st, i) => {
+      if (st.kind === 'vein' || !inView(st.x, st.y)) return;
+      items.push({ y: st.y, draw: () => this.drawSmash(c, i, sx(st.x), sy(st.y), z, Date.now()) });
     });
 
     // people
@@ -1609,18 +1658,14 @@ export class LobbyEngine {
     this.structCache.set(key, cv);
     return cv;
   }
-  /** A pot, crate or barrel: whole, wobbling from a hit, rubble, or growing back. */
-  private drawSmash(c: Ctx, i: number, X: number, Y: number, z: number, now: number) {
-    const sm = SMASHABLES[i];
-    const st = this.smash[i];
-    const broken = st.broke > 0 && now < st.broke + SMASH_BACK_MS;
-    const sp = this.smashSprite(sm.kind, broken);
+  /** How a smashable squashes and tilts right now: wobble from a hit, pop back up after it grows back. */
+  private squash(st: Tgt, now: number): { sxk: number; syk: number; rot: number; broken: boolean } {
+    const broken = st.broke > 0 && now < st.broke + st.back;
     let sxk = 1;
     let syk = 1;
     let rot = 0;
-    if (!broken && st.broke > 0 && now < st.broke + SMASH_BACK_MS + 260) {
-      // just back: pop up out of the ground
-      const t = (now - st.broke - SMASH_BACK_MS) / 260;
+    if (!broken && st.broke > 0 && now < st.broke + st.back + 260) {
+      const t = (now - st.broke - st.back) / 260;
       syk = Math.min(1.12, t * 1.2);
       sxk = 0.8 + 0.2 * Math.min(1, t);
     }
@@ -1630,48 +1675,98 @@ export class LobbyEngine {
       sxk *= 1 + 0.12 * (1 - w / 260);
       syk *= 1 - 0.1 * (1 - w / 260);
     }
+    return { sxk, syk, rot, broken };
+  }
+  /** A pot, crate, barrel, bush or stone: whole, wobbling from a hit, bits on the ground, or growing back. */
+  private drawSmash(c: Ctx, i: number, X: number, Y: number, z: number, now: number) {
+    const st = this.smash[i];
+    const q = this.squash(st, now);
+    if (q.broken && st.decor) {
+      // a few leaves or pebbles where it stood
+      const cols = st.kind === 'bush' ? ['#3f8a3a', '#5aa84a', '#2e6a2c'] : ['#8a8a96', '#6a6a76', '#a8a8b2'];
+      for (let k = 0; k < 4; k++) {
+        c.fillStyle = cols[k % cols.length];
+        c.fillRect(Math.round(X + (-5 + k * 3) * z), Math.round(Y - (1 + (k % 2)) * z), 2 * z, z);
+      }
+      return;
+    }
     c.save();
     c.translate(Math.round(X), Math.round(Y));
-    if (rot) c.rotate(rot);
-    c.scale(sxk, syk);
-    c.drawImage(sp, 0, 0, sp.width, sp.height, -(sp.width / 2) * z, -sp.height * z, sp.width * z, sp.height * z);
+    if (q.rot) c.rotate(q.rot);
+    c.scale(q.sxk, q.syk);
+    if (st.decor) {
+      const sp = sprite(`${st.decor}-0`);
+      const r = rect(`${st.decor}-0`);
+      if (sp && r) c.drawImage(sp, 0, 0, r[2], r[3], -r[4] * 2 * z, (-r[5] * 2 - 2) * z, r[2] * 2 * z, r[3] * 2 * z);
+    } else {
+      const sp = this.smashSprite(st.kind as 'pot' | 'crate' | 'barrel', q.broken);
+      c.drawImage(sp, 0, 0, sp.width, sp.height, -(sp.width / 2) * z, -sp.height * z, sp.width * z, sp.height * z);
+    }
     c.restore();
   }
-  /** Land a swing on a smashable: chips fly, and the last hit breaks it. Cosmetic, no XP. */
+  /** An ore vein: shakes under each hit, crumbles to rubble on the last, and grows back much later. */
+  private drawVein(c: Ctx, i: number, X: number, Y: number, z: number, now: number, lights: { x: number; y: number; r: number; c: string; k: number }[]) {
+    const st = this.smash[i];
+    const q = this.squash(st, now);
+    if (q.broken) {
+      for (const [dx, dy, w, h, col] of [[-12, -4, 6, 4, '#3b3544'], [-5, -6, 8, 6, '#4a4458'], [4, -4, 7, 4, '#3b3544'], [-2, -2, 4, 2, '#ffd24a'], [9, -2, 3, 2, '#6a6480']] as [number, number, number, number, string][]) {
+        c.fillStyle = col;
+        c.fillRect(Math.round(X + dx * z), Math.round(Y + dy * z), w * z, h * z);
+      }
+      return;
+    }
+    // a hit shakes it side to side (no transform, so its glow stays put)
+    const jx = q.rot ? Math.round(q.rot * 14 * z) : 0;
+    this.drawStruct(c, 'ore-vein', X + jx, Y, z, now, lights);
+    // cracks show how close it is to breaking
+    const dmg = st.maxHp - st.hp;
+    if (dmg > 0) {
+      c.fillStyle = '#16121c';
+      for (let k = 0; k < dmg; k++) c.fillRect(Math.round(X + (-10 + k * 5) * z), Math.round(Y - (8 + (k % 2) * 5) * z), z, 4 * z);
+    }
+  }
+  /** Land a swing on a smashable: chips fly, and the last hit breaks it. Breaking heals; an ore vein pays XP. */
   private smashHit(i: number, dir: number) {
-    const sm = SMASHABLES[i];
     const st = this.smash[i];
     const now = Date.now();
-    if (st.broke > 0 && now < st.broke + SMASH_BACK_MS) return;
-    const x = sm.x * LT + 8;
-    const y = sm.y * LT + 12;
-    const cols = SMASH_COLORS[sm.kind];
+    if (st.broke > 0 && now < st.broke + st.back) return;
+    const x = st.x;
+    const y = st.y - 2;
+    const cols = st.kind === 'bush' ? ['#3f8a3a', '#5aa84a', '#2e6a2c', '#ff6a8a'] : st.kind === 'stone' || st.kind === 'boulder' ? ['#8a8a96', '#6a6a76', '#a8a8b2'] : st.kind === 'vein' ? ['#ffd24a', '#f2a020', '#4a4458', '#6a6480'] : SMASH_COLORS[st.kind];
     st.hitAt = now;
     st.dir = dir;
     st.hp--;
-    this.fx.impact(x, y - 6, now, '#ffe9a0', 0.8);
+    this.fx.impact(x, y - 6, now, st.kind === 'vein' ? '#ffd24a' : '#ffe9a0', 0.8);
     if (st.hp > 0) {
       this.parts.burst('chip', x, y - 4, 5, 22, 18, cols, 0.5);
+      if (st.kind === 'vein') this.parts.burst('spark', x, y - 8, 4, 20, 20, ['#ffd24a', '#fff3b0'], 0.4);
       this.emit({ t: 'sfx', name: 'pop' });
       return;
     }
     st.broke = now;
-    st.hp = sm.hp;
+    st.hp = st.maxHp;
     this.parts.burst('chip', x, y - 6, 16, 46, 34, cols, 0.8);
-    this.parts.burst('dust', x, y, 8, 22, 10, ['#f2e6c8', '#d8c8a8'], 0.6);
-    if (sm.kind === 'pot' && Math.random() < 0.5) this.parts.burst('coin', x, y - 6, 3, 18, 30, ['#ffd24a', '#ffe27a'], 0.9);
-    this.fx.say(x, y - 22, 'SMASH!', '#ffcf4a', now);
+    this.parts.burst(st.kind === 'bush' ? 'leaf' : 'dust', x, y, 8, 22, 10, st.kind === 'bush' ? ['#3f8a3a', '#5aa84a'] : ['#f2e6c8', '#d8c8a8'], 0.6);
+    if (st.kind === 'pot' && Math.random() < 0.5) this.parts.burst('coin', x, y - 6, 3, 18, 30, ['#ffd24a', '#ffe27a'], 0.9);
+    this.fx.say(x, y - 22, st.kind === 'vein' ? 'CRACKED!' : 'SMASH!', '#ffcf4a', now);
     this.emit({ t: 'smash' });
+    if (st.xp) {
+      // an ore vein pays a little XP, more often a little than a lot
+      const [lo, hi] = st.xp;
+      const n = lo + Math.floor(Math.pow(Math.random(), 1.6) * (hi - lo + 1));
+      this.parts.burst('gold', x, y - 8, 10, 30, 36, ['#ffd24a', '#ffe27a', '#fff3b0'], 0.9);
+      this.fx.say(this.me.x, this.me.y - 50, `+${n} XP`, '#7fe3ff', now + 150);
+      this.emit({ t: 'xp', n });
+    }
     // breaking it patches you up
     const b = this.snap.brawl;
-    const gain = SMASH_HEAL[sm.kind];
-    if (b && b.on && !b.me.ko && b.me.hp < 100) {
-      this.fx.say(this.me.x, this.me.y - 44, `+${gain} HP`, '#7cff6b', now + 120);
+    if (st.heal && b && b.on && !b.me.ko && b.me.hp < 100) {
+      this.fx.say(this.me.x, this.me.y - 44, `+${st.heal} HP`, '#7cff6b', now + 120);
       this.parts.burst('star', this.me.x, this.me.y - 14, 6, 14, 20, ['#7cff6b', '#c8ffb8', '#ffffff'], 0.6);
-      this.emit({ t: 'heal', hp: gain });
+      this.emit({ t: 'heal', hp: st.heal });
     }
-    this.fx.impact(x, y - 6, now + 40, '#ffcf4a', 1.3);
-    this.fx.shake(120, 1.2, now);
+    this.fx.impact(x, y - 6, now + 40, '#ffcf4a', st.kind === 'vein' ? 1.6 : 1.3);
+    this.fx.shake(120, st.kind === 'vein' ? 1.8 : 1.2, now);
     this.emit({ t: 'sfx', name: 'pop' });
   }
   private structSprite(kind: string): HTMLCanvasElement {
