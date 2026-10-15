@@ -21,7 +21,7 @@ import { Sky } from './sky';
 import type { BrawlSnap, Look, Pose } from './types';
 import { drawHp, drawKo, drawShield, FightFx, hitFlash, jumpLift, koAge, pickTarget, swingTilt } from './brawlfx';
 import { ARENA_FLAGS, ARENA_TORCHES, paintColosseum, paintSign, paintSmash, paintSolBase, paintSolLogo, SIGN_H, SIGN_W, SMASH_COLORS, SMASH_DIM, SOL_BASE, SOL_LOGO } from './lobbyArt';
-import { CLIFF, DOORS, PAVILIONS, SMASHABLES, STRUCTURES, doorAt, GRASS, HALL, LCOLS, LH, LROWS, LT, LW, lidx, lobbyMap, lobbyPath, PLANK, PLAZA, ROAD, SAND, SPAWNS, standable, tileCentre, tileOf, WATER, type DoorId } from '../game/lobbyMap';
+import { CLIFF, DOORS, PAVILIONS, SMASH_HEAL, SMASHABLES, STRUCTURES, doorAt, GRASS, HALL, LCOLS, LH, LROWS, LT, LW, lidx, lobbyMap, lobbyPath, PLANK, PLAZA, ROAD, SAND, SPAWNS, standable, tileCentre, tileOf, WATER, type DoorId } from '../game/lobbyMap';
 
 export type LobbyEvent =
   | { t: 'ready' }
@@ -33,7 +33,9 @@ export type LobbyEvent =
   /** your miner swung its pickaxe; target is the player it hit, if any */
   | { t: 'swing'; target: string | null; x: number; y: number }
   /** your miner jumped */
-  | { t: 'jump' };
+  | { t: 'jump' }
+  /** your miner broke a pot or crate: give back this much HP */
+  | { t: 'heal'; hp: number };
 
 export interface LobbyPeerView {
   id: string;
@@ -1616,6 +1618,14 @@ export class LobbyEngine {
     this.parts.burst('dust', x, y, 8, 22, 10, ['#f2e6c8', '#d8c8a8'], 0.6);
     if (sm.kind === 'pot' && Math.random() < 0.5) this.parts.burst('coin', x, y - 6, 3, 18, 30, ['#ffd24a', '#ffe27a'], 0.9);
     this.fx.say(x, y - 22, 'SMASH!', '#ffcf4a', now);
+    // breaking it patches you up
+    const b = this.snap.brawl;
+    const gain = SMASH_HEAL[sm.kind];
+    if (b && b.on && !b.me.ko && b.me.hp < 100) {
+      this.fx.say(this.me.x, this.me.y - 44, `+${gain} HP`, '#7cff6b', now + 120);
+      this.parts.burst('star', this.me.x, this.me.y - 14, 6, 14, 20, ['#7cff6b', '#c8ffb8', '#ffffff'], 0.6);
+      this.emit({ t: 'heal', hp: gain });
+    }
     this.fx.impact(x, y - 6, now + 40, '#ffcf4a', 1.3);
     this.fx.shake(120, 1.2, now);
     this.emit({ t: 'sfx', name: 'pop' });
