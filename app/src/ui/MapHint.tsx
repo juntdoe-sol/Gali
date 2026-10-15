@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../game/constants';
 import { useGame } from '../game/store';
 import { useView } from '../pixel/view';
+import { useTutorial } from '../game/tutorial';
 import { PixelBox, T } from './kit';
 import { PixIcon } from './PixIcon';
 import { LANDSCAPE_APP, useLayout } from './layout';
@@ -16,6 +17,7 @@ import { BAR_H } from './TabBar';
 
 export function MapHint() {
   const onboarded = useGame((s) => s.save.onboarded);
+  const tut = useTutorial((s) => s.step);
   const focus = useView((s) => s.focus);
   const picked = useGame((s) => s.selected.length);
   const dockOpen = useGame((s) => s.dockOpen);
@@ -39,7 +41,7 @@ export function MapHint() {
   }, [done, fade]);
 
   // the landscape app has no room under the map: the DEPLOY panel says the same thing
-  if (!onboarded || (dockOpen && !desktop) || LANDSCAPE_APP) return null;
+  if (!onboarded || (dockOpen && !desktop) || LANDSCAPE_APP || tut >= 0) return null;
   return (
     <Animated.View pointerEvents="none" style={[styles.wrap, desktop ? { bottom: 24, left: 88, right: side + 28 } : { bottom: BAR_H + insets.bottom + 18 }, { opacity: fade }]}>
       <PixelBox fill="rgba(8,13,32,0.92)" hi={COLORS.teal} lo="#04060f" shadow={1} style={styles.pill}>

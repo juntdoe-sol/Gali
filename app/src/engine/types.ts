@@ -64,6 +64,8 @@ export interface Snapshot {
   /** true while the player is on the island (not in the lobby). Arriving lands the miner on the helipad. */
   onIsland?: boolean;
   brawl?: BrawlSnap;
+  /** the first-visit tutorial: point the miner at the nearest mining spot */
+  guide?: boolean;
 }
 
 /** One fighter, as the canvas sees it. Times are wall-clock ms (Date.now), 0 when not set. */
@@ -103,4 +105,6 @@ export type EngineEvent =
   /** your miner swung its pickaxe; target is the player it hit, if any */
   | { t: 'swing'; target: string | null; x: number; y: number }
   /** your miner jumped */
-  | { t: 'jump' };
+  | { t: 'jump' }
+  /** tutorial: your miner reached a mining spot */
+  | { t: 'arrived'; claim: number };
