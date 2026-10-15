@@ -7,7 +7,8 @@ import {
   BLOCKS, MOTHERLODE_POOL_SHARE, QUESTS, usd, SEASON,
 } from '../game/constants';
 import { isLive, isOnChain, useGame, useLevelXp, usePoints } from '../game/store';
-import { chainReady, CLUSTER, PROGRAM_ID_STR, short, SKR_MINT_STR, type BoardRound, type LeaderRow } from '../chain/light';
+import { chainReady, CLUSTER, oreLive, PROGRAM_ID_STR, short, SKR_MINT_STR, type BoardRound } from '../chain/light';
+import { useMinerRanks, useRanks } from '../game/ranks';
 import { loadBoard, loadChain } from '../chain/lazy';
 import { ADMIN_FEE, fmtSol, POT_FEE, practiceMotherlode, practiceOreMotherlode, simPot, soloMask } from '../game/pot';
 import { UnclaimedRow } from './Dock';
@@ -108,7 +109,7 @@ function Quests() {
         </T>
       </Card>
       <T v="label" style={{ marginTop: 6 }}>
-        Daily quests
+        Daily quests · {QUESTS.filter((q) => today && save.questClaimed.includes(q.id)).length}/{QUESTS.length} done · new ones at midnight
       </T>
       {QUESTS.map((q) => {
         const prog = today ? save.questProgress[q.id] ?? 0 : 0;
@@ -116,8 +117,12 @@ function Quests() {
         const claimed = today && save.questClaimed.includes(q.id);
         return (
           <Card key={q.id} style={[styles.rowCard, claimed && { opacity: 0.5 }]}>
+            <PixIcon name={q.icon} size={26} />
             <View style={{ flex: 1, gap: 5 }}>
-              <T v="bold">{q.label}</T>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <T v="bold" style={{ flexShrink: 1 }}>{q.label}</T>
+                <Pill text={q.where} color="rgba(61,224,200,0.16)" fg={COLORS.teal} />
+              </View>
               <Bar pct={(prog / q.target) * 100} colors={[COLORS.pink, COLORS.gold]} />
               <T v="muted">
                 {Math.min(prog, q.target)}/{q.target} · +{q.rewardXp} XP
@@ -393,50 +398,116 @@ function Rounds() {
   );
 }
 
+type RankTab = 'level' | 'ore' | 'brawl';
 function Ranks() {
-  const [rows, setRows] = useState<LeaderRow[] | null>(null);
   const owner = useGame((s) => s.wallet.owner);
   const points = usePoints();
   const xp = useLevelXp();
+  const [tab, setTab] = useState<RankTab>('level');
+  const miners = useMinerRanks();
+  const brawl = useRanks();
   useEffect(() => {
-    if (!chainReady) return;
-    loadChain()
-      .then((c) => c.fetchLeaderboard())
-      .then(setRows)
-      .catch(() => setRows([]));
+    void useMinerRanks.getState().load(oreLive ? (w) => loadBoard().then((b) => b.fetchMinerLifetimes(w)) : undefined);
+    void useRanks.getState().load();
   }, []);
-  const list = rows ?? [];
+  const rows =
+    tab === 'ore'
+      ? [...miners.rows].filter((r) => (r.ore ?? 0) > 0).sort((a, b) => (b.ore ?? 0) - (a.ore ?? 0))
+      : [...miners.rows].sort((a, b) => b.xp - a.xp);
+  const status = tab === 'brawl' ? brawl.status : miners.status;
   return (
     <>
-      <T v="display" style={{ fontSize: 20 }}>
-        Top miners · on-chain
+      <View style={{ flexDirection: 'row', gap: 6 }}>
+        {(
+          [
+            ['level', 'LEVEL'],
+            ['ore', 'ORE MINED'],
+            ['brawl', 'BRAWL'],
+          ] as [RankTab, string][]
+        ).map(([k, label]) => (
+          <Pressable key={k} onPress={() => setTab(k)} accessibilityRole="tab" accessibilityState={{ selected: tab === k }} style={{ flex: 1 }}>
+            <PixelBox fill={tab === k ? 'rgba(255,201,60,0.16)' : 'rgba(9,14,34,0.9)'} hi={tab === k ? COLORS.gold : '#22356f'} lo="#04060f" style={{ paddingVertical: 8, alignItems: 'center' }}>
+              <T v="label" style={{ color: tab === k ? COLORS.gold : COLORS.muted }}>
+                {label}
+              </T>
+            </PixelBox>
+          </Pressable>
+        ))}
+      </View>
+      <T v="muted" style={{ fontSize: 12 }}>
+        {tab === 'level'
+          ? 'Every Gali miner with a wallet, by XP. You: level ' + levelFromXp(xp) + ' · ' + points.toLocaleString() + ' pts.'
+          : tab === 'ore'
+            ? 'Lifetime ORE mined on ORE, read from each wallet on chain.'
+            : 'This week. A KO counts when the miner who went down reports it. 3 points a match win.'}
       </T>
-      {!chainReady || !list.length ? (
+      {status === 'off' ? (
         <Card>
-          <T>{rows === null && chainReady ? 'Loading the leaderboard…' : 'The on-chain board fills up as miners play rounds.'}</T>
-          <T v="muted" style={{ marginTop: 6 }}>
-            You: {points.toLocaleString()} pts · level {levelFromXp(xp)}
-          </T>
+          <T>Ranks are not set up on this server yet.</T>
+        </Card>
+      ) : status === 'error' ? (
+        <Card>
+          <T>Could not load the ranks. Try again in a moment.</T>
+        </Card>
+      ) : (status === 'loading' || status === 'idle') && !(tab === 'brawl' ? brawl.rows : miners.rows).length ? (
+        <Card>
+          <T>Loading the ranks…</T>
+        </Card>
+      ) : tab === 'brawl' ? (
+        !brawl.rows.length ? (
+          <Card>
+            <T>No fights this week yet. Be the first on the board.</T>
+          </Card>
+        ) : (
+          brawl.rows.map((r, k) => (
+            <PixelBox key={r.name} fill="rgba(9,14,34,0.9)" hi="#22356f" lo="#04060f" style={styles.rank}>
+              <RankNo k={k} />
+              <T v="bold" style={{ flex: 1 }} numberOfLines={1}>
+                {r.name}
+              </T>
+              <T v="muted">
+                {r.kos} KO · {r.wins} W
+              </T>
+              <T v="display" style={{ color: COLORS.gold, fontSize: 20, minWidth: 54, textAlign: 'right' }}>
+                {r.points}
+              </T>
+            </PixelBox>
+          ))
+        )
+      ) : !rows.length ? (
+        <Card>
+          <T>{tab === 'ore' && miners.rows.some((r) => r.ore === null) ? 'Reading ORE from the chain…' : 'Nobody on this board yet. Connect a wallet and play a round.'}</T>
         </Card>
       ) : (
-        list.map((r, k) => (
-          <PixelBox key={r.owner} fill={r.owner === owner ? 'rgba(255,201,60,0.12)' : 'rgba(9,14,34,0.9)'} hi={r.owner === owner ? COLORS.gold : '#22356f'} lo="#04060f" style={styles.rank}>
-            <View style={{ width: 34, alignItems: 'center' }}>
-              {k < 3 ? <PixIcon name={(['medal', 'medal2', 'medal3'] as const)[k]} size={28} /> : <T v="display" style={{ fontSize: 22 }}>{k + 1}</T>}
+        rows.map((r, k) => (
+          <PixelBox key={r.wallet} fill={r.wallet === owner ? 'rgba(255,201,60,0.12)' : 'rgba(9,14,34,0.9)'} hi={r.wallet === owner ? COLORS.gold : '#22356f'} lo="#04060f" style={styles.rank}>
+            <RankNo k={k} />
+            <View style={{ flex: 1 }}>
+              <T v="bold" numberOfLines={1}>
+                {r.name || short(r.wallet)}
+                {r.wallet === owner ? '  (you)' : ''}
+              </T>
+              {r.name ? (
+                <T v="muted" style={{ fontSize: 11 }}>
+                  {short(r.wallet)}
+                </T>
+              ) : null}
             </View>
-            <T v="bold" style={{ flex: 1 }}>
-              {short(r.owner)}
-              {r.owner === owner ? '  (you)' : ''}
-            </T>
             <T v="muted">Lv {r.level}</T>
-            <T v="display" style={{ color: COLORS.gold, fontSize: 20, minWidth: 70, textAlign: 'right' }}>
-              {r.points.toLocaleString()}
+            <T v="display" style={{ color: COLORS.gold, fontSize: 18, minWidth: 84, textAlign: 'right' }}>
+              {tab === 'ore' ? (r.ore ?? 0).toFixed(2) : r.xp.toLocaleString()}
+            </T>
+            <T v="muted" style={{ fontSize: 10, width: 26 }}>
+              {tab === 'ore' ? 'ORE' : 'XP'}
             </T>
           </PixelBox>
         ))
       )}
     </>
   );
+}
+function RankNo({ k }: { k: number }) {
+  return <View style={{ width: 34, alignItems: 'center' }}>{k < 3 ? <PixIcon name={(['medal', 'medal2', 'medal3'] as const)[k]} size={28} /> : <T v="display" style={{ fontSize: 22 }}>{k + 1}</T>}</View>;
 }
 
 /** Brawl on or off. Off: no HP bar, nobody can hit you, and you can't swing at anyone. */
