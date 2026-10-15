@@ -1,5 +1,6 @@
 import './src/polyfills';
 import { registerRootComponent } from 'expo';
-import App from './src/App';
+import { Boot } from './src/boot';
 
-registerRootComponent(App);
+// Boot reads the screen choice first, then loads the app (see src/boot.tsx).
+registerRootComponent(Boot);

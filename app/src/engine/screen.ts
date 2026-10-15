@@ -25,3 +25,9 @@ export function reducedMotion(): boolean {
     return false;
   }
 }
+
+/** How much one wheel event zooms: about 6% a mouse notch, smooth on a trackpad. */
+export function wheelZoom(e: WheelEvent): number {
+  const px = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+  return Math.exp(-Math.max(-50, Math.min(50, px)) * 0.0012);
+}

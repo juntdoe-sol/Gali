@@ -13,7 +13,7 @@ import { COLORS } from './game/constants';
 import { oreLive } from './chain/light';
 import { initAudio } from './game/sfx';
 import { useGame } from './game/store';
-import { reportMiner } from './game/ranks';
+import { fetchMiner, reportMiner } from './game/ranks';
 import { useName } from './game/username';
 import { levelFromXp } from './game/constants';
 import PixelMine from './pixel/PixelMine';
@@ -98,7 +98,21 @@ export default function App() {
       const points = g.wallet.player ? g.wallet.player.points : g.save.points;
       reportMiner({ wallet: owner, name: useName.getState().name, level: levelFromXp(xp), xp, points });
     };
-    const unGame = useGame.subscribe(checkIn);
+    // a wallet connected on a second device (web after the app, or the other way) brings its level with it
+    let pulled = '';
+    const pull = () => {
+      const owner = useGame.getState().wallet.owner;
+      if (!owner || owner === pulled) return;
+      pulled = owner;
+      void fetchMiner(owner).then((m) => {
+        if (m) useGame.getState().mergeProgress(m);
+      });
+    };
+    pull();
+    const unGame = useGame.subscribe(() => {
+      pull();
+      checkIn();
+    });
     const unName = useName.subscribe(checkIn);
     const seenId = setInterval(checkIn, 60_000);
     // the Explorer achievement: each place counts once

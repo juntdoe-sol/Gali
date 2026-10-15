@@ -232,6 +232,8 @@ interface GameState {
   bonkMole: () => void;
   /** Count something done around Gali: moves its daily quest and lifetime achievements along. */
   track: (k: TrackKind, n?: number) => void;
+  /** Take this wallet's XP and points from another device when they are higher than this one's. */
+  mergeProgress: (p: { xp: number; points: number }) => void;
   /** XP from Cave Run. Local game XP only: it feeds the miner level and nothing else. */
   gainXp: (n: number) => void;
   doEmote: () => void;
@@ -995,6 +997,12 @@ export const useGame = create<GameState>((set, get) => {
         questProgress: { ...s.questProgress, mole3: (s.questProgress.mole3 ?? 0) + 1 },
       }));
       get().toast('Bonk! +3 XP', 'good');
+    },
+
+    mergeProgress: ({ xp, points }) => {
+      const s = get().save;
+      if (get().wallet.player || (xp <= s.xp && points <= s.points)) return;
+      updateSave((sv) => ({ ...sv, xp: Math.max(sv.xp, xp), points: Math.max(sv.points, points) }));
     },
 
     track: (k, n = 1) => {
