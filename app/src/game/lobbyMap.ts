@@ -45,7 +45,7 @@ export const DOORS: Door[] = [
   { id: 'tunnel', x: 26, y: 42, w: 3, h: 1, label: 'TUNNEL', sub: 'ORE and SKR' },
   { id: 'pot', x: 35, y: 42, w: 3, h: 1, label: 'GOLD RUSH', sub: 'ORE and SKR' },
   { id: 'crash', x: 44, y: 42, w: 3, h: 1, label: 'CRASH CART', sub: 'ORE and SKR' },
-  { id: 'arena', x: 9, y: 29, w: 3, h: 1, label: 'ARENA', sub: 'Brawl' },
+  { id: 'arena', x: 7, y: 30, w: 3, h: 1, label: 'ARENA', sub: 'Brawl' },
 ];
 /** The three pavilions on the games row: the body tiles that block, above each door. */
 export const PAVILIONS: { id: 'tunnel' | 'pot' | 'crash'; x: number; y: number; w: number; h: number }[] = [
@@ -63,18 +63,21 @@ export const SPAWNS: Record<'start' | DoorId, [number, number]> = {
   tunnel: [27, 44],
   pot: [36, 44],
   crash: [45, 44],
-  arena: [10, 31],
+  arena: [8, 33],
 };
 
 /** Things with a shape of their own: a tent, a stall, the lighthouse. The engine draws each; the tiles under them block. */
 export interface Structure {
-  kind: 'tent' | 'fire' | 'cart' | 'crates' | 'barrel' | 'stall-red' | 'stall-teal' | 'lighthouse' | 'rack' | 'boulder' | 'sol-crystal' | 'ore-vein' | 'arena';
+  kind: 'tent' | 'fire' | 'cart' | 'crates' | 'barrel' | 'stall-red' | 'stall-teal' | 'lighthouse' | 'rack' | 'boulder' | 'sol-crystal' | 'ore-vein' | 'arena' | 'sign';
   /** tiles that block: x, y, width, height */
   at: [number, number, number, number];
 }
 export const STRUCTURES: Structure[] = [
-  // the Brawl arena: a stone gate with banners, its door on the south side
-  { kind: 'arena', at: [7, 26, 7, 3] },
+  // the Brawl arena: a round stone colosseum, its gate on the south side, a cobbled drive up to it
+  { kind: 'arena', at: [3, 24, 11, 6] },
+  // two directory boards by the fountain: every place, and an arrow to it
+  { kind: 'sign', at: [32, 32, 2, 1] },
+  { kind: 'sign', at: [39, 32, 2, 1] },
   { kind: 'tent', at: [8, 14, 3, 2] },
   { kind: 'fire', at: [12, 15, 1, 1] },
   { kind: 'tent', at: [5, 17, 3, 2] },
@@ -95,6 +98,39 @@ export const STRUCTURES: Structure[] = [
   { kind: 'sol-crystal', at: [42, 24, 1, 1] },
   { kind: 'ore-vein', at: [41, 30, 1, 1] },
   { kind: 'ore-vein', at: [14, 17, 1, 1] },
+];
+
+/**
+ * Things a miner can smash with a swing: pots, crates, barrels. Just for fun, no XP. They always block
+ * their tile (broken, they leave rubble, then grow back), so every phone still walks the same routes.
+ */
+export interface Smashable {
+  kind: 'pot' | 'crate' | 'barrel';
+  x: number;
+  y: number;
+  /** swings to break it */
+  hp: number;
+}
+export const SMASHABLES: Smashable[] = [
+  // the arena forecourt
+  { kind: 'barrel', x: 4, y: 30, hp: 2 },
+  { kind: 'crate', x: 4, y: 31, hp: 2 },
+  { kind: 'pot', x: 12, y: 30, hp: 1 },
+  { kind: 'pot', x: 13, y: 30, hp: 1 },
+  // round the plaza
+  { kind: 'pot', x: 25, y: 27, hp: 1 },
+  { kind: 'pot', x: 26, y: 29, hp: 1 },
+  { kind: 'crate', x: 45, y: 23, hp: 2 },
+  { kind: 'barrel', x: 46, y: 23, hp: 2 },
+  { kind: 'pot', x: 45, y: 31, hp: 1 },
+  { kind: 'crate', x: 27, y: 31, hp: 2 },
+  // the market square and the shore
+  { kind: 'pot', x: 47, y: 12, hp: 1 },
+  { kind: 'crate', x: 58, y: 12, hp: 2 },
+  { kind: 'barrel', x: 60, y: 24, hp: 2 },
+  // the games row
+  { kind: 'pot', x: 25, y: 41, hp: 1 },
+  { kind: 'barrel', x: 48, y: 41, hp: 2 },
 ];
 
 export interface Tree {
@@ -191,6 +227,8 @@ export function lobbyMap(): Lobby {
     for (let y = Math.min(y0, y1); y <= Math.max(y0, y1); y++) for (let k = -half; k <= half; k++) if (terrain[lidx(x1 + k, y)] !== WATER && terrain[lidx(x1 + k, y)] !== CLIFF && terrain[lidx(x1 + k, y)] !== HALL) set(x1 + k, y, terrain[lidx(x1 + k, y)] === PLAZA ? PLAZA : ROAD, 0);
   };
   road(28, 24, 15, 12); // to the cave: west, then north
+  road(24, 32, 8, 31, 1); // the drive to the arena: west along the pond, then up to the gate
+  rect(4, 30, 9, 2, PLAZA, 0); // the arena forecourt
   road(40, 20, 52, 12); // to the market: east, then north
   road(46, 27, 60, 27, 1); // toward the pier
   // the pier
@@ -204,6 +242,7 @@ export function lobbyMap(): Lobby {
   for (const pv of PAVILIONS) rect(pv.x, pv.y, pv.w, pv.h, terrain[lidx(pv.x, pv.y)], 1);
 
   for (const st of STRUCTURES) rect(st.at[0], st.at[1], st.at[2], st.at[3], terrain[lidx(st.at[0], st.at[1])], 1);
+  for (const sm of SMASHABLES) block[lidx(sm.x, sm.y)] = 1;
 
   // trees: a thick wood round the edge, thinner inside, never on a road, the plaza or a door
   const keep: [number, number, number][] = [
@@ -213,6 +252,7 @@ export function lobbyMap(): Lobby {
     [52, 11, 9],
     [65, 27, 6],
     [36, 42, 15], // the games row
+    [8, 28, 9], // the arena and its forecourt
   ];
   const trees: Tree[] = [];
   const decor: Decor[] = [];
