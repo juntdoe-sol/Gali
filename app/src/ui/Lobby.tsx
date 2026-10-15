@@ -18,7 +18,7 @@ import { ACT_LIFE_MS, announce, joinChat, joinLobby, leaveLobby, LOBBY_EMOTES, p
 import { cleanName, LOBBY_CAP, type DoorId } from '../game/lobbyMap';
 import { isOnChain, useGame, useLevelXp } from '../game/store';
 import { play } from '../game/sfx';
-import { brawlSnap, jump, setMyPos, swing, useBrawl } from '../game/brawl';
+import { brawlSnap, heal, jump, setMyPos, swing, useBrawl } from '../game/brawl';
 import { useName } from '../game/username';
 import type { LobbyEvent, LobbyPeerView, LobbySnap } from '../engine/lobby';
 import { atlasSource } from '../pixel/atlasSource';
@@ -239,6 +239,9 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
         break;
       case 'jump':
         jump('lobby');
+        break;
+      case 'heal':
+        heal(e.hp);
         break;
       case 'me':
         setMyPos('lobby', e.x, e.y);
