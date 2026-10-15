@@ -332,8 +332,8 @@ export function LiveNotice() {
         <Window title="REAL SOL, REAL ROUNDS" onClose={decline} width={460} accent={COLORS.gold}>
           <Bullet icon="ore" text="With a wallet connected you play live rounds on ORE's board on Solana mainnet with real SOL. ORE keeps 1% of every spot, plus 10% more of spots that miss. Only the gold spot mines ORE." />
           <Bullet icon="wallet" text={`Your wallet signs every deploy and every claim. Gali takes no cut and never holds your SOL. A round is capped at ${LIVE_MAX_ROUND_SOL} SOL.`} />
-          <Bullet icon="warn" text="This is a game of chance. You must be 18 or older, and it must be legal where you live. Only play with SOL you can afford to lose." muted />
-          <Btn kind="skr" label="I'm 18+ · connect wallet" onPress={accept} kbd="ENTER" />
+          <Bullet icon="warn" text="This is a game of chance with real SOL. Only play with SOL you can afford to lose." muted />
+          <Btn kind="skr" label="Got it · connect wallet" onPress={accept} kbd="ENTER" />
           <EnterKey fn={accept} />
         </Window>
       </Scrim>

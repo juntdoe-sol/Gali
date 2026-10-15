@@ -250,6 +250,9 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
       case 'smash':
         useGame.getState().track('smash');
         break;
+      case 'xp':
+        useGame.getState().gainXp(e.n);
+        break;
       case 'me':
         setMyPos('lobby', e.x, e.y);
         publishLobbyMe({ x: e.x, y: e.y, tx: e.tx, ty: e.ty, facing: e.facing, pose: e.pose, look, lvl: lvlRef.current, wallet: useGame.getState().wallet.owner });
