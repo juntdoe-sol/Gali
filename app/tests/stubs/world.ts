@@ -16,3 +16,6 @@ export const worldClient = () => ({
   },
 });
 export const sendWorldBx = () => false;
+// the saved chat table: tests set globalThis.__rest to a fake base URL and globalThis.fetch to a fake table
+export const restBase = () => ((globalThis as any).__rest ?? '') as string;
+export const publicKey = () => 'anon-test';

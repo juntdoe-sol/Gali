@@ -85,6 +85,40 @@ const look = (hat) => ({ hat, fit: '#2f5fd0', pick: '#c9c9c9', handle: '#9b6b43'
   A.publishLobbyMe({ x: 400, y: 100, tx: 450, ty: 100, facing: 1, pose: 'walk', look: look('hat-red'), lvl: 3 });
   await wait(20);
   assert.equal(B.useLobby.getState().peers[A.useLobby.getState().me].look.hat, 'hat-red', 'look kept');
+
+  // the saved table: a line said with nobody online still reaches the next player who opens the app
+  const table = [];
+  let nextId = 1;
+  globalThis.__rest = 'https://db.test';
+  globalThis.fetch = async (url, opts = {}) => {
+    assert.ok(String(url).startsWith('https://db.test/rest/v1/lobby_chat'), 'only the chat table');
+    assert.equal(opts.headers.apikey, 'anon-test');
+    if (opts.method === 'POST') {
+      table.push({ id: nextId++, at: new Date().toISOString(), ...JSON.parse(opts.body) });
+      return { ok: true, status: 201, json: async () => null };
+    }
+    const lim = Number(/limit=(\d+)/.exec(url)[1]);
+    return { ok: true, status: 200, json: async () => table.slice().sort((a, b) => b.id - a.id).slice(0, lim).map(({ mid, sender, name, body, at }) => ({ mid, sender, name, body, at })) };
+  };
+  bus.rooms = {};
+  const C = player('CAROL');
+  C.joinChat();
+  await wait(30);
+  C.publishLobbyMe({ x: 1, y: 1, tx: 1, ty: 1, facing: 1, pose: 'idle', look: look('hat-red'), lvl: 1, wallet: 'So11111111111111111111111111111111111111112' });
+  assert.ok(C.useLobby.getState().say('anyone here?'));
+  await wait(20);
+  assert.equal(table.length, 1, 'line saved');
+  assert.equal(table[0].body, 'anyone here?');
+  assert.equal(table[0].wallet, 'So11111111111111111111111111111111111111112', 'wallet saved for muting');
+  assert.equal(table[0].sender, C.useLobby.getState().me);
+  table.push({ id: nextId++, at: new Date(Date.now() - 8 * 24 * 3600_000).toISOString(), mid: 'old-line-1', sender: 'x', name: 'Old', body: 'too old' });
+  table.push({ id: nextId++, at: new Date().toISOString(), mid: 'BAD MID', sender: 'x', name: 'Bad', body: 'bad mid' });
+  bus.rooms = {}; // Carol closes the app: nobody online
+  const D = player('DAVE');
+  D.joinChat();
+  await wait(1700);
+  assert.deepEqual(D.useLobby.getState().msgs.map((m) => m.text), ['anyone here?'], 'saved line reached a lone newcomer; old and bad rows dropped');
+  assert.equal(D.useLobby.getState().msgs[0].name, 'CAROL');
   console.log('lobby-net: all passed', JSON.stringify(counts));
   process.exit(0);
 })().catch((e) => {
