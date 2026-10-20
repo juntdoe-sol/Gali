@@ -13,7 +13,7 @@ import type { Look } from '../engine/types';
 import { cleanChat, cleanName, LH, LOBBY_CAP, LW, SPAWNS, type DoorId } from './lobbyMap';
 import { loadJson, saveJson } from './storage';
 import { useName } from './username';
-import { useWorld, worldClient, worldReady } from './world';
+import { publicKey, restBase, useWorld, worldClient, worldReady } from './world';
 import { roomHooks } from './rx';
 
 export type LobbyPose = 'idle' | 'walk' | 'cheer' | 'dance1' | 'dance2' | 'dance3' | 'swing';
@@ -165,6 +165,7 @@ export const useLobby = create<LobbyState>((set, get) => ({
       msgs: [...s.msgs, { id: msgId++, mid, from: s.me, name, text, at: now, mine: true }].slice(-MAX_MSGS),
     });
     void chatChannel?.send({ type: 'broadcast', event: 'chat', payload: { id: s.me, nm: name, t: text, mid } });
+    storeLine({ mid, sender: s.me, name, body: text });
     return true;
   },
   myDance: 0,
@@ -314,15 +315,16 @@ function onChat(p: any) {
 }
 
 /* ---------------- chat history ----------------
- * Realtime keeps no history, so a reopened app used to show an empty chat. Two things fix that:
- * the last lines are kept on the phone, and on joining we ask whoever is online for theirs.
- * One player answers (the first to reply; the rest stand down), with at most HIST_N lines.
+ * Realtime keeps no history, so a reopened app used to show an empty chat. Three things fix that:
+ * the last lines are kept on the phone, every line is also saved to the lobby_chat table
+ * (supabase/sql/lobby-chat.sql) and the last HIST_N are read back on joining, and on joining we
+ * ask whoever is online for theirs. One player answers (the first to reply; the rest stand down).
  * History is treated like live chat from strangers: every line is cleaned and capped.
  */
 const MID = /^[a-z0-9-]{4,40}$/;
 const HIST_KEY = 'gali-lobby-chat-v1';
 const HIST_N = 30;
-const HIST_MAX_AGE = 24 * 3600_000;
+const HIST_MAX_AGE = 7 * 24 * 3600_000;
 let histAsk: string | null = null;
 let histTimer: ReturnType<typeof setTimeout> | null = null;
 let lastHistAnswer = 0;
@@ -356,6 +358,43 @@ export async function loadChatHistory() {
   const lines = (Array.isArray(saved.msgs) ? saved.msgs : []).map(cleanLine).filter((m): m is LobbyMsg => m !== null);
   // lines I wrote last session still count as mine
   mergeHistory(lines.map((m) => (saved.me && m.from === saved.me ? { ...m, from: useLobby.getState().me } : m)));
+}
+/** The wallet this player connected, if any (from publishLobbyMe), saved with their lines so the admin can mute it. */
+let myWallet: string | null = null;
+const restHeaders = () => ({ apikey: publicKey(), authorization: `Bearer ${publicKey()}`, 'content-type': 'application/json' });
+/** Save one of my lines to the lobby_chat table. Fire and forget: the database drops floods, repeats and muted wallets. */
+function storeLine(l: { mid: string; sender: string; name: string; body: string }) {
+  const base = restBase();
+  if (!base) return;
+  void fetch(`${base}/rest/v1/lobby_chat`, {
+    method: 'POST',
+    headers: { ...restHeaders(), prefer: 'return=minimal' },
+    body: JSON.stringify({ ...l, wallet: myWallet }),
+  }).catch(() => undefined);
+}
+let serverHistAt = 0;
+/** Read the last lines saved in the lobby_chat table and merge them in. At most once every 20 s. */
+export async function loadServerHistory() {
+  const base = restBase();
+  const now = Date.now();
+  if (!base || now - serverHistAt < 20_000) return;
+  serverHistAt = now;
+  try {
+    const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    const t = ctl ? setTimeout(() => ctl.abort(), 8000) : null;
+    const r = await fetch(`${base}/rest/v1/lobby_chat?select=mid,sender,name,body,at&order=id.desc&limit=${HIST_N}`, { headers: restHeaders(), signal: ctl?.signal });
+    if (t) clearTimeout(t);
+    if (!r.ok) return;
+    const rows = await r.json();
+    if (!Array.isArray(rows)) return;
+    mergeHistory(
+      rows
+        .map((x: any) => cleanLine({ mid: x?.mid, from: x?.sender, name: x?.name, text: x?.body, at: Date.parse(x?.at) }))
+        .filter((m: LobbyMsg | null): m is LobbyMsg => m !== null),
+    );
+  } catch {
+    /* offline or blocked: the phone's own copy and other players still fill in */
+  }
 }
 let lastSavedLen = -1;
 useLobby.subscribe((st) => {
@@ -484,7 +523,8 @@ let histLoaded = false;
 export function joinChat() {
   if (!histLoaded) {
     histLoaded = true;
-    void loadChatHistory();
+    // the phone's own copy first (it knows which lines were mine), then the saved table
+    void loadChatHistory().then(loadServerHistory, loadServerHistory);
   }
   if (chatChannel || chatJoining || !worldReady) return;
   const client = worldClient();
@@ -508,6 +548,8 @@ export function joinChat() {
     .subscribe((st) => {
     if (st === 'SUBSCRIBED') {
       useLobby.setState({ chatStatus: 'online' });
+      // after a reconnect, read the saved table again (throttled)
+      void loadServerHistory();
       // ask whoever is here for the lines we missed
       histAsk = rid();
       void ch.send({ type: 'broadcast', event: 'hist?', payload: { id: useLobby.getState().me, q: histAsk } });
@@ -540,6 +582,7 @@ let lastSent = 0;
 let lastKey = '';
 /** Called by the lobby screen when your miner moves or stops; sends when it changes, and as a slow heartbeat. */
 export function publishLobbyMe(m: { x: number; y: number; tx: number; ty: number; facing: 1 | -1; pose: string; look: Look; lvl: number; wallet?: string | null }) {
+  if (m.wallet !== undefined) myWallet = typeof m.wallet === 'string' && B58.test(m.wallet) ? m.wallet : null;
   const { status, me } = useLobby.getState();
   const name = useName.getState().name;
   if (!channel || status !== 'online' || !name) return;
