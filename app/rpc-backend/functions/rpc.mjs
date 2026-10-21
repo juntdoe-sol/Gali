@@ -95,19 +95,18 @@ export default async function rpc(req, ctx) {
   const now = Date.now();
   const hit = cache.get(key);
   if (hit && hit.until > now) return Response.json({ jsonrpc: '2.0', id: body.id, result: hit.result }, { headers });
-  let flight = inflight.get(key);
-  if (!flight) {
-    flight = (async () => {
-      const response = await forward({ ...body, id: 1 }, ctx);
-      if (!response.ok) return { response };
-      const parsed = await response.json();
-      if (!object(parsed) || !Object.hasOwn(parsed, 'result')) return { response };
-      if (cache.size >= 300) cache.delete(cache.keys().next().value);
-      cache.set(key, { until: Date.now() + ttl, result: parsed.result });
-      return { result: parsed.result };
-    })().finally(() => inflight.delete(key));
-    inflight.set(key, flight);
-  }
+  // Each request asks the provider itself. Sharing one in-flight request between visitors looked cheaper,
+  // but on an edge runtime a promise started by one request can't be awaited by another: the second
+  // visitor's read hung until it timed out, and the board went offline for everyone reading the same thing.
+  const flight = (async () => {
+    const response = await forward({ ...body, id: 1 }, ctx);
+    if (!response.ok) return { response };
+    const parsed = await response.json();
+    if (!object(parsed) || !Object.hasOwn(parsed, 'result')) return { response };
+    if (cache.size >= 300) cache.delete(cache.keys().next().value);
+    cache.set(key, { until: Date.now() + ttl, result: parsed.result });
+    return { result: parsed.result };
+  })();
   const out = await flight;
   if (out.response) return error(out.response.status, -32000, 'RPC unavailable', body.id);
   return Response.json({ jsonrpc: '2.0', id: body.id, result: out.result }, { headers });
@@ -118,7 +117,6 @@ const CACHE_MS = {
   getAccountInfo: 2000, getMultipleAccounts: 2000, getBalance: 1500, getTokenAccountBalance: 1500,
 };
 const cache = new Map();
-const inflight = new Map();
 
 async function forward(body, ctx) {
   // Helius first, Alchemy as the second path. Each key lives only in the function's secrets.
