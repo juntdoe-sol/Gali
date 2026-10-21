@@ -68,6 +68,30 @@ export interface Boss {
   hitAt: number;
   facing: 1 | -1;
 }
+/**
+ * Crawlers: small things that crawl out of the walls during a fight, in every mode. They walk the floor
+ * toward the nearest miner and bite. A few swings kill one, for a little XP. The host runs them.
+ */
+export interface Mob {
+  i: number;
+  x: number;
+  hp: number;
+  max: number;
+  f: 1 | -1;
+  /** wall ms of its last bite, and of the last hit it took */
+  atkAt: number;
+  hitAt: number;
+}
+export const MOB_HP = 30;
+export const MOB_XP = 5;
+const MOB_SPEED = 34;
+/** one bite: within this far of a miner on the floor, at most every MOB_BITE_MS */
+const MOB_REACH = 12;
+const MOB_BITE_MS = 1300;
+/** how often one crawls out, and how many at once: more in a Boss Raid */
+const MOB_EVERY: Record<Mode, number> = { lms: 9000, koth: 9000, boss: 5000 };
+const MOB_MAX: Record<Mode, number> = { lms: 3, koth: 3, boss: 5 };
+
 /** Below half HP the boss is angrier: faster wind-ups and attacks. */
 export const bossPhase2 = (b: { hp: number; max: number }) => b.hp <= b.max / 2;
 export interface Match {
@@ -87,6 +111,7 @@ export interface Match {
   /** who won, by name, for the banner */
   winnerName: string | null;
   boss: Boss | null;
+  mobs: Mob[];
 }
 export interface ArenaPeer {
   id: string;
@@ -150,7 +175,7 @@ interface ArenaState {
 }
 
 const rid = () => Math.random().toString(36).slice(2, 10);
-const blankMatch = (): Match => ({ host: '', n: 0, mode: 'lms', phase: 'wait', endsAt: 0, fighters: [], out: [], score: {}, winner: null, winnerName: null, boss: null });
+const blankMatch = (): Match => ({ host: '', n: 0, mode: 'lms', phase: 'wait', endsAt: 0, fighters: [], out: [], score: {}, winner: null, winnerName: null, boss: null, mobs: [] });
 
 export const useArena = create<ArenaState>((set, get) => ({
   open: false,
@@ -275,6 +300,7 @@ function join() {
     .on('broadcast', { event: 'thr' }, ({ payload }) => onThrow(payload))
     .on('broadcast', { event: 'pw' }, ({ payload }) => onPower(payload))
     .on('broadcast', { event: 'cheer' }, ({ payload }) => onCheer(payload))
+    .on('broadcast', { event: 'mk' }, ({ payload }) => onMobKilled(payload))
     .on('broadcast', { event: 'emo' }, ({ payload }) => onEmote(payload))
     .on('broadcast', { event: 'gb' }, ({ payload }) => onGrabbed(payload))
     .on('broadcast', { event: 'gok' }, ({ payload }) => onGrabAnswer(payload))
@@ -423,7 +449,7 @@ let lastBroadcast = 0;
 function broadcastMatch() {
   const m = useArena.getState().match;
   lastBroadcast = Date.now();
-  send('m', { h: useArena.getState().me, n: m.n, mode: m.mode, ph: m.phase, left: Math.max(0, m.endsAt - Date.now()), fi: m.fighters, out: m.out, sc: m.score, win: m.winner, wn: m.winnerName, boss: m.boss ? { x: Math.round(m.boss.x), y: Math.round(m.boss.y), hp: m.boss.hp, max: m.boss.max, a: m.boss.atk ?? '', aa: m.boss.atk ? Date.now() - m.boss.atkAt : -1, hd: m.boss.hitDone ? 1 : 0, f: m.boss.facing } : null });
+  send('m', { h: useArena.getState().me, n: m.n, mode: m.mode, ph: m.phase, left: Math.max(0, m.endsAt - Date.now()), fi: m.fighters, out: m.out, sc: m.score, win: m.winner, wn: m.winnerName, boss: m.boss ? { x: Math.round(m.boss.x), y: Math.round(m.boss.y), hp: m.boss.hp, max: m.boss.max, a: m.boss.atk ?? '', aa: m.boss.atk ? Date.now() - m.boss.atkAt : -1, hd: m.boss.hitDone ? 1 : 0, f: m.boss.facing } : null, mb: m.mobs.map((x) => [x.i, Math.round(x.x), x.hp, x.f, Date.now() - x.atkAt < 400 ? 1 : 0]) });
 }
 function setMatch(m: Partial<Match>, tell = true) {
   useArena.setState((s) => ({ match: { ...s.match, ...m } }));
@@ -437,10 +463,10 @@ function startPhase(phase: Phase, mode: Mode, now: number) {
     const fighters = presentIds();
     const hp = BOSS_BASE_HP + BOSS_HP_PER * Math.max(0, fighters.length - 1);
     const boss: Boss | null = mode === 'boss' ? { x: Math.round(AW * 0.72), y: GROUND, hp, max: hp, atk: null, atkAt: 0, hitDone: false, lastAtk: now, hitAt: 0, facing: -1 } : null;
-    setMatch({ host: s.me, n: s.match.n + 1, mode, phase, endsAt: now + COUNT_MS, fighters, out: [], score: {}, winner: null, winnerName: null, boss });
+    setMatch({ host: s.me, n: s.match.n + 1, mode, phase, endsAt: now + COUNT_MS, fighters, out: [], score: {}, winner: null, winnerName: null, boss, mobs: [] });
   } else if (phase === 'fight') setMatch({ phase, endsAt: now + FIGHT_MS[mode] });
   else if (phase === 'end') setMatch({ phase, endsAt: now + END_MS });
-  else setMatch({ phase: 'wait', endsAt: 0, fighters: [], out: [], score: {}, boss: null, winner: null, winnerName: null });
+  else setMatch({ phase: 'wait', endsAt: 0, fighters: [], out: [], score: {}, boss: null, mobs: [], winner: null, winnerName: null });
 }
 
 function hostTick() {
@@ -488,6 +514,7 @@ function hostTick() {
       if (m.boss.hp <= 0) return finish('boss-down', now);
       if (!alive.filter((id) => !gone.includes(id)).length) return finish(null, now);
     }
+    mobsThink(alive.filter((id) => !(id === s.me ? s.spectator : s.peers[id]?.spectator)), now);
     if (now - lastPickAt > 9000) spawnPickups(now, false);
     if (now >= m.endsAt) {
       // time: the most HP (LMS) or the highest score (KOTH) wins; the boss survives
@@ -506,7 +533,7 @@ function hostTick() {
 
 function finish(winner: string | null, now: number) {
   const m = useArena.getState().match;
-  setMatch({ winner, winnerName: winner === 'boss-down' ? 'THE MINERS' : winner ? nameOf(winner) : null, phase: 'end', endsAt: now + END_MS, boss: m.boss ? { ...m.boss, hp: Math.max(0, m.boss.hp) } : null });
+  setMatch({ winner, winnerName: winner === 'boss-down' ? 'THE MINERS' : winner ? nameOf(winner) : null, phase: 'end', endsAt: now + END_MS, boss: m.boss ? { ...m.boss, hp: Math.max(0, m.boss.hp) } : null, mobs: [] });
   const done = useArena.getState().match;
   hostResultListeners.forEach((f) => f(done));
   applyResult(done);
@@ -820,7 +847,8 @@ function bossThink(b: Boss, alive: string[], now: number) {
       loud = true;
       for (const id of targets) {
         const [px, py] = pos(id);
-        if (bossCatches(atk, x, facing, px, py)) bossHit('arena', id, x, b.y - 40, s.me);
+        // the hit is claimed where the victim stands: the boss's reach is long, the host has judged it
+        if (bossCatches(atk, x, facing, px, py)) bossHit('arena', id, px, py - 10, s.me);
       }
     } else if (now - atkAt >= wind + BOSS_ACT_MS) {
       atk = null;
@@ -859,6 +887,7 @@ function bossThink(b: Boss, alive: string[], now: number) {
 /** A player hit the boss. The host checks it and keeps the boss's HP. */
 const bossHitsFrom = new Map<string, number>();
 function onBossHit(p: any) {
+  if (p && p.k === 'h' && typeof p.t === 'string' && /^m\d{1,7}$/.test(p.t) && isHost()) return onMobHit(p);
   if (!p || p.k !== 'h' || p.t !== 'boss' || !isHost()) return;
   const s = useArena.getState();
   const b = s.match.boss;
@@ -878,6 +907,101 @@ export function hurtBoss(dmg: number, now = Date.now()) {
   if (!b) return;
   setMatch({ boss: { ...b, hp: Math.max(0, b.hp - dmg), hitAt: now } }, true);
 }
+
+/* ---------------- crawlers ---------------- */
+let mobSeq = 1;
+let mobsOn = true;
+let lastMobAt = 0;
+let lastMobSend = 0;
+/** The host moves the crawlers, lets them bite, and sends a new one out of a wall now and then. */
+function mobsThink(alive: string[], now: number) {
+  const s = useArena.getState();
+  const m = s.match;
+  const pos = (id: string): [number, number] => (id === s.me ? myPos : [s.peers[id]?.x ?? -999, s.peers[id]?.y ?? -999]);
+  const targets = alive.filter((id) => !(id === s.me ? useBrawl.getState().me.koAt : useBrawl.getState().peers[id]?.koAt));
+  let mobs = m.mobs.map((x) => ({ ...x }));
+  let loud = false;
+  if (mobsOn && now - lastMobAt > MOB_EVERY[m.mode] && mobs.length < MOB_MAX[m.mode] && targets.length) {
+    lastMobAt = now;
+    const left = mobSeq % 2 === 0;
+    mobs.push({ i: mobSeq++, x: left ? WALL_L + 8 : WALL_R - 8, hp: MOB_HP, max: MOB_HP, f: left ? 1 : -1, atkAt: 0, hitAt: 0 });
+    loud = true;
+  }
+  for (const mob of mobs) {
+    // the nearest miner, ones on the floor first (crawlers can't climb)
+    const near = targets
+      .map((id) => ({ id, p: pos(id) }))
+      .sort((a, b) => Math.abs(a.p[0] - mob.x) + (a.p[1] < GROUND - 12 ? 200 : 0) - (Math.abs(b.p[0] - mob.x) + (b.p[1] < GROUND - 12 ? 200 : 0)))[0];
+    if (!near) continue;
+    const dx = near.p[0] - mob.x;
+    if (Math.abs(dx) > 3) mob.f = dx > 0 ? 1 : -1;
+    if (Math.abs(dx) > MOB_REACH - 4) mob.x = Math.max(WALL_L + 6, Math.min(WALL_R - 6, mob.x + Math.sign(dx) * MOB_SPEED * 0.25));
+    if (Math.abs(dx) <= MOB_REACH && near.p[1] >= GROUND - 14 && now - mob.atkAt > MOB_BITE_MS) {
+      mob.atkAt = now;
+      loud = true;
+      bossHit('arena', near.id, near.p[0], near.p[1] - 6, s.me, 'mob');
+    }
+  }
+  mobs = mobs.filter((x) => x.hp > 0);
+  useArena.setState((st) => ({ match: { ...st.match, mobs } }));
+  if (mobs.length && (loud || now - lastMobSend > 300)) {
+    lastMobSend = now;
+    broadcastMatch();
+  }
+}
+function parseMobs(v: unknown): Mob[] {
+  if (!Array.isArray(v)) return [];
+  const old = new Map(useArena.getState().match.mobs.map((x) => [x.i, x]));
+  const now = Date.now();
+  return v
+    .slice(0, 8)
+    .filter((x): x is number[] => Array.isArray(x) && x.length >= 4 && x.every((n) => typeof n === 'number' && Number.isFinite(n)))
+    .map(([i, x, hp, f, bit]) => {
+      const was = old.get(Math.floor(i));
+      const h = Math.max(0, Math.min(999, hp));
+      return { i: Math.floor(i), x: num(x, 0, AW), hp: h, max: MOB_HP, f: f === -1 ? -1 : 1, atkAt: bit ? (was && now - was.atkAt < 600 ? was.atkAt : now) : was?.atkAt ?? 0, hitAt: was && h < was.hp ? now : was?.hitAt ?? 0 } as Mob;
+    });
+}
+/** A miner hit a crawler. The host checks it was close enough and takes the HP off. */
+const mobHitsFrom = new Map<string, number>();
+function onMobHit(p: any) {
+  const s = useArena.getState();
+  if (s.match.phase !== 'fight' || typeof p.a !== 'string') return;
+  const peer = s.peers[p.a];
+  const i = Number(String(p.t).slice(1));
+  const mob = s.match.mobs.find((x) => x.i === i);
+  if (!peer || !mob || Math.abs(peer.x - mob.x) > 170) return;
+  const w = ['swing', 'dash', 'slam', 'ore', 'splash', 'pet', 'spin'].includes(p.w) ? p.w : 'swing';
+  const now = Date.now();
+  const key = `${p.a}:${w}:${i}`;
+  if (now - (mobHitsFrom.get(key) ?? 0) < 300) return;
+  mobHitsFrom.set(key, now);
+  if (mobHitsFrom.size > 300) mobHitsFrom.clear();
+  hurtMob(i, baseDamage(w, p.a, Math.floor(Number(p.s) || 0), peer.lvl, true), p.a, now);
+}
+/** The host's own hits on a crawler, and everyone's once checked. The killing blow earns the XP. */
+export function hurtMob(i: number, dmg: number, by: string, now = Date.now()) {
+  const s = useArena.getState();
+  const mob = s.match.mobs.find((x) => x.i === i);
+  if (!mob || mob.hp <= 0) return;
+  const hp = Math.max(0, mob.hp - dmg);
+  const mobs = hp > 0 ? s.match.mobs.map((x) => (x.i === i ? { ...x, hp, hitAt: now } : x)) : s.match.mobs.filter((x) => x.i !== i);
+  useArena.setState({ match: { ...s.match, mobs } });
+  if (hp <= 0) {
+    send('mk', { h: s.me, i, by, x: Math.round(mob.x) });
+    onMobKilled({ h: s.me, i, by, x: mob.x });
+  }
+  broadcastMatch();
+}
+function onMobKilled(p: any) {
+  if (!p || p.h !== hostId() || !Number.isFinite(p.i)) return;
+  const me = useArena.getState().me;
+  useArena.setState((st) => ({ match: { ...st.match, mobs: st.match.mobs.filter((x) => x.i !== p.i) } }));
+  mobKillListeners.forEach((f) => f(num(p.x, 0, AW), p.by === me));
+  if (p.by === me) awardFightXp(MOB_XP);
+}
+/** Someone killed a crawler at x (mine: we did). The canvas puffs it away. */
+export const mobKillListeners = new Set<(x: number, mine: boolean) => void>();
 
 /* ---------------- what everyone does with the host's word ---------------- */
 let appliedN = -1;
@@ -907,6 +1031,7 @@ function onMatch(p: any) {
     winner: typeof p.win === 'string' ? p.win : null,
     winnerName: typeof p.wn === 'string' ? cleanName(p.wn) || (p.wn === 'THE MINERS' ? p.wn : null) : null,
     boss,
+    mobs: parseMobs(p.mb),
   };
   useArena.setState({ match: m });
   onMatchChanged(m);
@@ -972,4 +1097,4 @@ useBrawl.subscribe((b, prev) => {
 /** For the canvas: your HP is full again after a match, the boss's bar, the ring. */
 export const arenaMaxHp = MAX_HP;
 /** For tests. */
-export const _arenaTest = { hostTick, onMatch, onState, onGrab, onTook, onPickups, onEmote, onGrabbed, onGrabAnswer, onThrown, onRevived, finish: (w: string | null) => finish(w, Date.now()), setMyPos: (x: number, y: number) => (myPos = [x, y]) };
+export const _arenaTest = { hostTick, onMatch, onState, onGrab, onTook, onPickups, onEmote, onGrabbed, onGrabAnswer, onThrown, onRevived, finish: (w: string | null) => finish(w, Date.now()), setMyPos: (x: number, y: number) => (myPos = [x, y]), mobs: (on: boolean) => (mobsOn = on), mobsThink };
