@@ -25,7 +25,11 @@ create or replace function public.gali_today() returns date language sql stable 
 $$;
 
 /* ---------------- Brawl ---------------- */
--- 1 point a KO (each victim counts at most 3 times a day per winner), 3 a match win, 2 a Boss Raid won.
+-- 1 point a KO (each victim counts at most 3 times a day per winner), 3 a match win, 2 a raid won
+-- (a Boss Raid, or Crawler Waves held to the end).
+-- Crawler Waves wins are kept too (the table took only lms, koth and boss before).
+alter table public.brawl_wins drop constraint if exists brawl_wins_mode_check;
+alter table public.brawl_wins add constraint brawl_wins_mode_check check (mode in ('lms', 'koth', 'boss', 'waves'));
 create or replace function public.brawl_ranks_period(p_period text default 'all', p_limit int default 50)
 returns table (name text, kos int, wins int, bosses int, points int)
 language sql stable security definer set search_path = public as $$
@@ -37,8 +41,8 @@ language sql stable security definer set search_path = public as $$
     ) x where n <= 3 group by killer
   ), w as (
     select winner as name,
-           count(*) filter (where mode <> 'boss') as wins,
-           count(*) filter (where mode = 'boss') as bosses
+           count(*) filter (where mode not in ('boss', 'waves')) as wins,
+           count(*) filter (where mode in ('boss', 'waves')) as bosses
     from brawl_wins, s where s.t0 is null or at >= s.t0 group by winner
   )
   select coalesce(k.name, w.name), coalesce(k.kos, 0)::int, coalesce(w.wins, 0)::int, coalesce(w.bosses, 0)::int,
