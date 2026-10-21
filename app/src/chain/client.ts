@@ -15,7 +15,7 @@ import { Buffer } from 'buffer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getSecret, removeSecret, setSecret } from './secure';
 import { Platform } from 'react-native';
-import { webConnect, webDisconnect, webOwner, webSign } from './webWallet';
+import { webConnect, webDisconnect, webOwner, webSign, webSignMessage } from './webWallet';
 export { listWebWallets, PickWalletError, type WebWalletInfo } from './webWallet';
 import idlJson from './idl.json';
 import deployment from './deployment.json';
@@ -571,6 +571,34 @@ export async function sendTip(token: TipToken, to: PublicKey, amount: number) {
   });
 }
 export const tipSkrReady = Boolean(TIP_SKR_MINT);
+
+/**
+ * Sign plain text with the wallet itself (a sign-in: no transaction, no fee). Returns the wallet and the
+ * 64-byte signature as base64, checked here before it is handed back. Some wallets return the message
+ * with the signature attached, so the signature is found by checking which part verifies.
+ */
+export async function signTextWithWallet(text: string): Promise<{ owner: string; sig: string }> {
+  const msg = new TextEncoder().encode(text);
+  let owner: PublicKey;
+  let out: Uint8Array;
+  if (IS_WEB) {
+    owner = await webOwner();
+    out = await webSignMessage(msg);
+  } else {
+    const r = await transact(async (w) => {
+      const o = await authorize(w);
+      const [signed] = await w.signMessages({ addresses: [Buffer.from(o.toBytes()).toString('base64')], payloads: [msg] });
+      return { o, signed };
+    });
+    owner = r.o;
+    out = r.signed;
+  }
+  const pk = owner.toBytes();
+  const tries = out.length === 64 ? [out] : [out.slice(out.length - 64), out.slice(0, 64)];
+  const sig = tries.find((t) => t.length === 64 && ed25519.verify(t, msg, pk));
+  if (!sig) throw new Error('The wallet did not sign the text. Try again.');
+  return { owner: owner.toBase58(), sig: Buffer.from(sig).toString('base64') };
+}
 
 /** Sign a chat message with the session key (the chat server checks it against the Player account). */
 export function signWithSession(session: Keypair, message: string) {

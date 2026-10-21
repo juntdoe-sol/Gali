@@ -11,6 +11,7 @@ import { Btn, Frame, IconBtn, PixelBox, T, U } from './kit';
 import { PixIcon } from './PixIcon';
 import type { PixName } from './pixIcons';
 import { useChrome } from './layout';
+import { dmReady, openDm } from '../game/dm';
 
 /** The island's emotes travel as emoji (other players' apps read them); they are drawn as pixel icons. */
 const EMOTE_PIX: Record<string, PixName> = { '👋': 'wave', '⛏️': 'pick', '🎉': 'star', '💎': 'gem', '🔥': 'fire' };
@@ -57,6 +58,18 @@ export function PeerCard() {
         ))}
       </View>
       <View style={[styles.row, { marginTop: 10 }]}>
+        {peer.wallet && !peer.bot && peer.wallet !== owner && dmReady() ? (
+          <Btn
+            small
+            kind="gold"
+            label="Message"
+            style={{ flex: 1 }}
+            onPress={() => {
+              close();
+              openDm(peer.wallet, peer.name);
+            }}
+          />
+        ) : null}
         <Btn
           small
           label="Open chat"

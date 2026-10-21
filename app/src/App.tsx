@@ -21,6 +21,7 @@ import { useWorld } from './game/world';
 import { TabBar, type SheetTab } from './ui/TabBar';
 import { Dock } from './ui/Dock';
 import { RoundCard, Toasts, TopBar } from './ui/Hud';
+import { DmSheet } from './ui/Dm';
 import { Busy, GearReveal, LevelUp, LiveNotice, Onboarding, ResultPop, WalletGate, WalletPicker } from './ui/Modals';
 import { Sheet } from './ui/Sheet';
 import { ClaimPanel } from './ui/ClaimPanel';
@@ -271,6 +272,7 @@ function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTa
         <LiveNotice />
         {!guest && <CaveScreen />}
         <ArenaScreen />
+        <DmSheet />
     </>
   );
 }

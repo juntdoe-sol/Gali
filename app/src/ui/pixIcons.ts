@@ -11,6 +11,7 @@ export const PIX = {
   gift: require('../../assets/icons/gift.png'),
   star: require('../../assets/icons/star.png'),
   chat: require('../../assets/icons/chat.png'),
+  mail: require('../../assets/icons/mail.png'),
   tunnel: require('../../assets/icons/tunnel.png'),
   pot: require('../../assets/icons/pot.png'),
   cart: require('../../assets/icons/cart.png'),
