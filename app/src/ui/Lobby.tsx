@@ -40,6 +40,7 @@ import { dmReady, openDm } from '../game/dm';
 import { Sticker } from './Sticker';
 import { useTutorial } from '../game/tutorial';
 import { FightPad } from './ActionPad';
+import { TouchZone, useDomZones, zoneEvent } from './zones';
 import type { PixName } from './pixIcons';
 import { GAME_IDS, GAME_META, useArcade, type GameId } from '../game/arcade';
 
@@ -69,6 +70,8 @@ export function LobbyScreen({ onMarket, sheet, onTab }: { onMarket: () => void; 
 
 function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: () => void; top: number; bottomInset: number; sheet: SheetTab | null; onTab: (t: SheetTab | null) => void }) {
   const ref = useRef<LobbyRef>(null);
+  // Android: the lobby hears fingers on HIT and JUMP itself, so they work while a thumb holds the stick
+  const zw = useDomZones('lobby', (z) => ref.current?.zones?.(z));
   const [atlas, setAtlas] = useState<string | null>(null);
   const spawn = useRef(useLobby.getState().spawn).current;
   const name = useName((s) => s.name);
@@ -250,6 +253,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
   }, []);
 
   const onEvent = useCallback((e: LobbyEvent) => {
+    if (zoneEvent(e)) return;
     switch (e.t) {
       case 'swing':
         swing('lobby', e.target, e.x, e.y);
@@ -298,7 +302,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
   }, [look, enter]);
 
   return (
-    <View style={styles.root} pointerEvents="box-none">
+    <View ref={zw.wrap} collapsable={false} onLayout={zw.onLayout} style={styles.root} pointerEvents="box-none">
       {atlas ? (
         <LobbyView
           ref={ref}
@@ -442,8 +446,14 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
         ) : null}
         {!L.desktop ? (
           <View style={styles.fightRow} pointerEvents="box-none">
-            <MapButton instant label="JUMP" icon={<PixIcon name="jump" size={20} />} accessibilityLabel="Jump" onPress={() => ref.current?.jump?.()} />
-            {brawlOn ? <MapButton instant label="HIT" icon={<PixIcon name="fist" size={20} />} accessibilityLabel="Hit: swing your pickaxe" onPress={() => ref.current?.attack?.()} /> : null}
+            <TouchZone group="lobby" onPress={() => ref.current?.jump?.()}>
+              {() => <MapButton instant label="JUMP" icon={<PixIcon name="jump" size={20} />} accessibilityLabel="Jump" onPress={() => ref.current?.jump?.()} />}
+            </TouchZone>
+            {brawlOn ? (
+              <TouchZone group="lobby" onPress={() => ref.current?.attack?.()}>
+                {() => <MapButton instant label="HIT" icon={<PixIcon name="fist" size={20} />} accessibilityLabel="Hit: swing your pickaxe" onPress={() => ref.current?.attack?.()} />}
+              </TouchZone>
+            ) : null}
           </View>
         ) : null}
         <PixelBox fill="rgba(8,13,32,0.9)" hi="#2d4282" lo="#04060f" shadow={2} style={[styles.emotes, L.w < 390 && { gap: 3, paddingHorizontal: 6 }]}>
@@ -458,7 +468,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
         </PixelBox>
       </View>
 
-      {LANDSCAPE_APP ? <FightPad right={right + 14} bottom={GUTTER + 70} hit={brawlOn} onHit={() => ref.current?.attack?.()} onJump={() => ref.current?.jump?.()} /> : null}
+      {LANDSCAPE_APP ? <FightPad zone="lobby" right={right + 14} bottom={GUTTER + 70} hit={brawlOn} onHit={() => ref.current?.attack?.()} onJump={() => ref.current?.jump?.()} /> : null}
 
       {navOpen ? (
         <>
@@ -1005,12 +1015,18 @@ export function LobbyBack() {
         <BackPill kbd={ch.desktop ? 'L' : undefined} />
         {ch.desktop && !LANDSCAPE_APP ? fight : null}
       </View>
-      {LANDSCAPE_APP ? <FightPad small right={ch.right} bottom={bottom + 54} hit={brawlOn} onHit={islandFight} onJump={islandJump} /> : null}
+      {LANDSCAPE_APP ? <FightPad zone="island" small right={ch.right} bottom={bottom + 54} hit={brawlOn} onHit={islandFight} onJump={islandJump} /> : null}
       {ch.desktop ? null : (
         // phones: the action buttons sit on the right, above CAVE RUN, where a thumb rests
         <View style={[styles.actCol, { right: 12, bottom: bottom + 58 }]} pointerEvents="box-none">
-          <MapButton instant label="JUMP" icon={<PixIcon name="jump" size={20} />} accessibilityLabel="Jump" onPress={islandJump} />
-          {fight}
+          <TouchZone group="island" onPress={islandJump}>
+            {() => <MapButton instant label="JUMP" icon={<PixIcon name="jump" size={20} />} accessibilityLabel="Jump" onPress={islandJump} />}
+          </TouchZone>
+          {fight ? (
+            <TouchZone group="island" onPress={islandFight}>
+              {() => fight}
+            </TouchZone>
+          ) : null}
         </View>
       )}
     </>

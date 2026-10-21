@@ -30,6 +30,7 @@ import { DisconnectBtn } from './Hud';
 import { InboxBtn } from './Dm';
 import { dmReady, openDm } from '../game/dm';
 import { SkillButton } from './ActionPad';
+import { useDomZones, zoneEvent } from './zones';
 import type { PixName } from './pixIcons';
 
 const ICON: Record<ActiveId, PixName> = { dash: 'bolt', guard: 'helmet', slam: 'fire', splash: 'gem', spin: 'star', mend: 'heart' };
@@ -95,6 +96,8 @@ export function ArenaScreen() {
   const L = useLayout();
   const open = useArena((s) => s.open);
   const ref = useRef<ArenaRef>(null);
+  // Android: the arena hears fingers on the skill wheel itself, so they work while a thumb holds the stick
+  const zw = useDomZones('arena', (z) => ref.current?.zones?.(z));
   const [atlas, setAtlas] = useState<string | null>(null);
   const [panel, setPanel] = useState<'powers' | 'ranks' | 'lore' | null>(null);
   // first time in the arena: the story of the Two-Mouthed
@@ -150,6 +153,7 @@ export function ArenaScreen() {
   }, [open]);
 
   const onEvent = useCallback((e: ArenaEvent) => {
+    if (zoneEvent(e)) return;
     const a = useArena.getState();
     const now = Date.now();
     const cd = (p: ActiveId) => useArena.setState((s) => ({ readyAt: { ...s.readyAt, [p]: now + POWERS[p].cd } }));
@@ -242,7 +246,7 @@ export function ArenaScreen() {
   const barBottom = desk ? insets.bottom + 100 : insets.bottom + 8;
   return (
     <Modal visible transparent={false} animationType="fade" statusBarTranslucent onRequestClose={() => useArena.getState().close()}>
-      <View style={[styles.screen, LANDSCAPE_APP && { marginLeft: insets.left, marginRight: insets.right }]}>
+      <View ref={zw.wrap} collapsable={false} onLayout={zw.onLayout} style={[styles.screen, LANDSCAPE_APP && { marginLeft: insets.left, marginRight: insets.right }]}>
         {atlas ? (
           <ArenaView
             ref={ref}
@@ -394,22 +398,22 @@ function Controls({ bottom, desk, arena }: { bottom: number; desk: boolean; aren
   const outer: (ActiveId | 'throw')[] = ['throw', 'splash', 'spin', 'mend'];
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-      <SkillButton size={BIG} round gold icon="fist" label="HIT" style={at(0, 0, BIG)} onPress={() => arena.current?.attack?.()} />
+      <SkillButton zone="arena" size={BIG} round gold icon="fist" label="HIT" style={at(0, 0, BIG)} onPress={() => arena.current?.attack?.()} />
       {inner.map((p, i) => {
         const deg = 192 - i * 36;
-        return p === 'jump' ? <SkillButton key={p} size={SM} round icon="jump" label="JUMP" style={at(deg, 100, SM)} onPress={() => arena.current?.jump?.()} /> : <SkillButton key={p} size={SM} round style={at(deg, 100, SM)} {...skill(p)} />;
+        return p === 'jump' ? <SkillButton zone="arena" key={p} size={SM} round icon="jump" label="JUMP" style={at(deg, 100, SM)} onPress={() => arena.current?.jump?.()} /> : <SkillButton zone="arena" key={p} size={SM} round style={at(deg, 100, SM)} {...skill(p)} />;
       })}
       {outer.map((p, i) => {
         const deg = 180 - i * 26;
         return p === 'throw' ? (
-          <SkillButton key={p} size={SM} round icon="ore" label="THROW" count={a.ammo} style={at(deg, 170, SM)} onPress={() => arena.current?.throwOre?.()} />
+          <SkillButton zone="arena" key={p} size={SM} round icon="ore" label="THROW" count={a.ammo} style={at(deg, 170, SM)} onPress={() => arena.current?.throwOre?.()} />
         ) : (
-          <SkillButton key={p} size={SM} round style={at(deg, 170, SM)} {...skill(p)} />
+          <SkillButton zone="arena" key={p} size={SM} round style={at(deg, 170, SM)} {...skill(p)} />
         );
       })}
-      <SkillButton size={42} round icon="heart" style={at(90, 196, 42)} onPress={() => cheer()} />
-      <SkillButton size={42} round icon="laugh" style={at(112, 196, 42)} onPress={() => setEmoteOpen(!a.emoteOpen)} />
-      {pvp && canGrab ? <SkillButton size={SM} round gold icon="fist" label={a.holding?.ok ? 'TOSS' : 'GRAB'} style={at(90, 108, SM)} onPress={() => arena.current?.grab?.()} /> : null}
+      <SkillButton zone="arena" size={42} round icon="heart" style={at(90, 196, 42)} onPress={() => cheer()} />
+      <SkillButton zone="arena" size={42} round icon="laugh" style={at(112, 196, 42)} onPress={() => setEmoteOpen(!a.emoteOpen)} />
+      {pvp && canGrab ? <SkillButton zone="arena" size={SM} round gold icon="fist" label={a.holding?.ok ? 'TOSS' : 'GRAB'} style={at(90, 108, SM)} onPress={() => arena.current?.grab?.()} /> : null}
       {a.emoteOpen ? <EmoteBar /> : null}
     </View>
   );

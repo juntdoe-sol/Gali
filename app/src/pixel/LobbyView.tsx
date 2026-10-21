@@ -7,9 +7,12 @@
 import { useEffect, useRef, type Ref } from 'react';
 import { useDOMImperativeHandle, type DOMImperativeFactory, type DOMProps } from 'expo/dom';
 import { LobbyEngine, type LobbyEvent, type LobbyOpts, type LobbySnap } from '../engine/lobby';
+import { zoneTouches } from './zoneTouch';
 import type { Look } from '../engine/types';
 
 export interface LobbyRef extends DOMImperativeFactory {
+  /** where the app's game buttons sit (ui/zones.tsx), so a finger on one is pressed even mid-walk */
+  zones: (...args: any[]) => void;
   push: (...args: any[]) => void;
   goTo: (...args: any[]) => void;
   opts: (...args: any[]) => void;
@@ -20,11 +23,17 @@ export interface LobbyRef extends DOMImperativeFactory {
 export default function LobbyView({ ref, onEvent, atlas, look, opts }: { ref: Ref<LobbyRef>; onEvent: (e: LobbyEvent) => void; atlas: string; look: Look; opts: LobbyOpts; dom?: DOMProps }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const engine = useRef<LobbyEngine | null>(null);
+  const zt = useRef<ReturnType<typeof zoneTouches> | null>(null);
+  const zonesWas = useRef<unknown>(null);
   const pending = useRef<LobbySnap | null>(null);
 
   useDOMImperativeHandle(
     ref,
     () => ({
+      zones: (z: any) => {
+        zonesWas.current = z;
+        zt.current?.set(z);
+      },
       push: (s: any) => {
         if (engine.current) engine.current.push(s as LobbySnap);
         else pending.current = s as LobbySnap;
@@ -54,7 +63,13 @@ export default function LobbyView({ ref, onEvent, atlas, look, opts }: { ref: Re
     engine.current = e;
     if (pending.current) e.push(pending.current);
     void e.start(atlas);
-    return () => e.stop();
+    const z = zoneTouches((id) => onEvent({ t: 'zone', id } as never));
+    z.set(zonesWas.current);
+    zt.current = z;
+    return () => {
+      z.stop();
+      e.stop();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
