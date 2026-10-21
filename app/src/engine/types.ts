@@ -38,6 +38,8 @@ export interface Snapshot {
   /** CSS pixels covered by the HUD above and the dock below */
   /** screen CSS px the interface covers on each side; left/right are a desktop rail and side panel */
   view: { top: number; bottom: number; left?: number; right?: number };
+  /** a touch screen on the island: where the walking stick's centre sits (CSS px from the left and the bottom) */
+  stick?: { left: number; bottom: number } | null;
   phase: string;
   roundId: number;
   roundEndsAt: number; // wall-clock ms
