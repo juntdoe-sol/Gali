@@ -32,6 +32,8 @@ export interface RankRow {
 interface RanksState {
   period: Period;
   rows: RankRow[];
+  /** the server has no period ranks yet (ranks-periods.sql not run): this is the last 7 days instead */
+  weekOnly: boolean;
   at: number;
   status: 'idle' | 'loading' | 'ok' | 'off' | 'error';
   load: (period?: Period) => Promise<void>;
@@ -44,6 +46,7 @@ const rpc = (base: string, fn: string, args: Record<string, unknown>) => fetch(`
 export const useRanks = create<RanksState>((set, get) => ({
   period: 'day',
   rows: [],
+  weekOnly: false,
   at: 0,
   status: 'idle',
   load: async (period) => {
@@ -54,10 +57,17 @@ export const useRanks = create<RanksState>((set, get) => ({
     if (same && (get().status === 'loading' || Date.now() - get().at < 15_000)) return;
     set({ status: 'loading', period: p, ...(same ? {} : { rows: [] }) });
     try {
-      const r = await rpc(base, 'brawl_ranks_period', { p_period: p, p_limit: 50 });
+      let weekOnly = false;
+      let r = await rpc(base, 'brawl_ranks_period', { p_period: p, p_limit: 50 });
+      if (r.status === 404) {
+        // an older server: only the 7-day board exists
+        weekOnly = true;
+        r = await fetch(`${base}/rest/v1/brawl_ranks?select=*&order=points.desc&limit=50`, { headers: headers() });
+      }
       if (!r.ok) throw new Error(String(r.status));
       const data = (await r.json()) as RankRow[];
       if (get().period !== p) return;
+      set({ weekOnly });
       const rows = (Array.isArray(data) ? data : []).filter((x) => x && typeof x.name === 'string').map((x) => ({ name: clean(x.name), points: Number(x.points) || 0, kos: Number(x.kos) || 0, wins: Number(x.wins) || 0, bosses: Number(x.bosses) || 0 }));
       set({ rows, at: Date.now(), status: 'ok' });
     } catch {
