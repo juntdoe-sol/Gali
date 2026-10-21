@@ -74,6 +74,9 @@ export interface LobbyOpts {
   right?: number;
   /** false on a mouse-and-keyboard browser: no on-screen stick (WASD and click-to-walk instead) */
   touch?: boolean;
+  /** true while another screen (the arena, Cave Run, a mini game) is open over the lobby: it hears no keys
+   * and walks through no doors, so keys meant for that screen cannot walk the hidden miner into a door */
+  away?: boolean;
 }
 
 const SPEED = 58;
@@ -232,6 +235,10 @@ export class LobbyEngine {
   }
   setOpts(o: Partial<LobbyOpts>) {
     this.opts = { ...this.opts, ...o };
+    if (o.away) {
+      this.keys.clear();
+      this.me.path = [];
+    }
   }
   push(s: LobbySnap) {
     this.snap = s;
@@ -245,6 +252,12 @@ export class LobbyEngine {
   /** Brawl: react to what changed (a hit taken, standing up after a knockdown, a hit landing on someone). */
   private brawlEvents(b: BrawlSnap) {
     const me = this.me;
+    // the arena shares the brawl state: its hits and stand-ups are not the lobby's, so only note them
+    if (this.opts.away) {
+      this.lastRs = b.me.rs;
+      this.lastHit = b.me.hit;
+      return;
+    }
     if (this.lastRs < 0) this.lastRs = b.me.rs;
     if (b.me.rs !== this.lastRs) {
       this.lastRs = b.me.rs;
@@ -1138,6 +1151,10 @@ export class LobbyEngine {
   }
 
   private key(e: KeyboardEvent, down: boolean) {
+    if (this.opts.away) {
+      this.keys.clear();
+      return;
+    }
     const t = e.target as HTMLElement | null;
     if (t && /^(INPUT|TEXTAREA)$/.test(t.tagName)) return;
     const k = e.key.toLowerCase();
@@ -1270,7 +1287,7 @@ export class LobbyEngine {
       me.since = now;
     }
     // walking through a door
-    if (!this.leaving && performance.now() - this.born > 700) {
+    if (!this.leaving && !this.opts.away && performance.now() - this.born > 700) {
       const d = doorAt(me.x, me.y);
       if (d) {
         this.leaving = { id: d, at: performance.now(), sent: false };
