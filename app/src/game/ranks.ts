@@ -113,6 +113,8 @@ interface MinersState {
   rows: MinerRow[];
   /** everyone, for the ORE board (it reads the chain for each) */
   everyone: MinerRow[];
+  /** the server has no period ranks yet (ranks-periods.sql not run): every board shows all time */
+  allOnly: boolean;
   at: number;
   status: 'idle' | 'loading' | 'ok' | 'off' | 'error';
   load: (period?: Period, lifetimes?: Lifetimes) => Promise<void>;
@@ -134,6 +136,7 @@ export const useMinerRanks = create<MinersState>((set, get) => ({
   period: 'day',
   rows: [],
   everyone: [],
+  allOnly: false,
   at: 0,
   status: 'idle',
   load: async (period, lifetimes) => {
@@ -150,17 +153,19 @@ export const useMinerRanks = create<MinersState>((set, get) => ({
         p === 'all' ? null : rpc(base, 'gali_miner_ranks', { p_period: p, p_limit: 100 }),
         fetch(`${base}/rest/v1/gali_miners?select=wallet,name,level,xp,points&order=xp.desc&limit=200`, { headers: headers() }),
       ]);
-      if (!all.ok || (r && !r.ok)) throw new Error(String(r && !r.ok ? r.status : all.status));
+      // an older server (no period ranks yet): show all time instead of nothing
+      const allOnly = Boolean(r && r.status === 404);
+      if (!all.ok || (r && !r.ok && !allOnly)) throw new Error(String(r && !r.ok ? r.status : all.status));
       const everyoneRaw = (await all.json()) as Partial<MinerRow>[];
       let everyone = (Array.isArray(everyoneRaw) ? everyoneRaw : []).filter((x) => x && typeof x.wallet === 'string').map(toRow);
-      let rows = r ? ((await r.json()) as Partial<MinerRow>[]).filter((x) => x && typeof x.wallet === 'string').map(toRow) : everyone;
+      let rows = r && !allOnly ? ((await r.json()) as Partial<MinerRow>[]).filter((x) => x && typeof x.wallet === 'string').map(toRow) : everyone;
       if (get().period !== p) return;
-      set({ rows, everyone, at: Date.now(), status: 'ok' });
+      set({ rows, everyone, allOnly, at: Date.now(), status: 'ok' });
       if (lifetimes && everyone.length) {
         const life = await lifetimes(everyone.map((x) => x.wallet)).catch(() => ({}) as Record<string, { ore: number; deployed: number }>);
         markOre(base, life);
         let marks: Record<string, number> = {};
-        if (p !== 'all') {
+        if (p !== 'all' && !allOnly) {
           const b = await rpc(base, 'gali_ore_base', { p_period: p }).catch(() => null);
           const list = b && b.ok ? ((await b.json()) as { wallet: string; ore: number }[]) : [];
           marks = Object.fromEntries((Array.isArray(list) ? list : []).map((x) => [x.wallet, Number(x.ore)]));
@@ -168,7 +173,7 @@ export const useMinerRanks = create<MinersState>((set, get) => ({
         const withOre = (x: MinerRow): MinerRow => {
           const ore = life[x.wallet]?.ore ?? 0;
           const mark = marks[x.wallet];
-          return { ...x, ore, deployed: life[x.wallet]?.deployed ?? 0, oreGain: p === 'all' ? ore : mark === undefined ? null : Math.max(0, ore - mark) };
+          return { ...x, ore, deployed: life[x.wallet]?.deployed ?? 0, oreGain: p === 'all' || allOnly ? ore : mark === undefined ? null : Math.max(0, ore - mark) };
         };
         everyone = everyone.map(withOre);
         rows = rows.map(withOre);
