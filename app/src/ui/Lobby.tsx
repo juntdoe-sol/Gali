@@ -8,13 +8,13 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, FlatList, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { FlatList, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, levelFromXp } from '../game/constants';
 import { useCave } from '../game/caveStore';
 import { loadChain } from '../chain/lazy';
 import { TIP_LIMITS, TIP_SKR_MINT, short } from '../chain/light';
-import { ACT_LIFE_MS, announce, joinChat, joinLobby, leaveLobby, LOBBY_EMOTES, publishLobbyMe, useLobby, type Act, type LobbyMsg } from '../game/lobby';
+import { announce, joinChat, joinLobby, leaveLobby, LOBBY_EMOTES, publishLobbyMe, useLobby, type LobbyMsg } from '../game/lobby';
 import { chatWords, cleanName, LOBBY_CAP, STICKERS, stickerOf, type DoorId } from '../game/lobbyMap';
 import { isOnChain, useGame, useLevelXp } from '../game/store';
 import { play } from '../game/sfx';
@@ -491,7 +491,6 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
         lobby={{ navOpen, onNav: () => setNavOpen((v) => !v) }}
       />
 
-      <ActivityFeed top={topH + 10} left={L.desktop ? RAIL_W + GUTTER : 12} />
       {tipTo ? <TipSheet to={tipTo} onClose={() => setTipTo(null)} /> : null}
       {howTo ? <HowToPlay onClose={closeHowTo} /> : null}
       <Arcade />
@@ -658,62 +657,6 @@ function HowToPlay({ onClose }: { onClose: () => void }) {
         </View>
       </Window>
     </Scrim>
-  );
-}
-
-/* ---------------- activity feed ---------------- */
-function actText(a: Act): { icon: PixName; text: string; color: string } {
-  switch (a.k) {
-    case 'win':
-      return { icon: 'trophy', text: `${a.n} won${a.sol > 0 ? ` ${a.sol} SOL` : ''}${a.pts > 0 ? ` · +${a.pts} pts` : ''}`, color: COLORS.gold };
-    case 'tip':
-      return { icon: 'gift', text: a.toMe ? `${a.n} tipped you ${a.a} ${a.tk}` : `${a.mine ? 'You' : a.n} tipped ${a.tn} ${a.a} ${a.tk}`, color: '#ff8fd8' };
-    case 'play': {
-      const game = a.g === 'tunnel' ? 'Tunnel Collapse' : a.g === 'pot' ? 'Gold Rush Pot' : 'Crash Cart';
-      return { icon: a.win ? 'gem' : 'pick', text: a.win ? `${a.mine ? 'You' : a.n} won ${a.a} ${a.tk} in ${game}` : `${a.mine ? 'You' : a.n} staked ${a.a} ${a.tk} in ${game}`, color: a.win ? COLORS.gold : '#7fe3ff' };
-    }
-    case 'xp':
-      return { icon: 'star', text: `${a.n} earned ${a.xp} XP`, color: '#7fe3ff' };
-    case 'ko':
-      return { icon: 'pick', text: `${a.mine ? 'You' : a.n} knocked out ${a.tn}`, color: '#ff8a70' };
-    default:
-      return { icon: 'wave', text: `${a.n} entered the lobby`, color: '#9ff0a8' };
-  }
-}
-
-function ActItem({ a }: { a: Act }) {
-  const v = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    const left = Math.max(0, ACT_LIFE_MS - (Date.now() - a.at));
-    Animated.sequence([
-      Animated.timing(v, { toValue: 1, duration: 220, useNativeDriver: true }),
-      Animated.delay(Math.max(0, left - 220 - 900)),
-      Animated.timing(v, { toValue: 0, duration: 900, useNativeDriver: true }),
-    ]).start();
-  }, [a.at, v]);
-  const t = actText(a);
-  return (
-    <Animated.View style={{ opacity: v, transform: [{ translateX: v.interpolate({ inputRange: [0, 1], outputRange: [-12, 0] }) }] }}>
-      <PixelBox fill="rgba(8,13,32,0.9)" hi={t.color} lo="#04060f" style={styles.act}>
-        <View style={[styles.actEdge, { backgroundColor: t.color }]} />
-        <PixIcon name={t.icon} size={18} />
-        <T v="bold" style={{ fontSize: 13, flexShrink: 1 }} numberOfLines={2}>
-          {t.text}
-        </T>
-      </PixelBox>
-    </Animated.View>
-  );
-}
-
-/** What players are doing: wins, tips, points. Each line fades in, stays a few seconds and is gone. */
-function ActivityFeed({ top, left }: { top: number; left: number }) {
-  const feed = useLobby((s) => s.feed);
-  return (
-    <View style={[styles.feed, { top, left }]} pointerEvents="none">
-      {feed.map((a) => (
-        <ActItem key={a.id} a={a} />
-      ))}
-    </View>
   );
 }
 
@@ -1093,9 +1036,6 @@ export function BackPill({ door = 'island', onBefore, kbd }: { door?: DoorId; on
 
 
 const styles = StyleSheet.create({
-  feed: { position: 'absolute', left: 12, maxWidth: 420, gap: 6, alignItems: 'flex-start' },
-  act: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 10, paddingVertical: 6 },
-  actEdge: { position: 'absolute', left: U, top: U, bottom: U, width: U * 2 },
   tipRow: { flexDirection: 'row', gap: 8, justifyContent: 'center' },
   root: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: '#2f7fc4', zIndex: 30 },
   head: { position: 'absolute', left: 0, right: 0, top: 0, paddingHorizontal: 12, gap: 8 },
