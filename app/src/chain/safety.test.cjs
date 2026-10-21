@@ -99,6 +99,23 @@ test('token RPC outage is unavailable, not zero', async () => {
   await assert.rejects(h.c.fetchSkrBalance(A.publicKey), /unavailable/);
   await assert.rejects(h.c.fetchOreBalance(A.publicKey, B.publicKey.toBase58()), /unavailable/);
 });
+test('a missing token account is zero even when a proxy hides the node message', async () => {
+  const h = client({ rpc: { getTokenAccountBalance: async () => { throw new Error('502: RPC unavailable'); }, getAccountInfo: async () => null } });
+  assert.equal(await h.c.fetchOreBalance(A.publicKey, B.publicKey.toBase58()), 0);
+});
+test('live wallet still shows claimable SOL when the ORE balance read fails', async () => {
+  const b = load('board.ts', {
+    './polyfill-web': {}, './client': { connection: {}, fetchSolBalance: async () => 2, fetchOreBalance: async () => { throw new Error('RPC unavailable'); } },
+    './light': { REFINING_FEE_BPS: 1000 }, './ore/consts': { ORE_MINT: A.publicKey },
+    './ore/read': { ORE_REFINING_BPS: 1000n, fetchOreTreasury: async () => ({ motherlode: 0n }), fetchClock: async () => ({}), fetchOreMiner: async () => null,
+      readRewards: () => ({ sol: 1500000000n, unrefined: 0n, refined: 0n, roundId: 7n, checkpointed: true }), needsCheckpoint: () => null },
+    './ore/tx': { toSol: (l) => Number(l) / 1e9, toOre: (g) => Number(g) / 1e11 }, './ore/accounts': {},
+  });
+  const w = await b.fetchLiveWallet(A.publicKey);
+  assert.equal(w.sol, 2);
+  assert.equal(w.unclaimed.sol, 1.5);
+  assert.equal('ore' in w, false);
+});
 test('live wallet fails visibly when rewards RPC fails', async () => {
   const b = load('board.ts', {
     './polyfill-web': {}, './client': { connection: {}, fetchSolBalance: async () => 2, fetchOreBalance: async () => 3 },
