@@ -477,7 +477,7 @@ export class ArenaEngine {
   /** The nearest dizzy foe in reach (not in a raid, not while carrying or carried). */
   private grabTarget(wall: number): string | null {
     const s = this.snap;
-    if (!s || !this.fighting() || this.downed(wall) || s.match.mode === 'boss' || s.me.holding) return null;
+    if (!s || !this.fighting() || this.downed(wall) || s.match.mode === 'boss' || s.match.mode === 'waves' || s.me.holding) return null;
     const me = this.me;
     let best: string | null = null;
     let bd = Infinity;
@@ -521,7 +521,10 @@ export class ArenaEngine {
   }
   private targets() {
     const b = this.snap?.brawl;
-    const list = [...this.others.values()].filter((p) => !p.view.spectator).map((p) => ({ id: p.view.id, x: p.x, y: p.y, v: b?.peers[p.view.id] }));
+    // a raid (Boss Raid, Crawler Waves): the miners are on one side, so only the monsters are targets
+    const md = this.snap?.match.mode;
+    const raid = md === 'boss' || md === 'waves';
+    const list = raid ? [] : [...this.others.values()].filter((p) => !p.view.spectator).map((p) => ({ id: p.view.id, x: p.x, y: p.y, v: b?.peers[p.view.id] }));
     const boss = this.snap?.match.boss;
     if (boss && boss.hp > 0) list.push({ id: 'boss', x: boss.x, y: boss.y, v: { hp: boss.hp, ko: 0, sh: 0, hit: boss.hitAt, sw: 0, on: true } });
     for (const m of this.snap?.match.mobs ?? []) list.push({ id: `m${m.i}`, x: this.mobX.get(m.i) ?? m.x, y: GROUND, v: { hp: m.hp, ko: 0, sh: 0, hit: m.hitAt, sw: 0, on: true } });
@@ -1181,7 +1184,7 @@ export class ArenaEngine {
         if (v.sh) drawShield(c, X, FY, z, wall, v.sh);
         if (ko < 0) drawHp(c, v, X, FY, z, wall, mine);
         // dizzy: low on HP, and grabbable in a fight between miners
-        if (ko < 0 && v.hp <= DIZZY_HP && s?.match.mode !== 'boss' && s?.match.phase === 'fight') stars(c, X, FY - 30 * z, z * 0.7, wall);
+        if (ko < 0 && v.hp <= DIZZY_HP && s?.match.mode !== 'boss' && s?.match.mode !== 'waves' && s?.match.phase === 'fight') stars(c, X, FY - 30 * z, z * 0.7, wall);
       }
       if (raidDown) {
         // calling for help, and the ring filling while a teammate gets them up

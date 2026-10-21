@@ -32,13 +32,34 @@ import { AH, AW, BOSS_ACT_MS, BOSS_WIND2_MS, BOSS_WIND_MS, bossCatches, DIZZY_HP
 export * from './arenaMap';
 
 /* ---------------- matches ---------------- */
-export type Mode = 'lms' | 'koth' | 'boss';
-export const MODES: Mode[] = ['lms', 'koth', 'boss'];
-export const MODE_NAME: Record<Mode, string> = { lms: 'LAST MINER STANDING', koth: 'KING OF THE HILL', boss: 'BOSS RAID' };
+export type Mode = 'lms' | 'koth' | 'waves' | 'boss';
+export const MODES: Mode[] = ['lms', 'koth', 'waves', 'boss'];
+export const MODE_NAME: Record<Mode, string> = { lms: 'LAST MINER STANDING', koth: 'KING OF THE HILL', waves: 'CRAWLER WAVES', boss: 'BOSS RAID' };
+/** Modes where the miners are one side against the hall: no hits between miners, downed teammates wait for help. */
+export const coop = (mode: Mode) => mode === 'boss' || mode === 'waves';
+/**
+ * Crawler Waves: three miners hold the hall against waves of crawlers. Each wave brings more of them, a
+ * little tougher; clear the last one to win. More than three in the arena: the first three fight, the
+ * rest cheer from the balcony.
+ */
+export const WAVES = 5;
+export const WAVE_SQUAD = 3;
+export const WAVES_XP = 40;
+/** crawlers in wave w, their HP, and the breather before the next wave */
+export const waveSize = (w: number) => 3 + 2 * w;
+export const waveHp = (w: number) => 26 + 6 * w;
+const WAVE_REST_MS = 3500;
+const WAVE_SPAWN_MS = 1100;
+export interface Wave {
+  /** this wave (1..WAVES), crawlers still to come out, and when it starts (a breather before each) */
+  n: number;
+  toSpawn: number;
+  startAt: number;
+}
 export const BOSS_NAME = 'THE TWO-MOUTHED';
 export type Phase = 'wait' | 'count' | 'fight' | 'end';
 export const COUNT_MS = 5000;
-export const FIGHT_MS: Record<Mode, number> = { lms: 120_000, koth: 90_000, boss: 120_000 };
+export const FIGHT_MS: Record<Mode, number> = { lms: 120_000, koth: 90_000, waves: 180_000, boss: 120_000 };
 export const END_MS = 6000;
 export const KOTH_WIN = 20;
 /** XP for a KO in the arena, and for winning (the boss pays everyone who fought) */
@@ -89,8 +110,8 @@ const MOB_SPEED = 34;
 const MOB_REACH = 12;
 const MOB_BITE_MS = 1300;
 /** how often one crawls out, and how many at once: more in a Boss Raid */
-const MOB_EVERY: Record<Mode, number> = { lms: 9000, koth: 9000, boss: 5000 };
-const MOB_MAX: Record<Mode, number> = { lms: 3, koth: 3, boss: 5 };
+const MOB_EVERY: Record<Mode, number> = { lms: 9000, koth: 9000, waves: WAVE_SPAWN_MS, boss: 5000 };
+const MOB_MAX: Record<Mode, number> = { lms: 3, koth: 3, waves: 7, boss: 5 };
 
 /** Below half HP the boss is angrier: faster wind-ups and attacks. */
 export const bossPhase2 = (b: { hp: number; max: number }) => b.hp <= b.max / 2;
@@ -112,6 +133,8 @@ export interface Match {
   winnerName: string | null;
   boss: Boss | null;
   mobs: Mob[];
+  /** Crawler Waves: where the fight is */
+  wave: Wave | null;
 }
 export interface ArenaPeer {
   id: string;
@@ -128,6 +151,8 @@ export interface ArenaPeer {
   spectator: boolean;
   /** cosmetics: swing trail and KO effect ids */
   trail: string;
+  /** what their app can do: 2 knows Crawler Waves (older apps would ignore a match in a mode they don't know) */
+  v: number;
   /** last power they used, for the effect */
   fx: { p: string; at: number } | null;
   seen: number;
@@ -175,7 +200,7 @@ interface ArenaState {
 }
 
 const rid = () => Math.random().toString(36).slice(2, 10);
-const blankMatch = (): Match => ({ host: '', n: 0, mode: 'lms', phase: 'wait', endsAt: 0, fighters: [], out: [], score: {}, winner: null, winnerName: null, boss: null, mobs: [] });
+const blankMatch = (): Match => ({ host: '', n: 0, mode: 'lms', phase: 'wait', endsAt: 0, fighters: [], out: [], score: {}, winner: null, winnerName: null, boss: null, mobs: [], wave: null });
 
 export const useArena = create<ArenaState>((set, get) => ({
   open: false,
@@ -266,6 +291,10 @@ export function initArena(o: { level: () => number; look: () => Look; wallet: ()
     arena: true,
     koXp: ARENA_KO_XP,
     host: () => hostId(),
+    coop: () => {
+      const m = useArena.getState().match;
+      return m.phase === 'fight' && coop(m.mode);
+    },
   });
 }
 
@@ -385,6 +414,7 @@ function onState(p: any) {
     spectator: p.sp === 1,
     trail: typeof p.tr === 'string' && KEY.test(p.tr) ? p.tr : prev?.trail ?? 'plain',
     fx: prev?.fx ?? null,
+    v: typeof p.v === 'number' ? Math.floor(p.v) : prev?.v ?? 1,
     seen: Date.now(),
   };
   useArena.setState((st) => ({ peers: { ...st.peers, [p.id]: peer } }));
@@ -419,7 +449,7 @@ export function publishArenaMe(m: { x: number; y: number; tx: number; ty: number
   void channel.send({
     type: 'broadcast',
     event: 'st',
-    payload: { ...move, h: lk.hat, c: lk.fit, k: lk.pick, hd: lk.handle, pt: lk.pet, g: lk.glow, sx: lk.sex === 'f' ? 'f' : 'm', lvl: level(), tr: s.loadout.trail, ...(w ? { w } : {}) },
+    payload: { ...move, v: 2, h: lk.hat, c: lk.fit, k: lk.pick, hd: lk.handle, pt: lk.pet, g: lk.glow, sx: lk.sex === 'f' ? 'f' : 'm', lvl: level(), tr: s.loadout.trail, ...(w ? { w } : {}) },
   });
 }
 export const arenaPos = () => myPos;
@@ -449,7 +479,7 @@ let lastBroadcast = 0;
 function broadcastMatch() {
   const m = useArena.getState().match;
   lastBroadcast = Date.now();
-  send('m', { h: useArena.getState().me, n: m.n, mode: m.mode, ph: m.phase, left: Math.max(0, m.endsAt - Date.now()), fi: m.fighters, out: m.out, sc: m.score, win: m.winner, wn: m.winnerName, boss: m.boss ? { x: Math.round(m.boss.x), y: Math.round(m.boss.y), hp: m.boss.hp, max: m.boss.max, a: m.boss.atk ?? '', aa: m.boss.atk ? Date.now() - m.boss.atkAt : -1, hd: m.boss.hitDone ? 1 : 0, f: m.boss.facing } : null, mb: m.mobs.map((x) => [x.i, Math.round(x.x), x.hp, x.f, Date.now() - x.atkAt < 400 ? 1 : 0]) });
+  send('m', { h: useArena.getState().me, n: m.n, mode: m.mode, ph: m.phase, left: Math.max(0, m.endsAt - Date.now()), fi: m.fighters, out: m.out, sc: m.score, win: m.winner, wn: m.winnerName, boss: m.boss ? { x: Math.round(m.boss.x), y: Math.round(m.boss.y), hp: m.boss.hp, max: m.boss.max, a: m.boss.atk ?? '', aa: m.boss.atk ? Date.now() - m.boss.atkAt : -1, hd: m.boss.hitDone ? 1 : 0, f: m.boss.facing } : null, mb: m.mobs.map((x) => [x.i, Math.round(x.x), x.hp, x.f, Date.now() - x.atkAt < 400 ? 1 : 0, x.max]), wv: m.wave ? [m.wave.n, m.wave.toSpawn, Math.max(0, m.wave.startAt - Date.now())] : null });
 }
 function setMatch(m: Partial<Match>, tell = true) {
   useArena.setState((s) => ({ match: { ...s.match, ...m } }));
@@ -460,13 +490,13 @@ function setMatch(m: Partial<Match>, tell = true) {
 function startPhase(phase: Phase, mode: Mode, now: number) {
   const s = useArena.getState();
   if (phase === 'count') {
-    const fighters = presentIds();
+    const fighters = mode === 'waves' ? presentIds().slice(0, WAVE_SQUAD) : presentIds();
     const hp = BOSS_BASE_HP + BOSS_HP_PER * Math.max(0, fighters.length - 1);
     const boss: Boss | null = mode === 'boss' ? { x: Math.round(AW * 0.72), y: GROUND, hp, max: hp, atk: null, atkAt: 0, hitDone: false, lastAtk: now, hitAt: 0, facing: -1 } : null;
-    setMatch({ host: s.me, n: s.match.n + 1, mode, phase, endsAt: now + COUNT_MS, fighters, out: [], score: {}, winner: null, winnerName: null, boss, mobs: [] });
-  } else if (phase === 'fight') setMatch({ phase, endsAt: now + FIGHT_MS[mode] });
+    setMatch({ host: s.me, n: s.match.n + 1, mode, phase, endsAt: now + COUNT_MS, fighters, out: [], score: {}, winner: null, winnerName: null, boss, mobs: [], wave: null });
+  } else if (phase === 'fight') setMatch({ phase, endsAt: now + FIGHT_MS[mode], wave: mode === 'waves' ? { n: 1, toSpawn: waveSize(1), startAt: now + 1500 } : null });
   else if (phase === 'end') setMatch({ phase, endsAt: now + END_MS });
-  else setMatch({ phase: 'wait', endsAt: 0, fighters: [], out: [], score: {}, boss: null, mobs: [], winner: null, winnerName: null });
+  else setMatch({ phase: 'wait', endsAt: 0, fighters: [], out: [], score: {}, boss: null, mobs: [], wave: null, winner: null, winnerName: null });
 }
 
 function hostTick() {
@@ -484,7 +514,10 @@ function hostTick() {
   if (m.phase === 'wait') {
     // pick the next mode that fits the crowd: two or more for a fight between miners, the boss works solo
     let mode = m.n ? nextMode(m.mode) : 'lms';
-    if (present.length < 2) mode = 'boss';
+    // Crawler Waves only when every miner here has an app that knows it
+    if (mode === 'waves' && present.some((id) => id !== s.me && (s.peers[id]?.v ?? 1) < 2)) mode = nextMode(mode);
+    // alone: the co-op modes, in turn
+    if (present.length < 2) mode = m.mode === 'boss' && m.n ? 'waves' : 'boss';
     startPhase('count', mode, now);
   } else if (m.phase === 'count' && now >= m.endsAt) {
     startPhase('fight', m.mode, now);
@@ -514,6 +547,17 @@ function hostTick() {
       if (m.boss.hp <= 0) return finish('boss-down', now);
       if (!alive.filter((id) => !gone.includes(id)).length) return finish(null, now);
     }
+    if (m.mode === 'waves') {
+      const gone = alive.filter((id) => (id === s.me ? s.spectator : s.peers[id]?.spectator));
+      if (gone.length) setMatch({ out: [...new Set([...m.out, ...gone])] });
+      if (!alive.filter((id) => !gone.includes(id)).length) return finish(null, now);
+      const w = m.wave;
+      // a wave is done when none are left to come out and none are standing: the next one, or the win
+      if (w && now >= w.startAt && w.toSpawn <= 0 && !m.mobs.length) {
+        if (w.n >= WAVES) return finish('waves-won', now);
+        setMatch({ wave: { n: w.n + 1, toSpawn: waveSize(w.n + 1), startAt: now + WAVE_REST_MS } });
+      }
+    }
     mobsThink(alive.filter((id) => !(id === s.me ? s.spectator : s.peers[id]?.spectator)), now);
     if (now - lastPickAt > 9000) spawnPickups(now, false);
     if (now >= m.endsAt) {
@@ -533,7 +577,7 @@ function hostTick() {
 
 function finish(winner: string | null, now: number) {
   const m = useArena.getState().match;
-  setMatch({ winner, winnerName: winner === 'boss-down' ? 'THE MINERS' : winner ? nameOf(winner) : null, phase: 'end', endsAt: now + END_MS, boss: m.boss ? { ...m.boss, hp: Math.max(0, m.boss.hp) } : null, mobs: [] });
+  setMatch({ winner, winnerName: winner === 'boss-down' || winner === 'waves-won' ? 'THE MINERS' : winner ? nameOf(winner) : null, phase: 'end', endsAt: now + END_MS, boss: m.boss ? { ...m.boss, hp: Math.max(0, m.boss.hp) } : null, mobs: [] });
   const done = useArena.getState().match;
   hostResultListeners.forEach((f) => f(done));
   applyResult(done);
@@ -673,7 +717,7 @@ function onEmote(p: any) {
  */
 const pvp = () => {
   const m = useArena.getState().match;
-  return m.phase === 'fight' && m.mode !== 'boss';
+  return m.phase === 'fight' && !coop(m.mode);
 };
 /** The nearest dizzy foe you could grab right now, if any (for the GRAB button). */
 export function grabbable(): string | null {
@@ -774,7 +818,7 @@ useBrawl.subscribe((b, prev) => {
 /** In a raid with friends a knockdown keeps you down until someone gets you up (or time runs out). */
 export function downMode(): boolean {
   const m = useArena.getState().match;
-  return m.mode === 'boss' && m.phase === 'fight' && m.fighters.length >= 2;
+  return coop(m.mode) && m.phase === 'fight' && m.fighters.length >= 2;
 }
 function goDown() {
   const at = Date.now();
@@ -921,10 +965,14 @@ function mobsThink(alive: string[], now: number) {
   const targets = alive.filter((id) => !(id === s.me ? useBrawl.getState().me.koAt : useBrawl.getState().peers[id]?.koAt));
   let mobs = m.mobs.map((x) => ({ ...x }));
   let loud = false;
-  if (mobsOn && now - lastMobAt > MOB_EVERY[m.mode] && mobs.length < MOB_MAX[m.mode] && targets.length) {
+  const w = m.mode === 'waves' ? m.wave : null;
+  const canSpawn = m.mode === 'waves' ? Boolean(w && now >= w.startAt && w.toSpawn > 0) : true;
+  if (mobsOn && canSpawn && now - lastMobAt > MOB_EVERY[m.mode] && mobs.length < MOB_MAX[m.mode] && targets.length) {
     lastMobAt = now;
     const left = mobSeq % 2 === 0;
-    mobs.push({ i: mobSeq++, x: left ? WALL_L + 8 : WALL_R - 8, hp: MOB_HP, max: MOB_HP, f: left ? 1 : -1, atkAt: 0, hitAt: 0 });
+    const hp = w ? waveHp(w.n) : MOB_HP;
+    mobs.push({ i: mobSeq++, x: left ? WALL_L + 8 : WALL_R - 8, hp, max: hp, f: left ? 1 : -1, atkAt: 0, hitAt: 0 });
+    if (w) useArena.setState((st) => ({ match: { ...st.match, wave: st.match.wave ? { ...st.match.wave, toSpawn: st.match.wave.toSpawn - 1 } : null } }));
     loud = true;
   }
   for (const mob of mobs) {
@@ -956,10 +1004,10 @@ function parseMobs(v: unknown): Mob[] {
   return v
     .slice(0, 8)
     .filter((x): x is number[] => Array.isArray(x) && x.length >= 4 && x.every((n) => typeof n === 'number' && Number.isFinite(n)))
-    .map(([i, x, hp, f, bit]) => {
+    .map(([i, x, hp, f, bit, mx]) => {
       const was = old.get(Math.floor(i));
       const h = Math.max(0, Math.min(999, hp));
-      return { i: Math.floor(i), x: num(x, 0, AW), hp: h, max: MOB_HP, f: f === -1 ? -1 : 1, atkAt: bit ? (was && now - was.atkAt < 600 ? was.atkAt : now) : was?.atkAt ?? 0, hitAt: was && h < was.hp ? now : was?.hitAt ?? 0 } as Mob;
+      return { i: Math.floor(i), x: num(x, 0, AW), hp: h, max: Number.isFinite(mx) ? num(mx, 1, 999) : MOB_HP, f: f === -1 ? -1 : 1, atkAt: bit ? (was && now - was.atkAt < 600 ? was.atkAt : now) : was?.atkAt ?? 0, hitAt: was && h < was.hp ? now : was?.hitAt ?? 0 } as Mob;
     });
 }
 /** A miner hit a crawler. The host checks it was close enough and takes the HP off. */
@@ -1032,6 +1080,7 @@ function onMatch(p: any) {
     winnerName: typeof p.wn === 'string' ? cleanName(p.wn) || (p.wn === 'THE MINERS' ? p.wn : null) : null,
     boss,
     mobs: parseMobs(p.mb),
+    wave: Array.isArray(p.wv) && p.wv.length >= 3 ? { n: Math.floor(num(p.wv[0], 1, WAVES)), toSpawn: Math.floor(num(p.wv[1], 0, 99)), startAt: now + num(p.wv[2], 0, 60_000) } : null,
   };
   useArena.setState({ match: m });
   onMatchChanged(m);
@@ -1063,6 +1112,7 @@ function applyResult(m: Match) {
   const fought = m.fighters.includes(s.me);
   if (!fought) return;
   if (m.mode === 'boss' && m.winner === 'boss-down') awardFightXp(BOSS_XP);
+  else if (m.mode === 'waves' && m.winner === 'waves-won') awardFightXp(WAVES_XP);
   else if (m.winner === s.me && m.fighters.length >= 2) awardFightXp(WIN_XP);
   resultListeners.forEach((f) => f(m));
 }

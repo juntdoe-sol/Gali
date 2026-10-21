@@ -180,7 +180,46 @@ async function hitUntilDown(A, B, x, y) {
   assert.equal(B.useArena.getState().match.mobs.length, 0, 'gone for B too');
   assert.equal(B.xp, A.MOB_XP, 'B gets the kill XP');
   assert.equal(A.xp, 0, 'A did not');
-  console.log('arena play: emotes, grab and throw, raid revive, crawlers all OK');
+
+  // ---- Crawler Waves: no hits between miners; clearing the last wave wins XP for the squad
+  A._arenaTest.mobs(false);
+  const t0 = Date.now();
+  const waves = (P) => P.useArena.setState((s) => ({ spectator: false, match: { ...s.match, host: 'a1', mode: 'waves', phase: 'fight', endsAt: t0 + 60_000, fighters: ['a1', 'b2'], out: [], boss: null, mobs: [], wave: { n: 2, toSpawn: 3, startAt: t0 - 10 } } }));
+  waves(A);
+  waves(B);
+  for (const P of [A, B]) P.useBrawl.setState((s) => ({ me: { ...s.me, hp: 100, koAt: 0, shieldUntil: 0 } }));
+  A.at(150, 198);
+  B.at(160, 198);
+  await wait(300);
+  A.swing('arena', 'b2', 150, 198);
+  await wait(100);
+  assert.equal(B.useBrawl.getState().me.hp, 100, 'no friendly fire in Crawler Waves');
+  // the host's word reaches B, wave and all
+  A._arenaTest.hostTick();
+  await wait(100);
+  assert.equal(B.useArena.getState().match.mode, 'waves');
+  assert.equal(B.useArena.getState().match.wave?.n, 2, 'B sees wave 2');
+  // crawlers come out of the walls for the wave, a little tougher each wave
+  A._arenaTest.mobs(true);
+  for (let k = 0; k < 12; k++) {
+    A._arenaTest.hostTick();
+    await wait(260);
+  }
+  const wv = A.useArena.getState().match;
+  assert.ok(wv.mobs.length >= 2, 'wave 2 crawlers are out: ' + wv.mobs.length);
+  assert.equal(wv.mobs[0].max, A.waveHp(2), 'wave 2 HP');
+  assert.equal(wv.wave.toSpawn, 3 - wv.mobs.length, 'counted down as they came out');
+  assert.equal(B.useArena.getState().match.mobs[0]?.max, A.waveHp(2), 'B sees their HP');
+  A._arenaTest.mobs(false);
+  // the last wave, cleared: the squad wins
+  const xpB = B.xp;
+  A.useArena.setState((s) => ({ match: { ...s.match, mobs: [], wave: { n: A.WAVES, toSpawn: 0, startAt: Date.now() - 10 } } }));
+  A._arenaTest.hostTick();
+  await wait(100);
+  assert.equal(A.useArena.getState().match.winner, 'waves-won');
+  assert.equal(B.useArena.getState().match.phase, 'end');
+  assert.equal(B.xp - xpB, A.WAVES_XP, 'B gets the waves XP');
+  console.log('arena play: emotes, grab and throw, raid revive, crawlers, crawler waves all OK');
   process.exit(0);
 })().catch((e) => {
   console.error(e);

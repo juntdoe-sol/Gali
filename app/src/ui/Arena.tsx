@@ -10,7 +10,7 @@ import { Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Vie
 import { loadJson, saveJson } from '../game/storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, levelFromXp } from '../game/constants';
-import { hurtMob, mobKillListeners, cheer, downMode, effectiveLoadout, emote, EMOTE_MS, EMOTES, grab, grabbable, hostId, hurtBoss, isHost, MODE_NAME, publishArenaMe, REVIVE_MS, reviveListeners, setEmoteOpen, shareRevive, shareThrow, sharePower, throwHeld, tryGrab, useArena, KOTH_WIN, type Emote, type Mode } from '../game/arena';
+import { coop, WAVE_SQUAD, WAVES, WAVES_XP, waveSize, hurtMob, mobKillListeners, cheer, downMode, effectiveLoadout, emote, EMOTE_MS, EMOTES, grab, grabbable, hostId, hurtBoss, isHost, MODE_NAME, publishArenaMe, REVIVE_MS, reviveListeners, setEmoteOpen, shareRevive, shareThrow, sharePower, throwHeld, tryGrab, useArena, KOTH_WIN, type Emote, type Mode } from '../game/arena';
 import { brawlSnap, guard, heal, jump, setMyPos, strike, swing, useBrawl } from '../game/brawl';
 import { fightPoints, titleOf, TRAILS, trailUnlocked, useFightStats } from '../game/fightGear';
 import { ACTIVES, MEND_HP, PASSIVES, POWERS, POWER_KEY, baseDamage, unlocked, type ActiveId, type PowerId } from '../game/powers';
@@ -295,6 +295,9 @@ function TopBar({ top, onPanel }: { top: number; onPanel: (p: 'powers' | 'ranks'
   else if (m.mode === 'koth') {
     const best = Object.entries(m.score).sort((a, b) => b[1] - a[1])[0];
     sub = best ? `${best[0] === me ? 'YOU' : peers[best[0]]?.name ?? '?'} ${Math.floor(best[1])}/${KOTH_WIN}s in the ring` : `Hold the ring alone for ${KOTH_WIN}s`;
+  } else if (m.mode === 'waves') {
+    const w = m.wave;
+    sub = w ? `Wave ${w.n} of ${WAVES} · ${w.toSpawn + m.mobs.length} crawlers left · squad of ${m.fighters.length}` : `Hold the hall: ${WAVES} waves`;
   } else if (m.boss) sub = `Boss ${Math.ceil((m.boss.hp / m.boss.max) * 100)}% HP`;
   return (
     <View style={[styles.top, { top }]} pointerEvents="box-none">
@@ -341,7 +344,7 @@ function Controls({ bottom, desk, arena }: { bottom: number; desk: boolean; aren
         <View style={styles.ctrlRow} pointerEvents="box-none">
           <PixelBox fill="rgba(8,13,32,0.88)" hi={COLORS.trim} lo="#04060f" style={styles.watch}>
             <T v="bold" style={{ fontSize: 13, textAlign: 'center' }}>
-              {a.match.phase === 'fight' ? 'You are in the stands. Cheer them on: the next match starts soon.' : 'Get ready: you are in the next match.'}
+              {a.match.phase === 'fight' || (a.match.phase === 'count' && a.match.mode === 'waves') ? 'You are in the stands. Cheer them on: the next match starts soon.' : 'Get ready: you are in the next match.'}
             </T>
           </PixelBox>
         </View>
@@ -353,7 +356,7 @@ function Controls({ bottom, desk, arena }: { bottom: number; desk: boolean; aren
       </View>
     );
   }
-  const pvp = a.match.mode !== 'boss';
+  const pvp = !coop(a.match.mode);
   const canGrab = Boolean(a.holding?.ok) || Boolean(grabbable());
   if (desk) {
     // PC: a skill bar like a MOBA. Mouse to fight, keys for powers.
@@ -436,9 +439,15 @@ function Banner() {
   let small = '';
   if (m.phase === 'count') {
     big = String(Math.max(1, Math.ceil((m.endsAt - Date.now()) / 1000)));
-    small = MODE_NAME[m.mode];
+    small = m.mode === 'waves' ? `${MODE_NAME.waves} · squad of ${Math.min(WAVE_SQUAD, m.fighters.length)}` : MODE_NAME[m.mode];
+  } else if (m.phase === 'fight' && m.mode === 'waves' && m.wave && Date.now() < m.wave.startAt) {
+    big = m.wave.n === WAVES ? 'FINAL WAVE' : `WAVE ${m.wave.n}`;
+    small = `${waveSize(m.wave.n)} crawlers coming`;
   } else if (m.phase === 'end') {
-    if (m.mode === 'boss') {
+    if (m.mode === 'waves') {
+      big = m.winner === 'waves-won' ? 'HALL HELD!' : 'THE CRAWLERS WIN';
+      small = m.winner === 'waves-won' ? `Every miner in the squad gets ${WAVES_XP} XP` : 'Next match soon';
+    } else if (m.mode === 'boss') {
       big = m.winner === 'boss-down' ? 'BOSS DOWN!' : 'THE TWO-MOUTHED WINS';
       small = m.winner === 'boss-down' ? 'Everyone who fought gets XP' : 'Next match soon';
     } else {
