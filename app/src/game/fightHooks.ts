@@ -1,5 +1,5 @@
 /**
- * Where Brawl's moments go: your fight record (game/fightGear.ts) and the weekly ranks (game/ranks.ts).
+ * Where Brawl's moments go: your fight record (game/fightGear.ts) and the ranks (game/ranks.ts).
  * A KO counts for the ranks when the miner who went down reports it; a win when the arena host does.
  */
 import { hostResultListeners, resultListeners, useArena } from './arena';

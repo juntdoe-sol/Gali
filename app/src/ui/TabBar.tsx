@@ -19,7 +19,7 @@ const C = LANDSCAPE_APP;
 import { PixIcon } from './PixIcon';
 import type { PixName } from './pixIcons';
 
-export type SheetTab = 'quests' | 'rounds' | 'gear' | 'skr' | 'ranks' | 'me';
+export type SheetTab = 'quests' | 'rounds' | 'gear' | 'skr' | 'ranks' | 'clans' | 'me';
 
 /** Height of the bar above the safe-area inset. The panel and the map frame sit on top of it. */
 export const BAR_H = 64;
@@ -31,6 +31,7 @@ export const TAB_ICON: Record<SheetTab | 'chat' | 'mine', ImageSourcePropType> =
   gear: require('../../assets/ui/tab-store.png'),
   skr: require('../../assets/ui/tab-boost.png'),
   ranks: require('../../assets/ui/tab-ranks.png'),
+  clans: require('../../assets/ui/tab-me.png'),
   me: require('../../assets/ui/tab-me.png'),
   chat: require('../../assets/ui/tab-chat.png'),
   mine: require('../../assets/brand/logo.png'),
@@ -42,12 +43,13 @@ export const TAB_PIX: Record<SheetTab | 'chat', PixName> = {
   gear: 'bag',
   skr: 'bolt',
   ranks: 'trophy',
+  clans: 'users',
   me: 'user',
   chat: 'chat',
 };
 
 /** Keyboard shortcuts for the tabs on a desktop browser (see useHotkeys in App.tsx). */
-export const TAB_KEY: Record<SheetTab | 'chat', string> = { quests: 'Q', rounds: 'R', gear: 'B', skr: 'T', ranks: 'K', me: 'P', chat: 'C' };
+export const TAB_KEY: Record<SheetTab | 'chat', string> = { quests: 'Q', rounds: 'R', gear: 'B', skr: 'T', ranks: 'K', clans: 'N', me: 'P', chat: 'C' };
 
 export const SHEET_TITLE: Record<SheetTab, string> = {
   quests: 'Quests',
@@ -55,6 +57,7 @@ export const SHEET_TITLE: Record<SheetTab, string> = {
   gear: 'Market',
   skr: 'Boost',
   ranks: 'Ranks',
+  clans: 'Clans',
   me: 'Profile',
 };
 
@@ -62,21 +65,21 @@ type Item = { id: SheetTab | 'chat'; label: string };
 const LEFT: Item[] = [
   { id: 'quests', label: 'QUEST' },
   { id: 'rounds', label: 'ROUNDS' },
-  { id: 'gear', label: 'MARKET' },
+  { id: 'skr', label: 'BOOST' },
 ];
 const RIGHT: Item[] = [
-  { id: 'skr', label: 'BOOST' },
   { id: 'ranks', label: 'RANKS' },
+  { id: 'clans', label: 'CLANS' },
   { id: 'chat', label: 'CHAT' },
 ];
 
-/** The lobby bar drops QUEST and ROUNDS (they belong to the island); the games live in the TRAVEL menu. */
+/** The lobby bar drops QUEST and ROUNDS (they belong to the island); the games and the market live in the TRAVEL menu. */
 const LOBBY_LEFT: Item[] = [
-  { id: 'gear', label: 'MARKET' },
   { id: 'skr', label: 'BOOST' },
+  { id: 'ranks', label: 'RANKS' },
 ];
 const LOBBY_RIGHT: Item[] = [
-  { id: 'ranks', label: 'RANKS' },
+  { id: 'clans', label: 'CLANS' },
   { id: 'chat', label: 'CHAT' },
 ];
 
