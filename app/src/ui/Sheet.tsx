@@ -421,6 +421,9 @@ function Ranks() {
       : [...miners.rows].sort((a, b) => b.gain - a.gain);
   const status = tab === 'brawl' ? brawl.status : miners.status;
   const when = PERIOD_WORDS[period];
+  // the server has no period boards yet: say so, and show all time
+  const fallback = tab !== 'brawl' && miners.allOnly && period !== 'all';
+  const shownPeriod: Period = tab !== 'brawl' && miners.allOnly ? 'all' : period;
   return (
     <>
       <View style={{ flexDirection: 'row', gap: 6 }}>
@@ -446,13 +449,18 @@ function Ranks() {
       ) : (
         <>
           <PeriodPicker period={period} onPick={setPeriod} />
+          {fallback ? (
+            <T v="bold" style={{ fontSize: 12, color: COLORS.gold }}>
+              Today, month and year boards switch on with the next server update. Showing all time for now.
+            </T>
+          ) : null}
           <T v="muted" style={{ fontSize: 12 }}>
             {tab === 'level'
-              ? period === 'all'
+              ? shownPeriod === 'all'
                 ? 'Every Gali miner with a wallet, by XP. You: level ' + levelFromXp(xp) + ' · ' + points.toLocaleString() + ' pts.'
                 : `XP gained ${when}, by every Gali miner with a wallet. Days start at midnight Malaysia time.`
               : tab === 'ore'
-                ? period === 'all'
+                ? shownPeriod === 'all'
                   ? 'Lifetime ORE mined on ORE, read from each wallet on chain.'
                   : `ORE mined ${when}: the chain's total now, minus where each wallet stood when the ${period} began.`
                 : brawl.weekOnly
@@ -519,7 +527,7 @@ function Ranks() {
                 </View>
                 <T v="muted">Lv {r.level}</T>
                 <T v="display" style={{ color: COLORS.gold, fontSize: 18, minWidth: 84, textAlign: 'right' }}>
-                  {tab === 'ore' ? `${period === 'all' ? '' : '+'}${(r.oreGain ?? 0).toFixed(2)}` : `${period === 'all' ? '' : '+'}${r.gain.toLocaleString()}`}
+                  {tab === 'ore' ? `${shownPeriod === 'all' ? '' : '+'}${(r.oreGain ?? 0).toFixed(2)}` : `${shownPeriod === 'all' ? '' : '+'}${r.gain.toLocaleString()}`}
                 </T>
                 <T v="muted" style={{ fontSize: 10, width: 26 }}>
                   {tab === 'ore' ? 'ORE' : 'XP'}
