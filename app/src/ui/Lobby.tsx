@@ -32,6 +32,7 @@ import { BAR_H, TabBar, type SheetTab } from './TabBar';
 import { Arcade } from './Arcade';
 import { PixIcon } from './PixIcon';
 import { DisconnectBtn } from './Hud';
+import { fx } from '../pixel/fx';
 import { DANCES } from '../game/dances';
 import { loadPotw, usePotw } from '../game/ranks';
 import { InboxBtn } from './Dm';
@@ -1044,6 +1045,9 @@ function NamePrompt({ first, onDone }: { first: boolean; onDone: () => void }) {
   );
 }
 
+/** the island's walking stick radius, CSS px (engine/engine.ts draws it the same size) */
+const STICK_R = 50;
+
 /** "Back to lobby" on the island. Hidden while a panel has the screen. */
 export function LobbyBack() {
   const insets = useSafeAreaInsets();
@@ -1052,8 +1056,13 @@ export function LobbyBack() {
   const where = useLobby((s) => s.where);
   const ch = useChrome(insets);
   const brawlOn = useBrawl((b) => !b.off);
-  if (where !== 'island' || (dockOpen && !ch.desktop) || inside) return null;
   const bottom = ch.desktop ? ch.bottom : insets.bottom + BAR_H + 46;
+  // a touch screen gets a walking stick bottom left, above the LOBBY pill (the canvas draws it)
+  const touch = !ch.desktop || LANDSCAPE_APP;
+  const shown = where === 'island' && !(dockOpen && !ch.desktop) && !inside;
+  fx.stick = touch && shown ? { left: ch.left + 22 + STICK_R, bottom: bottom + 64 + STICK_R } : null;
+  useEffect(() => () => void (fx.stick = null), []);
+  if (!shown) return null;
   const fight = brawlOn ? <MapButton instant label="HIT" kbd={ch.desktop ? 'LMB' : undefined} icon={<PixIcon name="fist" size={20} />} accessibilityLabel="Hit: swing your pickaxe" onPress={islandFight} /> : null;
   return (
     <>

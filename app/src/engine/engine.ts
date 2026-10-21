@@ -137,6 +137,8 @@ export class Engine {
   private tapTimer: ReturnType<typeof setTimeout> | null = null;
   /** WASD / arrow keys held down (web) */
   private keys = new Set<string>();
+  /** the walking stick (touch screens): which finger holds it, and how far it is pushed (-1..1) */
+  private stick: { id: number; dx: number; dy: number } | null = null;
   private keyWalk = false;
   private keyAim: [number, number] = [0, 0];
   private onIsland = false;
@@ -502,14 +504,21 @@ export class Engine {
     if (k.has('arrowright') || k.has('d')) dx += 1;
     if (k.has('arrowup') || k.has('w')) dy -= 1;
     if (k.has('arrowdown') || k.has('s')) dy += 1;
+    // the stick: how far you push it is how fast you walk
+    let pace = 1;
+    if (this.stick && Math.hypot(this.stick.dx, this.stick.dy) > 0.18) {
+      dx = this.stick.dx;
+      dy = this.stick.dy;
+      pace = Math.min(1, Math.hypot(dx, dy) * 1.15);
+    }
     if ((!dx && !dy) || !this.onIsland || this.mode !== 'island') return false;
     const n = Math.hypot(dx, dy);
     const ux = dx / n;
     const uy = dy / n;
     const me = this.me;
     const ok = (x: number, y: number) => isLand(x, y) && isLand(x - 4, y) && isLand(x + 4, y);
-    const nx = me.x + ux * KEY_SPEED * dt;
-    const ny = me.y + uy * KEY_SPEED * dt;
+    const nx = me.x + ux * KEY_SPEED * pace * dt;
+    const ny = me.y + uy * KEY_SPEED * pace * dt;
     if (ok(nx, ny)) {
       me.x = nx;
       me.y = ny;
@@ -593,6 +602,7 @@ export class Engine {
     if (this.mode === 'island') this.drawIsland(c, now, dt, el);
     else if (this.mode === 'closeup') this.drawCloseup(c, now, dt, el);
     else this.drawTransition(c, t, now, dt, el);
+    if (this.mode === 'island') this.drawStick(c);
     this.prof('draw', t0);
 
     if (!this.ready) {
@@ -1423,6 +1433,13 @@ export class Engine {
     cv.addEventListener('contextmenu', (e) => e.preventDefault());
     cv.addEventListener('pointerdown', (e) => {
       const p = pos(e);
+      const sb = this.stickBase();
+      if (sb && !this.stick && this.mode === 'island' && e.pointerType !== 'mouse' && Math.hypot(p.x - sb.x, p.y - sb.y) < sb.r * 1.4) {
+        cv.setPointerCapture?.(e.pointerId);
+        this.stick = { id: e.pointerId, dx: 0, dy: 0 };
+        this.stickMove(p.x, p.y);
+        return;
+      }
       this.mouseTap = e.pointerType === 'mouse';
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       cv.setPointerCapture?.(e.pointerId);
@@ -1438,6 +1455,7 @@ export class Engine {
       }
     });
     cv.addEventListener('pointermove', (e) => {
+      if (this.stick && this.stick.id === e.pointerId) return this.stickMove(pos(e).x, pos(e).y);
       const q = this.pointers.get(e.pointerId);
       if (!q) return;
       const p = pos(e);
@@ -1461,6 +1479,10 @@ export class Engine {
       } else if (this.moved) this.cam.pan(dx, dy); // the wider map can be looked over at any zoom
     });
     const up = (e: PointerEvent) => {
+      if (this.stick && this.stick.id === e.pointerId) {
+        this.stick = null;
+        return;
+      }
       const q = this.pointers.get(e.pointerId);
       this.pointers.delete(e.pointerId);
       if (this.pointers.size < 2) this.pinch = null;
@@ -1479,6 +1501,7 @@ export class Engine {
     };
     cv.addEventListener('pointerup', up);
     cv.addEventListener('pointercancel', (e) => {
+      if (this.stick && this.stick.id === e.pointerId) this.stick = null;
       this.pointers.delete(e.pointerId);
       this.pinch = null;
       this.cancelPress();
@@ -1493,6 +1516,51 @@ export class Engine {
       },
       { passive: false },
     );
+  }
+  /** Where the walking stick sits (CSS px), when the app wants one: touch screens, on the island. */
+  private stickBase(): { x: number; y: number; r: number } | null {
+    const st = this.snap?.stick;
+    if (!st || !this.onIsland) return null;
+    return { x: st.left, y: this.H - st.bottom, r: 50 };
+  }
+  private stickMove(x: number, y: number) {
+    const b = this.stickBase();
+    if (!this.stick || !b) return;
+    let dx = (x - b.x) / b.r;
+    let dy = (y - b.y) / b.r;
+    const d = Math.hypot(dx, dy);
+    if (d > 1) {
+      dx /= d;
+      dy /= d;
+    }
+    this.stick.dx = dx;
+    this.stick.dy = dy;
+  }
+  private drawStick(c: Ctx) {
+    const b = this.stickBase();
+    if (!b) {
+      this.stick = null;
+      return;
+    }
+    const d = this.dpr;
+    const on = Boolean(this.stick);
+    c.save();
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.globalAlpha = on ? 0.8 : 0.45;
+    c.fillStyle = 'rgba(8,13,32,0.55)';
+    c.beginPath();
+    c.arc(b.x * d, b.y * d, b.r * d, 0, Math.PI * 2);
+    c.fill();
+    c.lineWidth = 2 * d;
+    c.strokeStyle = '#ffd24a';
+    c.stroke();
+    const kx = b.x + (this.stick?.dx ?? 0) * b.r * 0.62;
+    const ky = b.y + (this.stick?.dy ?? 0) * b.r * 0.62;
+    c.fillStyle = '#ffd24a';
+    c.beginPath();
+    c.arc(kx * d, ky * d, 20 * d, 0, Math.PI * 2);
+    c.fill();
+    c.restore();
   }
   private cancelPress() {
     if (this.pressTimer) clearTimeout(this.pressTimer);
