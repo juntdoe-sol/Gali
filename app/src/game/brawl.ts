@@ -188,7 +188,11 @@ export const brawlHooks: {
   koed?: (scope: Scope, foeId: string, foeName: string | null, xp: number) => void;
   /** we were knocked out by `by` */
   kodBy?: (scope: Scope, by: string, byName: string | null) => void;
+  /** a knockdown here lasts until a teammate revives you (the arena's Boss Raid): don't stand up on a timer */
+  holdKo?: (scope: Scope) => boolean;
 } = {};
+/** how long a held knockdown can last before the room gives up on hearing its end (ms) */
+export const HELD_KO_MS = 12_000;
 /** when we last landed a hit on each foe (for KO credit) */
 const myHits = new Map<string, number>();
 /** when each attacker last hit us (rate check) */
@@ -298,8 +302,8 @@ function onBx(scope: Scope, p: any) {
       }
       if (ko) {
         sendHp(true, a);
-        brawlHooks.kodBy?.(scope, a, boss ? 'Mole Boss' : info?.name ?? null);
-        setTimeout(standUp, KO_MS);
+        brawlHooks.kodBy?.(scope, a, boss ? 'The Two-Mouthed' : info?.name ?? null);
+        if (!brawlHooks.holdKo?.(scope)) setTimeout(standUp, KO_MS);
       } else sendHp();
     } else {
       // someone else took a hit: show it now; their own word on their HP follows
@@ -357,7 +361,7 @@ function regen() {
       changed = true;
     }
     // a knockdown we never heard the end of
-    if (p.koAt && now - p.koAt > KO_MS + 4000) {
+    if (p.koAt && now - p.koAt > (brawlHooks.holdKo?.(s.scope) ? HELD_KO_MS + 3000 : KO_MS + 4000)) {
       peers[id] = { ...p, koAt: 0, hp: MAX_HP };
       changed = true;
     }
@@ -412,6 +416,39 @@ export function resetMe(shieldMs = SHIELD_MS) {
   const now = Date.now();
   useBrawl.setState((s) => ({ guardUntil: 0, me: { ...s.me, hp: MAX_HP, koAt: 0, hitAt: 0, shieldUntil: now + shieldMs, respawn: s.me.respawn + 1 } }));
   sendHp(true);
+}
+
+/** Arena: a teammate got you up (Boss Raid), or the raid gave up on you. You stay where you are. */
+export function reviveMe(hp: number, shieldMs = 2000) {
+  const now = Date.now();
+  const s = useBrawl.getState();
+  if (!s.me.koAt) return false;
+  useBrawl.setState({ me: { ...s.me, hp: Math.max(1, Math.min(MAX_HP, hp)), koAt: 0, hitAt: now, shieldUntil: now + shieldMs } });
+  sendHp(true);
+  return true;
+}
+
+/**
+ * Arena: you were thrown by `by` (who grabbed you while dizzy). You judge your own HP as always, so
+ * this applies the damage here, with a knockback away from `from`.
+ */
+export function takeThrow(scope: Scope, dmg: number, from: [number, number], by: string) {
+  const now = Date.now();
+  const s = useBrawl.getState();
+  if (scope !== s.scope || s.me.koAt || s.off || !rooms[scope]?.arena) return false;
+  const hp = Math.max(0, s.me.hp - Math.max(0, Math.round(dmg)));
+  const ko = hp <= 0;
+  useBrawl.setState({ me: { ...s.me, hp, hitAt: now, hitFrom: from, koAt: ko ? now : 0 } });
+  if (ko) {
+    sendHp(true, by);
+    brawlHooks.kodBy?.(scope, by, peerInfo(scope, by)?.name ?? null);
+    if (!brawlHooks.holdKo?.(scope)) setTimeout(standUp, KO_MS);
+  } else sendHp(true);
+  return true;
+}
+/** We grabbed and threw `foe`: count it as our hit, so the KO (if it comes) is ours. */
+export function markHit(foe: string) {
+  myHits.set(foe, Date.now());
 }
 
 /** Arena: how much HP a pickup gives back, or a shield. */

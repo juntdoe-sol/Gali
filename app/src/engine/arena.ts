@@ -17,12 +17,13 @@
 import { canvasDpr, reducedMotion } from './screen';
 import { ctx2d, text, textWidth, loadAtlas, type Ctx } from './art';
 import { drawMiner, drawPet, frameAt, type Body } from './actors';
-import { drawHp, drawKo, drawShield, FightFx, hitFlash, koAge, pickTarget, swingTilt } from './brawlfx';
+import { drawHp, drawKo, drawShield, FALL_MS, FightFx, hitFlash, koAge, LIE_MS, pickTarget, stars, swingTilt } from './brawlfx';
+import { drawEmote } from './emoteArt';
 import { Particles } from './particles';
 import type { BrawlSnap, Look, Pose } from './types';
 import {
-  AH, AW, BALCONY, BOSS_ACT_MS, BOSS_HALF, BOSS_TALL, BOSS_WIND2_MS, BOSS_WIND_MS, GROUND, inHall, LEDGES, ROAR_REACH, spawnAt, standsSpot,
-  SWEEP_REACH, THRONE, THROW_RANGE, TONGUE_REACH, WALL_L, WALL_R, type BossAtk, type Pickup, type Shot,
+  AH, AW, BALCONY, BOSS_ACT_MS, BOSS_HALF, BOSS_TALL, BOSS_WIND2_MS, BOSS_WIND_MS, DIZZY_HP, DOWN_MS, EMOTE_MS, EMOTES, GROUND, HOLD_MS, inGrabReach, inHall, inReviveReach, LEDGES, REVIVE_MS, ROAR_REACH, spawnAt, standsSpot,
+  SWEEP_REACH, THRONE, THROW_RANGE, TONGUE_REACH, WALL_L, WALL_R, type BossAtk, type Emote, type Pickup, type Shot,
 } from '../game/arenaMap';
 import { trailColor } from '../game/trails';
 import { drawFan, drawFlame, drawGlow, drawVignette, type Fan } from './arenaArt';
@@ -42,6 +43,14 @@ export type ArenaEvent =
   | { t: 'grab'; i: number }
   | { t: 'peer'; id: string }
   | { t: 'clip'; url: string; mime: string }
+  /** T: open or close the emote picker; a pick from it */
+  | { t: 'emoteMenu' }
+  | { t: 'emote'; e: string }
+  /** reach for a dizzy foe next to you, throw the one you carry */
+  | { t: 'grabFoe'; target: string }
+  | { t: 'throwHeld'; d: 1 | -1 }
+  /** Boss Raid: standing over a downed teammate, stepped away, or held on long enough */
+  | { t: 'revive'; target: string; state: 'on' | 'off' | 'done' }
   | { t: 'sfx'; name: 'swing' | 'hit' | 'pop' | 'slam' | 'throw' | 'pick' | 'cheer' | 'ko' };
 
 export interface ArenaPeerView {
@@ -59,13 +68,32 @@ export interface ArenaPeerView {
   fx: { p: string; at: number } | null;
 }
 export interface ArenaSnap {
-  me: { id: string; spectator: boolean; ammo: number; actives: string[]; passive: string | null; ready: Record<string, number>; trail: string; guardUntil: number };
+  me: {
+    id: string;
+    spectator: boolean;
+    ammo: number;
+    actives: string[];
+    passive: string | null;
+    ready: Record<string, number>;
+    trail: string;
+    guardUntil: number;
+    emoteOpen?: boolean;
+    /** who you carry (ok once they agreed), who carries you, and your last throw */
+    holding?: { id: string; ok: boolean; at: number } | null;
+    heldBy?: string | null;
+    thrown?: { at: number; d: 1 | -1 } | null;
+    /** down in a Boss Raid, waiting for help */
+    down?: boolean;
+  };
   peers: ArenaPeerView[];
   brawl: BrawlSnap;
-  match: { n: number; mode: string; phase: string; fighters: string[]; out: string[]; score: Record<string, number>; boss: { x: number; y: number; hp: number; max: number; atk: BossAtk | null; atkAt: number; hitAt: number; facing: 1 | -1 } | null };
+  match: { n: number; mode: string; phase: string; fighters: string[]; out: string[]; score: Record<string, number>; boss: { x: number; y: number; hp: number; max: number; atk: BossAtk | null; atkAt: number; hitAt: number; facing: 1 | -1 } | null; downMode?: boolean };
   pickups: Pickup[];
   shots: Shot[];
   cheers: { id: string; at: number }[];
+  emotes?: { id: string; e: string; at: number }[];
+  /** who is getting whom up, since when */
+  revives?: { id: string; t: string; at: number }[];
 }
 export interface ArenaOpts {
   /** CSS px the app's bars cover at the top and bottom */
@@ -172,6 +200,10 @@ export class ArenaEngine {
   private crowd: Fan[] = [];
   private lastEmber = 0;
   private grabbed = new Map<number, number>();
+  private lastThrown = 0;
+  private lastGrabTry = 0;
+  private autoThrown = 0;
+  private reviving: { id: string; at: number; sent: boolean } | null = null;
   private recorder: { rec: MediaRecorder; chunks: Blob[]; until: number } | null = null;
   private onKey = (e: KeyboardEvent) => this.key(e, true);
   private onKeyUp = (e: KeyboardEvent) => this.key(e, false);
@@ -285,6 +317,16 @@ export class ArenaEngine {
       this.fx.shake(200, 2.2, wall);
       this.emit({ t: 'sfx', name: 'hit' });
     }
+    // thrown: a long flight the way you were thrown
+    const th = s.me.thrown;
+    if (th && th.at !== this.lastThrown && wall - th.at < 1500) {
+      this.lastThrown = th.at;
+      this.knock = th.d * 250;
+      me.vy = -230;
+      me.grounded = false;
+      this.parts.burst('dust', me.x, me.y, 8, 22, 12, ['#f2e6c8', '#d8c8a8'], 0.5);
+      this.fx.say(me.x, me.y - 40, 'THROWN!', '#ff8a3d', wall);
+    }
     if (b.me.ko && (!prev || !prev.brawl.me.ko)) {
       this.fx.ko(me.x, me.y, wall);
       this.emit({ t: 'sfx', name: 'ko' });
@@ -343,7 +385,53 @@ export class ArenaEngine {
   /* ---------------- actions ---------------- */
   private downed(wall: number) {
     const b = this.snap?.brawl;
+    if (this.snap?.me.down || this.snap?.me.heldBy) return true;
     return b ? koAge(b.me, wall) >= 0 : false;
+  }
+  private holdingOk() {
+    const h = this.snap?.me.holding;
+    return Boolean(h && h.ok);
+  }
+  /** The nearest dizzy foe in reach (not in a raid, not while carrying or carried). */
+  private grabTarget(wall: number): string | null {
+    const s = this.snap;
+    if (!s || !this.fighting() || this.downed(wall) || s.match.mode === 'boss' || s.me.holding) return null;
+    const me = this.me;
+    let best: string | null = null;
+    let bd = Infinity;
+    for (const p of this.others.values()) {
+      const v = s.brawl.peers[p.view.id];
+      if (p.view.spectator || !v || !v.on || v.ko || v.hp > DIZZY_HP || wall < v.sh || p.view.p === 'held') continue;
+      if (!inGrabReach(me.x, me.y, p.x, p.y)) continue;
+      const d = Math.abs(p.x - me.x);
+      if (d < bd) {
+        bd = d;
+        best = p.view.id;
+      }
+    }
+    return best;
+  }
+  /** Z (or the GRAB button): grab a dizzy foe next to you, or throw the one you carry. */
+  grab() {
+    const wall = Date.now();
+    if (this.holdingOk()) {
+      this.emit({ t: 'throwHeld', d: this.me.facing });
+      return;
+    }
+    if (wall - this.lastGrabTry < 500) return;
+    const t = this.grabTarget(wall);
+    if (!t) {
+      this.fx.say(this.me.x, this.me.y - 40, 'NO ONE DIZZY', '#8ea2cc', wall);
+      this.lastGrabTry = wall;
+      return;
+    }
+    this.lastGrabTry = wall;
+    this.emit({ t: 'grabFoe', target: t });
+  }
+  /** Show an emote (from the picker). */
+  emote(i: number) {
+    const e = EMOTES[i];
+    if (e) this.emit({ t: 'emote', e });
   }
   private fighting() {
     const s = this.snap;
@@ -359,6 +447,7 @@ export class ArenaEngine {
 
   attack() {
     const wall = Date.now();
+    if (this.holdingOk()) return void this.emit({ t: 'throwHeld', d: this.me.facing });
     if (!this.fighting() || this.downed(wall) || wall - this.lastSwing < 450) return;
     this.lastSwing = wall;
     const me = this.me;
@@ -412,7 +501,7 @@ export class ArenaEngine {
   power(p: string) {
     const s = this.snap;
     const wall = Date.now();
-    if (!s || !this.fighting() || this.downed(wall) || !this.canUse(p, wall)) return;
+    if (!s || !this.fighting() || this.downed(wall) || s.me.holding || !this.canUse(p, wall)) return;
     this.usedAt.set(p, wall);
     const me = this.me;
     if (this.aim && (p === 'dash' || p === 'splash') && Math.abs(this.aim[0] - me.x) > 3) me.facing = this.aim[0] > me.x ? 1 : -1;
@@ -592,8 +681,21 @@ export class ArenaEngine {
     }
     // powers: the letter keys, or 1 to 6, in the same order
     const slot = SLOT_KEYS.indexOf(k) >= 0 ? SLOT_KEYS.indexOf(k) : /^[1-6]$/.test(k) ? Number(k) - 1 : -1;
+    const picking = Boolean(this.snap?.me.emoteOpen);
+    if (down && !e.repeat && (k === 't' || (picking && k === 'escape'))) {
+      this.emit({ t: 'emoteMenu' });
+      e.preventDefault();
+      return;
+    }
+    // the emote picker is open: 1 to 6 pick an emote instead of a power
+    if (down && !e.repeat && picking && /^[1-6]$/.test(k)) {
+      this.emote(Number(k) - 1);
+      e.preventDefault();
+      return;
+    }
     if (down && !e.repeat) {
-      if (k === 'f') this.attack();
+      if (k === 'z') this.grab();
+      else if (k === 'f') this.attack();
       else if (k === ' ' || k === 'spacebar' || k === 'w' || k === 'arrowup') this.jump();
       else if (k === 's' || k === 'arrowdown') this.drop();
       else if (k === 'g') this.throwOre(this.aim);
@@ -673,7 +775,17 @@ export class ArenaEngine {
     }
     let moving = false;
     const spectator = Boolean(this.snap?.me.spectator);
-    if (spectator) {
+    const carrier = this.snap?.me.heldBy ? this.others.get(this.snap.me.heldBy) : undefined;
+    const carrying = this.holdingOk();
+    if (carrier && !spectator) {
+      // carried over someone's head: you go where they go
+      me.x = Math.max(WALL_L + 4, Math.min(WALL_R - 4, carrier.x));
+      me.y = Math.max(4, carrier.y - 18);
+      me.vy = 0;
+      me.grounded = false;
+      me.facing = carrier.facing;
+      this.knock = 0;
+    } else if (spectator) {
       // on the balcony: walk along it, no jumping
       me.y = BALCONY.y;
       me.vy = 0;
@@ -702,7 +814,7 @@ export class ArenaEngine {
       moving = true;
     } else {
       // run, fall, land: the floor and the ledges hold you (from above), the walls stop you
-      const run = downed ? 0 : ix * SPEED;
+      const run = downed ? 0 : ix * SPEED * (carrying ? 0.7 : 1);
       me.x = Math.max(WALL_L + 4, Math.min(WALL_R - 4, me.x + (run + this.knock) * dt));
       this.knock *= Math.exp(-7 * dt);
       if (Math.abs(this.knock) < 2) this.knock = 0;
@@ -738,8 +850,16 @@ export class ArenaEngine {
     }
     me.tx = me.x;
     me.ty = me.y;
+    // carried long enough: over they go
+    const hold = this.snap?.me.holding;
+    if (hold && hold.ok && wall - hold.at > HOLD_MS && this.autoThrown !== hold.at) {
+      this.autoThrown = hold.at;
+      this.emit({ t: 'throwHeld', d: me.facing });
+    }
+    // Boss Raid: stand over a downed teammate to get them up
+    this.thinkRevive(wall, downed);
     const swinging = now < this.swingUntil && !downed;
-    const want: Pose = swinging ? 'swing' : moving ? 'walk' : 'idle';
+    const want: Pose = swinging ? 'swing' : carrying ? 'carry' : moving ? 'walk' : 'idle';
     if (me.pose !== want) {
       me.pose = want;
       me.since = now;
@@ -788,6 +908,13 @@ export class ArenaEngine {
     }
     // others glide toward where they said they are going
     for (const p of this.others.values()) {
+      // the one you carry sits on your head, right now (their own word on it comes a moment later)
+      if (carrying && hold && p.view.id === hold.id) {
+        p.x = me.x;
+        p.y = me.y - 18;
+        p.facing = me.facing;
+        continue;
+      }
       // ease toward where they said they are (jumps and falls are quick, so follow fast)
       const dx = p.view.tx - p.x;
       const dy = p.view.ty - p.y;
@@ -799,7 +926,7 @@ export class ArenaEngine {
         if (Math.abs(dx) > 0.5) p.facing = dx > 0 ? 1 : -1;
       }
       const air = p.y < surfaceBelow(p.x, p.y) - 1.5;
-      const pw: Pose = d > 0.5 || air ? 'walk' : (/^dance[123]$/.test(p.view.p) || p.view.p === 'cheer' ? p.view.p : 'idle') as Pose;
+      const pw: Pose = p.view.p === 'carry' ? 'carry' : d > 0.5 || air ? 'walk' : (/^dance[123]$/.test(p.view.p) || p.view.p === 'cheer' ? p.view.p : 'idle') as Pose;
       if (p.pose !== pw) {
         p.pose = pw;
         p.since = now;
@@ -808,12 +935,47 @@ export class ArenaEngine {
     // tell the app where we are
     if (performance.now() - this.lastEmit > 60) {
       this.lastEmit = performance.now();
-      const pose = swinging ? 'swing' : moving ? 'walk' : 'idle';
+      const pose = carrier ? 'held' : swinging ? 'swing' : carrying ? 'carry' : moving ? 'walk' : 'idle';
       const key = `${Math.round(me.x)},${Math.round(me.y)},${Math.round(me.tx)},${Math.round(me.ty)},${pose},${me.facing}`;
       if (key !== this.lastEmitKey) {
         this.lastEmitKey = key;
         this.emit({ t: 'me', x: me.x, y: me.y, tx: me.tx, ty: me.ty, facing: me.facing, pose });
       }
+    }
+  }
+
+  /** Boss Raid: are you standing over a downed teammate? Tell the app when you start, stop and finish. */
+  private thinkRevive(wall: number, downed: boolean) {
+    const s = this.snap;
+    const me = this.me;
+    let over: string | null = null;
+    if (s && s.match.downMode && this.fighting() && !downed) {
+      for (const p of this.others.values()) {
+        const v = s.brawl.peers[p.view.id];
+        if (!p.view.spectator && v && v.ko && s.match.fighters.includes(p.view.id) && inReviveReach(me.x, me.y, p.x, p.y)) {
+          over = p.view.id;
+          break;
+        }
+      }
+    }
+    const r = this.reviving;
+    if (r && r.id !== over) {
+      if (!r.sent) this.emit({ t: 'revive', target: r.id, state: 'off' });
+      this.reviving = null;
+    }
+    if (over && !this.reviving) {
+      this.reviving = { id: over, at: wall, sent: false };
+      this.emit({ t: 'revive', target: over, state: 'on' });
+    }
+    const rv = this.reviving;
+    if (rv && !rv.sent && wall - rv.at >= REVIVE_MS) {
+      rv.sent = true;
+      const p = this.others.get(rv.id);
+      if (p) {
+        this.parts.burst('star', p.x, p.y - 10, 14, 30, 24, ['#7dffa0', '#ffffff'], 0.6);
+        this.fx.say(p.x, p.y - 40, 'BACK UP!', '#7dffa0', wall);
+      }
+      this.emit({ t: 'revive', target: rv.id, state: 'done' });
     }
   }
 
@@ -901,7 +1063,13 @@ export class ArenaEngine {
       const floor = spectator ? body.y : surfaceBelow(body.x, body.y);
       const Y = sy(floor);
       const v = b ? (mine ? b.me : b.peers[id]) : undefined;
-      const ko = v ? koAge(v, wall) : -1;
+      let ko = v ? koAge(v, wall) : -1;
+      // Boss Raid: down until someone helps, lying with stars round the head
+      const raidDown = Boolean(s?.match.downMode && v && v.ko && !spectator);
+      if (raidDown && v) ko = Math.max(0, Math.min(wall - v.ko, FALL_MS + LIE_MS - 20));
+      // carried over someone's head: lying flat, dizzy
+      const held = !spectator && (mine ? Boolean(s?.me.heldBy) : this.others.get(id)?.view.p === 'held' || (this.holdingOk() && s?.me.holding?.id === id));
+      if (held) ko = FALL_MS + 300;
       const lift = ko >= 0 ? 0 : Math.max(0, floor - body.y);
       if (look.pet && !spectator) drawPet(c, look.pet, now, X - 15 * z * body.facing, sy(body.y) + 1 * z, z, body.facing);
       if (ko < 0 || !drawKo(c, look, X, sy(body.y), z, body.facing, ko, wall)) {
@@ -921,6 +1089,34 @@ export class ArenaEngine {
       if (v && v.on && !spectator && b?.on) {
         if (v.sh) drawShield(c, X, FY, z, wall, v.sh);
         if (ko < 0) drawHp(c, v, X, FY, z, wall, mine);
+        // dizzy: low on HP, and grabbable in a fight between miners
+        if (ko < 0 && v.hp <= DIZZY_HP && s?.match.mode !== 'boss' && s?.match.phase === 'fight') stars(c, X, FY - 30 * z, z * 0.7, wall);
+      }
+      if (raidDown) {
+        // calling for help, and the ring filling while a teammate gets them up
+        if (Math.floor(wall / 400) % 2 === 0) {
+          const sc = Math.max(1, Math.round(z));
+          text(c, 'HELP!', Math.round(X - (textWidth('HELP!') * sc) / 2), Math.round(FY - 30 * z), sc, '#ff4f5e', '#1a0c10');
+        }
+        const r = (s?.revives ?? []).find((rv) => rv.t === id) ?? (!mine && this.reviving && this.reviving.id === id && !this.reviving.sent ? { at: this.reviving.at } : null);
+        if (r) {
+          const k = Math.max(0, Math.min(1, (wall - r.at) / REVIVE_MS));
+          c.strokeStyle = 'rgba(8,13,32,0.8)';
+          c.lineWidth = Math.max(2, 2 * z);
+          c.beginPath();
+          c.arc(X, FY - 10 * z, 9 * z, 0, Math.PI * 2);
+          c.stroke();
+          c.strokeStyle = '#7dffa0';
+          c.beginPath();
+          c.arc(X, FY - 10 * z, 9 * z, -Math.PI / 2, -Math.PI / 2 + k * Math.PI * 2);
+          c.stroke();
+        }
+        if (mine && v) {
+          const left = Math.max(0, Math.ceil((DOWN_MS - (wall - v.ko)) / 1000));
+          const sc = Math.max(1, Math.round(z * 0.8));
+          const msg = `WAIT FOR HELP ${left}`;
+          text(c, msg, Math.round(X - (textWidth(msg) * sc) / 2), Math.round(FY + 6 * z), sc, '#ffd84a', '#1a0c10');
+        }
       }
     };
     const me = this.me;
@@ -958,6 +1154,23 @@ export class ArenaEngine {
     if (s) {
       for (const p of this.others.values()) tag(p.view.name, p.x, p.y, p.view.spectator ? '#8ea2cc' : '#ffffff');
       tag('YOU', me.x, me.y, '#ffd24a');
+      // emotes float over the name for a moment
+      for (const em of s.emotes ?? []) {
+        const age = wall - em.at;
+        if (age < 0 || age > EMOTE_MS) continue;
+        const body = em.id === s.me.id ? me : this.others.get(em.id);
+        if (!body) continue;
+        const rise = Math.min(4, age / 60);
+        drawEmote(c, em.e as Emote, sx(body.x), sy(body.y - 44 - rise), z, age, EMOTE_MS);
+      }
+      // a dizzy foe in reach: show the grab key over them
+      const gt = this.grabTarget(wall);
+      const gb = gt ? this.others.get(gt) : null;
+      if (gb && Math.floor(wall / 300) % 3 !== 0) {
+        const sc = Math.max(1, Math.round(z * 0.8));
+        const msg = this.opts.touch ? 'GRAB!' : 'Z GRAB';
+        text(c, msg, Math.round(sx(gb.x) - (textWidth(msg) * sc) / 2), Math.round(sy(gb.y - 54)), sc, '#ffd84a', '#1a0c10');
+      }
       // King of the Hill: a crown on the leader
       if (s.match.mode === 'koth') {
         const lead = Object.entries(s.match.score).sort((a, bb) => bb[1] - a[1])[0];

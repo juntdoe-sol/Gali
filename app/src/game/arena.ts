@@ -19,7 +19,7 @@
 import type { RealtimeChannel } from '@supabase/realtime-js';
 import { create } from 'zustand';
 import type { Look } from '../engine/types';
-import { awardFightXp, bossHit, brawlHooks, enterScope, heal, registerRoom, resetMe, shieldMe, useBrawl, MAX_HP } from './brawl';
+import { awardFightXp, bossHit, brawlHooks, enterScope, heal, markHit, registerRoom, resetMe, reviveMe, shieldMe, takeThrow, useBrawl, MAX_HP } from './brawl';
 import { cleanName } from './lobbyMap';
 import { ACTIVES, PASSIVES, baseDamage, unlocked, type ActiveId, type PassiveId } from './powers';
 import { roomHooks } from './rx';
@@ -28,7 +28,7 @@ import { useName } from './username';
 import { useWorld, worldClient, worldReady } from './world';
 
 /* ---------------- the pit ---------------- */
-import { AH, AW, BOSS_ACT_MS, BOSS_WIND2_MS, BOSS_WIND_MS, bossCatches, GROUND, MAX_FIGHTERS, onThrone, ROAR_REACH, SWEEP_REACH, surfaceSpot, TONGUE_REACH, WALL_L, WALL_R, type BossAtk, type PickKind, type Pickup, type Shot } from './arenaMap';
+import { AH, AW, BOSS_ACT_MS, BOSS_WIND2_MS, BOSS_WIND_MS, bossCatches, DIZZY_HP, DOWN_MS, EMOTE_MS, EMOTES, GRAB_X, GRAB_Y, GROUND, HOLD_MS, inGrabReach, inReviveReach, MAX_FIGHTERS, onThrone, REVIVE_HP, REVIVE_MS, ROAR_REACH, SWEEP_REACH, surfaceSpot, THROW_DMG, TONGUE_REACH, WALL_L, WALL_R, type BossAtk, type Emote, type PickKind, type Pickup, type Shot } from './arenaMap';
 export * from './arenaMap';
 
 /* ---------------- matches ---------------- */
@@ -130,6 +130,20 @@ interface ArenaState {
   cheers: { id: string; at: number }[];
   /** you were knocked out in Last Miner Standing: watch from the stands */
   spectator: boolean;
+  /** emotes over people's heads: the last few */
+  emotes: { id: string; e: Emote; at: number }[];
+  /** the emote picker is open (T on PC, the smile button on a phone) */
+  emoteOpen: boolean;
+  /** you are carrying someone you grabbed (ok once they agreed it was a fair grab) */
+  holding: { id: string; at: number; ok: boolean } | null;
+  /** someone grabbed you and is carrying you */
+  heldBy: { id: string; at: number } | null;
+  /** you were just thrown: which way */
+  thrown: { at: number; d: 1 | -1 } | null;
+  /** Boss Raid: when you went down waiting for a teammate (0 when standing) */
+  downAt: number;
+  /** teammates standing over a downed miner, getting them up */
+  revives: { id: string; t: string; at: number }[];
   show: () => void;
   close: () => void;
   setLoadout: (l: Partial<Loadout>) => void;
@@ -151,9 +165,16 @@ export const useArena = create<ArenaState>((set, get) => ({
   loadout: { active: null, passive: null, trail: 'plain' },
   cheers: [],
   spectator: false,
+  emotes: [],
+  emoteOpen: false,
+  holding: null,
+  heldBy: null,
+  thrown: null,
+  downAt: 0,
+  revives: [],
   show: () => {
     if (get().open) return;
-    set({ open: true, peers: {}, match: blankMatch(), pickups: [], shots: [], ammo: 0, spectator: false });
+    set({ open: true, peers: {}, match: blankMatch(), pickups: [], shots: [], ammo: 0, spectator: false, emotes: [], emoteOpen: false, holding: null, heldBy: null, thrown: null, downAt: 0, revives: [] });
     enterScope('arena');
     // the host loop runs even offline: alone, you practise against the boss
     if (!hostTimer) hostTimer = setInterval(hostTick, 250);
@@ -254,6 +275,12 @@ function join() {
     .on('broadcast', { event: 'thr' }, ({ payload }) => onThrow(payload))
     .on('broadcast', { event: 'pw' }, ({ payload }) => onPower(payload))
     .on('broadcast', { event: 'cheer' }, ({ payload }) => onCheer(payload))
+    .on('broadcast', { event: 'emo' }, ({ payload }) => onEmote(payload))
+    .on('broadcast', { event: 'gb' }, ({ payload }) => onGrabbed(payload))
+    .on('broadcast', { event: 'gok' }, ({ payload }) => onGrabAnswer(payload))
+    .on('broadcast', { event: 'gth' }, ({ payload }) => onThrown(payload))
+    .on('broadcast', { event: 'rv' }, ({ payload }) => onReviving(payload))
+    .on('broadcast', { event: 'rvd' }, ({ payload }) => onRevived(payload))
     .on('broadcast', { event: 'bye' }, ({ payload }) => {
       const id = payload?.id;
       if (typeof id !== 'string') return;
@@ -325,7 +352,7 @@ function onState(p: any) {
     tx: num(p.tx, 0, AW),
     ty: num(p.ty, 0, AH),
     facing: p.f === -1 ? -1 : 1,
-    pose: typeof p.p === 'string' && /^(idle|walk|swing|cheer|dance[123])$/.test(p.p) ? p.p : 'idle',
+    pose: typeof p.p === 'string' && /^(idle|walk|swing|cheer|carry|held|dance[123])$/.test(p.p) ? p.p : 'idle',
     look: lk,
     lvl: Math.floor(num(p.lvl, 1, 999)),
     wallet: typeof p.w === 'string' && B58.test(p.w) ? p.w : prev?.wallet ?? null,
@@ -454,9 +481,12 @@ function hostTick() {
         if (sc[id] >= KOTH_WIN) return finish(id, now);
       }
     } else if (m.mode === 'boss' && m.boss) {
-      bossThink(m.boss, alive, now);
+      // whoever went to the balcony (no one got them up in time) is out of this raid
+      const gone = alive.filter((id) => (id === s.me ? s.spectator : s.peers[id]?.spectator));
+      if (gone.length) setMatch({ out: [...new Set([...m.out, ...gone])] });
+      bossThink(m.boss, alive.filter((id) => !gone.includes(id)), now);
       if (m.boss.hp <= 0) return finish('boss-down', now);
-      if (!alive.length) return finish(null, now);
+      if (!alive.filter((id) => !gone.includes(id)).length) return finish(null, now);
     }
     if (now - lastPickAt > 9000) spawnPickups(now, false);
     if (now >= m.endsAt) {
@@ -584,6 +614,186 @@ function onCheer(p: any) {
   useArena.setState((s) => ({ cheers: [...s.cheers.filter((c) => now - c.at < 2500), { id: p.id, at: now }].slice(-30) }));
 }
 
+/* ---------------- emotes ---------------- */
+let lastEmote = 0;
+/** Show an emote over your miner (everyone sees it for a moment). */
+export function emote(e: Emote) {
+  const now = Date.now();
+  if (!EMOTES.includes(e) || now - lastEmote < 700) return false;
+  lastEmote = now;
+  const me = useArena.getState().me;
+  useArena.setState((s) => ({ emoteOpen: false, emotes: [...s.emotes.filter((x) => now - x.at < EMOTE_MS && x.id !== me), { id: me, e, at: now }].slice(-30) }));
+  send('emo', { id: me, e });
+  return true;
+}
+export const setEmoteOpen = (open: boolean) => useArena.setState({ emoteOpen: open });
+const emoteFrom = new Map<string, number>();
+function onEmote(p: any) {
+  if (!p || typeof p.id !== 'string' || p.id.length > 16 || !EMOTES.includes(p.e)) return;
+  const now = Date.now();
+  if (now - (emoteFrom.get(p.id) ?? 0) < 500) return;
+  emoteFrom.set(p.id, now);
+  if (emoteFrom.size > 100) emoteFrom.clear();
+  useArena.setState((s) => ({ emotes: [...s.emotes.filter((x) => now - x.at < EMOTE_MS && x.id !== p.id), { id: p.id, e: p.e, at: now }].slice(-30) }));
+}
+
+/* ---------------- grab and throw ---------------- */
+/**
+ * A dizzy miner (low HP, stars over the head) can be grabbed by someone right next to them, carried for
+ * a moment and thrown. The one grabbed is the judge, as with every hit: their app checks the grab was
+ * fair (close, really dizzy, not shielded) and says yes or no, and applies the throw's damage itself.
+ * Not in a Boss Raid, where everyone is on the same side.
+ */
+const pvp = () => {
+  const m = useArena.getState().match;
+  return m.phase === 'fight' && m.mode !== 'boss';
+};
+/** The nearest dizzy foe you could grab right now, if any (for the GRAB button). */
+export function grabbable(): string | null {
+  const s = useArena.getState();
+  const b = useBrawl.getState();
+  if (!pvp() || s.spectator || !s.match.fighters.includes(s.me) || s.holding || s.heldBy || b.me.koAt) return null;
+  const now = Date.now();
+  let best: string | null = null;
+  let bd = Infinity;
+  for (const p of Object.values(s.peers)) {
+    const f = b.peers[p.id];
+    if (p.spectator || !f || !f.on || f.koAt || f.hp > DIZZY_HP || now < f.shieldUntil || now - p.seen > 4000) continue;
+    if (!inGrabReach(myPos[0], myPos[1], p.x, p.y)) continue;
+    const d = Math.abs(p.x - myPos[0]);
+    if (d < bd) {
+      bd = d;
+      best = p.id;
+    }
+  }
+  return best;
+}
+/** You reach for `target`. They decide if it counts; until then you are only reaching. */
+export function tryGrab(target: string) {
+  const s = useArena.getState();
+  const now = Date.now();
+  if (!pvp() || s.holding || s.heldBy || useBrawl.getState().me.koAt) return false;
+  useArena.setState({ holding: { id: target, at: now, ok: false } });
+  send('gb', { a: s.me, t: target, x: Math.round(myPos[0]), y: Math.round(myPos[1]) });
+  // no answer (they left, or run an older app): let go
+  setTimeout(() => {
+    const h = useArena.getState().holding;
+    if (h && h.id === target && h.at === now && !h.ok) useArena.setState({ holding: null });
+  }, 700);
+  return true;
+}
+const grabbedFrom = new Map<string, number>();
+/** Someone grabbed at us: fair? */
+function onGrabbed(p: any) {
+  const s = useArena.getState();
+  if (!p || p.t !== s.me || typeof p.a !== 'string' || p.a.length > 16) return;
+  const now = Date.now();
+  const me = useBrawl.getState().me;
+  const peer = s.peers[p.a];
+  const answer = (ok: boolean) => send('gok', { t: s.me, a: p.a, ok: ok ? 1 : 0 });
+  const recent = now - (grabbedFrom.get(p.a) ?? 0) < 2500;
+  const thrownLately = s.thrown && now - s.thrown.at < 1800;
+  const claim: [number, number] = [num(p.x, 0, AW), num(p.y, 0, AH)];
+  // where they say they are must be close to where we see them, and both close to us
+  const near = peer && Math.hypot(claim[0] - peer.x, claim[1] - peer.y) < 40 && inGrabReach(myPos[0], myPos[1], claim[0], claim[1]) && Math.abs(peer.x - myPos[0]) <= GRAB_X + 24 && Math.abs(peer.y - myPos[1]) <= GRAB_Y + 16;
+  const ok = pvp() && !s.spectator && s.match.fighters.includes(s.me) && !s.heldBy && !s.holding && !me.koAt && me.hp <= DIZZY_HP && now >= me.shieldUntil && !recent && !thrownLately && Boolean(near) && !peer?.spectator;
+  if (!ok) return answer(false);
+  grabbedFrom.set(p.a, now);
+  if (grabbedFrom.size > 100) grabbedFrom.clear();
+  useArena.setState({ heldBy: { id: p.a, at: now } });
+  answer(true);
+  // if the throw never comes, you slip free
+  setTimeout(() => {
+    const h = useArena.getState().heldBy;
+    if (h && h.id === p.a && h.at === now) useArena.setState({ heldBy: null });
+  }, HOLD_MS + 900);
+}
+function onGrabAnswer(p: any) {
+  const s = useArena.getState();
+  if (!p || p.a !== s.me || !s.holding || s.holding.id !== p.t) return;
+  if (p.ok === 1) useArena.setState({ holding: { ...s.holding, ok: true, at: Date.now() } });
+  else useArena.setState({ holding: null });
+}
+/** Throw whoever you carry, the way you face. */
+export function throwHeld(d: 1 | -1) {
+  const s = useArena.getState();
+  const h = s.holding;
+  if (!h) return false;
+  useArena.setState({ holding: null });
+  if (!h.ok) return false;
+  markHit(h.id);
+  send('gth', { a: s.me, t: h.id, d, x: Math.round(myPos[0]), y: Math.round(myPos[1]) });
+  return true;
+}
+function onThrown(p: any) {
+  const s = useArena.getState();
+  if (!p || p.t !== s.me || !s.heldBy || s.heldBy.id !== p.a) return;
+  const d: 1 | -1 = p.d === -1 ? -1 : 1;
+  const now = Date.now();
+  useArena.setState({ heldBy: null, thrown: { at: now, d } });
+  // the hit comes from just behind you, so the knock carries you the way you were thrown
+  takeThrow('arena', THROW_DMG, [myPos[0] - d * 10, myPos[1]], p.a);
+}
+/** You were hit or knocked down while carrying someone: they drop. */
+function dropWhatYouHold() {
+  const h = useArena.getState().holding;
+  if (h) useArena.setState({ holding: null });
+}
+useBrawl.subscribe((b, prev) => {
+  if (b.me.hitAt !== prev.me.hitAt && useArena.getState().holding) dropWhatYouHold();
+});
+
+/* ---------------- Boss Raid: down, and back up ---------------- */
+/** In a raid with friends a knockdown keeps you down until someone gets you up (or time runs out). */
+export function downMode(): boolean {
+  const m = useArena.getState().match;
+  return m.mode === 'boss' && m.phase === 'fight' && m.fighters.length >= 2;
+}
+function goDown() {
+  const at = Date.now();
+  useArena.setState({ downAt: at });
+  setTimeout(() => {
+    const s = useArena.getState();
+    if (s.downAt !== at) return;
+    // nobody came: to the balcony for the rest of this raid
+    useArena.setState({ downAt: 0, spectator: true });
+    reviveMe(MAX_HP, 0);
+  }, DOWN_MS);
+}
+/** You stand over a downed teammate (on), stepped away (off), or held on long enough (done). */
+export function shareRevive(target: string, state: 'on' | 'off' | 'done') {
+  const s = useArena.getState();
+  const now = Date.now();
+  if (state === 'on') useArena.setState({ revives: [...s.revives.filter((r) => r.id !== s.me && now - r.at < REVIVE_MS + 4000), { id: s.me, t: target, at: now }] });
+  else useArena.setState({ revives: s.revives.filter((r) => r.id !== s.me) });
+  if (state === 'done') send('rvd', { id: s.me, t: target, x: Math.round(myPos[0]), y: Math.round(myPos[1]) });
+  else send('rv', { id: s.me, t: target, on: state === 'on' ? 1 : 0 });
+}
+function onReviving(p: any) {
+  if (!p || typeof p.id !== 'string' || typeof p.t !== 'string' || p.id.length > 16 || p.t.length > 16) return;
+  const now = Date.now();
+  useArena.setState((s) => ({ revives: [...s.revives.filter((r) => r.id !== p.id && now - r.at < REVIVE_MS + 4000), ...(p.on === 1 ? [{ id: p.id, t: p.t, at: now }] : [])].slice(-20) }));
+}
+/** A teammate says they got us up. We check they were really there, long enough. */
+function onRevived(p: any) {
+  const s = useArena.getState();
+  if (!p || typeof p.id !== 'string') return;
+  const started = s.revives.find((r) => r.id === p.id && r.t === p.t);
+  useArena.setState({ revives: s.revives.filter((r) => r.id !== p.id) });
+  if (p.t !== s.me || !s.downAt || !downMode()) return;
+  const peer = s.peers[p.id];
+  const now = Date.now();
+  if (!peer || peer.spectator || !s.match.fighters.includes(p.id) || s.match.out.includes(p.id)) return;
+  // they started standing over us a while ago (we heard it), and are still close
+  if (!started || now - started.at < REVIVE_MS - 400) return;
+  if (!inReviveReach(peer.x, peer.y, myPos[0], myPos[1]) && !inReviveReach(num(p.x, 0, AW), num(p.y, 0, AH), myPos[0], myPos[1])) return;
+  useArena.setState({ downAt: 0 });
+  reviveMe(REVIVE_HP);
+  reviveListeners.forEach((f) => f(p.id));
+}
+/** You were got up (by this id), for the screen to say thanks. */
+export const reviveListeners = new Set<(by: string) => void>();
+
 /* ---------------- the boss ---------------- */
 /**
  * The Two-Mouthed, run by the host. It walks the floor toward the nearest miner and, when its last
@@ -708,11 +918,16 @@ function onMatchChanged(m: Match) {
   if (m.phase === 'count' && appliedN !== m.n) {
     appliedN = m.n;
     const i = m.fighters.indexOf(s.me);
-    useArena.setState({ spectator: i < 0, ammo: 0, readyAt: {} });
+    useArena.setState({ spectator: i < 0, ammo: 0, readyAt: {}, holding: null, heldBy: null, downAt: 0, revives: [] });
     resetMe(COUNT_MS + 600);
     matchListeners.forEach((f) => f(m));
   }
   if (m.phase === 'end') applyResult(m);
+  // the raid is over while you lie there: up you get
+  if (m.phase !== 'fight' && s.downAt) {
+    useArena.setState({ downAt: 0 });
+    reviveMe(MAX_HP);
+  }
 }
 export const matchListeners = new Set<(m: Match) => void>();
 
@@ -739,7 +954,10 @@ brawlHooks.kodBy = ((prev) => (scope, by, name) => {
     useArena.setState({ spectator: true });
     if (isHost()) setMatch({ out: [...new Set([...m.out, useArena.getState().me])] });
   }
+  if (downMode()) goDown();
+  dropWhatYouHold();
 })(brawlHooks.kodBy);
+brawlHooks.holdKo = (scope) => scope === 'arena' && useArena.getState().open && downMode();
 /** The host's view of a knockdown it heard about. */
 export function hostSawKo(id: string) {
   if (!isHost()) return;
@@ -754,4 +972,4 @@ useBrawl.subscribe((b, prev) => {
 /** For the canvas: your HP is full again after a match, the boss's bar, the ring. */
 export const arenaMaxHp = MAX_HP;
 /** For tests. */
-export const _arenaTest = { hostTick, onMatch, onState, onGrab, onTook, onPickups, finish: (w: string | null) => finish(w, Date.now()), setMyPos: (x: number, y: number) => (myPos = [x, y]) };
+export const _arenaTest = { hostTick, onMatch, onState, onGrab, onTook, onPickups, onEmote, onGrabbed, onGrabAnswer, onThrown, onRevived, finish: (w: string | null) => finish(w, Date.now()), setMyPos: (x: number, y: number) => (myPos = [x, y]) };

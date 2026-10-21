@@ -15,6 +15,8 @@ export interface ArenaRef extends DOMImperativeFactory {
   jump: (...args: any[]) => void;
   power: (...args: any[]) => void;
   throwOre: (...args: any[]) => void;
+  grab: (...args: any[]) => void;
+  emote: (...args: any[]) => void;
   opts: (...args: any[]) => void;
 }
 
@@ -34,6 +36,8 @@ export default function ArenaView({ ref, onEvent, atlas, look, opts }: { ref: Re
       jump: () => engine.current?.jump(),
       power: (p: any) => engine.current?.power(String(p)),
       throwOre: () => engine.current?.throwOre(),
+      grab: () => engine.current?.grab(),
+      emote: (i: any) => engine.current?.emote(Number(i)),
       opts: (o: any) => engine.current?.setOpts(o as Partial<ArenaOpts>),
     }),
     [],
