@@ -14,7 +14,7 @@ import { COLORS, levelFromXp } from '../game/constants';
 import { useCave } from '../game/caveStore';
 import { loadChain } from '../chain/lazy';
 import { TIP_LIMITS, TIP_SKR_MINT, short } from '../chain/light';
-import { ACT_LIFE_MS, announce, joinChat, joinLobby, leaveLobby, LOBBY_EMOTES, publishLobbyMe, useLobby, type Act, type LobbyMsg } from '../game/lobby';
+import { ACT_LIFE_MS, AURA_EMOTES, announce, joinChat, joinLobby, leaveLobby, LOBBY_EMOTES, publishLobbyMe, useLobby, type Act, type LobbyMsg } from '../game/lobby';
 import { chatWords, cleanName, LOBBY_CAP, STICKERS, stickerOf, type DoorId } from '../game/lobbyMap';
 import { isOnChain, useGame, useLevelXp } from '../game/store';
 import { play } from '../game/sfx';
@@ -32,6 +32,7 @@ import { BAR_H, TabBar, type SheetTab } from './TabBar';
 import { Arcade } from './Arcade';
 import { PixIcon } from './PixIcon';
 import { DisconnectBtn } from './Hud';
+import { DANCES } from '../game/dances';
 import { loadPotw, usePotw } from '../game/ranks';
 import { InboxBtn } from './Dm';
 import { dmReady, openDm } from '../game/dm';
@@ -183,7 +184,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
       const n = Number(e.key);
       if (n >= 1 && n <= LOBBY_EMOTES.length) useLobby.getState().emote(LOBBY_EMOTES[n - 1]);
-      else if (n === LOBBY_EMOTES.length + 1) setDanceOpen((o) => !o);
+      else if (n === LOBBY_EMOTES.length + 1 || e.key.toLowerCase() === 'v') setDanceOpen((o) => !o);
     };
     window.addEventListener('gali:travel', travel);
     window.addEventListener('gali:help', help);
@@ -399,33 +400,56 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
           </Pressable>
         )}
         {danceOpen ? (
-          <Frame style={styles.danceCard}>
-            <T v="label">Dance</T>
-            <View style={styles.danceRow}>
-              {([1, 2, 3] as const).map((n) => (
-                <Choice
-                  key={n}
-                  label={DANCE_NAMES[n - 1]}
-                  on={myDance === n}
-                  onPress={() => {
-                    useLobby.getState().setDance(myDance === n ? 0 : n);
-                    setDanceOpen(false);
-                  }}
-                />
-              ))}
-              {myDance ? (
-                <Btn
-                  small
-                  kind="red"
-                  label="STOP"
-                  style={{ alignSelf: 'center' }}
-                  onPress={() => {
-                    useLobby.getState().setDance(0);
-                    setDanceOpen(false);
-                  }}
-                />
-              ) : null}
+          <Frame style={[styles.danceCard, { maxWidth: Math.min(620, L.w - 24) }]}>
+            <View style={styles.auraHead}>
+              <PixIcon name="sparkle" size={22} />
+              <T v="display" style={{ fontSize: 20, lineHeight: 22, color: COLORS.gold, flex: 1 }}>
+                AURA FARMING
+              </T>
+              <IconBtn onPress={() => setDanceOpen(false)} label="Close" kbd="ESC">
+                <PixIcon name="close" size={16} />
+              </IconBtn>
             </View>
+            <T v="label">Dances · walk to stop</T>
+            <View style={styles.auraGrid}>
+              {DANCES.map((name, i) => {
+                const n = i + 1;
+                return (
+                  <Choice
+                    key={name}
+                    grow={false}
+                    label={name}
+                    on={myDance === n}
+                    onPress={() => {
+                      useLobby.getState().setDance(myDance === n ? 0 : n);
+                      setDanceOpen(false);
+                    }}
+                  />
+                );
+              })}
+            </View>
+            <T v="label">Emotes</T>
+            <View style={styles.auraGrid}>
+              {LOBBY_EMOTES.map((e, i) => (
+                <EmoteKey key={e} icon={e} label={`Emote ${EMOTE_NAME[e] ?? e}`} kbd={String(i + 1)} onPress={() => useLobby.getState().emote(e)} />
+              ))}
+            </View>
+            <View style={styles.auraGrid}>
+              {Object.entries(AURA_EMOTES).map(([k, words]) => (
+                <Choice key={k} grow={false} label={words} on={false} onPress={() => useLobby.getState().emote(k)} />
+              ))}
+            </View>
+            {myDance ? (
+              <Btn
+                small
+                kind="red"
+                label={`STOP ${DANCES[myDance - 1]}`}
+                onPress={() => {
+                  useLobby.getState().setDance(0);
+                  setDanceOpen(false);
+                }}
+              />
+            ) : null}
           </Frame>
         ) : null}
         {!L.desktop ? (
@@ -435,11 +459,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
           </View>
         ) : null}
         <PixelBox fill="rgba(8,13,32,0.9)" hi="#2d4282" lo="#04060f" shadow={2} style={[styles.emotes, L.w < 390 && { gap: 3, paddingHorizontal: 6 }]}>
-          {LOBBY_EMOTES.map((e, i) => (
-            <EmoteKey key={e} icon={e} label={`Emote ${EMOTE_NAME[e] ?? e}`} kbd={String(i + 1)} onPress={() => useLobby.getState().emote(e)} />
-          ))}
-          <View style={styles.emoteSep} />
-          <EmoteKey icon="note" label="Dance" kbd={String(LOBBY_EMOTES.length + 1)} on={Boolean(myDance) || danceOpen} onPress={() => setDanceOpen((o) => !o)} />
+          <AuraKey on={Boolean(myDance) || danceOpen} dancing={myDance ? DANCES[myDance - 1] : null} onPress={() => setDanceOpen((o) => !o)} />
           {L.desktop && !LANDSCAPE_APP ? (
             <>
               <View style={styles.emoteSep} />
@@ -526,6 +546,31 @@ function SolChip({ sol }: { sol: number }) {
 }
 
 /** One key of the emote bar: a pixel icon on a key cap that dips when pressed. */
+/** The bar's one button: dances and emotes live behind it. */
+function AuraKey({ on, dancing, onPress }: { on: boolean; dancing: string | null; onPress: () => void }) {
+  return (
+    <Pressable onPressIn={onPress} accessibilityRole="button" accessibilityLabel="Aura farming: dances and emotes">
+      {(st) => {
+        const { hovered, pressed } = st as { hovered?: boolean; pressed: boolean };
+        return (
+          <PixelBox fill={on ? 'rgba(255,201,60,0.22)' : hovered ? '#22346a' : '#0e1838'} hi={on ? COLORS.gold : '#2d4282'} lo="#04060f" style={[styles.auraKey, { transform: [{ translateY: pressed ? U : hovered ? -U : 0 }] }]}>
+            <PixIcon name="sparkle" size={26} />
+            <View>
+              <T v="display" style={{ fontSize: 16, lineHeight: 17, color: COLORS.gold, letterSpacing: 0.5 }}>
+                AURA FARMING
+              </T>
+              <T v="label" style={{ fontSize: 10 }}>
+                {dancing ? `DANCING: ${dancing}` : 'DANCES · EMOTES'}
+              </T>
+            </View>
+            <Kbd k="V" style={styles.emoteKbd} />
+          </PixelBox>
+        );
+      }}
+    </Pressable>
+  );
+}
+
 function EmoteKey({ icon, label, onPress, kbd, on }: { icon: PixName; label: string; onPress: () => void; kbd: string; on?: boolean }) {
   const narrow = useLayout().w < 390;
   return (
@@ -1049,7 +1094,7 @@ export function BackPill({ door = 'island', onBefore, kbd }: { door?: DoorId; on
   );
 }
 
-const DANCE_NAMES = ['DISCO', 'POGO', 'WIGGLE'] as const;
+
 
 const styles = StyleSheet.create({
   feed: { position: 'absolute', left: 12, maxWidth: 420, gap: 6, alignItems: 'flex-start' },
@@ -1082,6 +1127,9 @@ const styles = StyleSheet.create({
   emoteSep: { width: U, height: 30, backgroundColor: '#22356f', marginHorizontal: 2 },
   danceCard: { alignSelf: 'center', gap: 8, padding: 12, alignItems: 'center' },
   danceRow: { flexDirection: 'row', gap: 6 },
+  auraHead: { flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'stretch' },
+  auraGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, justifyContent: 'center' },
+  auraKey: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, height: 50 },
   howGrid: { gap: 12, paddingVertical: 4, justifyContent: 'space-between' },
   howRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
   howIcon: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center' },

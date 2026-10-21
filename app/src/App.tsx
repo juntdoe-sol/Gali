@@ -8,6 +8,7 @@ import { TAB_KEY } from './ui/TabBar';
 import { useView } from './pixel/view';
 import { BLOCKS } from './game/constants';
 import { AppState, Platform, StyleSheet, View } from 'react-native';
+import { MobileGate, MOBILE_BROWSER } from './ui/MobileGate';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from './game/constants';
 import { oreLive } from './chain/light';
@@ -75,6 +76,12 @@ async function scheduleDailyReminder() {
 }
 
 export default function App() {
+  // a phone or tablet browser: Gali plays on a computer (or in the Android app)
+  if (MOBILE_BROWSER) return <MobileGate />;
+  return <Game />;
+}
+
+function Game() {
   const fontsLoaded = useAppFonts();
   const [sheet, setSheet] = useState<SheetTab | null>(null);
   const onboarded = useGame((s) => s.save.onboarded);

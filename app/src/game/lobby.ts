@@ -16,9 +16,10 @@ import { useName } from './username';
 import { publicKey, restBase, useWorld, worldClient, worldReady } from './world';
 import { roomHooks } from './rx';
 
-export type LobbyPose = 'idle' | 'walk' | 'cheer' | 'dance1' | 'dance2' | 'dance3' | 'swing';
-const POSE_OK = ['walk', 'cheer', 'dance1', 'dance2', 'dance3', 'swing'];
-export const asPose = (v: unknown): LobbyPose => (typeof v === 'string' && POSE_OK.includes(v) ? (v as LobbyPose) : 'idle');
+/** dance1 to dance12: see DANCES in engine/actors.ts */
+export type LobbyPose = 'idle' | 'walk' | 'cheer' | 'swing' | `dance${number}`;
+const POSE_OK = /^(walk|cheer|swing|dance([1-9]|1[0-2]))$/;
+export const asPose = (v: unknown): LobbyPose => (typeof v === 'string' && POSE_OK.test(v) ? (v as LobbyPose) : 'idle');
 export type Where = 'lobby' | 'island';
 export type Say = { t: string; at: number };
 
@@ -79,8 +80,8 @@ interface LobbyState {
   mySay: Say | null;
   myEmoji: { e: string; at: number } | null;
   /** which dance I am doing (0 = none). Walking stops it. */
-  myDance: 0 | 1 | 2 | 3;
-  setDance: (n: 0 | 1 | 2 | 3) => void;
+  myDance: number;
+  setDance: (n: number) => void;
   /** the lobby chat sheet, and how many lines arrived while it was closed */
   chatOpen: boolean;
   unread: number;
@@ -96,6 +97,22 @@ interface LobbyState {
 
 /** Emotes are pixel icons: each is a key into the icon set (ui-<key> in the atlas, assets/icons/<key>.png). */
 export const LOBBY_EMOTES = ['wave', 'laugh', 'heart', 'fire', 'pick', 'gem'] as const;
+/** Aura farming: emotes that pop up as words over your head. Key -> what it says. */
+export const AURA_EMOTES: Record<string, string> = {
+  aura: '+1000 AURA',
+  unaura: '-1000 AURA',
+  sixseven: '67',
+  sigma: 'SIGMA',
+  rizz: 'RIZZ',
+  mew: 'MEWING',
+  dub: 'W',
+  el: 'L',
+  nocap: 'NO CAP',
+  frfr: 'FR FR',
+  gg: 'GG',
+  bruh: 'BRUH',
+};
+const EMOTE_OK = (e: string) => (LOBBY_EMOTES as readonly string[]).includes(e) || e in AURA_EMOTES;
 const LEGACY_EMOTE: Record<string, string> = { '👋': 'wave', '😂': 'laugh', '❤️': 'heart', '🔥': 'fire', '⛏️': 'pick', '💎': 'gem' };
 
 const rid = () => Math.random().toString(36).slice(2, 10);
@@ -169,9 +186,9 @@ export const useLobby = create<LobbyState>((set, get) => ({
     return true;
   },
   myDance: 0,
-  setDance: (n) => set({ myDance: n }),
+  setDance: (n) => set({ myDance: n >= 1 && n <= 12 ? Math.floor(n) : 0 }),
   emote: (e) => {
-    if (!(LOBBY_EMOTES as readonly string[]).includes(e)) return;
+    if (!EMOTE_OK(e)) return;
     set({ myEmoji: { e, at: Date.now() } });
     void channel?.send({ type: 'broadcast', event: 'emote', payload: { id: get().me, e } });
   },
@@ -438,7 +455,7 @@ function onHist(p: any) {
 function onEmote(p: any) {
   const s = useLobby.getState();
   const key = typeof p?.e === 'string' ? LEGACY_EMOTE[p.e] ?? p.e : '';
-  if (!p || typeof p.id !== 'string' || !(LOBBY_EMOTES as readonly string[]).includes(key)) return;
+  if (!p || typeof p.id !== 'string' || !EMOTE_OK(key)) return;
   const peer = s.peers[p.id];
   if (peer) useLobby.setState({ peers: { ...s.peers, [p.id]: { ...peer, emoji: key, emojiAt: Date.now() } } });
 }
