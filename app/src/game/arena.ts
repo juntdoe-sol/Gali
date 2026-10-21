@@ -4,10 +4,12 @@
  *
  *   Last Miner Standing  one life each; a KO puts you in the stands until the next match
  *   King of the Hill     stand alone in the ring to score; first to 20 seconds wins
- *   Mole Boss            everyone against one big mole; it slams whoever is close
+ *   Boss Raid            everyone against the Two-Mouthed: it sweeps, lashes its tongue and roars
  *
  * In here powers count (one active, one passive, unlocked by level), ORE shards can be picked up and
- * thrown, hearts and shields lie around, and the stands cheer. Nothing real is at stake: XP only.
+ * thrown, hearts and shields lie around, and the balcony cheers. Nothing real is at stake: XP only.
+ *
+ * The hall is seen from the side: miners run, jump onto ledges and drop back down (engine/arena.ts).
  *
  * There is no game server. One player's client is the host: the one with the smallest id that is still
  * here. The host runs the match clock, the scores, the pickups and the boss, and tells everyone. If the
@@ -26,13 +28,14 @@ import { useName } from './username';
 import { useWorld, worldClient, worldReady } from './world';
 
 /* ---------------- the pit ---------------- */
-import { AH, AW, FLOOR, MAX_FIGHTERS, onFloor, RING, spawnAt, type PickKind, type Pickup, type Shot } from './arenaMap';
+import { AH, AW, BOSS_ACT_MS, BOSS_WIND2_MS, BOSS_WIND_MS, bossCatches, GROUND, MAX_FIGHTERS, onThrone, ROAR_REACH, SWEEP_REACH, surfaceSpot, TONGUE_REACH, WALL_L, WALL_R, type BossAtk, type PickKind, type Pickup, type Shot } from './arenaMap';
 export * from './arenaMap';
 
 /* ---------------- matches ---------------- */
 export type Mode = 'lms' | 'koth' | 'boss';
 export const MODES: Mode[] = ['lms', 'koth', 'boss'];
-export const MODE_NAME: Record<Mode, string> = { lms: 'LAST MINER STANDING', koth: 'KING OF THE HILL', boss: 'MOLE BOSS' };
+export const MODE_NAME: Record<Mode, string> = { lms: 'LAST MINER STANDING', koth: 'KING OF THE HILL', boss: 'BOSS RAID' };
+export const BOSS_NAME = 'THE TWO-MOUTHED';
 export type Phase = 'wait' | 'count' | 'fight' | 'end';
 export const COUNT_MS = 5000;
 export const FIGHT_MS: Record<Mode, number> = { lms: 120_000, koth: 90_000, boss: 120_000 };
@@ -44,20 +47,29 @@ export const WIN_XP = 50;
 export const BOSS_XP = 30;
 export const BOSS_BASE_HP = 400;
 export const BOSS_HP_PER = 150;
-const BOSS_SPEED = 30;
-const BOSS_SLAM_MS = 2600;
-const BOSS_SLAM_R = 40;
+const BOSS_SPEED = 26;
+const BOSS_SPEED2 = 40;
+/** least time between attacks, and in phase two (below half HP) */
+const BOSS_COOL_MS = 2300;
+const BOSS_COOL2_MS = 1500;
 
 export interface Boss {
   x: number;
   y: number;
   hp: number;
   max: number;
-  /** when its last slam landed (wall ms) */
-  slamAt: number;
+  /** the attack it is winding up or doing, and when the wind-up started (wall ms) */
+  atk: BossAtk | null;
+  atkAt: number;
+  /** the attack's hit has been dealt */
+  hitDone: boolean;
+  /** when its last attack ended (host only) */
+  lastAtk: number;
   hitAt: number;
   facing: 1 | -1;
 }
+/** Below half HP the boss is angrier: faster wind-ups and attacks. */
+export const bossPhase2 = (b: { hp: number; max: number }) => b.hp <= b.max / 2;
 export interface Match {
   host: string;
   n: number;
@@ -178,7 +190,7 @@ let hostTimer: ReturnType<typeof setInterval> | null = null;
 let level: () => number = () => 1;
 let look: () => Look = () => ({ hat: 'hat-yellow', fit: '#2f5fd0', pick: '#c9c9c9', handle: '#9b6b43', pet: null, glow: 'none' });
 let wallet: () => string | null = () => null;
-let myPos: [number, number] = [FLOOR.cx, FLOOR.cy + 40];
+let myPos: [number, number] = [AW / 2, GROUND];
 let myState = { tx: 0, ty: 0, f: 1 as 1 | -1, p: 'idle' };
 let lastSent = 0;
 let lastKey = '';
@@ -228,7 +240,8 @@ function join() {
     return;
   }
   useArena.setState({ status: 'joining' });
-  const ch = client.channel('gali-arena', { config: { broadcast: { self: false, ack: false } } });
+  // the side-view hall is a new room: older apps (top-down arena) keep to their own
+  const ch = client.channel('gali-arena2', { config: { broadcast: { self: false, ack: false } } });
   ch.on('broadcast', { event: 'st' }, ({ payload }) => onState(payload))
     .on('broadcast', { event: 'bx' }, ({ payload }) => {
       roomHooks.onBx?.('arena', payload);
@@ -383,7 +396,7 @@ let lastBroadcast = 0;
 function broadcastMatch() {
   const m = useArena.getState().match;
   lastBroadcast = Date.now();
-  send('m', { h: useArena.getState().me, n: m.n, mode: m.mode, ph: m.phase, left: Math.max(0, m.endsAt - Date.now()), fi: m.fighters, out: m.out, sc: m.score, win: m.winner, wn: m.winnerName, boss: m.boss ? { x: Math.round(m.boss.x), y: Math.round(m.boss.y), hp: m.boss.hp, max: m.boss.max, sl: m.boss.slamAt ? Date.now() - m.boss.slamAt : -1, f: m.boss.facing } : null });
+  send('m', { h: useArena.getState().me, n: m.n, mode: m.mode, ph: m.phase, left: Math.max(0, m.endsAt - Date.now()), fi: m.fighters, out: m.out, sc: m.score, win: m.winner, wn: m.winnerName, boss: m.boss ? { x: Math.round(m.boss.x), y: Math.round(m.boss.y), hp: m.boss.hp, max: m.boss.max, a: m.boss.atk ?? '', aa: m.boss.atk ? Date.now() - m.boss.atkAt : -1, hd: m.boss.hitDone ? 1 : 0, f: m.boss.facing } : null });
 }
 function setMatch(m: Partial<Match>, tell = true) {
   useArena.setState((s) => ({ match: { ...s.match, ...m } }));
@@ -395,7 +408,8 @@ function startPhase(phase: Phase, mode: Mode, now: number) {
   const s = useArena.getState();
   if (phase === 'count') {
     const fighters = presentIds();
-    const boss = mode === 'boss' ? { x: FLOOR.cx, y: FLOOR.cy - 20, hp: BOSS_BASE_HP + BOSS_HP_PER * Math.max(0, fighters.length - 1), max: BOSS_BASE_HP + BOSS_HP_PER * Math.max(0, fighters.length - 1), slamAt: 0, hitAt: 0, facing: 1 as const } : null;
+    const hp = BOSS_BASE_HP + BOSS_HP_PER * Math.max(0, fighters.length - 1);
+    const boss: Boss | null = mode === 'boss' ? { x: Math.round(AW * 0.72), y: GROUND, hp, max: hp, atk: null, atkAt: 0, hitDone: false, lastAtk: now, hitAt: 0, facing: -1 } : null;
     setMatch({ host: s.me, n: s.match.n + 1, mode, phase, endsAt: now + COUNT_MS, fighters, out: [], score: {}, winner: null, winnerName: null, boss });
   } else if (phase === 'fight') setMatch({ phase, endsAt: now + FIGHT_MS[mode] });
   else if (phase === 'end') setMatch({ phase, endsAt: now + END_MS });
@@ -431,7 +445,7 @@ function hostTick() {
       const inRing = alive.filter((id) => {
         const p = id === s.me ? myPos : [s.peers[id]?.x ?? -999, s.peers[id]?.y ?? -999];
         const f = id === s.me ? useBrawl.getState().me : useBrawl.getState().peers[id];
-        return Math.hypot(p[0] - RING.x, (p[1] - RING.y) * 1.6) <= RING.r && !(f && f.koAt);
+        return onThrone(p[0], p[1]) && !(f && f.koAt);
       });
       if (inRing.length === 1) {
         const id = inRing[0];
@@ -471,14 +485,7 @@ function finish(winner: string | null, now: number) {
 export const hostResultListeners = new Set<(m: Match) => void>();
 
 /* ---------------- pickups ---------------- */
-function randomFloorSpot(): [number, number] {
-  for (let k = 0; k < 40; k++) {
-    const x = FLOOR.cx + (Math.random() * 2 - 1) * (FLOOR.rx - 20);
-    const y = FLOOR.cy + (Math.random() * 2 - 1) * (FLOOR.ry - 14);
-    if (onFloor(x, y, 14)) return [Math.round(x), Math.round(y)];
-  }
-  return [FLOOR.cx, FLOOR.cy];
-}
+const randomFloorSpot = (): [number, number] => surfaceSpot(Math.random);
 function spawnPickups(now: number, fresh: boolean) {
   lastPickAt = now;
   const s = useArena.getState();
@@ -578,32 +585,66 @@ function onCheer(p: any) {
 }
 
 /* ---------------- the boss ---------------- */
+/**
+ * The Two-Mouthed, run by the host. It walks the floor toward the nearest miner and, when its last
+ * attack has cooled, winds one up (everyone sees the warning), then lands it:
+ *
+ *   sweep   the held leg swings low across the floor in front and behind: jump it or stand on a ledge
+ *   tongue  the belly mouth lashes its tongue far ahead at floor and low-ledge height
+ *   roar    the face mouth roars: everyone close is hit and knocked back, ledges included
+ *
+ * Below half HP (phase two) it walks faster and winds up quicker. Whoever is mid-air when it lands
+ * dodges it on their own side (brawl.ts: a jump makes you safe for a moment).
+ */
 function bossThink(b: Boss, alive: string[], now: number) {
   const s = useArena.getState();
-  const pos = (id: string): [number, number] => (id === s.me ? myPos : [s.peers[id]?.x ?? FLOOR.cx, s.peers[id]?.y ?? FLOOR.cy]);
+  const pos = (id: string): [number, number] => (id === s.me ? myPos : [s.peers[id]?.x ?? AW / 2, s.peers[id]?.y ?? GROUND]);
   const targets = alive.filter((id) => !(id === s.me ? useBrawl.getState().me.koAt : useBrawl.getState().peers[id]?.koAt));
-  if (!targets.length) return;
-  const near = targets.map((id) => ({ id, p: pos(id), d: Math.hypot(pos(id)[0] - b.x, pos(id)[1] - b.y) })).sort((a, c) => a.d - c.d)[0];
-  let { x, y } = b;
-  if (near.d > 26) {
-    const k = Math.min(1, (BOSS_SPEED * 0.25) / near.d);
-    const nx = x + (near.p[0] - x) * k;
-    const ny = y + (near.p[1] - y) * k;
-    if (onFloor(nx, ny, 10)) {
-      x = nx;
-      y = ny;
+  const p2 = bossPhase2(b);
+  let { x, facing, atk, atkAt, hitDone, lastAtk } = b;
+  let loud = false;
+  if (atk) {
+    const wind = p2 ? BOSS_WIND2_MS : BOSS_WIND_MS;
+    if (!hitDone && now - atkAt >= wind) {
+      hitDone = true;
+      loud = true;
+      for (const id of targets) {
+        const [px, py] = pos(id);
+        if (bossCatches(atk, x, facing, px, py)) bossHit('arena', id, x, b.y - 40, s.me);
+      }
+    } else if (now - atkAt >= wind + BOSS_ACT_MS) {
+      atk = null;
+      lastAtk = now;
+      loud = true;
+    }
+  } else if (targets.length) {
+    // the nearest miner along the floor; ones on the floor first, they are easier to reach
+    const near = targets
+      .map((id) => ({ id, p: pos(id) }))
+      .sort((m, n) => Math.abs(m.p[0] - x) + (m.p[1] < GROUND - 3 ? 60 : 0) - (Math.abs(n.p[0] - x) + (n.p[1] < GROUND - 3 ? 60 : 0)))[0];
+    const dx = near.p[0] - x;
+    const want: 1 | -1 = dx >= 0 ? 1 : -1;
+    if (want !== facing && Math.abs(dx) > 6) {
+      facing = want;
+      loud = true;
+    }
+    if (Math.abs(dx) > 22) x = Math.max(WALL_L + 30, Math.min(WALL_R - 30, x + Math.sign(dx) * (p2 ? BOSS_SPEED2 : BOSS_SPEED) * 0.25));
+    if (now - lastAtk > (p2 ? BOSS_COOL2_MS : BOSS_COOL_MS)) {
+      const close = targets.filter((id) => Math.abs(pos(id)[0] - x) <= ROAR_REACH - 10).length;
+      const r = Math.random();
+      let pick: BossAtk | null = null;
+      if ((close >= 2 && r < 0.45) || (close >= 1 && r < 0.18)) pick = 'roar';
+      else if (Math.abs(dx) <= SWEEP_REACH - 8 && near.p[1] >= GROUND - 3) pick = r < 0.75 ? 'sweep' : 'tongue';
+      else if (Math.abs(dx) <= TONGUE_REACH - 12) pick = 'tongue';
+      if (pick) {
+        atk = pick;
+        atkAt = now;
+        hitDone = false;
+        loud = true;
+      }
     }
   }
-  const facing: 1 | -1 = near.p[0] >= x ? 1 : -1;
-  let slamAt = b.slamAt;
-  if (near.d < BOSS_SLAM_R && now - b.slamAt > BOSS_SLAM_MS) {
-    slamAt = now;
-    for (const id of targets) {
-      const p = pos(id);
-      if (Math.hypot(p[0] - x, p[1] - y) <= BOSS_SLAM_R) bossHit('arena', id, x, y, s.me);
-    }
-  }
-  setMatch({ boss: { ...b, x, y, facing, slamAt } }, slamAt !== b.slamAt || now - lastBroadcast > 400);
+  setMatch({ boss: { ...b, x, facing, atk, atkAt, hitDone, lastAtk } }, loud || now - lastBroadcast > 400);
 }
 /** A player hit the boss. The host checks it and keeps the boss's HP. */
 const bossHitsFrom = new Map<string, number>();
@@ -637,7 +678,11 @@ function onMatch(p: any) {
   const ids = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.length <= 16).slice(0, 40) : []);
   const score: Record<string, number> = {};
   if (p.sc && typeof p.sc === 'object') for (const [k, v] of Object.entries(p.sc)) if (k.length <= 16 && typeof v === 'number') score[k] = Math.max(0, Math.min(999, v));
-  const boss: Boss | null = p.boss && typeof p.boss === 'object' ? { x: num(p.boss.x, 0, AW), y: num(p.boss.y, 0, AH), hp: num(p.boss.hp, 0, 99999), max: num(p.boss.max, 1, 99999), slamAt: p.boss.sl >= 0 ? now - num(p.boss.sl, 0, 60000) : 0, hitAt: useArena.getState().match.boss?.hitAt ?? 0, facing: p.boss.f === -1 ? -1 : 1 } : null;
+  const atk: BossAtk | null = p.boss && ['sweep', 'tongue', 'roar'].includes(p.boss.a) ? p.boss.a : null;
+  const boss: Boss | null =
+    p.boss && typeof p.boss === 'object'
+      ? { x: num(p.boss.x, 0, AW), y: num(p.boss.y, 0, AH), hp: num(p.boss.hp, 0, 99999), max: num(p.boss.max, 1, 99999), atk, atkAt: atk ? now - num(p.boss.aa, 0, 60000) : 0, hitDone: p.boss.hd === 1, lastAtk: 0, hitAt: useArena.getState().match.boss?.hitAt ?? 0, facing: p.boss.f === -1 ? -1 : 1 }
+      : null;
   const prevBoss = useArena.getState().match.boss;
   if (boss && prevBoss && boss.hp < prevBoss.hp) boss.hitAt = now;
   const m: Match = {

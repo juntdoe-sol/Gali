@@ -30,7 +30,7 @@ export function initFightHooks(myName: () => string) {
     if (m.winner === me && m.fighters.length >= 2) useGame.getState().track('win');
     if (m.mode === 'boss' && m.winner === 'boss-down') {
       useFightStats.getState().add('bossWins');
-      // every miner who fought the Mole King reports their own win, so a solo boss fight counts on the ranks
+      // every miner who fought the boss reports their own win, so a solo boss fight counts on the ranks
       reportWin({ winner: myName(), host: myName(), mode: 'boss', players: m.fighters.length });
     }
     else if (m.winner === me && m.fighters.length >= 2) useFightStats.getState().add('wins');

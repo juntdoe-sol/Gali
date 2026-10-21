@@ -442,7 +442,7 @@ function Ranks() {
           ? 'Every Gali miner with a wallet, by XP. You: level ' + levelFromXp(xp) + ' · ' + points.toLocaleString() + ' pts.'
           : tab === 'ore'
             ? 'Lifetime ORE mined on ORE, read from each wallet on chain.'
-            : 'This week: 1 point a KO, 3 a match win, 2 a Mole King down. A KO counts when the miner who went down reports it.'}
+            : 'This week: 1 point a KO, 3 a match win, 2 a Boss Raid won. A KO counts when the miner who went down reports it.'}
       </T>
       {status === 'off' ? (
         <Card>

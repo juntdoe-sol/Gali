@@ -1,10 +1,14 @@
 /**
- * The Arena, drawn and played: one screen, the whole pit in view.
+ * The Arena, drawn and played: a gothic hall seen from the side, scrolling with you.
  *
- * A sand oval with four stone pillars and a ring in the middle, walled in, with stands full of a pixel
- * crowd along the top. Fighters move with WASD or the arrows (PC) or the stick (phone). On PC the left mouse
- * button swings, the right throws ORE at the cursor, Space jumps, and every unlocked power has its own key
- * (Q E R C V X, or 1 to 6). F and G still swing and throw. Spectators stand in the stands and cheer.
+ * A stone floor, two low ledges and the high throne in the middle, red arched windows, and a balcony along
+ * the top where the crowd (and anyone knocked out) stands. Fighters run with A/D or the arrows (PC) or the
+ * stick (phone), jump with W, Up or Space (or push the stick up), and drop off a ledge with S or Down (or
+ * the stick down). On PC the left mouse button swings, the right throws ORE at the cursor, and every
+ * unlocked power has its own key (Q E R C V X, or 1 to 6). F and G still swing and throw.
+ *
+ * In a Boss Raid everyone fights the Two-Mouthed: it warns before each attack (a red zone on the floor
+ * and a flashing mark), so jump its sweep, get above its tongue and keep away from its roar.
  *
  * The engine owns movement, aiming and the flight of your own ORE shards (it knows where everyone is
  * drawn), and tells the app what landed. The app (game/arena.ts, game/brawl.ts) owns the rules.
@@ -13,12 +17,17 @@
 import { canvasDpr, reducedMotion } from './screen';
 import { ctx2d, text, textWidth, loadAtlas, type Ctx } from './art';
 import { drawMiner, drawPet, frameAt, type Body } from './actors';
-import { drawHp, drawKo, drawShield, FightFx, hitFlash, jumpLift, koAge, pickTarget, swingTilt } from './brawlfx';
+import { drawHp, drawKo, drawShield, FightFx, hitFlash, koAge, pickTarget, swingTilt } from './brawlfx';
 import { Particles } from './particles';
 import type { BrawlSnap, Look, Pose } from './types';
-import { AH, AW, FLOOR, onFloor, PILLARS, PILLAR_R, RING, spawnAt, standsSpot, STANDS, THROW_RANGE, type Pickup, type Shot } from '../game/arenaMap';
+import {
+  AH, AW, BALCONY, BOSS_ACT_MS, BOSS_HALF, BOSS_TALL, BOSS_WIND2_MS, BOSS_WIND_MS, GROUND, inHall, LEDGES, ROAR_REACH, spawnAt, standsSpot,
+  SWEEP_REACH, THRONE, THROW_RANGE, TONGUE_REACH, WALL_L, WALL_R, type BossAtk, type Pickup, type Shot,
+} from '../game/arenaMap';
 import { trailColor } from '../game/trails';
-import { BOSS_EYE, bossSprite, drawFan, drawFlags, drawFlame, drawGlow, drawPillar, drawVignette, makeCrowd, paintArena, TORCHES, type Fan } from './arenaArt';
+import { drawFan, drawFlame, drawGlow, drawVignette, type Fan } from './arenaArt';
+import { HALL_TORCHES, makeHallCrowd, paintHall } from './hallArt';
+import { drawTwoMouthed, preloadBoss } from './bossArt';
 
 export type ArenaEvent =
   | { t: 'ready' }
@@ -53,7 +62,7 @@ export interface ArenaSnap {
   me: { id: string; spectator: boolean; ammo: number; actives: string[]; passive: string | null; ready: Record<string, number>; trail: string; guardUntil: number };
   peers: ArenaPeerView[];
   brawl: BrawlSnap;
-  match: { n: number; mode: string; phase: string; fighters: string[]; out: string[]; score: Record<string, number>; boss: { x: number; y: number; hp: number; max: number; slamAt: number; hitAt: number; facing: 1 | -1 } | null };
+  match: { n: number; mode: string; phase: string; fighters: string[]; out: string[]; score: Record<string, number>; boss: { x: number; y: number; hp: number; max: number; atk: BossAtk | null; atkAt: number; hitAt: number; facing: 1 | -1 } | null };
   pickups: Pickup[];
   shots: Shot[];
   cheers: { id: string; at: number }[];
@@ -67,7 +76,14 @@ export interface ArenaOpts {
   safeBottom?: number;
 }
 
-const SPEED = 62;
+const SPEED = 72;
+/** the hall's pull, a jump's kick, and the fastest fall (map px, per second) */
+const GRAVITY = 600;
+const JUMP_V = 262;
+const MAX_FALL = 340;
+/** how hard a hit throws you back, and a jump allowed just after running off an edge (ms) */
+const KNOCK = 130;
+const COYOTE_MS = 90;
 const SHOT_SPEED = 170;
 const DASH_PX = 52;
 const DASH_MS = 180;
@@ -82,6 +98,15 @@ const SLOT_IDS = ['dash', 'guard', 'slam', 'splash', 'spin', 'mend'];
 interface Mover extends Body {
   tx: number;
   ty: number;
+  /** fall speed, and whether the feet are on a floor or ledge */
+  vy?: number;
+  grounded?: boolean;
+}
+/** The floor or ledge right under a body at (x, y): where its shadow falls. */
+function surfaceBelow(x: number, y: number): number {
+  let best = GROUND;
+  for (const l of LEDGES) if (x >= l.x0 && x <= l.x1 && l.y >= y - 1 && l.y < best) best = l.y;
+  return best;
 }
 interface MyShot {
   x: number;
@@ -125,6 +150,15 @@ export class ArenaEngine {
   private swingUntil = 0;
   private lastSwing = 0;
   private myJumpAt = 0;
+  private lastGround = 0;
+  /** the ledge you dropped through, ignored until this time */
+  private dropY = -1;
+  private dropUntil = 0;
+  private knock = 0;
+  private stickUp = false;
+  private stickDown = false;
+  private lastAtkKey = '';
+  private lastDrip = 0;
   private dash: { from: [number, number]; dir: number; at: number; hit: boolean } | null = null;
   private slamAt = 0;
   private myShots: MyShot[] = [];
@@ -134,7 +168,6 @@ export class ArenaEngine {
   private lastHit = 0;
   private myHp = 100;
   private seen = new Map<string, { hp: number; sw: number; ko: number; fx: number; fxAt: number }>();
-  private lastBossSlam = 0;
   private lastBossHit = 0;
   private crowd: Fan[] = [];
   private lastEmber = 0;
@@ -152,7 +185,8 @@ export class ArenaEngine {
   ) {
     this.c = ctx2d(canvas);
     const [x, y] = spawnAt(0, 1);
-    this.me = { x, y, path: [], pose: 'idle', since: 0, facing: 1, tx: x, ty: y };
+    this.me = { x, y, path: [], pose: 'idle', since: 0, facing: 1, tx: x, ty: y, vy: 0, grounded: true };
+    preloadBoss();
     this.bindInput();
     (globalThis as unknown as { __galiArena?: ArenaEngine }).__galiArena = this;
   }
@@ -196,8 +230,8 @@ export class ArenaEngine {
 
   /* ---------------- the pit, painted once ---------------- */
   private buildGround() {
-    this.ground = paintArena();
-    this.crowd = makeCrowd();
+    this.ground = paintHall();
+    this.crowd = makeHallCrowd();
   }
 
   /* ---------------- people ---------------- */
@@ -240,12 +274,11 @@ export class ArenaEngine {
     if (prev && s.me.spectator && !prev.me.spectator) this.toStart(s);
     if (b.me.hit && b.me.hit !== this.lastHit) {
       this.lastHit = b.me.hit;
-      const dx = me.x - b.me.hx;
-      const d = Math.abs(dx) || 1;
-      for (let i = 0; i < 12; i++) {
-        const nx = me.x + dx / d;
-        if (!onFloor(nx, me.y)) break;
-        me.x = nx;
+      // thrown back, away from the hit, with a little hop
+      if (!s.me.spectator) {
+        this.knock = (me.x >= b.me.hx ? 1 : -1) * KNOCK;
+        me.vy = Math.min(me.vy ?? 0, -110);
+        me.grounded = false;
       }
       this.parts.burst('star', me.x, me.y - 14, 8, 26, 22, ['#ffffff', '#ffd84a', '#ff8a70'], 0.5);
       this.fx.hit(me.x, me.y, Math.max(0, this.myHp - b.me.hp), wall, true);
@@ -278,16 +311,9 @@ export class ArenaEngine {
     }
     const boss = s.match.boss;
     if (boss) {
-      if (boss.slamAt && boss.slamAt !== this.lastBossSlam && wall - boss.slamAt < 800) {
-        this.lastBossSlam = boss.slamAt;
-        this.parts.burst('dust', boss.x, boss.y, 18, 46, 18, ['#d8c8a8', '#f2e6c8'], 0.7);
-        this.fx.shake(260, 2.6, wall);
-        this.fx.say(boss.x, boss.y - 46, 'SLAM!', '#ff8a3d', wall);
-        this.emit({ t: 'sfx', name: 'slam' });
-      }
       if (boss.hitAt && boss.hitAt !== this.lastBossHit && wall - boss.hitAt < 600) {
         this.lastBossHit = boss.hitAt;
-        this.parts.burst('star', boss.x, boss.y - 24, 6, 26, 22, ['#ffffff', '#ffd84a'], 0.45);
+        this.parts.burst('star', boss.x, boss.y - 50, 6, 26, 22, ['#ffffff', '#ffd84a'], 0.45);
       }
     }
   }
@@ -304,10 +330,13 @@ export class ArenaEngine {
       const [x, y] = spawnAt(i, ids.length);
       me.x = x;
       me.y = y;
-      me.facing = x < FLOOR.cx ? 1 : -1;
+      me.facing = x < AW / 2 ? 1 : -1;
     }
     me.tx = me.x;
     me.ty = me.y;
+    me.vy = 0;
+    me.grounded = true;
+    this.knock = 0;
     this.parts.burst('dust', me.x, me.y, 10, 22, 14, ['#f2e6c8', '#d8c8a8'], 0.7);
   }
 
@@ -337,7 +366,7 @@ export class ArenaEngine {
     let t = pickTarget(me, this.targets(), wall);
     // the boss is big: it can be hit from a little further away
     const boss = this.snap?.match.boss;
-    if (!t && boss && boss.hp > 0 && Math.hypot(boss.x - me.x, (boss.y - me.y) * 1.6) < 36) t = { id: 'boss', facing: boss.x >= me.x ? 1 : -1 };
+    if (!t && boss && boss.hp > 0 && Math.abs(boss.x - me.x) < BOSS_HALF + 14 && me.y > boss.y - BOSS_TALL) t = { id: 'boss', facing: boss.x >= me.x ? 1 : -1 };
     if (t) me.facing = t.facing;
     this.swingUntil = performance.now() + 540;
     me.pose = 'swing';
@@ -348,12 +377,27 @@ export class ArenaEngine {
     this.emit({ t: 'sfx', name: 'swing' });
   }
 
+  /** Jump: off the floor or a ledge (or just after running off one). Mid-air you dodge hits for a moment. */
   jump() {
     const wall = Date.now();
-    if (this.downed(wall) || wall - this.myJumpAt < 600) return;
+    const me = this.me;
+    if (this.downed(wall) || this.snap?.me.spectator) return;
+    if (!me.grounded && performance.now() - this.lastGround > COYOTE_MS) return;
+    me.vy = -JUMP_V;
+    me.grounded = false;
+    this.lastGround = 0;
     this.myJumpAt = wall;
-    this.parts.burst('dust', this.me.x, this.me.y, 5, 14, 8, ['#f2e6c8', '#d8c8a8'], 0.4);
+    this.parts.burst('dust', me.x, me.y, 5, 14, 8, ['#f2e6c8', '#d8c8a8'], 0.4);
     this.emit({ t: 'jump' });
+  }
+  /** Drop down through the ledge you stand on. */
+  drop() {
+    const me = this.me;
+    if (!me.grounded || me.y >= GROUND - 1 || this.snap?.me.spectator) return;
+    this.dropY = me.y;
+    this.dropUntil = performance.now() + 260;
+    me.grounded = false;
+    me.vy = 40;
   }
 
   /** Is power `p` unlocked and off cooldown? */
@@ -379,10 +423,12 @@ export class ArenaEngine {
     } else if (p === 'slam') {
       this.slamAt = wall;
       this.myJumpAt = wall;
+      me.vy = -JUMP_V * 0.75;
+      me.grounded = false;
       this.emit({ t: 'power', p, targets: [], x: me.x, y: me.y });
       setTimeout(() => {
         // land: everyone close takes it
-        const hit = this.targets().filter((o) => o.v && o.v.on && !(o.v.ko && wall - o.v.ko < 4500) && Date.now() >= o.v.sh && Math.hypot(o.x - me.x, (o.y - me.y) * 1.4) <= SLAM_R).map((o) => o.id);
+        const hit = this.targets().filter((o) => o.v && o.v.on && !(o.v.ko && wall - o.v.ko < 4500) && Date.now() >= o.v.sh && (o.id === 'boss' ? Math.abs(o.x - me.x) <= SLAM_R + BOSS_HALF / 2 : Math.hypot(o.x - me.x, o.y - me.y) <= SLAM_R)).map((o) => o.id);
         this.parts.burst('dust', me.x, me.y, 16, 40, 16, ['#d8c8a8', '#f2e6c8'], 0.6);
         this.fx.shake(220, 2.4, Date.now());
         this.emit({ t: 'power', p: 'slam-land', targets: hit, x: me.x, y: me.y });
@@ -398,7 +444,7 @@ export class ArenaEngine {
       // everyone next to you takes it at once
       this.spinAt = performance.now();
       this.swingUntil = this.spinAt + 540;
-      const hit = this.targets().filter((o) => o.v && o.v.on && !(o.v.ko && wall - o.v.ko < 4500) && wall >= o.v.sh && Math.hypot(o.x - me.x, (o.y - me.y) * 1.4) <= (o.id === 'boss' ? SPIN_R + 10 : SPIN_R)).map((o) => o.id);
+      const hit = this.targets().filter((o) => o.v && o.v.on && !(o.v.ko && wall - o.v.ko < 4500) && wall >= o.v.sh && (o.id === 'boss' ? Math.abs(o.x - me.x) <= SPIN_R + BOSS_HALF / 2 && me.y > o.y - BOSS_TALL : Math.hypot(o.x - me.x, o.y - me.y) <= SPIN_R)).map((o) => o.id);
       this.fx.slash(me.x, me.y, 1, wall, hit.length > 0, trailColor(this.snap?.me.trail));
       this.fx.slash(me.x, me.y, -1, wall, hit.length > 0, trailColor(this.snap?.me.trail));
       this.parts.burst('star', me.x, me.y - 10, 10, 34, 16, ['#ffffff', '#ffd84a'], 0.45);
@@ -539,7 +585,8 @@ export class ArenaEngine {
     const slot = SLOT_KEYS.indexOf(k) >= 0 ? SLOT_KEYS.indexOf(k) : /^[1-6]$/.test(k) ? Number(k) - 1 : -1;
     if (down && !e.repeat) {
       if (k === 'f') this.attack();
-      else if (k === ' ') this.jump();
+      else if (k === ' ' || k === 'w' || k === 'arrowup') this.jump();
+      else if (k === 's' || k === 'arrowdown') this.drop();
       else if (k === 'g') this.throwOre(this.aim);
       else if (k === 'shift') this.power('dash');
       else if (slot >= 0) this.power(SLOT_IDS[slot]);
@@ -565,25 +612,20 @@ export class ArenaEngine {
       this.canvas.height = Math.round(cssH * dpr);
       this.c = ctx2d(this.canvas);
     }
-    // the whole pit in view between the app's bars; on a narrow phone, closer in and following you
+    // the hall's full height between the app's bars (on a phone a little closer, following you up and
+    // down too); it scrolls sideways with you
     const availH = Math.max(100, this.H - this.opts.top - this.opts.bottom);
-    const fit = Math.min(this.W / AW, availH / AH);
-    if (fit >= 1.8) {
-      this.z = Math.max(1, fit);
-      this.ox = Math.round((this.W - AW * this.z) / 2);
-      this.oy = Math.round(this.opts.top + (availH - AH * this.z) / 2);
-    } else {
-      // phones: close enough to see the fight, never tiny (the buttons float over the edges)
-      this.z = Math.max(fit, this.opts.touch ? Math.min(2.4, Math.max(1.9, availH / AH)) : Math.min(2.4, availH / AH));
-      const viewW = this.W / this.z;
-      const viewH = availH / this.z;
-      const cx = Math.max(viewW / 2, Math.min(AW - viewW / 2, this.me.x));
-      const cy = Math.max(viewH / 2, Math.min(AH - viewH / 2, this.me.y - 20));
-      this.camX += ((AW <= viewW ? AW / 2 : cx) - this.camX) * 0.15;
-      this.camY += ((AH <= viewH ? AH / 2 : cy) - this.camY) * 0.15;
-      this.ox = Math.round(this.W / 2 - this.camX * this.z);
-      this.oy = Math.round(this.opts.top + availH / 2 - this.camY * this.z);
-    }
+    const fit = availH / AH;
+    this.z = this.opts.touch ? Math.min(3, Math.max(fit, 1.9)) : Math.max(1, Math.min(4, fit));
+    const viewW = this.W / this.z;
+    const viewH = availH / this.z;
+    const fx = this.me.x + this.me.facing * 24;
+    const cx = AW <= viewW ? AW / 2 : Math.max(viewW / 2, Math.min(AW - viewW / 2, fx));
+    const cy = AH <= viewH ? AH / 2 : Math.max(viewH / 2, Math.min(AH - viewH / 2, this.me.y - 30));
+    this.camX += (cx - this.camX) * 0.12;
+    this.camY += (cy - this.camY) * 0.15;
+    this.ox = Math.round(this.W / 2 - this.camX * this.z);
+    this.oy = Math.round(this.opts.top + availH / 2 - this.camY * this.z);
   }
 
   private frame(t: number) {
@@ -600,38 +642,46 @@ export class ArenaEngine {
     }
   }
 
-  private canStand(x: number, y: number) {
-    if (this.snap?.me.spectator) return x > 12 && x < AW - 12 && y > STANDS.y0 + 2 && y < STANDS.y1;
-    return onFloor(x, y);
-  }
-
   private think(dt: number, now: number) {
     const me = this.me;
     const wall = Date.now();
     const downed = this.downed(wall);
     let ix = 0;
-    let iy = 0;
     if (this.keys.has('arrowleft') || this.keys.has('a')) ix -= 1;
     if (this.keys.has('arrowright') || this.keys.has('d')) ix += 1;
-    if (this.keys.has('arrowup') || this.keys.has('w')) iy -= 1;
-    if (this.keys.has('arrowdown') || this.keys.has('s')) iy += 1;
     if (this.stick) {
-      ix = this.stick.dx;
-      iy = this.stick.dy;
-    }
-    if (Math.hypot(ix, iy) < 0.18) {
-      ix = 0;
-      iy = 0;
+      ix = Math.abs(this.stick.dx) < 0.2 ? 0 : this.stick.dx;
+      // push the stick up to jump, down to drop off a ledge (once per push)
+      const up = this.stick.dy < -0.62;
+      const dn = this.stick.dy > 0.66;
+      if (up && !this.stickUp) this.jump();
+      if (dn && !this.stickDown) this.drop();
+      this.stickUp = up;
+      this.stickDown = dn;
+    } else {
+      this.stickUp = false;
+      this.stickDown = false;
     }
     let moving = false;
-    if (this.dash && !downed) {
-      // the dash carries you; the first fighter in your path is hit
+    const spectator = Boolean(this.snap?.me.spectator);
+    if (spectator) {
+      // on the balcony: walk along it, no jumping
+      me.y = BALCONY.y;
+      me.vy = 0;
+      me.grounded = true;
+      if (ix) {
+        me.x = Math.max(BALCONY.x0, Math.min(BALCONY.x1, me.x + ix * SPEED * dt));
+        me.facing = ix > 0 ? 1 : -1;
+        moving = true;
+      }
+    } else if (this.dash && !downed) {
+      // the dash carries you, even through the air; the first fighter in your path is hit
       const k = Math.min(1, (now - this.dash.at) / DASH_MS);
-      const nx = this.dash.from[0] + this.dash.dir * DASH_PX * k;
-      if (this.canStand(nx, me.y)) me.x = nx;
+      me.x = Math.max(WALL_L + 4, Math.min(WALL_R - 4, this.dash.from[0] + this.dash.dir * DASH_PX * k));
+      me.vy = 0;
       me.facing = this.dash.dir < 0 ? -1 : 1;
       if (!this.dash.hit) {
-        const foe = this.targets().find((o) => o.v && o.v.on && !(o.v.ko && wall - o.v.ko < 4500) && wall >= o.v.sh && Math.abs(o.x - me.x) < 12 && Math.abs(o.y - me.y) < 10);
+        const foe = this.targets().find((o) => o.v && o.v.on && !(o.v.ko && wall - o.v.ko < 4500) && wall >= o.v.sh && Math.abs(o.x - me.x) < (o.id === 'boss' ? BOSS_HALF : 12) && (o.id === 'boss' ? me.y > o.y - BOSS_TALL : Math.abs(o.y - me.y) < 14));
         if (foe) {
           this.dash.hit = true;
           this.fx.slash(me.x, me.y, me.facing, wall, true, trailColor(this.snap?.me.trail));
@@ -641,42 +691,54 @@ export class ArenaEngine {
       }
       if (k >= 1) this.dash = null;
       moving = true;
-    } else if (!downed && (ix || iy)) {
-      const n = Math.hypot(ix, iy);
-      const sp = SPEED * Math.min(1, n * 1.15);
-      const ux = ix / n;
-      const uy = iy / n;
-      const nx = me.x + ux * sp * dt;
-      const ny = me.y + uy * sp * dt;
-      if (this.canStand(nx, ny)) {
-        me.x = nx;
-        me.y = ny;
-        moving = true;
-      } else if (this.canStand(nx, me.y)) {
-        me.x = nx;
-        moving = true;
-      } else if (this.canStand(me.x, ny)) {
-        me.y = ny;
-        moving = true;
+    } else {
+      // run, fall, land: the floor and the ledges hold you (from above), the walls stop you
+      const run = downed ? 0 : ix * SPEED;
+      me.x = Math.max(WALL_L + 4, Math.min(WALL_R - 4, me.x + (run + this.knock) * dt));
+      this.knock *= Math.exp(-7 * dt);
+      if (Math.abs(this.knock) < 2) this.knock = 0;
+      const prevY = me.y;
+      const wasGrounded = Boolean(me.grounded);
+      me.vy = Math.min(MAX_FALL, (me.vy ?? 0) + GRAVITY * dt);
+      let ny = me.y + me.vy * dt;
+      let landed = false;
+      if (me.vy >= 0) {
+        for (const l of LEDGES) {
+          if (now < this.dropUntil && Math.abs(l.y - this.dropY) < 1) continue;
+          if (me.x >= l.x0 - 2 && me.x <= l.x1 + 2 && prevY <= l.y + 0.5 && ny >= l.y) {
+            ny = l.y;
+            landed = true;
+            break;
+          }
+        }
+        if (!landed && ny >= GROUND) {
+          ny = GROUND;
+          landed = true;
+        }
       }
-      if (Math.abs(ux) > 0.25) me.facing = ux > 0 ? 1 : -1;
-      me.tx = me.x + ux * 20;
-      me.ty = me.y + uy * 20;
+      if (me.vy < 0 && ny < 4) ny = 4;
+      me.y = ny;
+      if (landed) {
+        if (!wasGrounded && me.vy > 200) this.parts.burst('dust', me.x, me.y, 6, 16, 8, ['#8a7a94', '#5a4a62'], 0.4);
+        me.vy = 0;
+        me.grounded = true;
+        this.lastGround = now;
+      } else me.grounded = false;
+      if (ix && !downed) me.facing = ix > 0 ? 1 : -1;
+      moving = Math.abs(run) > 1 || !me.grounded;
     }
+    me.tx = me.x;
+    me.ty = me.y;
     const swinging = now < this.swingUntil && !downed;
     const want: Pose = swinging ? 'swing' : moving ? 'walk' : 'idle';
     if (me.pose !== want) {
       me.pose = want;
       me.since = now;
     }
-    if (!moving) {
-      me.tx = me.x;
-      me.ty = me.y;
-    }
     // embers drift up from the fires
     if (now - this.lastEmber > 140) {
       this.lastEmber = now;
-      const src = Math.random() < 0.5 ? TORCHES[Math.floor(Math.random() * TORCHES.length)] : ((pp) => [pp[0], pp[1] - 44] as [number, number])(PILLARS[Math.floor(Math.random() * PILLARS.length)]);
+      const src = HALL_TORCHES[Math.floor(Math.random() * HALL_TORCHES.length)];
       this.parts.spawn('ember', src[0] + (Math.random() - 0.5) * 4, src[1], { vx: (Math.random() - 0.5) * 6, vy: -8 - Math.random() * 8, life: 0.9 + Math.random() * 0.6, c: Math.random() < 0.5 ? '#ffb43d' : '#ff6a2a' });
     }
     // pick up whatever you walk over
@@ -693,11 +755,11 @@ export class ArenaEngine {
       sh.x += sh.dx * step;
       sh.y += sh.dy * step;
       sh.left -= step;
-      if (sh.left <= 0 || !onFloor(sh.x, sh.y + 10, -4)) {
+      if (sh.left <= 0 || !inHall(sh.x, sh.y) || sh.y >= GROUND - 1) {
         sh.done = true;
         continue;
       }
-      const foe = this.targets().find((o) => o.v && o.v.on && !(o.v.ko && wall - o.v.ko < 4500) && wall >= o.v.sh && Math.hypot(o.x - sh.x, o.y - 10 - sh.y) < (o.id === 'boss' ? 20 : 10));
+      const foe = this.targets().find((o) => o.v && o.v.on && !(o.v.ko && wall - o.v.ko < 4500) && wall >= o.v.sh && (o.id === 'boss' ? Math.abs(o.x - sh.x) < BOSS_HALF && sh.y > o.y - BOSS_TALL && sh.y <= o.y : Math.hypot(o.x - sh.x, o.y - 10 - sh.y) < 10));
       if (foe) {
         sh.done = true;
         this.parts.burst('gold', sh.x, sh.y, 6, 20, 14, ['#ffd24a', '#fff1a8'], 0.4);
@@ -717,16 +779,18 @@ export class ArenaEngine {
     }
     // others glide toward where they said they are going
     for (const p of this.others.values()) {
+      // ease toward where they said they are (jumps and falls are quick, so follow fast)
       const dx = p.view.tx - p.x;
       const dy = p.view.ty - p.y;
       const d = Math.hypot(dx, dy);
-      const step = SPEED * dt;
-      if (d > 0.5) {
-        p.x += (dx / d) * Math.min(d, step);
-        p.y += (dy / d) * Math.min(d, step);
+      const k = Math.min(1, dt * 12);
+      if (d > 0.3) {
+        p.x += dx * k;
+        p.y += dy * k;
         if (Math.abs(dx) > 0.5) p.facing = dx > 0 ? 1 : -1;
       }
-      const pw: Pose = d > 0.5 ? 'walk' : (/^dance[123]$/.test(p.view.p) || p.view.p === 'cheer' ? p.view.p : 'idle') as Pose;
+      const air = p.y < surfaceBelow(p.x, p.y) - 1.5;
+      const pw: Pose = d > 0.5 || air ? 'walk' : (/^dance[123]$/.test(p.view.p) || p.view.p === 'cheer' ? p.view.p : 'idle') as Pose;
       if (p.pose !== pw) {
         p.pose = pw;
         p.since = now;
@@ -763,26 +827,29 @@ export class ArenaEngine {
     const sy = (y: number) => oy + y * z;
     c.drawImage(this.ground, ox, oy, AW * z, AH * z);
     const s = this.snap;
-    drawFlags(c, sx, sy, z, wall);
-    // the crowd bobs, and jumps with their arms up when someone cheers or lands a KO
+    // the crowd on the balcony bobs, and jumps with their arms up when someone cheers or lands a KO
     const loud = (s?.cheers ?? []).filter((ch) => wall - ch.at < 1200).length;
     for (const f of this.crowd) {
       const wild = loud > 0 && (f.ph + Math.floor(wall / 90)) % 7 < loud + 1;
       const hop = wild ? (Math.floor(wall / 120 + f.ph) % 2) * 2 : Math.floor(((wall / 300 + f.ph) % 4) / 3);
       drawFan(c, f, sx, sy, z, hop, wild || (f.ph + Math.floor(wall / 700)) % 23 === 0);
     }
-    // torch flames on the wall
-    TORCHES.forEach(([tx, ty], i) => drawFlame(c, sx(tx + 0.5), sy(ty - 1), z, wall, i));
-    // the ring glows in King of the Hill
+    // torch flames on the pillars
+    HALL_TORCHES.forEach(([tx, ty], i) => {
+      c.fillStyle = '#3a2a1a';
+      c.fillRect(sx(tx - 1), sy(ty), 3 * z, 5 * z);
+      drawFlame(c, sx(tx + 0.5), sy(ty), z, wall, i, 1.1);
+    });
+    // King of the Hill: the throne glows
     if (s?.match.mode === 'koth') {
       c.save();
-      c.globalAlpha = 0.35 + 0.15 * Math.sin(wall / 300);
-      c.strokeStyle = '#ffd24a';
-      c.lineWidth = 2 * z;
-      c.beginPath();
-      c.ellipse(sx(RING.x), sy(RING.y), RING.r * z, (RING.r / 1.6) * z, 0, 0, Math.PI * 2);
-      c.stroke();
+      c.globalAlpha = 0.45 + 0.2 * Math.sin(wall / 300);
+      c.fillStyle = '#ffd24a';
+      c.fillRect(sx(THRONE.x0 - 2), sy(THRONE.y), (THRONE.x1 - THRONE.x0 + 4) * z, Math.max(1, z));
+      c.globalAlpha *= 0.4;
+      c.fillRect(sx(THRONE.x0), sy(THRONE.y - 14), (THRONE.x1 - THRONE.x0) * z, 14 * z);
       c.restore();
+      text(c, 'THRONE', Math.round(sx((THRONE.x0 + THRONE.x1) / 2) - (textWidth('THRONE') * z) / 2), Math.round(sy(THRONE.y + 9)), Math.max(1, Math.round(z)), '#ffd84a', '#1a0c10');
     }
     // pickups
     for (const it of s?.pickups ?? []) {
@@ -790,7 +857,7 @@ export class ArenaEngine {
       const X = sx(it.x);
       const Y = sy(it.y - 4 + bob);
       c.fillStyle = 'rgba(0,0,0,0.25)';
-      c.fillRect(X - 4 * z, sy(it.y), 8 * z, 2 * z);
+      c.fillRect(X - 4 * z, sy(it.y) - z, 8 * z, 2 * z);
       if (it.k === 'ore') {
         c.fillStyle = '#ffd24a';
         c.fillRect(X - 3 * z, Y - 4 * z, 6 * z, 5 * z);
@@ -815,129 +882,43 @@ export class ArenaEngine {
         c.fill();
       }
     }
-    // pillars (behind or in front of people by depth)
-    type Item = { y: number; f: () => void };
-    const items: Item[] = [];
-    PILLARS.forEach(([px, py], i) => {
-      items.push({
-        y: py + 2,
-        f: () => {
-          drawPillar(c, sx(px), sy(py), z);
-          drawFlame(c, sx(px), sy(py - 42), z, wall, i + 5, 1.2);
-        },
-      });
-    });
-    // the boss: the Mole King
+    // the Two-Mouthed: its warning first (under everyone), then the boss
     const boss = s?.match.boss;
-    if (boss && boss.hp > 0) {
-      items.push({
-        y: boss.y,
-        f: () => {
-          const age = wall - boss.slamAt;
-          const up = boss.slamAt && age < 400 ? Math.sin((age / 400) * Math.PI) * 12 : 0;
-          const bob = Math.round(Math.sin(wall / 260) * 0.8);
-          const flash = Boolean(boss.hitAt && wall - boss.hitAt < 120);
-          // claws up when it is ready to slam and someone is close: get out of the red ring
-          const near = [this.me, ...this.others.values()].some((o) => Math.hypot(o.x - boss.x, o.y - boss.y) < 50);
-          const ready = !boss.slamAt || age > 1900;
-          const raise = (ready && near) || (boss.slamAt > 0 && age < 220);
-          const X = sx(boss.x);
-          const Y = sy(boss.y);
-          c.fillStyle = 'rgba(0,0,0,0.35)';
-          c.beginPath();
-          c.ellipse(X, Y, (20 - up * 0.4) * z, (6 - up * 0.1) * z, 0, 0, Math.PI * 2);
-          c.fill();
-          if (ready && near) {
-            c.save();
-            c.globalAlpha = 0.35 + 0.25 * Math.sin(wall / 70);
-            c.strokeStyle = '#ff3a3a';
-            c.lineWidth = 2 * z;
-            c.beginPath();
-            c.ellipse(X, Y, 40 * z, 25 * z, 0, 0, Math.PI * 2);
-            c.stroke();
-            c.restore();
-          }
-          const spr = bossSprite(raise, flash);
-          c.save();
-          c.translate(X, Math.round(Y - (48 + up + bob) * z));
-          if (boss.facing < 0) c.scale(-1, 1);
-          c.drawImage(spr, -26 * z, 0, spr.width * z, spr.height * z);
-          // the eye glows
-          c.globalCompositeOperation = 'lighter';
-          const g = c.createRadialGradient((BOSS_EYE[0] - 26) * z, BOSS_EYE[1] * z, 0, (BOSS_EYE[0] - 26) * z, BOSS_EYE[1] * z, 7 * z);
-          g.addColorStop(0, 'rgba(255,60,40,0.7)');
-          g.addColorStop(1, 'rgba(255,60,40,0)');
-          c.fillStyle = g;
-          c.fillRect((BOSS_EYE[0] - 33) * z, (BOSS_EYE[1] - 7) * z, 14 * z, 14 * z);
-          c.restore();
-          // its HP bar, in a frame, with ticks every tenth
-          const w = 60 * z;
-          const bx = Math.round(X - w / 2);
-          const by = Math.round(sy(boss.y - 58));
-          c.fillStyle = '#140a0e';
-          c.fillRect(bx - 2 * z, by - 2 * z, w + 4 * z, 7 * z);
-          c.fillStyle = '#3a1418';
-          c.fillRect(bx, by, w, 3 * z);
-          const fr = Math.max(0, boss.hp / boss.max);
-          c.fillStyle = fr > 0.5 ? '#ff4f5e' : fr > 0.25 ? '#ff8a3d' : '#ffd24a';
-          c.fillRect(bx, by, w * fr, 3 * z);
-          c.fillStyle = 'rgba(255,255,255,0.35)';
-          c.fillRect(bx, by, w * fr, z);
-          c.fillStyle = '#140a0e';
-          for (let k = 1; k < 10; k++) c.fillRect(Math.round(bx + (w * k) / 10), by, Math.max(1, Math.round(z / 2)), 3 * z);
-          c.fillStyle = '#ffd24a';
-          c.fillRect(bx - 2 * z, by - 2 * z, 2 * z, 2 * z);
-          c.fillRect(bx + w, by - 2 * z, 2 * z, 2 * z);
-          text(c, 'MOLE KING', Math.round(X - (textWidth('MOLE KING') * z) / 2), Math.round(by - 9 * z), Math.max(1, Math.round(z)), '#ffd84a', '#1a0c10');
-          if (boss.slamAt && age < 500) {
-            c.save();
-            c.globalAlpha = 1 - age / 500;
-            c.strokeStyle = '#ff8a3d';
-            c.lineWidth = 2 * z;
-            c.beginPath();
-            c.ellipse(X, Y, (12 + age / 12) * z, ((12 + age / 12) / 1.6) * z, 0, 0, Math.PI * 2);
-            c.stroke();
-            c.restore();
-          }
-        },
-      });
-    }
-    // people
+    if (boss && (boss.hp > 0 || s?.match.phase === 'end')) this.drawBoss(boss, sx, sy, z, wall, s?.match.phase === 'end' && boss.hp <= 0);
+    // people: the boss stands behind them all
     const b = s?.brawl;
-    const fighter = (id: string, look: Look, body: Mover, mine: boolean, trail: string, spectator: boolean, jumpAt: number | undefined, fxp: { p: string; at: number } | null) => {
+    const fighter = (id: string, look: Look, body: Mover, mine: boolean, spectator: boolean, fxp: { p: string; at: number } | null) => {
       const X = sx(body.x);
-      const Y = sy(body.y);
+      const floor = spectator ? body.y : surfaceBelow(body.x, body.y);
+      const Y = sy(floor);
       const v = b ? (mine ? b.me : b.peers[id]) : undefined;
       const ko = v ? koAge(v, wall) : -1;
-      const slamUp = mine && this.slamAt && wall - this.slamAt < SLAM_MS ? Math.sin(((wall - this.slamAt) / SLAM_MS) * Math.PI) * 16 : 0;
-      const lift = ko >= 0 ? 0 : Math.max(jumpLift(jumpAt, wall), slamUp);
-      if (look.pet && !spectator) drawPet(c, look.pet, now, X - 15 * z * body.facing, Y + 1 * z, z, body.facing);
-      if (ko < 0 || !drawKo(c, look, X, Y, z, body.facing, ko, wall)) {
+      const lift = ko >= 0 ? 0 : Math.max(0, floor - body.y);
+      if (look.pet && !spectator) drawPet(c, look.pet, now, X - 15 * z * body.facing, sy(body.y) + 1 * z, z, body.facing);
+      if (ko < 0 || !drawKo(c, look, X, sy(body.y), z, body.facing, ko, wall)) {
         const sw = !mine && v && v.sw && wall - v.sw < 540 ? wall - v.sw : -1;
         const swAge = sw >= 0 ? sw : mine && wall - this.lastSwing < 540 ? wall - this.lastSwing : -1;
-        const pose: Pose = sw >= 0 ? 'swing' : lift > 0 && body.pose !== 'walk' ? 'walk' : spectator && body.pose === 'idle' && s?.cheers.some((ch) => ch.id === id && wall - ch.at < 1400) ? 'cheer' : body.pose;
-        const f = sw >= 0 ? Math.min(5, Math.floor(sw / 90)) : frameAt(pose, body.since, now);
+        const pose: Pose = sw >= 0 ? 'swing' : spectator && body.pose === 'idle' && s?.cheers.some((ch) => ch.id === id && wall - ch.at < 1400) ? 'cheer' : body.pose;
+        const f = sw >= 0 ? Math.min(5, Math.floor(sw / 90)) : lift > 0 && pose === 'walk' ? 1 : frameAt(pose, body.since, now);
         drawMiner(c, look, pose, f, X, Y, z, body.facing, hitFlash(v, wall) ? 0.45 : 1, lift, swingTilt(swAge, body.facing));
       }
+      const FY = sy(body.y);
       // Pickaxe Guard: a blue shield in front
       const guarding = mine ? (s?.me.guardUntil ?? 0) > wall : fxp && fxp.p === 'guard' && wall - fxp.at < 1500;
       if (guarding) {
         c.fillStyle = 'rgba(127,227,255,0.5)';
-        c.fillRect(X + body.facing * 7 * z - (body.facing < 0 ? 3 * z : 0), Y - 22 * z, 3 * z, 18 * z);
+        c.fillRect(X + body.facing * 7 * z - (body.facing < 0 ? 3 * z : 0), FY - 22 * z, 3 * z, 18 * z);
       }
       if (v && v.on && !spectator && b?.on) {
-        if (v.sh) drawShield(c, X, Y - lift * z, z, wall, v.sh);
-        if (ko < 0) drawHp(c, v, X, Y, z, wall, mine);
+        if (v.sh) drawShield(c, X, FY, z, wall, v.sh);
+        if (ko < 0) drawHp(c, v, X, FY, z, wall, mine);
       }
-      void trail;
     };
     const me = this.me;
     if (s) {
-      items.push({ y: me.y, f: () => fighter(s.me.id, this.look, me, true, s.me.trail, s.me.spectator, this.myJumpAt, null) });
-      for (const p of this.others.values()) items.push({ y: p.y, f: () => fighter(p.view.id, p.view.look, p, false, p.view.trail, p.view.spectator, b?.jumps?.[p.view.id], p.view.fx) });
+      for (const p of this.others.values()) fighter(p.view.id, p.view.look, p, false, p.view.spectator, p.view.fx);
+      fighter(s.me.id, this.look, me, true, s.me.spectator, null);
     }
-    items.sort((a, bb) => a.y - bb.y);
-    for (const it of items) it.f();
     // shards in flight: yours, and others' as they told us
     const shard = (x: number, y: number) => {
       const r = Math.floor(wall / 60) % 2;
@@ -953,7 +934,7 @@ export class ArenaEngine {
       shard(sh.x + sh.dx * d, sh.y + sh.dy * d);
     }
     this.parts.draw(c, ox, oy, z);
-    drawGlow(c, [...TORCHES.map(([tx, ty]) => [sx(tx), sy(ty - 4), 46] as [number, number, number]), ...PILLARS.map(([px, py]) => [sx(px), sy(py - 46), 40] as [number, number, number])], z, wall);
+    drawGlow(c, HALL_TORCHES.map(([tx, ty]) => [sx(tx), sy(ty - 4), 46] as [number, number, number]), z, wall);
     this.fx.draw(c, ox, oy, z, wall);
     // names
     const fs = Math.max(1, Math.round(z * 0.8));
@@ -984,6 +965,7 @@ export class ArenaEngine {
       }
     }
     drawVignette(c, this.W, this.H);
+    if (boss && boss.hp > 0 && s?.match.phase !== 'wait') this.drawBossBar(boss, wall);
     // the stick: always shown on a phone, bright while you hold it
     if (this.opts.touch && !s?.me.spectator) {
       const b = this.stickBase();
@@ -1017,6 +999,134 @@ export class ArenaEngine {
       c.fillRect(X - 1, Y - 7, 2, 5);
       c.fillRect(X - 1, Y + 2, 2, 5);
     }
+  }
+
+  /* ---------------- the Two-Mouthed ---------------- */
+  private roarAt = 0;
+  private deathAt = 0;
+  /**
+   * The boss, its warnings and what its attacks look like. The host decides when an attack lands; here
+   * the wind-up shows as a red zone where it will hit and a flashing mark over its head, then the hit
+   * shakes the hall. Blood drips from its tongue and the leg it holds.
+   */
+  private drawBoss(boss: NonNullable<ArenaSnap['match']['boss']>, sx: (x: number) => number, sy: (y: number) => number, z: number, wall: number, dying: boolean) {
+    const c = this.c;
+    const p2 = boss.hp <= boss.max / 2;
+    const wind = p2 ? BOSS_WIND2_MS : BOSS_WIND_MS;
+    const t = boss.atk ? wall - boss.atkAt : 0;
+    const f = boss.facing;
+    // the moment an attack starts, and the moment it lands
+    const key = boss.atk ? `${boss.atk}:${Math.round(boss.atkAt / 50)}` : '';
+    if (key && key !== this.lastAtkKey && t < wind) {
+      this.lastAtkKey = key;
+      this.emit({ t: 'sfx', name: 'pop' });
+    }
+    const landedKey = `${key}:hit`;
+    if (key && t >= wind && t < wind + BOSS_ACT_MS && this.lastAtkKey !== landedKey && (this.lastAtkKey === key || this.lastAtkKey === '')) {
+      this.lastAtkKey = landedKey;
+      const words: Record<BossAtk, [string, string]> = { sweep: ['SWEEP!', '#ff8a3d'], tongue: ['LASH!', '#ff4f5e'], roar: ['ROAAAR!', '#ffd84a'] };
+      const [w, col] = words[boss.atk as BossAtk];
+      this.fx.say(boss.x, boss.y - BOSS_TALL - 6, w, col, wall);
+      this.fx.shake(boss.atk === 'roar' ? 420 : 260, boss.atk === 'roar' ? 3.4 : 2.6, wall);
+      this.emit({ t: 'sfx', name: 'slam' });
+      if (boss.atk === 'sweep') this.parts.burst('dust', boss.x + f * 30, GROUND, 18, 50, 14, ['#8a7a94', '#c8b8d0'], 0.6);
+      if (boss.atk === 'roar') this.roarAt = wall;
+    }
+    // the warning: where it is about to hit
+    if (boss.atk && t < wind && !dying) {
+      const a = 0.22 + 0.18 * Math.sin(wall / 55);
+      c.save();
+      c.fillStyle = `rgba(255,40,40,${a})`;
+      c.strokeStyle = `rgba(255,90,70,${Math.min(1, a * 2.6)})`;
+      c.lineWidth = Math.max(1, z);
+      if (boss.atk === 'sweep') {
+        c.fillRect(sx(boss.x - SWEEP_REACH), sy(GROUND - 12), SWEEP_REACH * 2 * z, 12 * z);
+        c.strokeRect(sx(boss.x - SWEEP_REACH), sy(GROUND - 12), SWEEP_REACH * 2 * z, 12 * z);
+      } else if (boss.atk === 'tongue') {
+        const x0 = f > 0 ? boss.x : boss.x - TONGUE_REACH;
+        c.fillRect(sx(x0), sy(GROUND - 64), TONGUE_REACH * z, 64 * z);
+        c.strokeRect(sx(x0), sy(GROUND - 64), TONGUE_REACH * z, 64 * z);
+      } else {
+        c.beginPath();
+        c.ellipse(sx(boss.x), sy(GROUND), ROAR_REACH * z, 90 * z, 0, Math.PI, Math.PI * 2);
+        c.closePath();
+        c.fill();
+        c.stroke();
+      }
+      c.restore();
+      if (Math.floor(wall / 120) % 2 === 0) {
+        const sc = Math.max(2, Math.round(z * 2));
+        text(c, '!', Math.round(sx(boss.x) - (textWidth('!') * sc) / 2), Math.round(sy(boss.y - BOSS_TALL - 22)), sc, '#ff4f5e', '#1a0c10');
+      }
+    }
+    // the roar's shock ring
+    const ra = wall - this.roarAt;
+    if (this.roarAt && ra < 520) {
+      const k = ra / 520;
+      c.save();
+      c.globalAlpha = 1 - k;
+      c.strokeStyle = '#ffd84a';
+      c.lineWidth = Math.max(1, 2 * z);
+      c.beginPath();
+      c.ellipse(sx(boss.x), sy(boss.y - 60), (20 + k * ROAR_REACH) * z, (14 + k * 70) * z, 0, 0, Math.PI * 2);
+      c.stroke();
+      c.restore();
+    }
+    // knocked down: it sinks and fades
+    let alpha = 1;
+    let sink = 0;
+    if (dying) {
+      if (!this.deathAt) this.deathAt = wall;
+      const k = Math.min(1, (wall - this.deathAt) / 1400);
+      alpha = 1 - k;
+      sink = k * 14;
+      if (k < 1 && Math.random() < 0.3) this.parts.burst('smoke', boss.x + (Math.random() - 0.5) * 40, GROUND, 1, 10, 6, ['#3a2a3a', '#5a4a5a'], 0.9);
+    } else this.deathAt = 0;
+    // a shadow on the floor
+    c.fillStyle = 'rgba(0,0,0,0.35)';
+    c.beginPath();
+    c.ellipse(sx(boss.x), sy(GROUND), 30 * z, 4 * z, 0, 0, Math.PI * 2);
+    c.fill();
+    const tips = drawTwoMouthed(c, sx(boss.x), sy(boss.y + sink), z, { facing: f, wall, atk: dying ? null : boss.atk, t, wind, act: BOSS_ACT_MS, p2, flash: Boolean(boss.hitAt && wall - boss.hitAt < 120) }, alpha);
+    // blood drips from the tongue and the leg it holds
+    const now = performance.now();
+    if (tips && !dying && now - this.lastDrip > 240) {
+      this.lastDrip = now;
+      const [dx, dy] = Math.random() < 0.55 ? tips.tongue : tips.weapon;
+      const x = boss.x + dx;
+      const y = boss.y + dy;
+      if (y < GROUND - 2) this.parts.spawn('drip', x, GROUND, { z: GROUND - y, vz: -25, life: 1.6, c: Math.random() < 0.5 ? '#9a1018' : '#c42028' });
+    }
+  }
+  /** The boss's name and HP across the top of the screen, like a proper boss fight. */
+  private drawBossBar(boss: NonNullable<ArenaSnap['match']['boss']>, wall: number) {
+    const c = this.c;
+    const fr = Math.max(0, boss.hp / boss.max);
+    const p2 = fr <= 0.5;
+    const w = Math.round(Math.min(this.W * 0.62, 460));
+    const h = 8;
+    const x = Math.round((this.W - w) / 2);
+    const y = Math.round(this.opts.top + 22);
+    const name = 'THE TWO-MOUTHED';
+    const sc = 2;
+    // a dark plate so the name reads over the crowd
+    c.fillStyle = 'rgba(10,6,12,0.72)';
+    c.fillRect(x - 14, y - 22, w + 28, h + 30);
+    text(c, name, Math.round(this.W / 2 - (textWidth(name) * sc) / 2), y - 16, sc, '#f2e6c8', '#1a0c10');
+    if (p2) text(c, 'ENRAGED', x + w - textWidth('ENRAGED') * 1 - 2, y - 10, 1, Math.floor(wall / 250) % 2 ? '#ff4f5e' : '#ff8a3d', '#1a0c10');
+    c.fillStyle = '#0c0608';
+    c.fillRect(x - 3, y - 3, w + 6, h + 6);
+    c.fillStyle = '#8a6a3a';
+    c.fillRect(x - 2, y - 2, w + 4, 1);
+    c.fillRect(x - 2, y + h + 1, w + 4, 1);
+    c.fillStyle = '#2a0c10';
+    c.fillRect(x, y, w, h);
+    c.fillStyle = p2 ? (Math.floor(wall / 300) % 2 ? '#c41a24' : '#a8121c') : '#b8202a';
+    c.fillRect(x, y, Math.round(w * fr), h);
+    c.fillStyle = 'rgba(255,255,255,0.25)';
+    c.fillRect(x, y, Math.round(w * fr), 2);
+    c.fillStyle = '#0c0608';
+    for (let k = 1; k < 10; k++) c.fillRect(Math.round(x + (w * k) / 10), y, 1, h);
   }
 
   /* ---------------- clips ---------------- */

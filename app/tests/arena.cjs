@@ -1,7 +1,7 @@
 // Run: node tests/arena.cjs
 // The arena on a fake realtime bus: everyone agrees on one host, matches run count -> fight -> end and
 // rotate modes, a KO in Last Miner Standing sends you to the stands and the last one standing wins
-// (with XP), pickups go to whoever the host says, and players can bring the Mole Boss down.
+// (with XP), pickups go to whoever the host says, and players can bring the Two-Mouthed down.
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
@@ -127,13 +127,13 @@ async function hitUntilDown(A, B, x, y) {
     assert.equal(P.useArena.getState().spectator, false, 'everyone fights again');
   }
   await wait(5200);
-  // Cara alone in the ring scores
-  A.at(60, 130);
-  B.at(300, 130);
-  C.at(180, 132);
+  // Cara alone on the throne (the high middle ledge) scores
+  A.at(60, 198);
+  B.at(300, 198);
+  C.at(240, 118);
   await wait(1600);
   const sc = A.useArena.getState().match.score.c3 ?? 0;
-  assert.ok(sc >= 1, `Cara scores in the ring (${sc}s)`);
+  assert.ok(sc >= 1, `Cara scores on the throne (${sc}s)`);
   assert.ok(!(A.useArena.getState().match.score.a1 > 0), 'nobody else does');
 
   // a thrown shard reaches across the pit; a swing does not
@@ -159,7 +159,18 @@ async function hitUntilDown(A, B, x, y) {
   assert.ok(afterOre - B.useBrawl.getState().me.hp <= 4, 'guarding takes a fifth');
   assert.equal(aHp - A.useBrawl.getState().me.hp, 5, 'the guard stings the attacker for 5');
 
-  // a solo player gets the Mole Boss, and can bring it down
+  // the Two-Mouthed's attacks catch by where you stand: the sweep is low, the tongue reaches far ahead,
+  // the roar is all round
+  const G = A.GROUND;
+  assert.equal(A.bossCatches('sweep', 300, -1, 270, G), true, 'sweep: on the floor next to it');
+  assert.equal(A.bossCatches('sweep', 300, -1, 270, G - 30), false, 'sweep: jumped over it');
+  assert.equal(A.bossCatches('sweep', 300, -1, 200, G), false, 'sweep: out of reach');
+  assert.equal(A.bossCatches('tongue', 300, -1, 190, G), true, 'tongue: far ahead on the floor');
+  assert.equal(A.bossCatches('tongue', 300, -1, 190, 118), false, 'tongue: not up on the throne');
+  assert.equal(A.bossCatches('tongue', 300, -1, 360, G), false, 'tongue: not behind it');
+  assert.equal(A.bossCatches('roar', 300, -1, 360, G), true, 'roar: behind it too');
+
+  // a solo player gets the boss, and can bring it down
   for (const P of [A, B, C]) P.useArena.getState().close();
   bus.rooms = {};
   const D = player('DAN', 'd4', 20);
