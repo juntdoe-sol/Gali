@@ -163,10 +163,17 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
   const left = L.desktop ? RAIL_W : 0;
   const right = L.desktop ? chatW + GUTTER * 2 : 0;
   const touch = !L.mouse;
+  // another screen over the lobby: the lobby stops hearing keys, so they cannot walk the miner into a door
+  const arenaOpen = useArena((s) => s.open);
+  const caveOpen = useCave((s) => s.open);
+  const arcadeOpen = useArcade((s) => !!s.game);
+  const away = arenaOpen || caveOpen || arcadeOpen;
+  const awayRef = useRef(away);
+  awayRef.current = away;
   useEffect(() => {
     const f = ref.current?.opts;
-    if (typeof f === 'function') f({ top: topH, bottom, left, right, touch });
-  }, [topH, bottom, left, right, touch]);
+    if (typeof f === 'function') f({ top: topH, bottom, left, right, touch, away });
+  }, [topH, bottom, left, right, touch, away]);
 
   // desktop keys: G travel, ? help, 1-6 emotes, 7 dance, Esc closes the top menu
   useEffect(() => {
@@ -179,7 +186,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
       setHowTo(false);
     };
     const key = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+      if (awayRef.current || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
       const n = Number(e.key);
@@ -298,7 +305,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
           onEvent={onEvent}
           atlas={atlas}
           look={look}
-          opts={{ spawn, top: topH, bottom, left, right, touch }}
+          opts={{ spawn, top: topH, bottom, left, right, touch, away }}
           dom={{ style: { flex: 1, backgroundColor: '#2f7fc4' }, scrollEnabled: false, nestedScrollEnabled: false, bounces: false, overScrollMode: 'never' } as never}
         />
       ) : null}
