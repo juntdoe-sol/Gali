@@ -10,7 +10,7 @@ import { Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Vie
 import { loadJson, saveJson } from '../game/storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, levelFromXp } from '../game/constants';
-import { cheer, downMode, effectiveLoadout, emote, EMOTE_MS, EMOTES, grab, grabbable, hostId, hurtBoss, isHost, MODE_NAME, publishArenaMe, REVIVE_MS, reviveListeners, setEmoteOpen, shareRevive, shareThrow, sharePower, throwHeld, tryGrab, useArena, KOTH_WIN, type Emote, type Mode } from '../game/arena';
+import { hurtMob, mobKillListeners, cheer, downMode, effectiveLoadout, emote, EMOTE_MS, EMOTES, grab, grabbable, hostId, hurtBoss, isHost, MODE_NAME, publishArenaMe, REVIVE_MS, reviveListeners, setEmoteOpen, shareRevive, shareThrow, sharePower, throwHeld, tryGrab, useArena, KOTH_WIN, type Emote, type Mode } from '../game/arena';
 import { brawlSnap, guard, heal, jump, setMyPos, strike, swing, useBrawl } from '../game/brawl';
 import { fightPoints, titleOf, TRAILS, trailUnlocked, useFightStats } from '../game/fightGear';
 import { ACTIVES, MEND_HP, PASSIVES, POWERS, POWER_KEY, baseDamage, unlocked, type ActiveId, type PowerId } from '../game/powers';
@@ -66,7 +66,7 @@ function snapshot(): ArenaSnap {
       .filter((p) => now - p.seen < 15_000)
       .map((p) => ({ id: p.id, name: p.name, x: Math.round(p.x), y: Math.round(p.y), tx: Math.round(p.tx), ty: Math.round(p.ty), f: p.facing, p: p.pose, look: p.look, spectator: p.spectator, trail: p.trail, fx: p.fx })),
     brawl: brawlSnap(now),
-    match: { n: a.match.n, mode: a.match.mode, phase: a.match.phase, fighters: a.match.fighters, out: a.match.out, score: a.match.score, boss: a.match.boss, downMode: downMode() },
+    match: { n: a.match.n, mode: a.match.mode, phase: a.match.phase, fighters: a.match.fighters, out: a.match.out, score: a.match.score, boss: a.match.boss, downMode: downMode(), mobs: a.match.mobs },
     pickups: a.pickups,
     shots: a.shots.filter((s) => now - s.at < 1200),
     cheers: a.cheers.filter((c) => now - c.at < 2500),
@@ -76,12 +76,18 @@ function snapshot(): ArenaSnap {
 }
 
 /** Hit the boss: the host keeps its HP, so the host applies its own hits directly. */
-function hitBoss(w: 'swing' | 'dash' | 'slam' | 'ore' | 'splash' | 'pet' | 'spin', x: number, y: number) {
+type MonsterW = 'swing' | 'dash' | 'slam' | 'ore' | 'splash' | 'pet' | 'spin';
+const isMonster = (t: string | null) => t === 'boss' || (t !== null && /^m\d{1,7}$/.test(t));
+/** Hit the boss or a crawler: the host keeps their HP, so the host applies its own hits directly. */
+function hitMonster(t: string, w: MonsterW, x: number, y: number) {
   if (isHost()) {
-    hurtBoss(baseDamage(w, useArena.getState().me, Date.now() % 997, myLvl(), true));
+    const me = useArena.getState().me;
+    const dmg = baseDamage(w, me, Date.now() % 997, myLvl(), true);
+    if (t === 'boss') hurtBoss(dmg);
+    else hurtMob(Number(t.slice(1)), dmg, me);
     return;
   }
-  strike('arena', w, 'boss', x, y);
+  strike('arena', w, t, x, y);
 }
 
 export function ArenaScreen() {
@@ -103,6 +109,15 @@ export function ArenaScreen() {
   useEffect(() => {
     if (open && !atlas) atlasSource().then(setAtlas, () => setAtlas('/pixel/atlas.png'));
   }, [open, atlas]);
+
+  // a crawler died: the canvas puffs it away
+  useEffect(() => {
+    const f = (x: number, mine: boolean) => ref.current?.mobDown?.(x, mine);
+    mobKillListeners.add(f);
+    return () => {
+      mobKillListeners.delete(f);
+    };
+  }, []);
 
   // a teammate got you back up
   useEffect(() => {
@@ -144,7 +159,7 @@ export function ArenaScreen() {
         publishArenaMe({ x: e.x, y: e.y, tx: e.tx, ty: e.ty, facing: e.facing, pose: e.pose });
         break;
       case 'swing':
-        if (e.target === 'boss') hitBoss('swing', e.x, e.y);
+        if (e.target && isMonster(e.target)) hitMonster(e.target, 'swing', e.x, e.y);
         else swing('arena', e.target, e.x, e.y);
         break;
       case 'jump':
@@ -158,17 +173,17 @@ export function ArenaScreen() {
           sharePower(p);
           if (p === 'guard') guard();
           if (p === 'mend') heal(MEND_HP);
-          if (p === 'spin') for (const t of e.targets) t === 'boss' ? hitBoss('spin', e.x, e.y) : strike('arena', 'spin', t, e.x, e.y);
+          if (p === 'spin') for (const t of e.targets) isMonster(t) ? hitMonster(t, 'spin', e.x, e.y) : strike('arena', 'spin', t, e.x, e.y);
         } else if (e.p === 'dash-hit' || e.p === 'slam-land') {
           const w = e.p === 'dash-hit' ? 'dash' : 'slam';
           for (const t of e.targets) {
-            if (t === 'boss') hitBoss(w, e.x, e.y);
+            if (isMonster(t)) hitMonster(t, w, e.x, e.y);
             else strike('arena', w, t, e.x, e.y);
           }
         }
         break;
       case 'strike':
-        if (e.target === 'boss') hitBoss(e.w, e.x, e.y);
+        if (isMonster(e.target)) hitMonster(e.target, e.w, e.x, e.y);
         else strike('arena', e.w, e.target, e.x, e.y);
         break;
       case 'throw':

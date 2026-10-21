@@ -53,7 +53,7 @@ const HP_SEND_MS = 700;
 
 /** Damage of an attacker's n-th swing: the same on every client, and not up to the attacker. */
 export const dmgOf = swingDmg;
-const WEAPONS: Weapon[] = ['swing', 'dash', 'slam', 'ore', 'splash', 'pet', 'boss', 'sting', 'spin'];
+const WEAPONS: Weapon[] = ['swing', 'dash', 'slam', 'ore', 'splash', 'pet', 'boss', 'mob', 'sting', 'spin'];
 
 export interface Fighter {
   hp: number;
@@ -277,8 +277,9 @@ function onBx(scope: Scope, p: any) {
     // powers, thrown ORE and the boss only exist in the arena
     if (w !== 'swing' && !room?.arena) return;
     const boss = a === 'boss';
-    if (boss && (w !== 'boss' || !room?.host || typeof p.h !== 'string' || room.host() !== p.h)) return;
-    if (!boss && w === 'boss') return;
+    // 'boss' is whatever the host runs: the Two-Mouthed and its crawlers
+    if (boss && ((w !== 'boss' && w !== 'mob') || !room?.host || typeof p.h !== 'string' || room.host() !== p.h)) return;
+    if (!boss && (w === 'boss' || w === 'mob')) return;
     // the attacker swung: draw it
     if (w === 'swing' && st.peers[a]) useBrawl.setState((s) => ({ peers: { ...s.peers, [a]: { ...s.peers[a], swingAt: now } } }));
     const info = boss ? null : peerInfo(scope, a);
@@ -302,7 +303,7 @@ function onBx(scope: Scope, p: any) {
       }
       if (ko) {
         sendHp(true, a);
-        brawlHooks.kodBy?.(scope, a, boss ? 'The Two-Mouthed' : info?.name ?? null);
+        brawlHooks.kodBy?.(scope, a, boss ? (w === 'mob' ? 'A crawler' : 'The Two-Mouthed') : info?.name ?? null);
         if (!brawlHooks.holdKo?.(scope)) setTimeout(standUp, KO_MS);
       } else sendHp();
     } else {
@@ -478,9 +479,9 @@ export function strike(scope: Scope, w: Weapon, target: string, x: number, y: nu
   const s = useBrawl.getState();
   const room = rooms[scope];
   if (!room?.arena || scope !== s.scope || s.off || s.me.koAt || !canFight(scope)) return false;
-  if (target === 'boss') {
+  if (target === 'boss' || /^m\d{1,7}$/.test(target)) {
     seq += 1;
-    return send(scope, { k: 'h', a: meId(scope), t: 'boss', s: seq, x: Math.round(x), y: Math.round(y), w });
+    return send(scope, { k: 'h', a: meId(scope), t: target, s: seq, x: Math.round(x), y: Math.round(y), w });
   }
   const v = s.peers[target];
   if (!v || !v.on || v.koAt || now < v.shieldUntil) return false;
@@ -493,10 +494,10 @@ export function strike(scope: Scope, w: Weapon, target: string, x: number, y: nu
 }
 
 /** The arena host's boss hits a player. Only the host calls this. */
-export function bossHit(scope: Scope, target: string, x: number, y: number, host: string) {
+export function bossHit(scope: Scope, target: string, x: number, y: number, host: string, w: 'boss' | 'mob' = 'boss') {
   seq += 1;
   // the host may be the target: deliver it to ourselves too
-  const p = { k: 'h', a: 'boss', t: target, s: seq, x: Math.round(x), y: Math.round(y), w: 'boss', h: host };
+  const p = { k: 'h', a: 'boss', t: target, s: seq, x: Math.round(x), y: Math.round(y), w, h: host };
   if (target === meId(scope)) onBx(scope, p);
   else send(scope, p);
 }

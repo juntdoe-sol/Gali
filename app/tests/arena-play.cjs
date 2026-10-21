@@ -58,6 +58,9 @@ async function hitUntilDown(A, B, x, y) {
 (async () => {
   const A = player('ALICE', 'a1', 9);
   const B = player('BOB', 'b2', 5);
+  // crawlers are tested on their own at the end
+  A._arenaTest.mobs(false);
+  B._arenaTest.mobs(false);
   await wait(30);
   A.at(150, 198);
   B.at(162, 198);
@@ -143,7 +146,41 @@ async function hitUntilDown(A, B, x, y) {
   assert.equal(B.useBrawl.getState().me.koAt, 0, 'B is back up');
   assert.equal(B.useBrawl.getState().me.hp, A.REVIVE_HP);
   assert.equal(B.useArena.getState().downAt, 0);
-  console.log('arena play: emotes, grab and throw, raid revive all OK');
+
+  // ---- crawlers: one crawls out, walks up, bites; a few swings kill it, and the killer gets XP
+  A.at(300, 198);
+  B.at(120, 198);
+  await wait(200);
+  for (const P of [A, B]) P.useBrawl.setState((s) => ({ me: { ...s.me, hp: 100, koAt: 0, shieldUntil: 0 } }));
+  A.useArena.setState((s) => ({ match: { ...s.match, mobs: [] } }));
+  // the host's next tick sends one out of a wall
+  A._arenaTest.mobs(true);
+  await wait(400);
+  const m0 = A.useArena.getState().match.mobs;
+  assert.equal(m0.length, 1, 'one crawler out');
+  assert.equal(B.useArena.getState().match.mobs.length, 1, 'B sees it');
+  // bring it to B and let it bite
+  B.at(120, 198);
+  await wait(400);
+  const bx = A.useArena.getState().peers.b2.x;
+  A.useArena.setState((s) => ({ match: { ...s.match, mobs: s.match.mobs.map((m) => ({ ...m, x: bx + 6, atkAt: 0 })) } }));
+  for (let k = 0; k < 20 && B.useBrawl.getState().me.hp === 100; k++) await wait(100);
+  assert.equal(B.useBrawl.getState().me.hp, 100 - 6, 'a bite takes 6');
+  // B kills it with swings (B is not the host: the host checks each hit)
+  const id = 'm' + m0[0].i;
+  let swings = 0;
+  const sent = [];
+  while (A.useArena.getState().match.mobs.length && swings < 8) {
+    sent.push(B.strike('arena', 'swing', id, bx, 198));
+    swings++;
+    await wait(350);
+  }
+  await wait(80);
+  assert.equal(A.useArena.getState().match.mobs.length, 0, 'dead after ' + swings + ' swings');
+  assert.equal(B.useArena.getState().match.mobs.length, 0, 'gone for B too');
+  assert.equal(B.xp, A.MOB_XP, 'B gets the kill XP');
+  assert.equal(A.xp, 0, 'A did not');
+  console.log('arena play: emotes, grab and throw, raid revive, crawlers all OK');
   process.exit(0);
 })().catch((e) => {
   console.error(e);
