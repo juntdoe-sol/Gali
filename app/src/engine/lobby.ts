@@ -16,7 +16,7 @@
 import { canvasDpr, reducedMotion } from './screen';
 import { wheelZoom } from './screen';
 import { draw, has, makeCanvas, ctx2d, rect, sprite, text, textCentered, textWidth, loadAtlas, type Ctx } from './art';
-import { drawMiner, drawPet, frameAt, lampOf, stepBody, type Body } from './actors';
+import { drawMiner, drawPet, frameAt, lampOf, stepBody, type Body , drawDancer, isDance } from './actors';
 import { Particles } from './particles';
 import { Sky } from './sky';
 import type { BrawlSnap, Look, Pose } from './types';
@@ -122,6 +122,7 @@ function buildTargets(): Tgt[] {
 
 /** how long a smashed pot or crate stays rubble before it grows back (ms) */
 const SMASH_BACK_MS = 18000;
+const AURA_WORDS: Record<string, string> = { aura: '+1000 AURA', unaura: '-1000 AURA', sixseven: '67', sigma: 'SIGMA', rizz: 'RIZZ', mew: 'MEWING', dub: 'W', el: 'L', nocap: 'NO CAP', frfr: 'FR FR', gg: 'GG', bruh: 'BRUH' };
 const DOOR_COLOR: Record<DoorId, string> = { island: '#3de0c8', cave: '#ff9a3d', market: '#b86bff', tunnel: '#ff9a3d', pot: '#ffcf4a', crash: '#3de0c8', arena: '#ff4f5e' };
 
 interface Walker extends Body {
@@ -1321,7 +1322,7 @@ export class LobbyEngine {
     for (const p of this.peers.values()) {
       if (p.path.length) stepBody(p, dt, SPEED, now);
       const walking = p.path.length > 0;
-      const want = walking ? 'walk' : p.view.p === 'cheer' || /^dance[123]$/.test(p.view.p) ? p.view.p : 'idle';
+      const want = walking ? 'walk' : p.view.p === 'cheer' || isDance(p.view.p) ? p.view.p : 'idle';
       if (p.pose !== want) {
         p.pose = want as Pose;
         p.since = now;
@@ -1517,7 +1518,9 @@ export class LobbyEngine {
             const pose = (sw >= 0 ? 'swing' : lift > 0 && b.pose !== 'walk' ? 'walk' : b.pose) as never;
             const pf = sw >= 0 ? Math.min(5, Math.floor(sw / 90)) : lift > 0 && b.pose !== 'walk' ? 2 : f;
             const swAge = sw >= 0 ? sw : pr.mine && wall - this.lastSwingWall < 540 ? wall - this.lastSwingWall : -1;
-            drawMiner(c, pr.look, pose, pf, X, Y, z, b.facing, hitFlash(bv, wall) ? 0.45 : 1, lift, swingTilt(swAge, b.facing));
+            const dn = isDance(b.pose) && sw < 0 && lift <= 0 ? Number(b.pose.slice(5)) : 0;
+            if (dn) drawDancer(c, pr.look, dn, wall, X, Y, z, b.facing, hitFlash(bv, wall) ? 0.45 : 1);
+            else drawMiner(c, pr.look, pose, pf, X, Y, z, b.facing, hitFlash(bv, wall) ? 0.45 : 1, lift, swingTilt(swAge, b.facing));
           }
           if (bs?.on && bv?.on) {
             if (bv.sh) drawShield(c, X, Y - lift * z, z, wall, bv.sh);
@@ -2099,7 +2102,17 @@ export class LobbyEngine {
       lines.forEach((l, i) => text(c, l, Math.round(X - (textWidth(l) * fs) / 2), by + Math.round(3 * fs + i * lh), fs, '#1a1a2e'));
       y = by - 6 * fs;
     }
-    if (emoji) {
+    const words = emoji ? AURA_WORDS[emoji] : undefined;
+    if (words) {
+      // an aura emote: big gold words that float up and fade
+      const s2 = fs * 2;
+      const bob = Math.min(12, emojiAge / 130) * fs;
+      const tw = textWidth(words) * s2;
+      c.globalAlpha = Math.max(0, 1 - emojiAge / 3000);
+      const col = emoji === 'unaura' || emoji === 'el' || emoji === 'bruh' ? '#ff6a6a' : emoji === 'sigma' || emoji === 'mew' ? '#c9a8ff' : '#ffd24a';
+      text(c, words, Math.round(X - tw / 2), Math.round(y - 6 * fs - bob - 7 * s2), s2, col, '#1a0c10');
+      c.globalAlpha = 1;
+    } else if (emoji) {
       const ic = sprite(`ui-${emoji}`);
       if (ic) {
         // a pixel icon, a whole number of device pixels per art pixel so it stays crisp
