@@ -14,7 +14,7 @@ import { COLORS, levelFromXp } from '../game/constants';
 import { useCave } from '../game/caveStore';
 import { loadChain } from '../chain/lazy';
 import { TIP_LIMITS, TIP_SKR_MINT, short } from '../chain/light';
-import { ACT_LIFE_MS, AURA_EMOTES, announce, joinChat, joinLobby, leaveLobby, LOBBY_EMOTES, publishLobbyMe, useLobby, type Act, type LobbyMsg } from '../game/lobby';
+import { ACT_LIFE_MS, announce, joinChat, joinLobby, leaveLobby, LOBBY_EMOTES, publishLobbyMe, useLobby, type Act, type LobbyMsg } from '../game/lobby';
 import { chatWords, cleanName, LOBBY_CAP, STICKERS, stickerOf, type DoorId } from '../game/lobbyMap';
 import { isOnChain, useGame, useLevelXp } from '../game/store';
 import { play } from '../game/sfx';
@@ -432,11 +432,6 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
             <View style={styles.auraGrid}>
               {LOBBY_EMOTES.map((e, i) => (
                 <EmoteKey key={e} icon={e} label={`Emote ${EMOTE_NAME[e] ?? e}`} kbd={String(i + 1)} onPress={() => useLobby.getState().emote(e)} />
-              ))}
-            </View>
-            <View style={styles.auraGrid}>
-              {Object.entries(AURA_EMOTES).map(([k, words]) => (
-                <Choice key={k} grow={false} label={words} on={false} onPress={() => useLobby.getState().emote(k)} />
               ))}
             </View>
             {myDance ? (
