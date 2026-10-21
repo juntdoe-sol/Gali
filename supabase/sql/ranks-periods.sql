@@ -1,7 +1,8 @@
--- Ranks by period: today, this month, this year and all time. Run once in the Supabase SQL Editor
+-- Ranks by period: today, this week, this month, this year and all time. Run once in the Supabase SQL Editor
 -- (safe to run again), after brawl-ranks.sql, brawl-ranks-boss.sql and miner-ranks.sql.
 --
--- Days, months and years start at midnight Malaysia time (UTC+8).
+-- Days, weeks (from Monday), months and years start at midnight Malaysia time (UTC+8). The week is
+-- for the lobby's Player of the Week board: the most XP gained since Monday.
 --
 -- Brawl: counted straight from the KO and win rows, for any period.
 -- Level (XP) and ORE mined: the totals only ever go up, so a period's score is how much a wallet gained
@@ -13,6 +14,7 @@ create or replace function public.gali_period_start(p_period text) returns times
 language sql stable as $$
   select case p_period
     when 'day' then date_trunc('day', now() at time zone 'Asia/Kuala_Lumpur') at time zone 'Asia/Kuala_Lumpur'
+    when 'week' then date_trunc('week', now() at time zone 'Asia/Kuala_Lumpur') at time zone 'Asia/Kuala_Lumpur'
     when 'month' then date_trunc('month', now() at time zone 'Asia/Kuala_Lumpur') at time zone 'Asia/Kuala_Lumpur'
     when 'year' then date_trunc('year', now() at time zone 'Asia/Kuala_Lumpur') at time zone 'Asia/Kuala_Lumpur'
     else null
@@ -120,7 +122,7 @@ language sql stable security definer set search_path = public as $$
     coalesce((select x.ore_close from gali_miner_days x, s where x.wallet = m.wallet and x.day < s.d0 and x.ore_close is not null order by x.day desc limit 1),
              (select x.ore_open from gali_miner_days x, s where x.wallet = m.wallet and x.day >= s.d0 and x.ore_open is not null order by x.day limit 1))
   from gali_miners m
-  where p_period in ('day', 'month', 'year')
+  where p_period in ('day', 'week', 'month', 'year')
 $$;
 grant execute on function public.gali_period_base(text) to anon, authenticated;
 
@@ -129,9 +131,9 @@ create or replace function public.gali_miner_ranks(p_period text default 'all', 
 returns table (wallet text, name text, level int, xp bigint, points bigint, gain bigint)
 language sql stable security definer set search_path = public as $$
   select m.wallet, m.name, m.level, m.xp, m.points,
-         case when p_period in ('day', 'month', 'year') then m.xp - b.xp else m.xp end as gain
+         case when p_period in ('day', 'week', 'month', 'year') then m.xp - b.xp else m.xp end as gain
   from gali_miners m left join gali_period_base(p_period) b on b.wallet = m.wallet
-  where p_period not in ('day', 'month', 'year') or m.xp - b.xp > 0
+  where p_period not in ('day', 'week', 'month', 'year') or m.xp - b.xp > 0
   order by gain desc
   limit least(greatest(coalesce(p_limit, 100), 1), 200)
 $$;

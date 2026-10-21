@@ -68,7 +68,7 @@ export const SPAWNS: Record<'start' | DoorId, [number, number]> = {
 
 /** Things with a shape of their own: a tent, a stall, the lighthouse. The engine draws each; the tiles under them block. */
 export interface Structure {
-  kind: 'tent' | 'fire' | 'cart' | 'crates' | 'barrel' | 'stall-red' | 'stall-teal' | 'lighthouse' | 'rack' | 'boulder' | 'sol-crystal' | 'ore-vein' | 'arena' | 'sign' | 'flag';
+  kind: 'tent' | 'fire' | 'cart' | 'crates' | 'barrel' | 'stall-red' | 'stall-teal' | 'lighthouse' | 'rack' | 'boulder' | 'sol-crystal' | 'ore-vein' | 'arena' | 'sign' | 'potw' | 'flag';
   /** tiles that block: x, y, width, height */
   at: [number, number, number, number];
   /** which flag, for a flagpole */
@@ -79,6 +79,8 @@ export const STRUCTURES: Structure[] = [
   { kind: 'arena', at: [3, 24, 11, 6] },
   // a directory board by the fountain: every place, and an arrow to it
   { kind: 'sign', at: [32, 19, 2, 1] },
+  // beside it, the Player of the Week: whoever gained the most XP since Monday
+  { kind: 'potw', at: [38, 19, 2, 1] },
   // the flag square between Cave Run and the market: where our miners come from
   { kind: 'flag', at: [31, 8, 1, 1], v: 'us' },
   { kind: 'flag', at: [33, 8, 1, 1], v: 'my' },

@@ -200,3 +200,26 @@ export async function fetchMiner(wallet: string): Promise<{ xp: number; points: 
     return null;
   }
 }
+
+/* ---------------- Player of the Week: the most XP gained since Monday (Malaysia time) ---------------- */
+export interface Potw {
+  name: string;
+  level: number;
+  gain: number;
+}
+export const usePotw = create<{ potw: Potw | null; at: number }>(() => ({ potw: null, at: 0 }));
+/** Fetch the week's top miner for the lobby's board (at most once every 5 minutes). */
+export async function loadPotw() {
+  const base = restBase();
+  if (!base || Date.now() - usePotw.getState().at < 5 * 60_000) return;
+  usePotw.setState({ at: Date.now() });
+  try {
+    const r = await rpc(base, 'gali_miner_ranks', { p_period: 'week', p_limit: 1 });
+    if (!r.ok) return;
+    const [top] = (await r.json()) as { name?: string; wallet?: string; level?: number; gain?: number }[];
+    const name = top ? clean(String(top.name || '')) || `${String(top.wallet ?? '').slice(0, 4)}…${String(top.wallet ?? '').slice(-4)}` : '';
+    usePotw.setState({ potw: top && Number(top.gain) > 0 ? { name, level: Number(top.level) || 1, gain: Number(top.gain) || 0 } : null });
+  } catch {
+    /* the board keeps what it had */
+  }
+}
