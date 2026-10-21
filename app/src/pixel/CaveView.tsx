@@ -11,13 +11,14 @@ import type { Look } from '../engine/types';
 
 export interface CaveRef extends DOMImperativeFactory {
   opts: (...args: any[]) => void;
+  back: (...args: any[]) => void;
 }
 
 export default function CaveView({ ref, onEvent, atlas, look, opts }: { ref: Ref<CaveRef>; onEvent: (e: CaveEvent) => void; atlas: string; look: Look; opts: CaveOpts; dom?: DOMProps }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const engine = useRef<CaveEngine | null>(null);
 
-  useDOMImperativeHandle(ref, () => ({ opts: (o: any) => engine.current?.setOpts(o as Partial<CaveOpts>) }), []);
+  useDOMImperativeHandle(ref, () => ({ opts: (o: any) => engine.current?.setOpts(o as Partial<CaveOpts>), back: () => engine.current?.back() }), []);
 
   useEffect(() => {
     const cv = canvas.current;
