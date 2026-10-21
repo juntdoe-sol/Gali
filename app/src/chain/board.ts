@@ -380,13 +380,14 @@ export async function deployAutopilot(owner: PublicKey, squares: number[], solPe
 
 /** Everything the wallet panel shows in live mode. Reads ORE and the wallet only. */
 export async function fetchLiveWallet(owner: PublicKey, knownSol?: number) {
+  // The ORE balance and the motherlode are extras: one failing must never hide the SOL waiting to be claimed.
   const [sol, ore, orePool, unclaimed] = await Promise.all([
     knownSol === undefined ? fetchSolBalance(owner) : Promise.resolve(knownSol),
-    fetchOreBalance(owner, ORE_MINT.toBase58()),
-    fetchOreMotherlode(),
+    fetchOreBalance(owner, ORE_MINT.toBase58()).catch(() => undefined),
+    fetchOreMotherlode().catch(() => undefined),
     fetchClaimable(owner),
   ]);
-  return { sol, ore, orePool, unclaimed };
+  return { sol, unclaimed, ...(ore === undefined ? {} : { ore }), ...(orePool === undefined ? {} : { orePool }) };
 }
 
 /** Whole ORE waiting in ORE's motherlode right now. */
