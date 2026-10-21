@@ -433,3 +433,55 @@ export function paintFlag(g: G, v: 'us' | 'my' | 'id' | 'ng') {
   g.fillStyle = 'rgba(0,0,0,0.12)';
   g.fillRect(0, H - 1, W, 1);
 }
+
+/* ---------------- the Player of the Week board ---------------- */
+export const POTW_W = 64;
+export const POTW_H = 66;
+/** A dark gold-trimmed board on two posts: a crown, PLAYER OF THE WEEK, the name and the XP they gained. */
+export function paintPotw(g: G, p: { name: string; level: number; gain: number } | null) {
+  const P = (x: number, y: number, w: number, h: number, c: string) => {
+    g.fillStyle = c;
+    g.fillRect(x, y, w, h);
+  };
+  const mid = (s: string, y: number, c: string, shadow?: string) => text(g as Ctx, s, Math.round(POTW_W / 2 - textWidth(s) / 2), y, 1, c, shadow);
+  // posts and their shadow
+  P(9, 48, 3, 18, '#4a331c');
+  P(52, 48, 3, 18, '#4a331c');
+  P(9, 48, 1, 18, '#6b4a2b');
+  P(52, 48, 1, 18, '#6b4a2b');
+  P(5, 64, 54, 2, 'rgba(0,0,0,0.22)');
+  // the frame, gold-trimmed
+  P(0, 6, 64, 46, '#5e4126');
+  P(1, 7, 62, 44, '#c99a3a');
+  P(1, 7, 62, 1, '#ffe27a');
+  P(3, 9, 58, 40, '#1a1030');
+  // a crown on top
+  P(24, 0, 16, 7, '#ffd24a');
+  P(24, 0, 3, 3, '#1a1030');
+  P(30, 0, 4, 2, '#1a1030');
+  P(37, 0, 3, 3, '#1a1030');
+  P(24, 0, 1, 1, '#ffd24a');
+  P(31, 0, 2, 1, '#ffd24a');
+  P(39, 0, 1, 1, '#ffd24a');
+  P(25, 5, 14, 1, '#c98a1a');
+  P(28, 3, 2, 2, '#ff4f5e');
+  P(34, 3, 2, 2, '#3de0c8');
+  // the words
+  mid('PLAYER OF', 11, '#ffe27a');
+  mid('THE WEEK', 17, '#ffe27a');
+  P(8, 24, 48, 1, '#3a2c5a');
+  if (!p) {
+    mid('COULD BE', 28, '#c8b8e8');
+    mid('YOU', 35, '#ffffff');
+    mid('EARN XP', 42, '#8ea2cc');
+    return;
+  }
+  // the name, cut to fit the board
+  let name = p.name.toUpperCase();
+  while (name.length > 1 && textWidth(name) > 54) name = name.slice(0, -1);
+  if (name !== p.name.toUpperCase()) name = name.slice(0, -1) + '.';
+  mid(name, 28, '#ffffff');
+  mid(`LV ${p.level}`, 35, '#3de0c8');
+  const xp = p.gain >= 100000 ? `${Math.floor(p.gain / 1000)}K` : p.gain.toLocaleString('en-US');
+  mid(`+${xp} XP`, 42, '#ffd24a');
+}

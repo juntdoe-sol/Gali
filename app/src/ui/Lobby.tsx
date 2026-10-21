@@ -32,6 +32,7 @@ import { BAR_H, TabBar, type SheetTab } from './TabBar';
 import { Arcade } from './Arcade';
 import { PixIcon } from './PixIcon';
 import { DisconnectBtn } from './Hud';
+import { loadPotw, usePotw } from '../game/ranks';
 import { InboxBtn } from './Dm';
 import { dmReady, openDm } from '../game/dm';
 import { Sticker } from './Sticker';
@@ -138,7 +139,9 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
         emoji: s.myEmoji && now - s.myEmoji.at < 3000 ? s.myEmoji.e : null,
         dance: s.myDance,
         brawl: brawlSnap(now),
+        potw: usePotw.getState().potw,
       };
+      void loadPotw();
       const json = JSON.stringify(snap);
       // On Android the ref's methods only exist once the WebView has loaded.
       const push = ref.current?.push;
