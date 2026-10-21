@@ -97,22 +97,7 @@ interface LobbyState {
 
 /** Emotes are pixel icons: each is a key into the icon set (ui-<key> in the atlas, assets/icons/<key>.png). */
 export const LOBBY_EMOTES = ['wave', 'laugh', 'heart', 'fire', 'pick', 'gem'] as const;
-/** Aura farming: emotes that pop up as words over your head. Key -> what it says. */
-export const AURA_EMOTES: Record<string, string> = {
-  aura: '+1000 AURA',
-  unaura: '-1000 AURA',
-  sixseven: '67',
-  sigma: 'SIGMA',
-  rizz: 'RIZZ',
-  mew: 'MEWING',
-  dub: 'W',
-  el: 'L',
-  nocap: 'NO CAP',
-  frfr: 'FR FR',
-  gg: 'GG',
-  bruh: 'BRUH',
-};
-const EMOTE_OK = (e: string) => (LOBBY_EMOTES as readonly string[]).includes(e) || e in AURA_EMOTES;
+const EMOTE_OK = (e: string) => (LOBBY_EMOTES as readonly string[]).includes(e);
 const LEGACY_EMOTE: Record<string, string> = { '👋': 'wave', '😂': 'laugh', '❤️': 'heart', '🔥': 'fire', '⛏️': 'pick', '💎': 'gem' };
 
 const rid = () => Math.random().toString(36).slice(2, 10);
