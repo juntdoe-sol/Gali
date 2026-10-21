@@ -102,12 +102,15 @@ export default async function rpc(req, ctx) {
     const response = await forward({ ...body, id: 1 }, ctx);
     if (!response.ok) return { response };
     const parsed = await response.json();
+    // the node's "no such account" answer (see forward): passed on, never cached
+    if (object(parsed) && object(parsed.error) && parsed.error.message === 'could not find account') return { missing: parsed.error };
     if (!object(parsed) || !Object.hasOwn(parsed, 'result')) return { response };
     if (cache.size >= 300) cache.delete(cache.keys().next().value);
     cache.set(key, { until: Date.now() + ttl, result: parsed.result });
     return { result: parsed.result };
   })();
   const out = await flight;
+  if (out.missing) return Response.json({ jsonrpc: '2.0', id: body.id, error: out.missing }, { headers });
   if (out.response) return error(out.response.status, -32000, 'RPC unavailable', body.id);
   return Response.json({ jsonrpc: '2.0', id: body.id, result: out.result }, { headers });
 }
@@ -156,6 +159,11 @@ async function forward(body, ctx) {
       if (body.method === 'sendTransaction' && object(result.error) && typeof result.error.message === 'string') {
         const code = Number.isInteger(result.error.code) ? result.error.code : -32002;
         return Response.json({ jsonrpc: '2.0', id: body.id, error: { code, message: result.error.message.slice(0, 600) } }, { headers });
+      }
+      // "could not find account" is the node's answer for a wallet with no token account yet (no ORE ever held):
+      // pass it on, so the app reads it as 0 instead of every provider looking down.
+      if (object(result.error) && typeof result.error.message === 'string' && /could not find account/i.test(result.error.message)) {
+        return Response.json({ jsonrpc: '2.0', id: body.id, error: { code: Number.isInteger(result.error.code) ? result.error.code : -32602, message: 'could not find account' } }, { headers });
       }
       if (result.error || !Object.hasOwn(result, 'result')) continue;
       return Response.json({ jsonrpc: '2.0', id: body.id, result: result.result }, { headers });

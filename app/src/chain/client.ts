@@ -111,9 +111,10 @@ export async function fetchSkrBalance(owner: PublicKey, mint = SKR_MINT): Promis
     const b = await withTimeout(connection.getTokenAccountBalance(ata(owner, mint)));
     return Number(b.value.uiAmountString ?? b.value.uiAmount ?? 0);
   } catch (e) {
-    // A missing ATA is zero; transport/rate-limit/malformed-account failures are not.
-    if (/could not find account/i.test(String((e as Error)?.message ?? e)) &&
-      await withTimeout(connection.getAccountInfo(ata(owner, mint))) === null) return 0;
+    // A missing token account is zero; transport/rate-limit/malformed-account failures are not. Any failure is
+    // checked against the account itself: a proxy can hide the node's "could not find account" behind its own error.
+    const info = await (async () => withTimeout(connection.getAccountInfo(ata(owner, mint))))().catch(() => undefined);
+    if (info === null) return 0;
     throw e;
   }
 }

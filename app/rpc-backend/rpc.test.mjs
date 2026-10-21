@@ -92,6 +92,18 @@ for (const upstream of [
   assert.equal(response.status, 502);
   assert.ok(!(await response.text()).includes(ctx.env.HELIUS_RPC_KEY));
 }
+// a wallet with no token account: the node's answer passes through (fixed wording, never the provider's text)
+globalThis.fetch = async () => Response.json({ jsonrpc: '2.0', id: 1, error: { code: -32602, message: 'Invalid param: could not find account' } });
+const missing = await rpc(request(message('getTokenAccountBalance', ['SysvarC1ock11111111111111111111111111111111'])), ctx);
+assert.equal(missing.status, 200);
+const missingBody = await missing.text();
+assert.ok(!missingBody.includes(ctx.env.HELIUS_RPC_KEY));
+assert.deepEqual(JSON.parse(missingBody).error, { code: -32602, message: 'could not find account' });
+// ... and a provider reflecting its key in that message is still refused
+globalThis.fetch = async () => Response.json({ jsonrpc: '2.0', id: 1, error: { code: -32602, message: `could not find account ${ctx.env.HELIUS_RPC_KEY}` } });
+const leaky = await rpc(request(message('getTokenAccountBalance', ['SysvarRent111111111111111111111111111111111'])), ctx);
+assert.equal(leaky.status, 502);
+assert.ok(!(await leaky.text()).includes(ctx.env.HELIUS_RPC_KEY));
 globalThis.fetch = async () => new Response('', { status: 429 });
 const limited = await rpc(request(message('getSlot')), ctx);
 assert.equal(limited.status, 429);
