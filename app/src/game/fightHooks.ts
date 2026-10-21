@@ -32,10 +32,14 @@ export function initFightHooks(myName: () => string) {
       useFightStats.getState().add('bossWins');
       // every miner who fought the boss reports their own win, so a solo boss fight counts on the ranks
       reportWin({ winner: myName(), host: myName(), mode: 'boss', players: m.fighters.length });
+    } else if (m.mode === 'waves' && m.winner === 'waves-won' && m.fighters.includes(me)) {
+      // the squad held the hall: each of the three reports their own win (the match's winner is "THE MINERS")
+      reportWin({ winner: myName(), host: myName(), mode: 'waves', players: m.fighters.length });
     }
     else if (m.winner === me && m.fighters.length >= 2) useFightStats.getState().add('wins');
   });
   hostResultListeners.add((m) => {
-    if (m.mode !== 'boss' && m.winner && m.winnerName && m.fighters.length >= 2) reportWin({ winner: m.winnerName, host: myName(), mode: m.mode, players: m.fighters.length });
+    // a raid win (boss or waves) is reported by each miner above, never as "THE MINERS"
+    if (m.mode !== 'boss' && m.mode !== 'waves' && m.winner && m.winnerName && m.fighters.length >= 2) reportWin({ winner: m.winnerName, host: myName(), mode: m.mode, players: m.fighters.length });
   });
 }
