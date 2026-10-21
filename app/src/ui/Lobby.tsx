@@ -45,7 +45,7 @@ const GAME_SHORT: Record<GameId, string> = { tunnel: 'TUNNEL', pot: 'GOLD RUSH',
 const DOOR_UI: { id: DoorId; label: string; sub: string; color: string }[] = [
   { id: 'island', label: 'ISLAND', sub: 'Mine ORE', color: '#3de0c8' },
   { id: 'cave', label: 'CAVE', sub: 'Dig for XP', color: '#ff9a3d' },
-  { id: 'market', label: 'MARKET', sub: 'Gear and items', color: '#b86bff' },
+  { id: 'market', label: 'MARKET', sub: 'Gear, pets', color: '#b86bff' },
   { id: 'arena', label: 'ARENA', sub: 'Brawl', color: '#ff4f5e' },
 ];
 const EMOTE_NAME: Record<string, string> = { wave: 'Wave', laugh: 'Laugh', heart: 'Love', fire: 'Fire', pick: 'Pickaxe', gem: 'Gem' };
@@ -452,11 +452,11 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
       {navOpen ? (
         <>
           <Pressable style={styles.navScrim} onPress={() => setNavOpen(false)} accessibilityLabel="Close travel menu" />
-          <View style={[styles.navCol, L.desktop ? { left: RAIL_W + GUTTER, top: 110, width: 420 } : { bottom: bottomInset + BAR_H + 52 }]} pointerEvents="box-none">
-            <Window title="TRAVEL" sub="Your miner walks there and goes in" onClose={() => setNavOpen(false)} width={460}>
+          <View style={[styles.navCol, { top: topH, bottom: bottomInset + BAR_H }, L.desktop && { left: RAIL_W + GUTTER, right: right }]} pointerEvents="box-none">
+            <Window title="TRAVEL" sub="Your miner walks there and goes in" onClose={() => setNavOpen(false)} width={580}>
               <T v="label">Places</T>
               <View style={styles.nav}>
-                {DOOR_UI.filter((d) => d.id !== 'market').map((d) => (
+                {DOOR_UI.map((d) => (
                   <NavTile key={d.id} label={d.label} sub={d.sub} color={d.color} icon={DOOR_ICON[d.id] ?? 'map'} onPress={() => walkTo(d.id)} />
                 ))}
               </View>
@@ -578,7 +578,7 @@ const HOWTO: { icon: PixName; title: string; body: string }[] = [
   { icon: 'trophy', title: 'Arena', body: 'The colosseum west of the plaza. Last Miner Standing, King of the Ring, or team up against the boss. Q, E, R, C, V and X fire your powers as you level up. Wins and KOs put you on the Brawl ranks.' },
   { icon: 'pick', title: 'Cave Run', body: 'Walk into the cave in the north west. Dig down, dodge the rocks, and earn XP. It never spends SOL.' },
   { icon: 'cart', title: 'Mini games', body: 'Three pavilions south of the plaza: Tunnel Collapse, Gold Rush Pot and Crash Cart. Stake ORE or SKR, with a new round every 40 seconds. 5% house fee. 18+ only, stake only what you can afford to lose.' },
-  { icon: 'quest', title: 'Quests and ranks', body: 'QUEST has nine daily quests across the whole game, plus achievements. Claim each one for XP. RANKS shows every miner by level, by ORE mined on chain, and the week\'s Brawl board.' },
+  { icon: 'quest', title: 'Quests and ranks', body: 'QUEST has nine daily quests across the whole game, plus achievements. Claim each one for XP. RANKS shows miners by level, ORE mined on chain and Brawl points, for today, this month, this year or all time. Clans are coming soon.' },
   { icon: 'user', title: 'Profile and wallet', body: 'PROFILE holds your wallet, gear and settings. The power button next to it disconnects your wallet from any screen.' },
   { icon: 'wave', title: 'Back to the lobby', body: 'Every place has a LOBBY button. GO jumps straight to the island, cave, arena, games or market.' },
 ];
@@ -1064,8 +1064,8 @@ const styles = StyleSheet.create({
   dot: { width: U * 4, height: U * 4 },
   bottom: { position: 'absolute', left: 0, right: 0, paddingHorizontal: 12, gap: 8 },
   navScrim: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: 'rgba(4,6,15,0.35)' },
-  navCol: { position: 'absolute', left: 12, right: 12, alignItems: 'center' },
-  nav: { flexDirection: 'row', gap: 8, justifyContent: 'center' },
+  navCol: { position: 'absolute', left: 12, right: 12, alignItems: 'center', justifyContent: 'center' },
+  nav: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },
   navTileWrap: { flex: 1 },
   navTile: { height: 54, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 12, overflow: 'hidden' },
   navAccent: { position: 'absolute', left: U, top: U, bottom: U, width: U * 2 },
