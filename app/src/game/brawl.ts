@@ -177,6 +177,8 @@ export interface Room {
   koXp?: number;
   /** who may send the boss's hits (the arena's host) */
   host?: () => string | null;
+  /** miners are on one side here right now (a raid): hits between them do nothing */
+  coop?: () => boolean;
 }
 const rooms: Partial<Record<Scope, Room>> = {};
 export function registerRoom(scope: Scope, r: Room) {
@@ -285,6 +287,7 @@ function onBx(scope: Scope, p: any) {
     const info = boss ? null : peerInfo(scope, a);
     const dmg = baseDamage(w, a, Math.floor(p.s), info?.lvl ?? 1, Boolean(room?.arena));
     if (p.t === me) {
+      if (!boss && room?.coop?.()) return;
       if (meSafe(now) || !canFight(scope)) return void sendHp();
       const key = `${a}:${w}`;
       const seen: [number, number] | null = boss ? [p.x, p.y] : info?.pos ?? null;
