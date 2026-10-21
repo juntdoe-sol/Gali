@@ -76,7 +76,6 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
   const [editing, setEditing] = useState(false);
   const status = useLobby((s) => s.status);
   const count = useLobby((s) => Object.keys(s.peers).length + 1);
-  const msgs = useLobby((s) => s.msgs);
   const lvl = levelFromXp(useLevelXp());
   const sol = useGame((s) => (isOnChain(s) ? s.wallet.sol + s.wallet.sessionSol : s.save.practiceSol));
   const [navOpen, setNavOpen] = useState(false);
