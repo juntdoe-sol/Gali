@@ -377,7 +377,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
         </View>
       )}
 
-      {/* bottom: the last few lines (phones), emotes, then the same bar as the island */}
+      {/* bottom: emotes and dances, then the same bar as the island (chat lives in CHAT, not over the stick) */}
       <View style={[styles.bottom, L.desktop ? { bottom: GUTTER, left: RAIL_W + GUTTER, right, alignItems: 'center' } : { bottom: bottomInset + BAR_H + 40 }]} pointerEvents="box-none">
         {status === 'full' ? (
           <PixelBox fill="rgba(60,10,16,0.9)" hi={COLORS.red} lo="#04060f" style={styles.full}>
@@ -386,20 +386,6 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
             </T>
           </PixelBox>
         ) : null}
-        {L.desktop || L.h < 500 ? null : (
-          <Pressable style={styles.log} onPress={() => useLobby.getState().setChatOpen(true)} accessibilityRole="button" accessibilityLabel="Open the lobby chat">
-            {msgs.slice(-3).map((m) => (
-              <View key={m.id} style={styles.line}>
-                <T v="black" style={{ fontSize: 13, color: m.mine ? COLORS.gold : COLORS.teal }}>
-                  {m.name}
-                </T>
-                <T v="body" style={{ fontSize: 13, flex: 1 }} numberOfLines={2}>
-                  {chatWords(m.text)}
-                </T>
-              </View>
-            ))}
-          </Pressable>
-        )}
         {danceOpen ? (
           <Frame style={[styles.danceCard, { maxWidth: Math.min(620, L.w - 24) }]}>
             <View style={styles.auraHead}>
