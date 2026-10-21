@@ -1,7 +1,7 @@
 /**
  * Round game buttons for touch screens: the arena's skill wheel uses them, and the landscape app's lobby
- * and island get a HIT and JUMP pad bottom right. They fire on touch-down, so they work while another
- * finger holds the stick.
+ * and island get a HIT and JUMP pad bottom right. They fire on touch-down. On Android, given a `zone`,
+ * the game itself catches the finger (ui/zones.tsx), so they work while another finger holds the stick.
  */
 import { Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
 import { COLORS } from '../game/constants';
@@ -9,23 +9,13 @@ import { haptic } from '../game/sfx';
 import { T } from './kit';
 import { PixIcon } from './PixIcon';
 import type { PixName } from './pixIcons';
+import { TouchZone, ZONES_ON, type ZoneGroup } from './zones';
 
 export /** One round (phone) or square (PC) fight button, with a cooldown that drains from the top. */
-function SkillButton({ size, round, icon, label, kbd, left = 0, total = 1, locked, count, gold, style, onPress }: { size: number; round: boolean; icon: PixName; label?: string; kbd?: string; left?: number; total?: number; locked?: string; count?: number; gold?: boolean; style?: ViewStyle; onPress: () => void }) {
+function SkillButton({ size, round, icon, label, kbd, left = 0, total = 1, locked, count, gold, style, onPress, zone }: { size: number; round: boolean; icon: PixName; label?: string; kbd?: string; left?: number; total?: number; locked?: string; count?: number; gold?: boolean; style?: ViewStyle; onPress: () => void; zone?: ZoneGroup }) {
   const cooling = left > 0;
   const frac = Math.max(0, Math.min(1, left / total));
-  return (
-    <Pressable
-      disabled={Boolean(locked)}
-      onPressIn={() => {
-        haptic.tap();
-        onPress();
-      }}
-      accessibilityRole="button"
-      accessibilityLabel={locked ? `${label ?? icon}, ${locked}` : label ?? icon}
-      style={style}
-    >
-      {({ pressed }) => (
+  const face = (pressed: boolean) => (
         <View
           style={[
             styles.skill,
@@ -61,19 +51,39 @@ function SkillButton({ size, round, icon, label, kbd, left = 0, total = 1, locke
             </View>
           ) : null}
         </View>
-      )}
+  );
+  // Android, in a game: the game hears the finger and presses this (ui/zones.tsx), so it works mid-walk
+  if (ZONES_ON && zone) {
+    return (
+      <TouchZone group={zone} off={Boolean(locked)} style={style} onPress={onPress}>
+        {face}
+      </TouchZone>
+    );
+  }
+  return (
+    <Pressable
+      disabled={Boolean(locked)}
+      onPressIn={() => {
+        haptic.tap();
+        onPress();
+      }}
+      accessibilityRole="button"
+      accessibilityLabel={locked ? `${label ?? icon}, ${locked}` : label ?? icon}
+      style={style}
+    >
+      {({ pressed }) => face(pressed)}
     </Pressable>
   );
 }
 
 /** HIT (big) and JUMP, bottom right. `small` keeps the island's map clear. */
-export function FightPad({ bottom, right, onHit, onJump, hit = true, small }: { bottom: number; right: number; onHit: () => void; onJump: () => void; hit?: boolean; small?: boolean }) {
+export function FightPad({ bottom, right, onHit, onJump, hit = true, small, zone }: { bottom: number; right: number; onHit: () => void; onJump: () => void; hit?: boolean; small?: boolean; zone?: ZoneGroup }) {
   const H = small ? 62 : 80;
   const J = small ? 46 : 56;
   return (
     <View style={{ position: 'absolute', right, bottom, width: H + J + 12, height: H + J / 2 + 6 }} pointerEvents="box-none">
-      {hit ? <SkillButton size={H} round gold icon="fist" label="HIT" style={{ position: 'absolute', right: 0, bottom: 0 }} onPress={onHit} /> : null}
-      <SkillButton size={J} round icon="jump" label="JUMP" style={{ position: 'absolute', right: hit ? H + 6 : 0, bottom: hit ? H / 2 + 2 : 0 }} onPress={onJump} />
+      {hit ? <SkillButton size={H} round gold icon="fist" label="HIT" zone={zone} style={{ position: 'absolute', right: 0, bottom: 0 }} onPress={onHit} /> : null}
+      <SkillButton size={J} round icon="jump" label="JUMP" zone={zone} style={{ position: 'absolute', right: hit ? H + 6 : 0, bottom: hit ? H / 2 + 2 : 0 }} onPress={onJump} />
     </View>
   );
 }
