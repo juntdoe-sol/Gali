@@ -15,7 +15,7 @@ export interface RankRow {
   points: number;
   kos: number;
   wins: number;
-  /** Mole King fights won this week */
+  /** Boss Raids won this week */
   bosses: number;
 }
 interface RanksState {

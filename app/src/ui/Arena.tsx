@@ -282,7 +282,7 @@ function Controls({ bottom, desk, arena }: { bottom: number; desk: boolean; aren
           <SkillButton size={56} round={false} icon="heart" label="CHEER" onPress={() => cheer()} />
         </View>
         <T v="label" style={{ fontSize: 11, textAlign: 'center' }}>
-          WASD move · left click hit · right click throw at the cursor · Q E R C V X or 1 to 6 powers · SHIFT dash
+          A D move · W or SPACE jump · S drop · left click hit · right click throw · Q E R C V X or 1 to 6 powers · SHIFT dash
         </T>
       </View>
     );
@@ -330,7 +330,7 @@ function Banner() {
     small = MODE_NAME[m.mode];
   } else if (m.phase === 'end') {
     if (m.mode === 'boss') {
-      big = m.winner === 'boss-down' ? 'BOSS DOWN!' : 'THE MOLE WINS';
+      big = m.winner === 'boss-down' ? 'BOSS DOWN!' : 'THE TWO-MOUTHED WINS';
       small = m.winner === 'boss-down' ? 'Everyone who fought gets XP' : 'Next match soon';
     } else {
       big = m.winner === me ? 'YOU WIN!' : m.winnerName ? `${m.winnerName} WINS` : 'DRAW';
@@ -452,7 +452,7 @@ function PowersPanel({ onClose, desk }: { onClose: () => void; desk: boolean }) 
             ))}
           </View>
           <T v="muted" style={{ fontSize: 12 }}>
-            Fight points: 1 per KO, 3 per arena win, 2 per Mole Boss down. You have {stats.kos} KOs, {stats.wins} wins and {stats.bossWins} boss wins. Levels add at most 20% damage, and nothing here changes mining.
+            Fight points: 1 per KO, 3 per arena win, 2 per Boss Raid won. You have {stats.kos} KOs, {stats.wins} wins and {stats.bossWins} boss wins. Levels add at most 20% damage, and nothing here changes mining.
           </T>
         </ScrollView>
       </Window>
@@ -467,7 +467,7 @@ function RanksPanel({ onClose }: { onClose: () => void }) {
   }, []);
   return (
     <Scrim onPress={onClose}>
-      <Window title="BRAWL RANKS" sub="This week: 1 point a KO, 3 a match win, 2 a Mole King down." onClose={onClose} width={480}>
+      <Window title="BRAWL RANKS" sub="This week: 1 point a KO, 3 a match win, 2 a Boss Raid won." onClose={onClose} width={480}>
         <ScrollView style={{ maxHeight: 460 }}>
           {r.status === 'off' ? <T v="muted">Ranks are not set up on this server yet.</T> : null}
           {r.status === 'error' ? <T v="muted">Could not load the ranks. Try again in a moment.</T> : null}
