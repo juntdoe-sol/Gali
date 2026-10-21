@@ -7,6 +7,8 @@ export const fx = {
   /** screen pixels covered by the HUD above and the deploy panel below; the map keeps the spots between them */
   viewTop: 215,
   viewBottom: 150,
+  /** the island's walking stick (touch screens): CSS px from the left and the bottom edge, or null for none */
+  stick: null as { left: number; bottom: number } | null,
 };
 
 /**

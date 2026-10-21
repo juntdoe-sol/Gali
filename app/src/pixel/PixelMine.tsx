@@ -102,6 +102,7 @@ function snapshot(): Snapshot {
   }));
   return {
     view: viewBand(focus),
+    stick: focus < 0 ? fx.stick : null,
     phase: st.phase,
     roundId: st.roundId,
     // a live round waiting for its first deploy has no end yet: hold it a full round away
