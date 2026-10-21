@@ -128,7 +128,7 @@ export function CaveScreen() {
             atlas={atlas}
             look={myLook()}
             opts={{ spot, runs: save.runs, best: save.best, top: insets.top, bottom: insets.bottom, touch: !(L.desktop && !LANDSCAPE_APP) }}
-            dom={{ style: { flex: 1, backgroundColor: '#0a0810' }, scrollEnabled: false, bounces: false, overScrollMode: 'never' } as never}
+            dom={{ style: { flex: 1, backgroundColor: '#0a0810' }, scrollEnabled: false, nestedScrollEnabled: false, bounces: false, overScrollMode: 'never' } as never}
           />
         ) : null}
         <View style={[styles.caveBack, { top: insets.top + 8 }]} pointerEvents="box-none">

@@ -321,7 +321,9 @@ export default function PixelMine() {
 
   return (
     <View style={[StyleSheet.absoluteFill, { backgroundColor: '#123a6b' }]}>
-      {atlas ? <GameView ref={ref} onEvent={onEvent} atlas={atlas} dom={{ style: { flex: 1, backgroundColor: '#123a6b' }, scrollEnabled: false, bounces: false, overScrollMode: 'never' } as never} /> : null}
+      {/* nestedScrollEnabled off: with it on, Android's WebView tells the app to stop watching a finger that
+          lands on the map, so the HIT and JUMP buttons went dead while the other thumb held the stick */}
+      {atlas ? <GameView ref={ref} onEvent={onEvent} atlas={atlas} dom={{ style: { flex: 1, backgroundColor: '#123a6b' }, scrollEnabled: false, nestedScrollEnabled: false, bounces: false, overScrollMode: 'never' } as never} /> : null}
       <RevealSounds />
     </View>
   );
