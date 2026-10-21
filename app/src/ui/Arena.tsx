@@ -619,7 +619,7 @@ function RanksPanel({ onClose }: { onClose: () => void }) {
   }, [period]);
   return (
     <Scrim onPress={onClose}>
-      <Window title="BRAWL RANKS" sub={`${PERIOD_WORDS[period][0].toUpperCase()}${PERIOD_WORDS[period].slice(1)}: 1 point a KO, 3 a match win, 2 a Boss Raid won.`} onClose={onClose} width={480}>
+      <Window title="BRAWL RANKS" sub={`${r.weekOnly ? 'The last 7 days' : PERIOD_WORDS[period][0].toUpperCase() + PERIOD_WORDS[period].slice(1)}: 1 point a KO, 3 a match win, 2 a Boss Raid won.`} onClose={onClose} width={480}>
         <PeriodPicker period={period} onPick={setPeriod} />
         <ScrollView style={{ maxHeight: 420 }}>
           {r.status === 'off' ? <T v="muted">Ranks are not set up on this server yet.</T> : null}

@@ -9,11 +9,10 @@ import {
 import { isLive, isOnChain, useGame, useLevelXp, usePoints } from '../game/store';
 import { chainReady, CLUSTER, oreLive, PROGRAM_ID_STR, short, SKR_MINT_STR, type BoardRound } from '../chain/light';
 import { PERIOD_WORDS, useMinerRanks, useRanks, type Period } from '../game/ranks';
-import { ClansTab, PeriodPicker } from './Clans';
+import { ClansSoon, ComingSoon, MarketSoon, PeriodPicker } from './Clans';
 import { loadBoard, loadChain } from '../chain/lazy';
 import { ADMIN_FEE, fmtSol, POT_FEE, practiceMotherlode, practiceOreMotherlode, simPot, soloMask } from '../game/pot';
 import { UnclaimedRow } from './Dock';
-import { Market } from './Market';
 import { Bar, Btn, Card, Choice, FocusRing, Frame, IconBtn, INPUT, Kbd, PixelBox, Pill, T, U } from './kit';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { reloadAppAsync } from 'expo';
@@ -49,7 +48,7 @@ export function Sheet({ tab, onTab }: { tab: SheetTab | null; onTab: (t: SheetTa
       {tab === 'gear' && <GearTab />}
       {tab === 'skr' && <SkrTab />}
       {tab === 'ranks' && <Ranks />}
-      {tab === 'clans' && <ClansTab />}
+      {tab === 'clans' && <ClansSoon />}
       {tab === 'me' && <Me />}
     </ScrollView>
   );
@@ -156,9 +155,9 @@ function Quests() {
   );
 }
 
-/** The gear tab: the player-to-player NFT Market (a preview until it opens). */
+/** The gear tab: the player-to-player Market, not open yet. */
 function GearTab() {
-  return <Market />;
+  return <MarketSoon />;
 }
 
 function MotherlodeCard() {
@@ -403,7 +402,7 @@ function Rounds() {
   );
 }
 
-type RankTab = 'level' | 'ore' | 'brawl';
+type RankTab = 'level' | 'ore' | 'brawl' | 'clans';
 function Ranks() {
   const owner = useGame((s) => s.wallet.owner);
   const points = usePoints();
@@ -430,6 +429,7 @@ function Ranks() {
             ['level', 'LEVEL'],
             ['ore', 'ORE MINED'],
             ['brawl', 'BRAWL'],
+            ['clans', 'CLANS'],
           ] as [RankTab, string][]
         ).map(([k, label]) => (
           <Pressable key={k} onPress={() => setTab(k)} accessibilityRole="tab" accessibilityState={{ selected: tab === k }} style={{ flex: 1 }}>
@@ -441,85 +441,93 @@ function Ranks() {
           </Pressable>
         ))}
       </View>
-      <PeriodPicker period={period} onPick={setPeriod} />
-      <T v="muted" style={{ fontSize: 12 }}>
-        {tab === 'level'
-          ? period === 'all'
-            ? 'Every Gali miner with a wallet, by XP. You: level ' + levelFromXp(xp) + ' · ' + points.toLocaleString() + ' pts.'
-            : `XP gained ${when}, by every Gali miner with a wallet. Days start at midnight Malaysia time.`
-          : tab === 'ore'
-            ? period === 'all'
-              ? 'Lifetime ORE mined on ORE, read from each wallet on chain.'
-              : `ORE mined ${when}: the chain's total now, minus where each wallet stood when the ${period} began.`
-            : `Brawl ${when}: 1 point a KO, 3 a match win, 2 a Boss Raid won. A KO counts when the miner who went down reports it.`}
-      </T>
-      {status === 'off' ? (
-        <Card>
-          <T>Ranks are not set up on this server yet.</T>
-        </Card>
-      ) : status === 'error' ? (
-        <Card>
-          <T>Could not load the ranks. Try again in a moment.</T>
-        </Card>
-      ) : (status === 'loading' || status === 'idle') && !(tab === 'brawl' ? brawl.rows : miners.rows).length ? (
-        <Card>
-          <T>Loading the ranks…</T>
-        </Card>
-      ) : tab === 'brawl' ? (
-        !brawl.rows.length ? (
-          <Card>
-            <T>No fights {when} yet. Be the first on the board.</T>
-          </Card>
-        ) : (
-          brawl.rows.map((r, k) => (
-            <PixelBox key={r.name} fill="rgba(9,14,34,0.9)" hi="#22356f" lo="#04060f" style={styles.rank}>
-              <RankNo k={k} />
-              <T v="bold" style={{ flex: 1 }} numberOfLines={1}>
-                {r.name}
-              </T>
-              <T v="muted">
-                {r.kos} KO · {r.wins} W{r.bosses ? ` · ${r.bosses} B` : ''}
-              </T>
-              <T v="display" style={{ color: COLORS.gold, fontSize: 20, minWidth: 54, textAlign: 'right' }}>
-                {r.points}
-              </T>
-            </PixelBox>
-          ))
-        )
-      ) : !rows.length ? (
-        <Card>
-          <T>
-            {tab === 'ore' && miners.everyone.some((r) => r.ore === null)
-              ? 'Reading ORE from the chain…'
-              : period === 'all'
-                ? 'Nobody on this board yet. Connect a wallet and play a round.'
-                : `Nobody has gained ${tab === 'ore' ? 'ORE' : 'XP'} ${when} yet. Play a round to get on the board.`}
-          </T>
-        </Card>
+      {tab === 'clans' ? (
+        <ComingSoon icon="users" title="CLAN RANKS" line="Clans ranked by the XP their miners earn, today, this month, this year and all time." />
       ) : (
-        rows.map((r, k) => (
-          <PixelBox key={r.wallet} fill={r.wallet === owner ? 'rgba(255,201,60,0.12)' : 'rgba(9,14,34,0.9)'} hi={r.wallet === owner ? COLORS.gold : '#22356f'} lo="#04060f" style={styles.rank}>
-            <RankNo k={k} />
-            <View style={{ flex: 1 }}>
-              <T v="bold" numberOfLines={1}>
-                {r.name || short(r.wallet)}
-                {r.wallet === owner ? '  (you)' : ''}
+        <>
+          <PeriodPicker period={period} onPick={setPeriod} />
+          <T v="muted" style={{ fontSize: 12 }}>
+            {tab === 'level'
+              ? period === 'all'
+                ? 'Every Gali miner with a wallet, by XP. You: level ' + levelFromXp(xp) + ' · ' + points.toLocaleString() + ' pts.'
+                : `XP gained ${when}, by every Gali miner with a wallet. Days start at midnight Malaysia time.`
+              : tab === 'ore'
+                ? period === 'all'
+                  ? 'Lifetime ORE mined on ORE, read from each wallet on chain.'
+                  : `ORE mined ${when}: the chain's total now, minus where each wallet stood when the ${period} began.`
+                : brawl.weekOnly
+                  ? 'Brawl, the last 7 days (today, month and year boards switch on with the next server update): 1 point a KO, 3 a match win, 2 a Boss Raid won.'
+                  : `Brawl ${when}: 1 point a KO, 3 a match win, 2 a Boss Raid won. A KO counts when the miner who went down reports it.`}
+          </T>
+          {status === 'off' ? (
+            <Card>
+              <T>Ranks are not set up on this server yet.</T>
+            </Card>
+          ) : status === 'error' ? (
+            <Card>
+              <T>Could not load the ranks. Try again in a moment.</T>
+            </Card>
+          ) : (status === 'loading' || status === 'idle') && !(tab === 'brawl' ? brawl.rows : miners.rows).length ? (
+            <Card>
+              <T>Loading the ranks…</T>
+            </Card>
+          ) : tab === 'brawl' ? (
+            !brawl.rows.length ? (
+              <Card>
+                <T>No fights {when} yet. Be the first on the board.</T>
+              </Card>
+            ) : (
+              brawl.rows.map((r, k) => (
+                <PixelBox key={r.name} fill="rgba(9,14,34,0.9)" hi="#22356f" lo="#04060f" style={styles.rank}>
+                  <RankNo k={k} />
+                  <T v="bold" style={{ flex: 1 }} numberOfLines={1}>
+                    {r.name}
+                  </T>
+                  <T v="muted">
+                    {r.kos} KO · {r.wins} W{r.bosses ? ` · ${r.bosses} B` : ''}
+                  </T>
+                  <T v="display" style={{ color: COLORS.gold, fontSize: 20, minWidth: 54, textAlign: 'right' }}>
+                    {r.points}
+                  </T>
+                </PixelBox>
+              ))
+            )
+          ) : !rows.length ? (
+            <Card>
+              <T>
+                {tab === 'ore' && miners.everyone.some((r) => r.ore === null)
+                  ? 'Reading ORE from the chain…'
+                  : period === 'all'
+                    ? 'Nobody on this board yet. Connect a wallet and play a round.'
+                    : `Nobody has gained ${tab === 'ore' ? 'ORE' : 'XP'} ${when} yet. Play a round to get on the board.`}
               </T>
-              {r.name ? (
-                <T v="muted" style={{ fontSize: 11 }}>
-                  {short(r.wallet)}
+            </Card>
+          ) : (
+            rows.map((r, k) => (
+              <PixelBox key={r.wallet} fill={r.wallet === owner ? 'rgba(255,201,60,0.12)' : 'rgba(9,14,34,0.9)'} hi={r.wallet === owner ? COLORS.gold : '#22356f'} lo="#04060f" style={styles.rank}>
+                <RankNo k={k} />
+                <View style={{ flex: 1 }}>
+                  <T v="bold" numberOfLines={1}>
+                    {r.name || short(r.wallet)}
+                    {r.wallet === owner ? '  (you)' : ''}
+                  </T>
+                  {r.name ? (
+                    <T v="muted" style={{ fontSize: 11 }}>
+                      {short(r.wallet)}
+                    </T>
+                  ) : null}
+                </View>
+                <T v="muted">Lv {r.level}</T>
+                <T v="display" style={{ color: COLORS.gold, fontSize: 18, minWidth: 84, textAlign: 'right' }}>
+                  {tab === 'ore' ? `${period === 'all' ? '' : '+'}${(r.oreGain ?? 0).toFixed(2)}` : `${period === 'all' ? '' : '+'}${r.gain.toLocaleString()}`}
                 </T>
-              ) : null}
-            </View>
-            <T v="muted">Lv {r.level}</T>
-            <T v="display" style={{ color: COLORS.gold, fontSize: 18, minWidth: 84, textAlign: 'right' }}>
-              {tab === 'ore' ? `${period === 'all' ? '' : '+'}${(r.oreGain ?? 0).toFixed(2)}` : `${period === 'all' ? '' : '+'}${r.gain.toLocaleString()}`}
-            </T>
-            <T v="muted" style={{ fontSize: 10, width: 26 }}>
-              {tab === 'ore' ? 'ORE' : 'XP'}
-            </T>
-          </PixelBox>
-        ))
+                <T v="muted" style={{ fontSize: 10, width: 26 }}>
+                  {tab === 'ore' ? 'ORE' : 'XP'}
+                </T>
+              </PixelBox>
+            ))
+          )}
+        </>
       )}
     </>
   );
