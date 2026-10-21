@@ -110,3 +110,26 @@ export function bossCatches(atk: BossAtk, bx: number, f: 1 | -1, px: number, py:
   if (atk === 'tongue') return dx * f > -6 && dx * f <= TONGUE_REACH && py >= GROUND - 64;
   return Math.abs(dx) <= ROAR_REACH && py >= GROUND - 90;
 }
+
+/* ---------------- playing with each other ---------------- */
+/** quick emotes, shown over your miner for a moment (keys: T, then 1 to 6) */
+export const EMOTES = ['wave', 'laugh', 'gg', 'angry', 'heart', 'skull'] as const;
+export type Emote = (typeof EMOTES)[number];
+export const EMOTE_MS = 2600;
+/** at or under this HP a miner is dizzy (stars over the head) and can be grabbed */
+export const DIZZY_HP = 35;
+/** how close a grab reaches (map px, sideways and up or down), how long you can carry, and the throw */
+export const GRAB_X = 18;
+export const GRAB_Y = 14;
+export const HOLD_MS = 1500;
+export const THROW_DMG = 22;
+/** Boss Raid: a downed miner lies here this long waiting for help, then goes to the balcony */
+export const DOWN_MS = 12_000;
+/** stand over a downed teammate this long to get them up, with this much HP */
+export const REVIVE_MS = 2000;
+export const REVIVE_HP = 30;
+export const REVIVE_X = 16;
+/** Can a grabber at (gx, gy) grab a miner at (vx, vy)? */
+export const inGrabReach = (gx: number, gy: number, vx: number, vy: number) => Math.abs(vx - gx) <= GRAB_X && Math.abs(vy - gy) <= GRAB_Y;
+/** Is a rescuer at (rx, ry) close enough to revive a miner lying at (vx, vy)? */
+export const inReviveReach = (rx: number, ry: number, vx: number, vy: number) => Math.abs(vx - rx) <= REVIVE_X && Math.abs(vy - ry) <= 10;

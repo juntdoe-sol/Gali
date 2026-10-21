@@ -8,8 +8,8 @@ import type { BrawlView, Look } from './types';
 
 /** the knockdown: fall, lie dizzy, then a little dance before standing up */
 export const KO_MS = 3000;
-const FALL_MS = 220;
-const LIE_MS = 1500;
+export const FALL_MS = 220;
+export const LIE_MS = 1500;
 /** a jump: up and down in this long, this high (map px) */
 export const JUMP_MS = 460;
 const JUMP_H = 11;
@@ -66,7 +66,8 @@ export function drawKo(c: Ctx, look: Look, X: number, Y: number, s: number, faci
   return true;
 }
 
-function stars(c: Ctx, X: number, Y: number, s: number, now: number) {
+/** Dizzy stars going round, centred on (X, Y). */
+export function stars(c: Ctx, X: number, Y: number, s: number, now: number) {
   for (let i = 0; i < 3; i++) {
     const a = now / 260 + (i * Math.PI * 2) / 3;
     const x = Math.round(X + Math.cos(a) * 7 * s);

@@ -6,10 +6,11 @@
  * and shows what they say.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, View, type ViewStyle } from 'react-native';
+import { Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, View, type ViewStyle } from 'react-native';
+import { loadJson, saveJson } from '../game/storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, levelFromXp } from '../game/constants';
-import { cheer, effectiveLoadout, grab, hostId, hurtBoss, isHost, MODE_NAME, publishArenaMe, shareThrow, sharePower, useArena, KOTH_WIN, type Mode } from '../game/arena';
+import { cheer, downMode, effectiveLoadout, emote, EMOTE_MS, EMOTES, grab, grabbable, hostId, hurtBoss, isHost, MODE_NAME, publishArenaMe, REVIVE_MS, reviveListeners, setEmoteOpen, shareRevive, shareThrow, sharePower, throwHeld, tryGrab, useArena, KOTH_WIN, type Emote, type Mode } from '../game/arena';
 import { brawlSnap, guard, heal, jump, setMyPos, strike, swing, useBrawl } from '../game/brawl';
 import { fightPoints, titleOf, TRAILS, trailUnlocked, useFightStats } from '../game/fightGear';
 import { ACTIVES, MEND_HP, PASSIVES, POWERS, POWER_KEY, baseDamage, unlocked, type ActiveId, type PowerId } from '../game/powers';
@@ -25,6 +26,8 @@ import { LANDSCAPE_APP, useLayout } from './layout';
 import { BackPill, TipSheet } from './Lobby';
 import { PixIcon } from './PixIcon';
 import { DisconnectBtn } from './Hud';
+import { InboxBtn } from './Dm';
+import { dmReady, openDm } from '../game/dm';
 import { SkillButton } from './ActionPad';
 import type { PixName } from './pixIcons';
 
@@ -43,15 +46,31 @@ function snapshot(): ArenaSnap {
   const now = Date.now();
   const lo = effectiveLoadout(myLvl());
   return {
-    me: { id: a.me, spectator: a.spectator || !a.match.fighters.includes(a.me), ammo: a.ammo, actives: lo.actives, passive: lo.passive, ready: a.readyAt, trail: a.loadout.trail, guardUntil: b.guardUntil },
+    me: {
+      id: a.me,
+      spectator: a.spectator || !a.match.fighters.includes(a.me),
+      ammo: a.ammo,
+      actives: lo.actives,
+      passive: lo.passive,
+      ready: a.readyAt,
+      trail: a.loadout.trail,
+      guardUntil: b.guardUntil,
+      emoteOpen: a.emoteOpen,
+      holding: a.holding ? { id: a.holding.id, ok: a.holding.ok, at: a.holding.at } : null,
+      heldBy: a.heldBy?.id ?? null,
+      thrown: a.thrown,
+      down: a.downAt > 0,
+    },
     peers: Object.values(a.peers)
       .filter((p) => now - p.seen < 15_000)
       .map((p) => ({ id: p.id, name: p.name, x: Math.round(p.x), y: Math.round(p.y), tx: Math.round(p.tx), ty: Math.round(p.ty), f: p.facing, p: p.pose, look: p.look, spectator: p.spectator, trail: p.trail, fx: p.fx })),
     brawl: brawlSnap(now),
-    match: { n: a.match.n, mode: a.match.mode, phase: a.match.phase, fighters: a.match.fighters, out: a.match.out, score: a.match.score, boss: a.match.boss },
+    match: { n: a.match.n, mode: a.match.mode, phase: a.match.phase, fighters: a.match.fighters, out: a.match.out, score: a.match.score, boss: a.match.boss, downMode: downMode() },
     pickups: a.pickups,
     shots: a.shots.filter((s) => now - s.at < 1200),
     cheers: a.cheers.filter((c) => now - c.at < 2500),
+    emotes: a.emotes.filter((e) => now - e.at < EMOTE_MS),
+    revives: a.revives.filter((r) => now - r.at < REVIVE_MS + 3000),
   };
 }
 
@@ -70,12 +89,33 @@ export function ArenaScreen() {
   const open = useArena((s) => s.open);
   const ref = useRef<ArenaRef>(null);
   const [atlas, setAtlas] = useState<string | null>(null);
-  const [panel, setPanel] = useState<'powers' | 'ranks' | null>(null);
+  const [panel, setPanel] = useState<'powers' | 'ranks' | 'lore' | null>(null);
+  // first time in the arena: the story of the Two-Mouthed
+  useEffect(() => {
+    if (!open) return;
+    void loadJson<boolean>(LORE_KEY, false).then((seen) => {
+      if (!seen) setPanel('lore');
+    });
+  }, [open]);
   const [tipTo, setTipTo] = useState<{ id: string; name: string; wallet: string } | null>(null);
   const [clip, setClip] = useState<{ url: string; mime: string } | null>(null);
   useEffect(() => {
     if (open && !atlas) atlasSource().then(setAtlas, () => setAtlas('/pixel/atlas.png'));
   }, [open, atlas]);
+
+  // a teammate got you back up
+  useEffect(() => {
+    const f = (by: string) => {
+      const name = useArena.getState().peers[by]?.name ?? 'A teammate';
+      useGame.getState().toast(`${name} got you back up`, 'good');
+      play('claim');
+      haptic.tap?.();
+    };
+    reviveListeners.add(f);
+    return () => {
+      reviveListeners.delete(f);
+    };
+  }, []);
 
   // push the arena to the canvas ten times a second, when something changed
   useEffect(() => {
@@ -137,13 +177,31 @@ export function ArenaScreen() {
       case 'grab':
         grab(e.i);
         break;
+      case 'emoteMenu':
+        setEmoteOpen(!a.emoteOpen);
+        break;
+      case 'emote':
+        emote(e.e as Emote);
+        break;
+      case 'grabFoe':
+        if (tryGrab(e.target)) play('select');
+        break;
+      case 'throwHeld':
+        if (throwHeld(e.d)) play('crack');
+        break;
+      case 'revive':
+        shareRevive(e.target, e.state);
+        if (e.state === 'done') play('claim');
+        break;
       case 'peer': {
         const p = a.peers[e.id];
         const g = useGame.getState();
         if (!p) break;
-        if (!g.wallet.owner) g.toast('Connect a wallet to send tips', 'info');
+        if (!g.wallet.owner) g.toast('Connect a wallet to message or tip players', 'info');
         else if (!p.wallet) g.toast(`${p.name} has no wallet connected`, 'info');
-        else if (p.wallet !== g.wallet.owner) setTipTo({ id: p.id, name: p.name, wallet: p.wallet });
+        else if (p.wallet === g.wallet.owner) break;
+        else if (dmReady()) openDm(p.wallet, p.name);
+        else setTipTo({ id: p.id, name: p.name, wallet: p.wallet });
         break;
       }
       case 'clip':
@@ -185,6 +243,14 @@ export function ArenaScreen() {
         {clip ? <ClipCard clip={clip} onClose={() => setClip(null)} top={barTop + 8} /> : null}
         {panel === 'powers' ? <PowersPanel desk={desk} onClose={() => setPanel(null)} /> : null}
         {panel === 'ranks' ? <RanksPanel onClose={() => setPanel(null)} /> : null}
+        {panel === 'lore' ? (
+          <LorePanel
+            onClose={() => {
+              saveJson(LORE_KEY, true, 0);
+              setPanel(null);
+            }}
+          />
+        ) : null}
         {tipTo ? <TipSheet to={tipTo} onClose={() => setTipTo(null)} /> : null}
       </View>
     </Modal>
@@ -199,7 +265,7 @@ function useTicker(ms = 250) {
   }, [ms]);
 }
 
-function TopBar({ top, onPanel }: { top: number; onPanel: (p: 'powers' | 'ranks') => void }) {
+function TopBar({ top, onPanel }: { top: number; onPanel: (p: 'powers' | 'ranks' | 'lore') => void }) {
   useTicker();
   const m = useArena((s) => s.match);
   const status = useArena((s) => s.status);
@@ -228,6 +294,8 @@ function TopBar({ top, onPanel }: { top: number; onPanel: (p: 'powers' | 'ranks'
       <View style={styles.topBtns}>
         <MapButton label="POWERS" icon={<PixIcon name="bolt" size={18} />} onPress={() => onPanel('powers')} />
         <MapButton label="RANKS" icon={<PixIcon name="trophy" size={18} />} onPress={() => onPanel('ranks')} />
+        <MapButton label="STORY" icon={<PixIcon name="quest" size={18} />} onPress={() => onPanel('lore')} />
+        <InboxBtn />
         <DisconnectBtn />
       </View>
     </View>
@@ -263,10 +331,14 @@ function Controls({ bottom, desk, arena }: { bottom: number; desk: boolean; aren
         </View>
         <View style={styles.ctrlRow} pointerEvents="box-none">
           <MapButton label="CHEER" icon={<PixIcon name="heart" size={18} />} onPress={() => cheer()} />
+          <MapButton label="EMOTE" icon={<PixIcon name="laugh" size={18} />} onPress={() => setEmoteOpen(!a.emoteOpen)} />
         </View>
+        {a.emoteOpen ? <EmoteBar /> : null}
       </View>
     );
   }
+  const pvp = a.match.mode !== 'boss';
+  const canGrab = Boolean(a.holding?.ok) || Boolean(grabbable());
   if (desk) {
     // PC: a skill bar like a MOBA. Mouse to fight, keys for powers.
     return (
@@ -279,10 +351,13 @@ function Controls({ bottom, desk, arena }: { bottom: number; desk: boolean; aren
           <SkillButton size={56} round={false} icon="fist" label="HIT" kbd="LMB" onPress={() => arena.current?.attack?.()} />
           <SkillButton size={56} round={false} icon="ore" label="THROW" kbd="RMB" count={a.ammo} onPress={() => arena.current?.throwOre?.()} />
           <SkillButton size={56} round={false} icon="jump" label="JUMP" kbd="SPC" onPress={() => arena.current?.jump?.()} />
+          {pvp ? <SkillButton size={56} round={false} icon="fist" label={a.holding?.ok ? 'TOSS' : 'GRAB'} kbd="Z" gold={canGrab} onPress={() => arena.current?.grab?.()} /> : null}
+          <SkillButton size={56} round={false} icon="laugh" label="EMOTE" kbd="T" onPress={() => setEmoteOpen(!a.emoteOpen)} />
           <SkillButton size={56} round={false} icon="heart" label="CHEER" onPress={() => cheer()} />
         </View>
+        {a.emoteOpen ? <EmoteBar desk /> : null}
         <T v="label" style={{ fontSize: 11, textAlign: 'center' }}>
-          A D move · W or SPACE jump · S drop · left click hit · right click throw · Q E R C V X or 1 to 6 powers · SHIFT dash
+          A D move · W or SPACE jump · S drop · left click hit · right click throw · Q E R C V X or 1 to 6 powers · SHIFT dash · Z grab a dizzy miner · T emotes
         </T>
       </View>
     );
@@ -314,6 +389,24 @@ function Controls({ bottom, desk, arena }: { bottom: number; desk: boolean; aren
         );
       })}
       <SkillButton size={42} round icon="heart" style={at(90, 196, 42)} onPress={() => cheer()} />
+      <SkillButton size={42} round icon="laugh" style={at(112, 196, 42)} onPress={() => setEmoteOpen(!a.emoteOpen)} />
+      {pvp && canGrab ? <SkillButton size={SM} round gold icon="fist" label={a.holding?.ok ? 'TOSS' : 'GRAB'} style={at(90, 108, SM)} onPress={() => arena.current?.grab?.()} /> : null}
+      {a.emoteOpen ? <EmoteBar /> : null}
+    </View>
+  );
+}
+
+const EMOTE_ICON: Record<Emote, PixName> = { wave: 'wave', laugh: 'laugh', gg: 'trophy', angry: 'fire', heart: 'heart', skull: 'bat' };
+const EMOTE_LABEL: Record<Emote, string> = { wave: 'HI', laugh: 'HAHA', gg: 'GG', angry: 'GRR', heart: 'LOVE', skull: 'RIP' };
+/** The emote picker: six quick ones. On PC press 1 to 6 while it is open. */
+function EmoteBar({ desk }: { desk?: boolean }) {
+  return (
+    <View style={[styles.emoteBar, desk ? styles.emoteBarDesk : null]} pointerEvents="box-none">
+      <PixelBox fill="rgba(8,13,32,0.94)" hi={COLORS.gold} lo="#04060f" shadow={2} style={styles.emoteRow}>
+        {EMOTES.map((e, i) => (
+          <SkillButton key={e} size={52} round={false} icon={EMOTE_ICON[e]} label={EMOTE_LABEL[e]} kbd={desk ? String(i + 1) : undefined} onPress={() => emote(e)} />
+        ))}
+      </PixelBox>
     </View>
   );
 }
@@ -460,6 +553,63 @@ function PowersPanel({ onClose, desk }: { onClose: () => void; desk: boolean }) 
   );
 }
 
+const LORE_KEY = 'gali-boss-lore-v1';
+const LORE: string[] = [
+  'Deep under ORE Island, a crew dug past the last shaft and broke into a sealed hall. Something in the dark woke up.',
+  'The miners call it the Two-Mouthed. The mouth on its face eats ore. The mouth in its belly eats miners.',
+  'It took the leg of the first miner it caught. It still carries that leg and swings it like a club.',
+  'Every night it climbs closer to the mine. If it reaches the board, it eats the ore before anyone can claim it.',
+  'One miner cannot stop it. Fight it together in the Boss Raid, and pick each other up when it knocks you down.',
+];
+const LORE_TIPS: [string, string][] = [
+  ['SWEEP', 'It swings the leg low across the floor. Jump it, or stand on a ledge.'],
+  ['LASH', 'The belly tongue shoots far ahead. Jump it, or climb to the high middle ledge.'],
+  ['ROAR', 'Both mouths scream. Run away from it before the ring lands.'],
+];
+
+/** The story of the Two-Mouthed: shown the first time you enter the arena, and from STORY after that. */
+function LorePanel({ onClose }: { onClose: () => void }) {
+  return (
+    <Scrim onPress={onClose}>
+      <Window title="THE TWO-MOUTHED" sub="Why every miner must take it down" onClose={onClose} width={520}>
+        <ScrollView style={{ maxHeight: 480 }} contentContainerStyle={{ gap: 10 }}>
+          <View style={styles.loreTop}>
+            <Image source={require('../../assets/arena/two-mouthed.png')} style={styles.loreImg} resizeMode="contain" />
+            <View style={{ flex: 1, gap: 8 }}>
+              {LORE.slice(0, 3).map((line) => (
+                <T key={line} style={{ fontSize: 13 }}>
+                  {line}
+                </T>
+              ))}
+            </View>
+          </View>
+          {LORE.slice(3).map((line) => (
+            <T key={line} style={{ fontSize: 13 }}>
+              {line}
+            </T>
+          ))}
+          <View style={{ gap: 6 }}>
+            {LORE_TIPS.map(([k, v]) => (
+              <View key={k} style={styles.loreTip}>
+                <T v="display" style={{ width: 64, fontSize: 16, color: COLORS.red }}>
+                  {k}
+                </T>
+                <T v="muted" style={{ flex: 1, fontSize: 12 }}>
+                  {v}
+                </T>
+              </View>
+            ))}
+          </View>
+          <T v="muted" style={{ fontSize: 12 }}>
+            Downed in a raid? Stay put. A teammate who stands over you for 2 seconds gets you back up.
+          </T>
+          <Btn kind="gold" label="TO THE HALL" onPress={onClose} />
+        </ScrollView>
+      </Window>
+    </Scrim>
+  );
+}
+
 function RanksPanel({ onClose }: { onClose: () => void }) {
   const r = useRanks();
   useEffect(() => {
@@ -505,6 +655,12 @@ const styles = StyleSheet.create({
   controls: { position: 'absolute', left: 12, right: 12, gap: 8, alignItems: 'flex-end' },
   ctrlRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' },
   watch: { padding: 10, maxWidth: 420 },
+  loreTop: { flexDirection: 'row', gap: 12, alignItems: 'center' },
+  loreImg: { width: 120, height: 150, imageRendering: 'pixelated' } as never,
+  loreTip: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  emoteBar: { position: 'absolute', left: 0, right: 0, top: '38%', alignItems: 'center' },
+  emoteBarDesk: { position: 'relative', top: 0 },
+  emoteRow: { flexDirection: 'row', gap: 6, padding: 8 },
   deskBar: { position: 'absolute', left: 12, right: 12, alignItems: 'center', gap: 4 },
   deskRow: { flexDirection: 'row', gap: 6, alignItems: 'flex-end' },
   skill: { borderWidth: 3, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
