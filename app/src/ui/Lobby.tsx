@@ -32,6 +32,8 @@ import { BAR_H, TabBar, type SheetTab } from './TabBar';
 import { Arcade } from './Arcade';
 import { PixIcon } from './PixIcon';
 import { DisconnectBtn } from './Hud';
+import { InboxBtn } from './Dm';
+import { dmReady, openDm } from '../game/dm';
 import { Sticker } from './Sticker';
 import { useTutorial } from '../game/tutorial';
 import { FightPad } from './ActionPad';
@@ -261,9 +263,10 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
         const peer = useLobby.getState().peers[e.id];
         const g = useGame.getState();
         if (!peer) break;
-        if (!g.wallet.owner) g.toast('Connect a wallet to send tips', 'info');
+        if (!g.wallet.owner) g.toast('Connect a wallet to message or tip players', 'info');
         else if (!peer.wallet) g.toast(`${peer.name} has no wallet connected`, 'info');
         else if (peer.wallet === g.wallet.owner) g.toast("That's your own wallet", 'info');
+        else if (dmReady()) openDm(peer.wallet, peer.name);
         else setTipTo({ id: peer.id, name: peer.name, wallet: peer.wallet });
         break;
       }
@@ -325,6 +328,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
                 </T>
               </IconBtn>
             </Tip>
+            <InboxBtn />
             <DisconnectBtn />
           </View>
         </View>
@@ -358,6 +362,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
                   {status === 'full' ? 'FULL' : status === 'online' ? `${count}` : status === 'joining' ? '...' : 'OFF'}
                 </T>
               </PixelBox>
+              <InboxBtn />
               <IconBtn onPress={() => onTab(sheet === 'me' ? null : 'me')} label="Profile">
                 <PixIcon name="user" size={20} />
               </IconBtn>

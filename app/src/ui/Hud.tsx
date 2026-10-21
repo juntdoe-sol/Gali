@@ -6,6 +6,7 @@ import { short } from '../chain/light';
 import { isLive, isOnChain, LIVE_LOCK_MS, roundEndsAt, roundSpanMs, useGame, useLevelXp, usePoints, useRoundReward } from '../game/store';
 import { fmtSol, practiceMotherlode, practiceOreMotherlode } from '../game/pot';
 import { Bar, Frame, IconBtn, PixelBox, T, Tip, U } from './kit';
+import { InboxBtn } from './Dm';
 import { fx } from '../pixel/fx';
 import { useView } from '../pixel/view';
 import { useMinersHere } from './World';
@@ -157,6 +158,7 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
           <Stat icon="sol" value={sol.toFixed(sol >= 100 ? 1 : 3)} label="SOL" tip="SOL in your wallet." />
           {streak >= 2 ? <Stat icon="fire" color={COLORS.red} value={`x${streak}`} tip={`${streak} rounds in a row on the gold spot.`} /> : null}
         </View>
+        <InboxBtn />
         <WalletChip onMenu={onMenu} />
       </View>
     );
@@ -173,6 +175,7 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
         </View>
         <View style={styles.chipRow}>
           <WalletChip onMenu={onMenu} />
+          <InboxBtn />
           <IconBtn onPress={onMenu} label="Open your profile">
             <PixIcon name="user" size={22} />
           </IconBtn>

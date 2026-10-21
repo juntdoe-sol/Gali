@@ -18,6 +18,8 @@ interface Adapter extends WebWalletInfo {
   current(): PublicKey | null;
   disconnect(): Promise<void>;
   signTransaction(tx: Transaction): Promise<Transaction>;
+  /** sign plain bytes (a sign-in text); returns the 64-byte signature */
+  signMessage?(msg: Uint8Array): Promise<Uint8Array>;
 }
 
 /* ---------- Wallet Standard ---------- */
@@ -101,6 +103,14 @@ function stdAdapter(w: StdWallet): Adapter {
       const [out] = await w.features['solana:signTransaction'].signTransaction(input);
       return Transaction.from(out.signedTransaction);
     },
+    async signMessage(msg) {
+      const f = w.features['solana:signMessage'];
+      if (!f) throw new Error(`${w.name} can't sign a message. Try another wallet.`);
+      if (!account) await adapter.connect(false);
+      if (!account) throw new Error('Wallet did not share an address');
+      const [out] = await f.signMessage({ account, message: msg });
+      return new Uint8Array(out.signature);
+    },
   };
   return adapter;
 }
@@ -113,6 +123,7 @@ interface InjectedProvider {
   connect(opts?: { onlyIfTrusted?: boolean }): Promise<{ publicKey?: { toString(): string } } | void>;
   disconnect?(): Promise<void>;
   signTransaction<T extends Transaction>(tx: T): Promise<T>;
+  signMessage?(msg: Uint8Array, display?: string): Promise<{ signature: Uint8Array } | Uint8Array>;
 }
 
 type W = typeof globalThis & {
@@ -136,6 +147,11 @@ function injectedAdapter(name: string, p: InjectedProvider): Adapter {
       await p.disconnect?.().catch(() => undefined);
     },
     signTransaction: (tx) => p.signTransaction(tx),
+    async signMessage(msg) {
+      if (typeof p.signMessage !== 'function') throw new Error(`${name} can't sign a message. Try another wallet.`);
+      const out = await p.signMessage(msg, 'utf8');
+      return new Uint8Array(out instanceof Uint8Array ? out : out.signature);
+    },
   };
 }
 
@@ -253,6 +269,11 @@ export async function webDisconnect() {
   choice.set(null);
 }
 
+export async function webSignMessage(msg: Uint8Array): Promise<Uint8Array> {
+  const a = chosen();
+  if (!a.signMessage) throw new Error(`${a.name} can't sign a message. Try another wallet.`);
+  return a.signMessage(msg);
+}
 export async function webSign<T extends Transaction>(tx: T): Promise<T> {
   return (await chosen().signTransaction(tx)) as T;
 }
