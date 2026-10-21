@@ -8,7 +8,8 @@ import {
 } from '../game/constants';
 import { isLive, isOnChain, useGame, useLevelXp, usePoints } from '../game/store';
 import { chainReady, CLUSTER, oreLive, PROGRAM_ID_STR, short, SKR_MINT_STR, type BoardRound } from '../chain/light';
-import { useMinerRanks, useRanks } from '../game/ranks';
+import { PERIOD_WORDS, useMinerRanks, useRanks, type Period } from '../game/ranks';
+import { ClansTab, PeriodPicker } from './Clans';
 import { loadBoard, loadChain } from '../chain/lazy';
 import { ADMIN_FEE, fmtSol, POT_FEE, practiceMotherlode, practiceOreMotherlode, simPot, soloMask } from '../game/pot';
 import { UnclaimedRow } from './Dock';
@@ -48,6 +49,7 @@ export function Sheet({ tab, onTab }: { tab: SheetTab | null; onTab: (t: SheetTa
       {tab === 'gear' && <GearTab />}
       {tab === 'skr' && <SkrTab />}
       {tab === 'ranks' && <Ranks />}
+      {tab === 'clans' && <ClansTab />}
       {tab === 'me' && <Me />}
     </ScrollView>
   );
@@ -409,15 +411,17 @@ function Ranks() {
   const [tab, setTab] = useState<RankTab>('level');
   const miners = useMinerRanks();
   const brawl = useRanks();
+  const [period, setPeriod] = useState<Period>(() => useMinerRanks.getState().period);
   useEffect(() => {
-    void useMinerRanks.getState().load(oreLive ? (w) => loadBoard().then((b) => b.fetchMinerLifetimes(w)) : undefined);
-    void useRanks.getState().load();
-  }, []);
+    void useMinerRanks.getState().load(period, oreLive ? (w) => loadBoard().then((b) => b.fetchMinerLifetimes(w)) : undefined);
+    void useRanks.getState().load(period);
+  }, [period]);
   const rows =
     tab === 'ore'
-      ? [...miners.rows].filter((r) => (r.ore ?? 0) > 0).sort((a, b) => (b.ore ?? 0) - (a.ore ?? 0))
-      : [...miners.rows].sort((a, b) => b.xp - a.xp);
+      ? miners.everyone.filter((r) => (r.oreGain ?? 0) > 0).sort((a, b) => (b.oreGain ?? 0) - (a.oreGain ?? 0))
+      : [...miners.rows].sort((a, b) => b.gain - a.gain);
   const status = tab === 'brawl' ? brawl.status : miners.status;
+  const when = PERIOD_WORDS[period];
   return (
     <>
       <View style={{ flexDirection: 'row', gap: 6 }}>
@@ -437,12 +441,17 @@ function Ranks() {
           </Pressable>
         ))}
       </View>
+      <PeriodPicker period={period} onPick={setPeriod} />
       <T v="muted" style={{ fontSize: 12 }}>
         {tab === 'level'
-          ? 'Every Gali miner with a wallet, by XP. You: level ' + levelFromXp(xp) + ' · ' + points.toLocaleString() + ' pts.'
+          ? period === 'all'
+            ? 'Every Gali miner with a wallet, by XP. You: level ' + levelFromXp(xp) + ' · ' + points.toLocaleString() + ' pts.'
+            : `XP gained ${when}, by every Gali miner with a wallet. Days start at midnight Malaysia time.`
           : tab === 'ore'
-            ? 'Lifetime ORE mined on ORE, read from each wallet on chain.'
-            : 'This week: 1 point a KO, 3 a match win, 2 a Boss Raid won. A KO counts when the miner who went down reports it.'}
+            ? period === 'all'
+              ? 'Lifetime ORE mined on ORE, read from each wallet on chain.'
+              : `ORE mined ${when}: the chain's total now, minus where each wallet stood when the ${period} began.`
+            : `Brawl ${when}: 1 point a KO, 3 a match win, 2 a Boss Raid won. A KO counts when the miner who went down reports it.`}
       </T>
       {status === 'off' ? (
         <Card>
@@ -459,7 +468,7 @@ function Ranks() {
       ) : tab === 'brawl' ? (
         !brawl.rows.length ? (
           <Card>
-            <T>No fights this week yet. Be the first on the board.</T>
+            <T>No fights {when} yet. Be the first on the board.</T>
           </Card>
         ) : (
           brawl.rows.map((r, k) => (
@@ -479,7 +488,13 @@ function Ranks() {
         )
       ) : !rows.length ? (
         <Card>
-          <T>{tab === 'ore' && miners.rows.some((r) => r.ore === null) ? 'Reading ORE from the chain…' : 'Nobody on this board yet. Connect a wallet and play a round.'}</T>
+          <T>
+            {tab === 'ore' && miners.everyone.some((r) => r.ore === null)
+              ? 'Reading ORE from the chain…'
+              : period === 'all'
+                ? 'Nobody on this board yet. Connect a wallet and play a round.'
+                : `Nobody has gained ${tab === 'ore' ? 'ORE' : 'XP'} ${when} yet. Play a round to get on the board.`}
+          </T>
         </Card>
       ) : (
         rows.map((r, k) => (
@@ -498,7 +513,7 @@ function Ranks() {
             </View>
             <T v="muted">Lv {r.level}</T>
             <T v="display" style={{ color: COLORS.gold, fontSize: 18, minWidth: 84, textAlign: 'right' }}>
-              {tab === 'ore' ? (r.ore ?? 0).toFixed(2) : r.xp.toLocaleString()}
+              {tab === 'ore' ? `${period === 'all' ? '' : '+'}${(r.oreGain ?? 0).toFixed(2)}` : `${period === 'all' ? '' : '+'}${r.gain.toLocaleString()}`}
             </T>
             <T v="muted" style={{ fontSize: 10, width: 26 }}>
               {tab === 'ore' ? 'ORE' : 'XP'}

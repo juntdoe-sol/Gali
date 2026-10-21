@@ -1,6 +1,6 @@
 /**
  * The Arena screen: the pit (pixel/ArenaView), the match banner, the fight buttons, the power picker,
- * the weekly ranks, and the clip of the last knockout.
+ * the ranks, and the clip of the last knockout.
  *
  * The rules live in game/arena.ts and game/brawl.ts. This file passes what the canvas reports to them,
  * and shows what they say.
@@ -14,7 +14,8 @@ import { cheer, downMode, effectiveLoadout, emote, EMOTE_MS, EMOTES, grab, grabb
 import { brawlSnap, guard, heal, jump, setMyPos, strike, swing, useBrawl } from '../game/brawl';
 import { fightPoints, titleOf, TRAILS, trailUnlocked, useFightStats } from '../game/fightGear';
 import { ACTIVES, MEND_HP, PASSIVES, POWERS, POWER_KEY, baseDamage, unlocked, type ActiveId, type PowerId } from '../game/powers';
-import { useRanks } from '../game/ranks';
+import { PERIOD_WORDS, useRanks, type Period } from '../game/ranks';
+import { PeriodPicker } from './Clans';
 import { haptic, play, type Sound } from '../game/sfx';
 import { useGame } from '../game/store';
 import type { ArenaEvent, ArenaSnap } from '../engine/arena';
@@ -612,17 +613,19 @@ function LorePanel({ onClose }: { onClose: () => void }) {
 
 function RanksPanel({ onClose }: { onClose: () => void }) {
   const r = useRanks();
+  const [period, setPeriod] = useState<Period>(() => useRanks.getState().period);
   useEffect(() => {
-    void useRanks.getState().load();
-  }, []);
+    void useRanks.getState().load(period);
+  }, [period]);
   return (
     <Scrim onPress={onClose}>
-      <Window title="BRAWL RANKS" sub="This week: 1 point a KO, 3 a match win, 2 a Boss Raid won." onClose={onClose} width={480}>
-        <ScrollView style={{ maxHeight: 460 }}>
+      <Window title="BRAWL RANKS" sub={`${PERIOD_WORDS[period][0].toUpperCase()}${PERIOD_WORDS[period].slice(1)}: 1 point a KO, 3 a match win, 2 a Boss Raid won.`} onClose={onClose} width={480}>
+        <PeriodPicker period={period} onPick={setPeriod} />
+        <ScrollView style={{ maxHeight: 420 }}>
           {r.status === 'off' ? <T v="muted">Ranks are not set up on this server yet.</T> : null}
           {r.status === 'error' ? <T v="muted">Could not load the ranks. Try again in a moment.</T> : null}
           {r.status === 'loading' && !r.rows.length ? <T v="muted">Loading</T> : null}
-          {r.status === 'ok' && !r.rows.length ? <T v="muted">No fights this week yet. Be the first on the board.</T> : null}
+          {r.status === 'ok' && !r.rows.length ? <T v="muted">No fights {PERIOD_WORDS[period]} yet. Be the first on the board.</T> : null}
           {r.rows.map((row, i) => (
             <View key={row.name} style={styles.rankRow}>
               <T v="display" style={{ width: 34, fontSize: 18, color: i < 3 ? COLORS.gold : COLORS.muted }}>

@@ -3,7 +3,7 @@
  *
  * Fight points come from what you do in Brawl: 1 per KO, 3 per arena win, 2 per Mole Boss down.
  * Points unlock swing trails (the colour of the arc your pickaxe draws) and a title shown in the arena.
- * Your own record is kept on this device; the weekly ranks (game/ranks.ts) are shared.
+ * Your own record is kept on this device; the ranks (game/ranks.ts) are shared.
  */
 import { create } from 'zustand';
 import { loadJson, saveJson } from './storage';
