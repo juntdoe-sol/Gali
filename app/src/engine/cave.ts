@@ -25,6 +25,7 @@ export type CaveEvent =
   | { t: 'xp'; n: number }
   | { t: 'end'; depth: number; xp: number }
   | { t: 'sfx'; name: 'hit' | 'crack' | 'pop' | 'gem' | 'hurt' | 'descend' | 'over' | 'start' | 'tick' | 'oil' }
+  | { t: 'phase'; p: string }
   | { t: 'close' };
 
 export interface CaveOpts {
@@ -34,9 +35,11 @@ export interface CaveOpts {
   /** CSS pixels of safe area above and below. */
   top: number;
   bottom: number;
+  /** a phone (stick and SWING button); false on a computer (keys and mouse) */
+  touch?: boolean;
 }
 
-type Phase = 'intro' | 'play' | 'descend' | 'over';
+type Phase = 'intro' | 'play' | 'descend' | 'over' | 'pause';
 interface Item { kind: Exclude<Loot, ''>; x: number; y: number; z: number; vz: number; born: number }
 interface Bat { x: number; y: number; hx: number; hy: number; seed: number; awake: boolean; dead: boolean }
 interface Fall { x: number; y: number; at: number; done: boolean }
@@ -202,6 +205,13 @@ export class CaveEngine {
   private stick: { id: number; bx: number; by: number; x: number; y: number } | null = null;
   private swingHeld = new Set<number>();
   private keys = new Set<string>();
+  /** the mouse (computer): where it points (CSS px), when it last moved, and whether the button is held */
+  private mouse: { x: number; y: number; at: number } | null = null;
+  private mouseDown = false;
+  /** where the map was drawn last frame (device px), to turn the mouse into a direction */
+  private view = { OX: 0, OY: 0 };
+  private pausedAt = 0;
+  private floorAt = 0;
   private buttons: Rect[] = [];
   private unbind: (() => void)[] = [];
 
@@ -268,7 +278,30 @@ export class CaveEngine {
     this.load(1);
     this.phase = 'play';
     this.phaseAt = Date.now();
+    this.floorAt = Date.now();
     this.say(this.x, this.y - 30, 'DEPTH 1', '#ffd24a', true);
+  }
+  private get desk() {
+    return !this.opts.touch;
+  }
+  /** Esc or P: stop the clock (the lantern too) and show the pause card. */
+  private pause() {
+    if (this.phase !== 'play') return;
+    this.phase = 'pause';
+    this.pausedAt = Date.now();
+    this.keys.clear();
+    this.mouseDown = false;
+    this.stick = null;
+    this.swingHeld.clear();
+  }
+  private resume() {
+    if (this.phase !== 'pause') return;
+    const gap = Date.now() - this.pausedAt;
+    this.nextFall += gap;
+    this.hurtAt += gap;
+    this.floorAt += gap;
+    for (const f of this.falls) f.at += gap;
+    this.phase = 'play';
   }
   private end(why: string) {
     if (this.phase === 'over') return;
@@ -320,6 +353,14 @@ export class CaveEngine {
         if (p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h) return b.go();
       }
       if (this.phase !== 'play') return;
+      if (e.pointerType === 'mouse' && this.desk) {
+        // computer: the left button digs toward the mouse, and keeps digging while held
+        if (e.button !== 0) return;
+        this.mouse = { ...p, at: Date.now() };
+        this.mouseDown = true;
+        this.swing();
+        return;
+      }
       const sb = this.swingButton();
       if (Math.hypot(p.x - sb.x, p.y - sb.y) < sb.r + 14) {
         this.swingHeld.add(e.pointerId);
@@ -329,6 +370,7 @@ export class CaveEngine {
       if (!this.stick) this.stick = { id: e.pointerId, bx: p.x, by: p.y, x: p.x, y: p.y };
     });
     on(cv, 'pointermove', (e: PointerEvent) => {
+      if (e.pointerType === 'mouse' && this.desk) this.mouse = { ...pos(e), at: Date.now() };
       if (!this.stick || this.stick.id !== e.pointerId) return;
       const p = pos(e);
       this.stick.x = p.x;
@@ -342,25 +384,52 @@ export class CaveEngine {
         this.stick.by += (dy / d) * (d - 62);
       }
     });
+    on(cv, 'contextmenu', (e: Event) => e.preventDefault());
     const up = (e: PointerEvent) => {
+      if (e.pointerType === 'mouse') this.mouseDown = false;
       this.swingHeld.delete(e.pointerId);
       if (this.stick?.id === e.pointerId) this.stick = null;
     };
     on(cv, 'pointerup', up);
     on(cv, 'pointercancel', up);
     if (typeof window !== 'undefined') {
-      on(window, 'keydown', (e: KeyboardEvent) => {
-        const k = e.key.toLowerCase();
-        if (k === ' ' || k === 'enter') {
-          if (this.phase === 'play') this.swing();
-          else if (this.phase !== 'descend' && !e.repeat) this.buttons[0]?.go();
+      // capture: the cave hears its keys before a focused button does (Enter and Space would press it)
+      const GAME = /^(arrow(up|down|left|right)|[wasdjkp ]|enter|escape|spacebar)$/;
+      on(
+        window,
+        'keydown',
+        (e: KeyboardEvent) => {
+          const t = e.target as HTMLElement | null;
+          if (t && (/^(INPUT|TEXTAREA)$/.test(t.tagName) || t.isContentEditable)) return;
+          if (e.ctrlKey || e.metaKey || e.altKey) return;
+          const k = e.key.toLowerCase();
+          if (!GAME.test(k)) return;
           e.preventDefault();
-        }
-        this.keys.add(k);
+          e.stopPropagation();
+          if (t && t.tagName === 'BUTTON') t.blur();
+          if (k === 'escape' || k === 'p') {
+            if (e.repeat) return;
+            if (this.phase === 'play') this.pause();
+            else if (this.phase === 'pause') this.resume();
+            else if (k === 'escape' && (this.phase === 'intro' || this.phase === 'over')) this.emit({ t: 'close' });
+            return;
+          }
+          if (k === ' ' || k === 'spacebar' || k === 'enter' || k === 'j' || k === 'k') {
+            if (this.phase === 'play') this.swing();
+            else if (this.phase === 'pause' && k === 'enter' && !e.repeat) this.resume();
+            else if (this.phase !== 'descend' && (k === 'enter' || k === ' ') && !e.repeat) this.buttons[0]?.go();
+          }
+          this.keys.add(k === 'spacebar' ? ' ' : k === 'j' || k === 'k' ? ' ' : k);
+        },
+        { capture: true },
+      );
+      on(window, 'keyup', (e: KeyboardEvent) => {
+        const k = e.key.toLowerCase();
+        this.keys.delete(k === 'spacebar' || k === 'j' || k === 'k' ? ' ' : k);
       });
-      on(window, 'keyup', (e: KeyboardEvent) => this.keys.delete(e.key.toLowerCase()));
       on(window, 'blur', () => {
         this.keys.clear();
+        this.mouseDown = false;
         this.stick = null;
         this.swingHeld.clear();
       });
@@ -486,6 +555,7 @@ export class CaveEngine {
     if (this.phase === 'descend') {
       if (now - this.phaseAt > 520 && lv.depth === this.descendFrom) {
         this.load(lv.depth + 1);
+        this.floorAt = now;
         this.say(this.x, this.y - 30, `DEPTH ${this.level.depth}`, '#ffd24a', true);
       }
       if (now - this.phaseAt > 1040) {
@@ -496,6 +566,7 @@ export class CaveEngine {
     }
     if (this.phase !== 'play') {
       this.pose = this.phase === 'over' ? 'idle' : this.pose;
+      if (this.phase === 'pause') this.pose = 'idle';
       return;
     }
     // walk
@@ -506,18 +577,40 @@ export class CaveEngine {
     let vy = wy * speed + this.ky;
     this.kx *= Math.max(0, 1 - dt * 9);
     this.ky *= Math.max(0, 1 - dt * 9);
+    // computer: the pick points at the mouse while you use it; otherwise the way you walk
+    const m = this.mouse;
+    const mouseAim = this.desk && m && (this.mouseDown || now - m.at < 2500);
+    if (mouseAim && m) {
+      const d = this.dpr;
+      const mx = (m.x * d - this.view.OX) / this.S;
+      const my = (m.y * d - this.view.OY) / this.S;
+      const ax = mx - this.x;
+      const ay = my - (this.y - 6);
+      const al = Math.hypot(ax, ay);
+      if (al > 2) {
+        this.aim = { x: ax / al, y: ay / al };
+        if (Math.abs(ax) > 2) this.facing = ax > 0 ? 1 : -1;
+      }
+    }
     if (wx || wy) {
       const d = Math.hypot(wx, wy);
-      this.aim = { x: wx / d, y: wy / d };
-      if (Math.abs(wx) > 0.2) this.facing = wx > 0 ? 1 : -1;
+      if (!mouseAim) this.aim = { x: wx / d, y: wy / d };
+      if (!mouseAim && Math.abs(wx) > 0.2) this.facing = wx > 0 ? 1 : -1;
       this.moved = true;
     }
     const nx = this.x + vx * dt;
     if (!this.blocked(nx, this.y)) this.x = nx;
-    else vx = 0;
+    else {
+      // round a corner: slide up or down to the gap if it is only a few pixels away
+      if (wx && !wy) this.slide(0, nx, speed * dt);
+      vx = 0;
+    }
     const ny = this.y + vy * dt;
     if (!this.blocked(this.x, ny)) this.y = ny;
-    else vy = 0;
+    else {
+      if (wy && !wx) this.slide(1, ny, speed * dt);
+      vy = 0;
+    }
     const walking = (wx || wy) && (Math.abs(vx) + Math.abs(vy) > 4);
     if (swinging) {
       if (!this.swingHit && now - this.swingAt >= SWING_HIT_MS) {
@@ -525,7 +618,7 @@ export class CaveEngine {
         this.strike(now);
       }
     } else {
-      if (this.swingHeld.size || this.keys.has(' ')) this.swing();
+      if (this.swingHeld.size || this.keys.has(' ') || this.mouseDown) this.swing();
       else {
         const want: Pose = walking ? 'walk' : 'idle';
         if (this.pose !== want) {
@@ -649,6 +742,20 @@ export class CaveEngine {
     this.flushXp();
   }
   private descendFrom = 0;
+  /** Blocked going one way: if a gap is within 5 px to the side, step toward it. axis 0: moving in x. */
+  private slide(axis: 0 | 1, to: number, step: number) {
+    for (let off = 1; off <= 5; off++) {
+      for (const sgn of [1, -1]) {
+        const o = off * sgn;
+        const ok = axis === 0 ? !this.blocked(to, this.y + o) && !this.blocked(this.x, this.y + o) : !this.blocked(this.x + o, to) && !this.blocked(this.x + o, this.y);
+        if (ok) {
+          if (axis === 0) this.y += Math.sign(o) * Math.min(Math.abs(o), step);
+          else this.x += Math.sign(o) * Math.min(Math.abs(o), step);
+          return;
+        }
+      }
+    }
+  }
 
   /* ---------------- drawing ---------------- */
   private resize() {
@@ -662,16 +769,29 @@ export class CaveEngine {
     this.canvas.width = Math.round(cssW * dpr);
     this.canvas.height = Math.round(cssH * dpr);
     this.c = ctx2d(this.canvas);
-    this.S = Math.max(2, Math.floor(Math.min(this.canvas.width / 150, this.canvas.height / 215)));
+    // phone: about 150 x 215 art px on screen. Computer: closer, the cave's width in the middle and room
+    // for the side panels
+    this.S = this.desk ? Math.max(2, Math.floor(Math.min(this.canvas.width / (COLS * TILE + 120), this.canvas.height / 175))) : Math.max(2, Math.floor(Math.min(this.canvas.width / 150, this.canvas.height / 215)));
     this.light = makeCanvas(Math.ceil(this.canvas.width / this.S) + 2, Math.ceil(this.canvas.height / this.S) + 2);
   }
 
+  private lastPhase = '';
+  /** The phone's back button, or Esc arriving late from the app: pause a run, else nothing. */
+  back() {
+    if (this.phase === 'play') this.pause();
+  }
   private frame(t: number) {
+    if (this.phase !== this.lastPhase) {
+      this.lastPhase = this.phase;
+      this.emit({ t: 'phase', p: this.phase });
+    }
     const dt = Math.min(0.05, (t - this.last) / 1000);
     this.last = t;
     const now = Date.now();
     this.resize();
-    this.think(dt, now);
+    if (this.phase !== 'pause') this.think(dt, now);
+    const cur = this.desk && this.phase === 'play' ? 'none' : 'default';
+    if (this.canvas.style.cursor !== cur) this.canvas.style.cursor = cur;
     this.parts.update(dt, 0);
     this.shake = Math.max(0, this.shake - dt * 14);
     this.cam.x += (this.x - this.cam.x) * Math.min(1, dt * 7);
@@ -681,7 +801,11 @@ export class CaveEngine {
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.imageSmoothingEnabled = false;
     this.drawWorld(c, now);
-    if (this.phase === 'play' || this.phase === 'descend') this.drawHud(c, now);
+    if (this.phase === 'play' || this.phase === 'descend' || this.phase === 'pause') {
+      if (this.desk) this.drawDeskHud(c, now);
+      else this.drawHud(c, now);
+    }
+    if (this.phase === 'pause') this.drawPause(c);
     if (this.phase === 'descend') {
       const k = (now - this.phaseAt) / 1040;
       c.fillStyle = `rgba(3,2,6,${k < 0.5 ? k * 2 : (1 - k) * 2})`;
@@ -702,7 +826,8 @@ export class CaveEngine {
     const viewW = DW / S;
     const camX = viewW >= mapW ? mapW / 2 : Math.max(viewW / 2, Math.min(mapW - viewW / 2, this.cam.x));
     const OX = Math.round(DW / 2 - camX * S + (seeded(now / 33) - 0.5) * sh * S);
-    const OY = Math.round(DH * 0.44 - this.cam.y * S + (seeded(now / 29 + 9) - 0.5) * sh * S);
+    const OY = Math.round(DH * (this.desk ? 0.5 : 0.44) - this.cam.y * S + (seeded(now / 29 + 9) - 0.5) * sh * S);
+    this.view = { OX, OY };
     c.fillStyle = '#0a0810';
     c.fillRect(0, 0, DW, DH);
     const x0 = Math.floor(-OX / S / TILE) - 1;
@@ -864,6 +989,50 @@ export class CaveEngine {
       textCentered(c, f.t, OX + f.x * S, OY + (f.y - k * 16) * S - 5 * sc, sc, f.c, '#05030a');
       c.globalAlpha = 1;
     }
+    // computer: a small cross where the pick will land, and a ring on the mouse
+    if (this.desk && this.phase === 'play' && this.mouse) {
+      const hx = OX + (this.x + this.aim.x * 11) * S;
+      const hy = OY + (this.y - 3 + this.aim.y * 11) * S;
+      c.fillStyle = 'rgba(255,210,74,0.8)';
+      c.fillRect(hx - S, hy - 3 * S, 2 * S, 6 * S);
+      c.fillRect(hx - 3 * S, hy - S, 6 * S, 2 * S);
+      const d = this.dpr;
+      const MX = this.mouse.x * d;
+      const MY = this.mouse.y * d;
+      c.strokeStyle = 'rgba(255,241,168,0.9)';
+      c.lineWidth = 2 * d;
+      c.beginPath();
+      c.arc(MX, MY, 7 * d, 0, Math.PI * 2);
+      c.stroke();
+      c.fillStyle = '#fff1a8';
+      c.fillRect(MX - d, MY - d, 2 * d, 2 * d);
+    }
+    // lost on a floor for a while: a faint arrow at the lamp's edge points to the ladder
+    if (this.phase === 'play' && now - this.floorAt > 25_000) {
+      const [lx2, ly2] = lv.ladder;
+      const ax = lx2 * TILE + 8 - this.x;
+      const ay = ly2 * TILE + 8 - (this.y - 6);
+      const al = Math.hypot(ax, ay);
+      if (al > 40) {
+        const R = 30;
+        const px = OX + (this.x + (ax / al) * R) * S;
+        const py = OY + (this.y - 6 + (ay / al) * R) * S;
+        const ang = Math.atan2(ay, ax);
+        c.save();
+        c.globalAlpha = 0.45 + 0.25 * Math.sin(now / 250);
+        c.translate(px, py);
+        c.rotate(ang);
+        c.fillStyle = '#c7f284';
+        c.beginPath();
+        c.moveTo(4 * S, 0);
+        c.lineTo(-3 * S, -3 * S);
+        c.lineTo(-1 * S, 0);
+        c.lineTo(-3 * S, 3 * S);
+        c.closePath();
+        c.fill();
+        c.restore();
+      }
+    }
     // hurt flash and low-oil pulse
     const h = now - this.hurtAt;
     if (h < 260) {
@@ -910,7 +1079,7 @@ export class CaveEngine {
     c.fillStyle = 'rgba(5,3,10,0.6)';
     c.fillRect(ex.x * d, ex.y * d, ex.w * d, ex.h * d);
     textCentered(c, 'x', (ex.x + ex.w / 2) * d, (ex.y + ex.h / 2) * d - 2.5 * u * 1.4, u * 1.4, '#cfd6e6');
-    if (this.phase === 'play') this.buttons.push({ ...ex, go: () => this.end('RUN ENDED') });
+    if (this.phase === 'play') this.buttons.push({ ...ex, go: () => this.pause() });
     if (this.phase !== 'play') return;
     // swing button
     const sb = this.swingButton();
@@ -957,6 +1126,111 @@ export class CaveEngine {
     }
   }
 
+  /** Computer: the run's numbers in two side panels beside the cave, and the keys along the bottom. */
+  private drawDeskHud(c: Ctx, now: number) {
+    const d = this.dpr;
+    const DW = this.canvas.width;
+    const DH = this.canvas.height;
+    const u = Math.max(2, Math.round(d * 2));
+    const mapW = COLS * TILE * this.S;
+    const side = (DW - mapW) / 2;
+    const wide = side >= 170 * d;
+    const pw = wide ? Math.min(side - 28 * d, 250 * d) : 220 * d;
+    const top = (this.opts.top + 64) * d;
+    const box = (x: number, y: number, w: number, h: number) => {
+      c.fillStyle = 'rgba(10,8,18,0.86)';
+      c.fillRect(x, y, w, h);
+      c.fillStyle = '#3a2c50';
+      c.fillRect(x, y, w, 2 * d);
+      c.fillRect(x, y + h - 2 * d, w, 2 * d);
+      c.fillRect(x, y, 2 * d, h);
+      c.fillRect(x + w - 2 * d, y, 2 * d, h);
+    };
+    // left: hearts and the lantern
+    const lx = wide ? (side - pw) / 2 : 14 * d;
+    const lh = 46 * u;
+    box(lx, top, pw, lh);
+    let y = top + 6 * u;
+    text(c, 'HEARTS', lx + 6 * u, y, u, '#cfd6e6', '#05030a');
+    y += 9 * u;
+    for (let i = 0; i < HEARTS; i++) {
+      const sp = i < this.hearts ? HEART : HEART_OFF;
+      const pop = i === this.hearts && now - this.hurtAt < 300 ? 1.3 : 1;
+      c.drawImage(sp, lx + 6 * u + i * 10 * u, y, sp.width * u * 1.2 * pop, sp.height * u * 1.2 * pop);
+    }
+    y += 10 * u;
+    text(c, 'LANTERN', lx + 6 * u, y, u, '#cfd6e6', '#05030a');
+    y += 8 * u;
+    const k = this.oil / OIL_MAX;
+    const bw = pw - 12 * u - 22 * u;
+    c.drawImage(FLAME, lx + 6 * u, y - u, FLAME.width * u, FLAME.height * u);
+    c.fillStyle = '#05030a';
+    c.fillRect(lx + 13 * u, y, bw + 2 * u, 5 * u);
+    c.fillStyle = k < 0.17 ? (Math.floor(now / 160) % 2 ? '#ff4f3a' : '#ffb060') : '#ffb030';
+    c.fillRect(lx + 14 * u, y + u, Math.round(bw * k), 3 * u);
+    c.fillStyle = '#fff1a8';
+    c.fillRect(lx + 14 * u, y + u, Math.round(bw * k), u);
+    text(c, `${Math.ceil(this.oil)}S`, lx + 16 * u + bw, y, u, k < 0.17 ? '#ff8a70' : '#ffd9a8', '#05030a');
+    // right: depth, XP, best
+    const rx = wide ? DW - side + (side - pw) / 2 : DW - pw - 14 * d;
+    box(rx, top, pw, lh);
+    y = top + 6 * u;
+    text(c, 'DEPTH', rx + 6 * u, y, u, '#cfd6e6', '#05030a');
+    const dt = String(this.level.depth);
+    text(c, dt, rx + pw - 6 * u - textWidth(dt) * u * 2, y - u, u * 2, '#ffd24a', '#05030a');
+    y += 12 * u;
+    text(c, 'RUN XP', rx + 6 * u, y, u, '#cfd6e6', '#05030a');
+    const xt = String(this.runXp);
+    text(c, xt, rx + pw - 6 * u - textWidth(xt) * u * 2, y - u, u * 2, '#8ff0ff', '#05030a');
+    y += 12 * u;
+    text(c, 'BEST', rx + 6 * u, y, u, '#cfd6e6', '#05030a');
+    const bt = `DEPTH ${Math.max(this.opts.best, this.level.depth)}`;
+    text(c, bt, rx + pw - 6 * u - textWidth(bt) * u, y, u, '#c7f284', '#05030a');
+    // the keys, along the bottom
+    const keys: [string, string][] = [
+      ['WASD', 'MOVE'],
+      ['MOUSE', 'AIM'],
+      ['CLICK / SPACE', 'DIG'],
+      ['ESC', 'PAUSE'],
+    ];
+    const ku = Math.max(2, Math.round(d * 1.5));
+    const gap = 14 * d;
+    const parts = keys.map(([kk, w]) => ({ kk, w, kw: textWidth(kk) * ku + 10 * d, ww: textWidth(w) * ku }));
+    const total = parts.reduce((n, p) => n + p.kw + 6 * d + p.ww + gap, -gap);
+    let x = (DW - total) / 2;
+    const by = DH - (this.opts.bottom + 30) * d;
+    c.fillStyle = 'rgba(10,8,18,0.7)';
+    c.fillRect(x - 12 * d, by - 8 * d, total + 24 * d, 9 * ku + 10 * d);
+    for (const p of parts) {
+      c.fillStyle = '#2a2040';
+      c.fillRect(x, by - 3 * d, p.kw, 7 * ku + 2 * d);
+      c.fillStyle = '#4a3a6a';
+      c.fillRect(x, by + 7 * ku - 3 * d, p.kw, 2 * d);
+      text(c, p.kk, x + 5 * d, by, ku, '#fff1a8');
+      x += p.kw + 6 * d;
+      text(c, p.w, x, by, ku, '#cfd6e6', '#05030a');
+      x += p.ww + gap;
+    }
+    // first seconds: say how to play
+    if (!this.moved && this.phase === 'play') textCentered(c, 'WASD TO MOVE - CLICK A ROCK TO DIG', DW / 2, DH * 0.5 + 60 * d, ku, '#ffffff', '#05030a');
+  }
+
+  private drawPause(c: Ctx) {
+    this.panel(
+      c,
+      [
+        { t: 'PAUSED', c: '#ffd24a', k: 2 },
+        { t: ' ', c: '#fff' },
+        { t: `DEPTH ${this.level.depth} - ${this.runXp} XP SO FAR`, c: '#ffffff' },
+        { t: 'YOUR LANTERN WAITS FOR YOU', c: '#ffb060' },
+      ],
+      [
+        { t: this.desk ? 'RESUME  (ESC)' : 'RESUME', gold: true, go: () => this.resume() },
+        { t: 'END RUN', go: () => this.end('RUN ENDED') },
+      ],
+    );
+  }
+
   private panel(c: Ctx, lines: { t: string; c: string; k?: number }[], buttons: { t: string; gold?: boolean; go: () => void }[]) {
     const d = this.dpr;
     const u = Math.max(2, Math.round(d * 1.5));
@@ -964,7 +1238,7 @@ export class CaveEngine {
     const DH = this.canvas.height;
     c.fillStyle = 'rgba(5,3,10,0.55)';
     c.fillRect(0, 0, DW, DH);
-    const w = Math.min(DW - 32 * d, 330 * d);
+    const w = Math.min(DW - 32 * d, (this.desk ? 420 : 330) * d);
     const lineH = 9 * u;
     const bh = 50 * d;
     const hgt = lines.reduce((n, l) => n + lineH * (l.k ?? 1), 0) + buttons.length * (bh + 10 * d) + 36 * d;
@@ -1009,11 +1283,19 @@ export class CaveEngine {
       { t: 'WATCH YOUR LANTERN AND THE BATS.', c: '#ffb060' },
       { t: ' ', c: '#fff' },
       { t: this.opts.best > 0 ? `YOUR BEST: DEPTH ${this.opts.best}` : 'XP LEVELS UP YOUR MINER', c: '#8ff0ff' },
+      ...(this.desk
+        ? [
+            { t: ' ', c: '#fff' },
+            { t: 'WASD OR ARROWS: MOVE', c: '#cfd6e6' },
+            { t: 'MOUSE: AIM - CLICK OR SPACE: DIG', c: '#cfd6e6' },
+            { t: 'HOLD TO KEEP DIGGING - ESC: PAUSE', c: '#cfd6e6' },
+          ]
+        : []),
     ];
     if (runs > 0) {
       this.panel(c, lines, [
-        { t: `START RUN - ${runs} LEFT TODAY`, gold: true, go: () => this.begin() },
-        { t: 'BACK', go: () => this.emit({ t: 'close' }) },
+        { t: `START RUN - ${runs} LEFT TODAY${this.desk ? '  (ENTER)' : ''}`, gold: true, go: () => this.begin() },
+        { t: this.desk ? 'BACK  (ESC)' : 'BACK', go: () => this.emit({ t: 'close' }) },
       ]);
     } else {
       this.panel(c, [...lines.slice(0, 1), { t: ' ', c: '#fff' }, { t: 'NO RUNS LEFT TODAY', c: '#ff8a70' }, { t: 'MINE A ROUND FOR +1 RUN', c: '#ffffff' }, { t: '3 FREE RUNS EVERY DAY', c: '#cfd6e6' }], [
@@ -1032,8 +1314,8 @@ export class CaveEngine {
       { t: `+${this.runXp} XP FOR YOUR MINER`, c: '#8ff0ff' },
       { t: this.level.depth >= this.opts.best && this.level.depth > 1 ? 'NEW BEST!' : `BEST: DEPTH ${this.opts.best}`, c: '#c7f284' },
     ];
-    const again = runs > 0 ? [{ t: `RUN AGAIN - ${runs} LEFT`, gold: true, go: () => this.begin() }] : [];
+    const again = runs > 0 ? [{ t: `RUN AGAIN - ${runs} LEFT${this.desk ? '  (ENTER)' : ''}`, gold: true, go: () => this.begin() }] : [];
     if (!runs) lines.push({ t: 'MINE A ROUND FOR +1 RUN', c: '#ffffff' });
-    this.panel(c, lines, [...again, { t: 'BACK', gold: !runs, go: () => this.emit({ t: 'close' }) }]);
+    this.panel(c, lines, [...again, { t: this.desk ? 'BACK  (ESC)' : 'BACK', gold: !runs, go: () => this.emit({ t: 'close' }) }]);
   }
 }

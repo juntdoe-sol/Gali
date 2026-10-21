@@ -19,7 +19,7 @@ import { myLook } from '../pixel/PixelMine';
 import { useView } from '../pixel/view';
 import { GEAR_ICON } from './gearIcons';
 import { MapButton, T } from './kit';
-import { useChrome } from './layout';
+import { LANDSCAPE_APP, useChrome, useLayout } from './layout';
 import { BAR_H } from './TabBar';
 import { BackPill } from './Lobby';
 import { DisconnectBtn } from './Hud';
@@ -70,9 +70,19 @@ export function CaveEntry() {
 
 export function CaveScreen() {
   const insets = useSafeAreaInsets();
+  const L = useLayout();
   const open = useCave((s) => s.open);
   const ref = useRef<CaveRef>(null);
+  const phase = useRef('intro');
   const [atlas, setAtlas] = useState<string | null>(null);
+  // Esc (web) and the back button (phone): during a run they pause it, they never drop you out of it
+  const onBack = useCallback(() => {
+    if (['play', 'pause', 'descend'].includes(phase.current)) {
+      if (Platform.OS !== 'web') ref.current?.back?.();
+      return;
+    }
+    useCave.getState().close();
+  }, []);
   useEffect(() => {
     if (open && !atlas) atlasSource().then(setAtlas, () => setAtlas('/pixel/atlas.png'));
   }, [open, atlas]);
@@ -95,6 +105,9 @@ export function CaveScreen() {
         if (e.name === 'hurt') haptic.heavy();
         else if (e.name === 'crack' || e.name === 'gem') haptic.thud();
         break;
+      case 'phase':
+        phase.current = e.p;
+        break;
       case 'close':
         cave.close();
         break;
@@ -106,7 +119,7 @@ export function CaveScreen() {
   if (!open) return null;
   const { spot, save } = useCave.getState();
   return (
-    <Modal visible transparent={false} animationType="fade" statusBarTranslucent onRequestClose={() => useCave.getState().close()}>
+    <Modal visible transparent={false} animationType="fade" statusBarTranslucent onRequestClose={onBack}>
       <View style={styles.screen}>
         {atlas ? (
           <CaveView
@@ -114,7 +127,7 @@ export function CaveScreen() {
             onEvent={onEvent}
             atlas={atlas}
             look={myLook()}
-            opts={{ spot, runs: save.runs, best: save.best, top: insets.top, bottom: insets.bottom }}
+            opts={{ spot, runs: save.runs, best: save.best, top: insets.top, bottom: insets.bottom, touch: !(L.desktop && !LANDSCAPE_APP) }}
             dom={{ style: { flex: 1, backgroundColor: '#0a0810' }, scrollEnabled: false, bounces: false, overScrollMode: 'never' } as never}
           />
         ) : null}
