@@ -87,13 +87,23 @@ export interface ArenaSnap {
   };
   peers: ArenaPeerView[];
   brawl: BrawlSnap;
-  match: { n: number; mode: string; phase: string; fighters: string[]; out: string[]; score: Record<string, number>; boss: { x: number; y: number; hp: number; max: number; atk: BossAtk | null; atkAt: number; hitAt: number; facing: 1 | -1 } | null; downMode?: boolean };
+  match: { n: number; mode: string; phase: string; fighters: string[]; out: string[]; score: Record<string, number>; boss: { x: number; y: number; hp: number; max: number; atk: BossAtk | null; atkAt: number; hitAt: number; facing: 1 | -1 } | null; downMode?: boolean; mobs?: MobView[] };
   pickups: Pickup[];
   shots: Shot[];
   cheers: { id: string; at: number }[];
   emotes?: { id: string; e: string; at: number }[];
   /** who is getting whom up, since when */
   revives?: { id: string; t: string; at: number }[];
+}
+/** a crawler, as the host last said */
+export interface MobView {
+  i: number;
+  x: number;
+  hp: number;
+  max: number;
+  f: 1 | -1;
+  atkAt: number;
+  hitAt: number;
 }
 export interface ArenaOpts {
   /** CSS px the app's bars cover at the top and bottom */
@@ -289,6 +299,78 @@ export class ArenaEngine {
   }
 
   /** What changed since the last snapshot: a new match, a stand-up, hits, powers, the boss. */
+  /** where each crawler is drawn: it glides toward where the host says it is */
+  private mobX = new Map<number, number>();
+  /** A crawler died: a puff, and +XP over it if it was your hit. */
+  mobDown(x: number, mine: boolean) {
+    const wall = Date.now();
+    this.parts.burst('smoke', x, GROUND - 3, 10, 26, 14, ['#3a2a3a', '#6a4a5a', '#9a1018'], 0.7);
+    this.parts.burst('star', x, GROUND - 6, 6, 24, 18, ['#ffffff', '#ffd84a'], 0.4);
+    if (mine) this.fx.say(x, GROUND - 22, '+5 XP', '#7dffa0', wall);
+    this.emit({ t: 'sfx', name: 'pop' });
+  }
+  /** A crawler: a small hunched grey ghoul with red eyes, scuttling on four thin legs. */
+  private drawMob(m: MobView, sx: (x: number) => number, sy: (y: number) => number, z: number, wall: number) {
+    const c = this.c;
+    const x = this.mobX.get(m.i) ?? m.x;
+    const biting = wall - m.atkAt < 320;
+    const flash = wall - m.hitAt < 120;
+    const step = Math.floor(wall / 110 + m.i) % 2;
+    const f = m.f;
+    const X = sx(x);
+    const Y = sy(GROUND);
+    // shadow
+    c.fillStyle = 'rgba(0,0,0,0.3)';
+    c.fillRect(X - 7 * z, Y - z, 14 * z, 2 * z);
+    const u = z * 1.3;
+    const px = (dx: number, dy: number, w: number, h: number, col: string) => {
+      c.fillStyle = flash ? '#ffffff' : col;
+      const lx = f > 0 ? dx : -dx - w;
+      c.fillRect(Math.round(X + lx * u), Math.round(Y + dy * u), Math.ceil(w * u), Math.ceil(h * u));
+    };
+    const lunge = biting ? 3 : 0;
+    const O = '#1a0a10';
+    // legs, thin and dark, scuttling
+    const l = step ? 1 : 0;
+    px(-5, -3, 1, 3 - l, '#3a2228');
+    px(-2, -3, 1, 2 + l, '#3a2228');
+    px(2, -3, 1, 3 - l, '#3a2228');
+    px(5, -3, 1, 2 + l, '#3a2228');
+    // outline, then the pale hunched body (the boss's colours: bone and old blood)
+    px(-7, -10, 13, 7, O);
+    px(3 + lunge, -10, 7, 7, O);
+    px(-6, -9, 11, 5, '#c8b4a0');
+    px(-5, -9, 9, 1, '#e8dcc8');
+    px(-6, -5, 11, 1, '#7a5a50');
+    // ribs and a red wound
+    px(-3, -8, 1, 2, '#7a5a50');
+    px(-1, -8, 1, 2, '#7a5a50');
+    px(1, -8, 1, 2, '#7a5a50');
+    px(-5, -7, 2, 1, '#a8242a');
+    // head, pushed forward when it bites
+    px(4 + lunge, -9, 5, 5, '#d8c8b0');
+    px(4 + lunge, -9, 5, 1, '#f2e6d4');
+    px(5 + lunge, -8, 1, 1, '#ff2a2a');
+    px(7 + lunge, -8, 1, 1, '#ff2a2a');
+    // jaw: open with teeth when it bites
+    px(5 + lunge, -5, 4, 1, biting ? '#3a0a10' : '#7a5a50');
+    if (biting) {
+      px(5 + lunge, -4, 4, 1, '#d8c8b0');
+      px(6 + lunge, -5, 1, 1, '#ffffff');
+      px(8 + lunge, -5, 1, 1, '#ffffff');
+      px(9 + lunge, -4, 1, 2, '#c42028');
+    }
+    // a little tail
+    px(-8, -8, 2, 1, '#c8b4a0');
+    // HP, once it has been hit
+    if (m.hp < m.max) {
+      c.fillStyle = '#1a0a10';
+      c.fillRect(X - 7 * z, Y - 16 * z, 14 * z, 2 * z);
+      c.fillStyle = '#ff4f5e';
+      c.fillRect(X - 7 * z, Y - 16 * z, Math.round(14 * z * Math.max(0, m.hp / m.max)), 2 * z);
+    }
+  }
+
   private react(s: ArenaSnap, prev: ArenaSnap | null) {
     const wall = Date.now();
     const me = this.me;
@@ -442,6 +524,7 @@ export class ArenaEngine {
     const list = [...this.others.values()].filter((p) => !p.view.spectator).map((p) => ({ id: p.view.id, x: p.x, y: p.y, v: b?.peers[p.view.id] }));
     const boss = this.snap?.match.boss;
     if (boss && boss.hp > 0) list.push({ id: 'boss', x: boss.x, y: boss.y, v: { hp: boss.hp, ko: 0, sh: 0, hit: boss.hitAt, sw: 0, on: true } });
+    for (const m of this.snap?.match.mobs ?? []) list.push({ id: `m${m.i}`, x: this.mobX.get(m.i) ?? m.x, y: GROUND, v: { hp: m.hp, ko: 0, sh: 0, hit: m.hitAt, sw: 0, on: true } });
     return list;
   }
 
@@ -906,6 +989,13 @@ export class ArenaEngine {
         this.emit({ t: 'strike', w: 'pet', target: foe.id, x: me.x, y: me.y });
       }
     }
+    // crawlers glide toward where the host says they are
+    const mobs = this.snap?.match.mobs ?? [];
+    for (const m of mobs) {
+      const cur = this.mobX.get(m.i);
+      this.mobX.set(m.i, cur === undefined || Math.abs(cur - m.x) > 60 ? m.x : cur + (m.x - cur) * Math.min(1, dt * 8));
+    }
+    if (this.mobX.size > mobs.length) for (const k of [...this.mobX.keys()]) if (!mobs.some((m) => m.i === k)) this.mobX.delete(k);
     // others glide toward where they said they are going
     for (const p of this.others.values()) {
       // the one you carry sits on your head, right now (their own word on it comes a moment later)
@@ -1055,6 +1145,7 @@ export class ArenaEngine {
     }
     // the Two-Mouthed: its warning first (under everyone), then the boss
     const boss = s?.match.boss;
+    for (const m of s?.match.mobs ?? []) this.drawMob(m, sx, sy, z, wall);
     if (boss && (boss.hp > 0 || s?.match.phase === 'end')) this.drawBoss(boss, sx, sy, z, wall, s?.match.phase === 'end' && boss.hp <= 0);
     // people: the boss stands behind them all
     const b = s?.brawl;
