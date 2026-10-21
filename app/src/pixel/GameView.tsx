@@ -7,9 +7,12 @@
 import { useEffect, useRef, type Ref } from 'react';
 import { useDOMImperativeHandle, type DOMImperativeFactory, type DOMProps } from 'expo/dom';
 import { Engine } from '../engine/engine';
+import { zoneTouches } from './zoneTouch';
 import type { EngineEvent, Snapshot } from '../engine/types';
 
 export interface GameRef extends DOMImperativeFactory {
+  /** where the app's game buttons sit (ui/zones.tsx), so a finger on one is pressed even mid-walk */
+  zones: (...args: any[]) => void;
   push: (...args: any[]) => void;
   focus: (...args: any[]) => void;
   attack: (...args: any[]) => void;
@@ -19,11 +22,17 @@ export interface GameRef extends DOMImperativeFactory {
 export default function GameView({ ref, onEvent, atlas }: { ref: Ref<GameRef>; onEvent: (e: EngineEvent) => void; atlas: string; dom?: DOMProps }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const engine = useRef<Engine | null>(null);
+  const zt = useRef<ReturnType<typeof zoneTouches> | null>(null);
+  const zonesWas = useRef<unknown>(null);
   const pending = useRef<Snapshot | null>(null);
 
   useDOMImperativeHandle(
     ref,
     () => ({
+      zones: (z: any) => {
+        zonesWas.current = z;
+        zt.current?.set(z);
+      },
       push: (s: any) => {
         if (engine.current) engine.current.push(s as Snapshot);
         else pending.current = s as Snapshot;
@@ -47,7 +56,13 @@ export default function GameView({ ref, onEvent, atlas }: { ref: Ref<GameRef>; o
     engine.current = e;
     if (pending.current) e.push(pending.current);
     void e.start(atlas);
-    return () => e.stop();
+    const z = zoneTouches((id) => onEvent({ t: 'zone', id } as never));
+    z.set(zonesWas.current);
+    zt.current = z;
+    return () => {
+      z.stop();
+      e.stop();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

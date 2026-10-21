@@ -10,7 +10,7 @@
     "backgroundColor": "#070d20",
     "android": {
       "package": "trade.aeonian.gali",
-      "versionCode": 18,
+      "versionCode": 19,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#070d20"

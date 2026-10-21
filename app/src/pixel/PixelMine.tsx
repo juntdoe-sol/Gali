@@ -16,6 +16,7 @@ import { oreLive } from '../chain/light';
 import { isLive, isOnChain, LIVE_LOCK_MS, roundEndsAt, soloOf, useGame } from '../game/store';
 import { clearBots, ensureBots, EMOTES, publishMe, startWorld, stopWorld, thinkBots, useWorld, type Avatar } from '../game/world';
 import { CLAIMS, openSpot } from '../engine/island';
+import { useDomZones, zoneEvent } from '../ui/zones';
 import type { EngineEvent, Look, PeerView, Snapshot } from '../engine/types';
 import { fx } from './fx';
 import { GUTTER, layoutNow, TOP_H } from '../ui/layout';
@@ -174,6 +175,8 @@ export const islandJump = () => jumpFn?.();
 
 export default function PixelMine() {
   const ref = useRef<GameRef>(null);
+  // Android: the island hears fingers on HIT and JUMP itself, so they work while a thumb holds the stick
+  const zw = useDomZones('island', (z) => ref.current?.zones?.(z));
   const request = useView((s) => s.request);
   const [atlas, setAtlas] = useState<string | null>(null);
   useEffect(() => {
@@ -267,6 +270,7 @@ export default function PixelMine() {
   }, [request]);
 
   const onEvent = useCallback((e: EngineEvent) => {
+    if (zoneEvent(e)) return;
     const st = useGame.getState();
     switch (e.t) {
       case 'ready':
@@ -320,7 +324,7 @@ export default function PixelMine() {
   }, []);
 
   return (
-    <View style={[StyleSheet.absoluteFill, { backgroundColor: '#123a6b' }]}>
+    <View ref={zw.wrap} collapsable={false} onLayout={zw.onLayout} style={[StyleSheet.absoluteFill, { backgroundColor: '#123a6b' }]}>
       {/* nestedScrollEnabled off: with it on, Android's WebView tells the app to stop watching a finger that
           lands on the map, so the HIT and JUMP buttons went dead while the other thumb held the stick */}
       {atlas ? <GameView ref={ref} onEvent={onEvent} atlas={atlas} dom={{ style: { flex: 1, backgroundColor: '#123a6b' }, scrollEnabled: false, nestedScrollEnabled: false, bounces: false, overScrollMode: 'never' } as never} /> : null}

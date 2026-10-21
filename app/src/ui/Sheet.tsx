@@ -16,7 +16,7 @@ import { UnclaimedRow } from './Dock';
 import { Bar, Btn, Card, Choice, FocusRing, Frame, IconBtn, INPUT, Kbd, PixelBox, Pill, T, U } from './kit';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { reloadAppAsync } from 'expo';
-import { ORIENT_KEY, type Orient } from '../boot';
+import { lockScreen, ORIENT_KEY, type Orient } from '../boot';
 import { PixIcon } from './PixIcon';
 import { GUTTER, RAIL_W, useLayout } from './layout';
 import { BAR_H, SHEET_TITLE, TAB_PIX, TabBar, type SheetTab } from './TabBar';
@@ -554,6 +554,8 @@ function ScreenSwitch() {
     setBusy(true);
     try {
       await AsyncStorage.setItem(ORIENT_KEY, o);
+      // turn the screen now, then restart so the layout is rebuilt for the new shape
+      await lockScreen(o);
       await reloadAppAsync('screen orientation changed');
     } catch {
       useGame.getState().toast('Saved. Close and reopen Gali to switch the screen.', 'info');

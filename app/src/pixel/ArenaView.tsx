@@ -7,9 +7,12 @@
 import { useEffect, useRef, type Ref } from 'react';
 import { useDOMImperativeHandle, type DOMImperativeFactory, type DOMProps } from 'expo/dom';
 import { ArenaEngine, type ArenaEvent, type ArenaOpts, type ArenaSnap } from '../engine/arena';
+import { zoneTouches } from './zoneTouch';
 import type { Look } from '../engine/types';
 
 export interface ArenaRef extends DOMImperativeFactory {
+  /** where the app's game buttons sit (ui/zones.tsx), so a finger on one is pressed even mid-walk */
+  zones: (...args: any[]) => void;
   push: (...args: any[]) => void;
   attack: (...args: any[]) => void;
   jump: (...args: any[]) => void;
@@ -24,11 +27,17 @@ export interface ArenaRef extends DOMImperativeFactory {
 export default function ArenaView({ ref, onEvent, atlas, look, opts }: { ref: Ref<ArenaRef>; onEvent: (e: ArenaEvent) => void; atlas: string; look: Look; opts: ArenaOpts; dom?: DOMProps }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const engine = useRef<ArenaEngine | null>(null);
+  const zt = useRef<ReturnType<typeof zoneTouches> | null>(null);
+  const zonesWas = useRef<unknown>(null);
   const pending = useRef<ArenaSnap | null>(null);
 
   useDOMImperativeHandle(
     ref,
     () => ({
+      zones: (z: any) => {
+        zonesWas.current = z;
+        zt.current?.set(z);
+      },
       push: (s: any) => {
         if (engine.current) engine.current.push(s as ArenaSnap);
         else pending.current = s as ArenaSnap;
@@ -61,7 +70,13 @@ export default function ArenaView({ ref, onEvent, atlas, look, opts }: { ref: Re
     engine.current = e;
     if (pending.current) e.push(pending.current);
     void e.start(atlas);
-    return () => e.stop();
+    const z = zoneTouches((id) => onEvent({ t: 'zone', id } as never));
+    z.set(zonesWas.current);
+    zt.current = z;
+    return () => {
+      z.stop();
+      e.stop();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
