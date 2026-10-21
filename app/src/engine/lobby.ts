@@ -21,7 +21,7 @@ import { Particles } from './particles';
 import { Sky } from './sky';
 import type { BrawlSnap, Look, Pose } from './types';
 import { drawHp, drawKo, drawShield, FightFx, hitFlash, jumpLift, koAge, pickTarget, swingTilt } from './brawlfx';
-import { FLAG_H, FLAG_W, paintFlag, ARENA_FLAGS, ARENA_TORCHES, paintColosseum, paintSign, paintSmash, paintSolBase, paintSolLogo, SIGN_H, SIGN_W, SMASH_COLORS, SMASH_DIM, SOL_BASE, SOL_LOGO } from './lobbyArt';
+import { FLAG_H, FLAG_W, paintFlag, ARENA_FLAGS, ARENA_TORCHES, paintColosseum, paintPotw, paintSign, paintSmash, POTW_H, POTW_W, paintSolBase, paintSolLogo, SIGN_H, SIGN_W, SMASH_COLORS, SMASH_DIM, SOL_BASE, SOL_LOGO } from './lobbyArt';
 import { CLIFF, DOORS, PAVILIONS, SMASH_HEAL, SMASHABLES, STRUCTURES, doorAt, GRASS, HALL, LCOLS, LH, LROWS, LT, LW, lidx, lobbyMap, lobbyPath, PLANK, PLAZA, ROAD, SAND, SPAWNS, standable, tileCentre, tileOf, WATER, type DoorId } from '../game/lobbyMap';
 
 export type LobbyEvent =
@@ -61,6 +61,8 @@ export interface LobbySnap {
   emoji: string | null;
   dance?: number;
   brawl?: BrawlSnap;
+  /** the lobby's Player of the Week board: the most XP gained since Monday */
+  potw?: { name: string; level: number; gain: number } | null;
 }
 export interface LobbyOpts {
   spawn: 'start' | DoorId;
@@ -1440,6 +1442,11 @@ export class LobbyEngine {
         items.push({ y: wy, draw: () => this.drawFlagPole(c, v, sx(wx), sy(wy), z, now) });
         continue;
       }
+      if (st.kind === 'potw') {
+        const sp = this.potwSprite();
+        items.push({ y: wy, draw: () => c.drawImage(sp, 0, 0, sp.width, sp.height, Math.round((sx(wx) - (sp.width / 2) * z) * dpr) / dpr, Math.round((sy(wy) - sp.height * z) * dpr) / dpr, sp.width * z, sp.height * z) });
+        continue;
+      }
       if (st.kind === 'sign') {
         const sp = this.signSprite(st.at[0], st.at[1]);
         items.push({ y: wy, draw: () => c.drawImage(sp, 0, 0, sp.width, sp.height, Math.round((sx(wx) - (sp.width / 2) * z) * dpr) / dpr, Math.round((sy(wy) - sp.height * z) * dpr) / dpr, sp.width * z, sp.height * z) });
@@ -1602,6 +1609,18 @@ export class LobbyEngine {
     if (hit) return hit;
     const cv = makeCanvas(SOL_LOGO[0], SOL_LOGO[1]);
     paintSolLogo(ctx2d(cv), frame < 0 ? -1 : -0.1 + (frame / 7) * 1.2);
+    this.structCache.set(key, cv);
+    return cv;
+  }
+  /** The Player of the Week board, painted again when the name or the XP changes. */
+  private potwSprite(): HTMLCanvasElement {
+    const p = this.snap?.potw ?? null;
+    const key = `potw-${p ? `${p.name}|${p.level}|${p.gain}` : '-'}`;
+    const hit = this.structCache.get(key);
+    if (hit) return hit;
+    for (const k of [...this.structCache.keys()]) if (k.startsWith('potw-')) this.structCache.delete(k);
+    const cv = makeCanvas(POTW_W, POTW_H);
+    paintPotw(ctx2d(cv), p);
     this.structCache.set(key, cv);
     return cv;
   }
