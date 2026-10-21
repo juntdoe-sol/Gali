@@ -217,8 +217,8 @@ export class ArenaEngine {
   stop() {
     cancelAnimationFrame(this.raf);
     if (typeof window !== 'undefined') {
-      window.removeEventListener('keydown', this.onKey);
-      window.removeEventListener('keyup', this.onKeyUp);
+      window.removeEventListener('keydown', this.onKey, true);
+      window.removeEventListener('keyup', this.onKeyUp, true);
       window.removeEventListener('blur', this.onBlur);
     }
     try {
@@ -521,6 +521,8 @@ export class ArenaEngine {
     // the right button throws: no browser menu over the pit
     cv.addEventListener('contextmenu', (e) => e.preventDefault());
     cv.addEventListener('pointerdown', (e) => {
+      const fa = typeof document !== 'undefined' ? (document.activeElement as HTMLElement | null) : null;
+      if (fa && fa !== document.body && fa.tagName !== 'INPUT' && fa.tagName !== 'TEXTAREA') fa.blur?.();
       const p = pos(e);
       const mouse = e.pointerType === 'mouse' && !this.opts.touch;
       if (!mouse) {
@@ -563,8 +565,9 @@ export class ArenaEngine {
       if (e.pointerType === 'mouse') this.aim = null;
     });
     if (typeof window !== 'undefined') {
-      window.addEventListener('keydown', this.onKey);
-      window.addEventListener('keyup', this.onKeyUp);
+      // capture: the game hears its keys before a focused button does (Space would press the button)
+      window.addEventListener('keydown', this.onKey, true);
+      window.addEventListener('keyup', this.onKeyUp, true);
       window.addEventListener('blur', this.onBlur);
     }
   }
@@ -581,17 +584,23 @@ export class ArenaEngine {
     if (t && (/^(INPUT|TEXTAREA)$/.test(t.tagName) || t.isContentEditable)) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const k = e.key.toLowerCase();
+    // a button clicked on the way in (GO, ARENA, a skill) still has focus: Space and Enter would press it
+    if (t && t.tagName === 'BUTTON' && (k === ' ' || k === 'spacebar')) {
+      e.preventDefault();
+      e.stopPropagation();
+      t.blur();
+    }
     // powers: the letter keys, or 1 to 6, in the same order
     const slot = SLOT_KEYS.indexOf(k) >= 0 ? SLOT_KEYS.indexOf(k) : /^[1-6]$/.test(k) ? Number(k) - 1 : -1;
     if (down && !e.repeat) {
       if (k === 'f') this.attack();
-      else if (k === ' ' || k === 'w' || k === 'arrowup') this.jump();
+      else if (k === ' ' || k === 'spacebar' || k === 'w' || k === 'arrowup') this.jump();
       else if (k === 's' || k === 'arrowdown') this.drop();
       else if (k === 'g') this.throwOre(this.aim);
       else if (k === 'shift') this.power('dash');
       else if (slot >= 0) this.power(SLOT_IDS[slot]);
     }
-    if (['f', ' ', 'g'].includes(k) || slot >= 0) e.preventDefault();
+    if (['f', ' ', 'spacebar', 'g'].includes(k) || slot >= 0) e.preventDefault();
     if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'w', 'a', 's', 'd'].includes(k)) {
       if (down) this.keys.add(k);
       else this.keys.delete(k);
