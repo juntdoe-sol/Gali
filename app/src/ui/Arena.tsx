@@ -250,7 +250,7 @@ export function ArenaScreen() {
             atlas={atlas}
             look={myLook()}
             opts={{ top: barTop, bottom: barBottom, touch: !desk, safeBottom: insets.bottom }}
-            dom={{ style: { flex: 1, backgroundColor: '#120c1a' }, scrollEnabled: false, bounces: false, overScrollMode: 'never' } as never}
+            dom={{ style: { flex: 1, backgroundColor: '#120c1a' }, scrollEnabled: false, nestedScrollEnabled: false, bounces: false, overScrollMode: 'never' } as never}
           />
         ) : null}
         <TopBar top={insets.top + 8} onPanel={setPanel} />

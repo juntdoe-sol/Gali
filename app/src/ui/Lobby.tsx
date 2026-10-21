@@ -300,7 +300,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
           atlas={atlas}
           look={look}
           opts={{ spawn, top: topH, bottom, left, right, touch }}
-          dom={{ style: { flex: 1, backgroundColor: '#2f7fc4' }, scrollEnabled: false, bounces: false, overScrollMode: 'never' } as never}
+          dom={{ style: { flex: 1, backgroundColor: '#2f7fc4' }, scrollEnabled: false, nestedScrollEnabled: false, bounces: false, overScrollMode: 'never' } as never}
         />
       ) : null}
 
