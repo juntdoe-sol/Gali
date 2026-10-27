@@ -14,7 +14,7 @@ Deno.serve(async (req) => {
     const { admin, action, target = '', reason = '', ts, sig } = await req.json();
     if (!ACTIONS.includes(action)) return reply(400, { error: 'unknown action' });
     if (Math.abs(Date.now() - Number(ts)) > 120_000) return reply(400, { error: 'stale request; sign again' });
-    const message = `gali-admin:${action}:${target}:${ts}`;
+    const message = `gali-admin:${action}:${target}:${String(reason).slice(0, 200)}:${ts}`;
     if (!admin || !sig || !verify(String(sig), message, String(admin))) return reply(401, { error: 'bad signature' });
     if ((await configAuthority()) !== admin) return reply(403, { error: 'not the Gali admin wallet' });
 
@@ -46,6 +46,7 @@ Deno.serve(async (req) => {
       }
     }
   } catch (e) {
-    return reply(500, { error: String((e as Error).message ?? e) });
+    console.error('chat-admin', (e as Error)?.message ?? e);
+    return reply(500, { error: 'Something went wrong. Try again.' });
   }
 });
