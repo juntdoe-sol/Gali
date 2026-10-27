@@ -16,6 +16,7 @@
  * host leaves, the next smallest id takes over within a few seconds. Hits work as everywhere else in
  * Brawl (game/brawl.ts): each player is the judge of their own HP.
  */
+import { boundWallet, idFor } from './peerId';
 import type { RealtimeChannel } from '@supabase/realtime-js';
 import { create } from 'zustand';
 import type { Look } from '../engine/types';
@@ -314,7 +315,8 @@ function join() {
     });
     return;
   }
-  useArena.setState({ status: 'joining' });
+  // with a wallet, fight under an id made from it (game/peerId.ts), so nobody can put their wallet on us
+  useArena.setState({ status: 'joining', me: idFor(wallet(), useArena.getState().me) });
   // the side-view hall is a new room: older apps (top-down arena) keep to their own
   const ch = client.channel('gali-arena2', { config: { broadcast: { self: false, ack: false } } });
   ch.on('broadcast', { event: 'st' }, ({ payload }) => onState(payload))
@@ -410,7 +412,7 @@ function onState(p: any) {
     pose: typeof p.p === 'string' && /^(idle|walk|swing|cheer|carry|held|dance[123])$/.test(p.p) ? p.p : 'idle',
     look: lk,
     lvl: Math.floor(num(p.lvl, 1, 999)),
-    wallet: typeof p.w === 'string' && B58.test(p.w) ? p.w : prev?.wallet ?? null,
+    wallet: boundWallet(p.id, p.w) ?? prev?.wallet ?? null,
     spectator: p.sp === 1,
     trail: typeof p.tr === 'string' && KEY.test(p.tr) ? p.tr : prev?.trail ?? 'plain',
     fx: prev?.fx ?? null,

@@ -68,6 +68,8 @@ export interface MyStake {
   choice: number;
   amount: string;
   sig: string;
+  /** the house's commitment for this round, saved before staking */
+  commit?: string;
 }
 export interface RoundResult {
   game: GameId;
@@ -83,6 +85,8 @@ export interface RoundResult {
   pays: { who: string; short: string; amount: string; kind: 'win' | 'refund'; sig: string }[];
   /** what this wallet staked and got back, in token units */
   mine: { staked: number; back: number; net: number } | null;
+  /** the commitment this player saw before staking, to check the revealed secret against */
+  committed?: string;
 }
 
 /** Client cutoff for new stakes: 10 s before the house stops counting them, so a wallet approval can still land. */
@@ -210,7 +214,7 @@ export const useArcade = create<ArcadeState>((set, get) => {
       const mine = get().stakes.filter((s) => key(s) === k);
       const staked = mine.reduce((n, s) => n + Number(s.amount), 0);
       const back = owner ? r.pays.filter((p) => p.who === owner).reduce((n, p) => n + Number(p.amount), 0) : 0;
-      const result: RoundResult = { ...r, game: g, token: t, round, mine: mine.length ? { staked, back, net: back - staked } : null };
+      const result: RoundResult = { ...r, game: g, token: t, round, mine: mine.length ? { staked, back, net: back - staked } : null, committed: mine.find((x) => x.commit)?.commit };
       const stakes = get().stakes.filter((s) => key(s) !== k);
       set((s) => ({ stakes, results: [result, ...s.results].slice(0, 12) }));
       save(stakes);
@@ -278,13 +282,19 @@ export const useArcade = create<ArcadeState>((set, get) => {
       if (mine + Number(amount) > cap) return g.toast(`Limit reached: ${cap} ${token.toUpperCase()} per round`, 'info');
       const have = get().balance[token];
       if (have !== null && have < Number(amount)) return g.toast(`Not enough ${token.toUpperCase()} (you have ${fmtAmt(have)})`, 'bad');
+      // the commitment must be in hand before staking, so the revealed secret can be checked against it later
+      const cm = get().commit;
+      if (!cm || cm.round !== round || cm.key !== `${game}:${token}`) {
+        void ensureCommit();
+        return g.toast('Getting the round ready. Try again in a second.', 'info');
+      }
       const pick = game === 'pot' ? 0 : choice[game];
       const memo = `gali1|${CODE[game]}|${TCODE[token]}|${round}|${pick}`;
       set({ busy: true, note: 'Approve in your wallet…' });
       try {
         const a = await loadArcade();
         const sig = await a.sendStake({ mint: tb.mint, houseAta: tb.houseAta, decimals: tb.decimals, program: tb.program }, amount, memo);
-        const stake: MyStake = { game, token, round, choice: pick, amount, sig };
+        const stake: MyStake = { game, token, round, choice: pick, amount, sig, commit: cm.hash };
         const stakes = [...get().stakes, stake];
         set({ stakes, note: null });
         save(stakes);

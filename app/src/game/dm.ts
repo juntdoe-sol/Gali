@@ -18,6 +18,7 @@ import { getSecret, removeSecret, setSecret } from '../chain/secure';
 import { haptic, play } from './sfx';
 import { useGame } from './store';
 import { useName } from './username';
+import { setPlayPass } from './play';
 import { publicKey, restBase } from './world';
 
 export interface DmMsg {
@@ -118,7 +119,8 @@ export async function signIn() {
   const owner = g.wallet.owner;
   if (!owner) throw new Error('Connect a wallet first');
   const ts = Date.now();
-  const text = `Gali: sign in to your messages\nWallet: ${owner}\nTime: ${ts}\nThis costs nothing and sends no transaction.`;
+  // the same text as supabase/functions/_shared/pass.ts; it names the site so a signature made elsewhere is useless here
+  const text = `galiisland.bounded.page wants you to sign in to Gali.\nWallet: ${owner}\nTime: ${ts}\nThis costs nothing and sends no transaction.`;
   const chain = await loadChain();
   const { owner: signer, sig } = await chain.signTextWithWallet(text);
   if (signer !== owner) throw new Error('That is a different wallet from the one connected');
@@ -259,12 +261,27 @@ export async function setBlocked(on: boolean) {
 }
 
 /* ---------------- keeping it fresh ---------------- */
+const asked = new Set<string>();
+/** Once per wallet per app session, ask the wallet to sign in, so ranks, check-ins and chat history are saved. */
+function autoSignIn() {
+  const owner = useGame.getState().wallet.owner;
+  if (!owner || useDm.getState().pass || asked.has(owner) || !restBase()) return;
+  asked.add(owner);
+  setTimeout(() => {
+    if (useGame.getState().wallet.owner !== owner || useDm.getState().pass) return;
+    void signIn().catch(() => undefined); // declined or failed: the game still works, nothing is saved
+  }, 1500);
+}
+
 let started = false;
 /** Called once at start: keep the pass in step with the wallet, and check for new messages. */
 export function startDm() {
   if (started) return;
   started = true;
-  void restore();
+  // play records (ranks, check-ins, chat history) use the same pass
+  useDm.subscribe((s, prev) => { if (s.pass !== prev.pass || s.me !== prev.me) setPlayPass(s.pass, s.me); });
+  setPlayPass(useDm.getState().pass, useDm.getState().me);
+  void restore().then(autoSignIn);
   let owner = useGame.getState().wallet.owner;
   useGame.subscribe((g) => {
     if (g.wallet.owner === owner) return;
@@ -272,7 +289,7 @@ export function startDm() {
     // another wallet (or none): forget the old one's messages on screen, and look for its own pass
     useDm.setState({ me: null, pass: null, threads: [], unread: 0, msgs: [], withWallet: null, open: false });
     lastUnread = 0;
-    void restore().then(() => refreshInbox(true));
+    void restore().then(() => { void refreshInbox(true); autoSignIn(); });
   });
   setInterval(() => {
     const s = useDm.getState();

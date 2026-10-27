@@ -15,8 +15,8 @@
 import '../polyfill-web';
 import { getSecret, setSecret } from '../secure';
 import { ComputeBudgetProgram, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, TransactionInstruction } from '@solana/web3.js';
-import { assertSessionFundingAllowed, connection, sendWithKey, sendWithWallet } from '../client';
-import { LIVE_AUTOPILOT_MAX_SOL, platformFee, REVENUE_WALLET } from '../light';
+import { connection, sendWithKey, sendWithWallet } from '../client';
+import { LIVE_AUTOPILOT_MAX_SOL, LIVE_MAX_ROUND_SOL, platformFee, REVENUE_WALLET } from '../light';
 import { AUTOMATION_STRATEGY, EXECUTOR_ADDRESS } from './consts';
 import { automateIx, checkpointIx, claimOreIx, claimSolIx, deployIx } from './ix';
 import { fetchClock, fetchOreAutomation, fetchOreMiner, needsCheckpoint } from './read';
@@ -95,19 +95,21 @@ export const LIVE_LOCK_SLOTS = 15;
 
 /** Rent-exempt minimum for a plain SOL account: a transfer that leaves the revenue wallet below it would fail the whole transaction. */
 const RENT_MIN_LAMPORTS = 890_880n;
-let revenueOk = false;
+let revenueOk = true;
 let revenueCheckedAt = 0;
 /**
- * The platform fee transfer for a deploy of `lamports`, or nothing. It is left out while the revenue wallet
- * is still below the rent minimum, so a deploy can never fail because of the fee.
+ * The platform fee transfer for a deploy of `lamports`, or nothing. It is left out only when a successful read
+ * shows the revenue wallet below the rent minimum, so a deploy can never fail because of the fee; a failed read
+ * keeps the last answer instead of switching the fee off.
  */
 async function feeIx(owner: PublicKey, lamports: bigint): Promise<TransactionInstruction[]> {
   const fee = platformFee(lamports);
   if (fee <= 0n) return [];
   const to = new PublicKey(REVENUE_WALLET);
-  if (!revenueOk && Date.now() - revenueCheckedAt > 60_000) {
+  if (Date.now() - revenueCheckedAt > 60_000) {
     revenueCheckedAt = Date.now();
-    revenueOk = BigInt(await connection.getBalance(to).catch(() => 0)) >= RENT_MIN_LAMPORTS;
+    const bal = await connection.getBalance(to).catch(() => null);
+    if (bal !== null) revenueOk = BigInt(bal) >= RENT_MIN_LAMPORTS;
   }
   if (!revenueOk) return [];
   return [SystemProgram.transfer({ fromPubkey: owner, toPubkey: to, lamports: fee })];
@@ -185,47 +187,6 @@ export const automationRoundCost = (lamportsPerSquare: bigint, squares: number) 
   const deployed = lamportsPerSquare * BigInt(squares);
   return deployed + (deployed * EXECUTOR_FEE_BPS) / 10_000n;
 };
-
-/**
- * Hand the session key the right to deploy for this player, and fund it.
- *
- * `rounds` is how many rounds of play to top the automation up for, which is the
- * number a player actually thinks in.
- *
- * The strategy is DiscretionaryBps, which is the one where the executor supplies
- * the squares. That matches what Gali already does for a player who taps Smart
- * pick, and it is the only strategy where the fee is a share of the deploy rather
- * than a flat amount.
- */
-export async function startOreAutomation(args: {
-  session: Keypair;
-  squares: number[];
-  lamportsPerSquare: bigint;
-  rounds: number;
-  /** Basis points of each round's deploy. Defaults to Gali's rate. */
-  feeBps?: bigint;
-  /** Let any bot run it instead of Gali's key. */
-  openExecutor?: boolean;
-}): Promise<string> {
-  assertSessionFundingAllowed();
-  const mask = squaresToMask(args.squares);
-  const feeBps = args.feeBps ?? EXECUTOR_FEE_BPS;
-  const deployed = args.lamportsPerSquare * BigInt(args.squares.length);
-  const perRound = deployed + (deployed * feeBps) / 10_000n;
-  const deposit = perRound * BigInt(Math.max(1, args.rounds));
-  return sendWithWallet(async (owner) => [
-    automateIx({
-      authority: owner,
-      amount: args.lamportsPerSquare,
-      deposit,
-      fee: feeBps,
-      mask,
-      strategy: AUTOMATION_STRATEGY.DiscretionaryBps,
-      reload: false,
-      executor: args.openExecutor ? EXECUTOR_ADDRESS : args.session.publicKey,
-    }),
-  ]);
-}
 
 /**
  * Stop automating: set the deposit to zero and the amount to zero.
@@ -314,6 +275,7 @@ export async function startLiveAutomation(args: {
   const mask = squaresToMask(args.squares);
   const n = maskToSquares(mask).length;
   if (n < 1 || n !== args.maxSquares) throw new Error('Bad autopilot setup');
+  if (Number(args.lamportsPerSquare * BigInt(n)) / LAMPORTS_PER_SOL > LIVE_MAX_ROUND_SOL + 1e-9) throw new Error(`A round is capped at ${LIVE_MAX_ROUND_SOL} SOL`);
   const perRound = args.lamportsPerSquare * BigInt(n) + AUTOPILOT_FEE_LAMPORTS;
   const deposit = perRound * BigInt(args.rounds);
   if (Number(deposit) / LAMPORTS_PER_SOL > LIVE_AUTOPILOT_MAX_SOL + 1e-9) throw new Error(`Autopilot is capped at ${LIVE_AUTOPILOT_MAX_SOL} SOL`);
