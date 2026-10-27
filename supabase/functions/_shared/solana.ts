@@ -2,7 +2,13 @@
 import { ed25519 } from 'npm:@noble/curves@2.4.0/ed25519.js';
 import bs58 from 'npm:bs58@6';
 
-export const RPC = Deno.env.get('SOLANA_RPC') ?? 'https://api.devnet.solana.com';
+/** No default: a missing setting must stop the chat functions, not quietly read devnet. */
+function rpcUrl() {
+  const url = Deno.env.get('SOLANA_RPC');
+  if (!url) throw new Error('SOLANA_RPC is not set');
+  return url;
+}
+export const SKR_MINT = Deno.env.get('SKR_MINT') || 'SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3';
 export const PROGRAM_ID = Deno.env.get('GALI_PROGRAM_ID') ?? 'GamTh2wWNNGU6CB5G3aF7Xeu1m7fQEtd9caRGtgPcMmV';
 
 export const cors = {
@@ -13,7 +19,7 @@ export const reply = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 
 export async function rpc(method: string, params: unknown[]) {
-  const r = await fetch(RPC, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
+  const r = await fetch(rpcUrl(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
   const j = await r.json();
   if (j.error) throw new Error(j.error.message);
   return j.result;
@@ -61,13 +67,13 @@ export async function readPlayer(owner: string) {
 }
 
 /** True when `sig` is a confirmed transaction signed by `from` that moved at least `amount` SKR to `to`. */
-export async function tipIsReal(sig: string, from: string, to: string, amount: number, mint = Deno.env.get('SKR_MINT') ?? '') {
+export async function tipIsReal(sig: string, from: string, to: string, amount: number, mint = SKR_MINT) {
   const tx = await rpc('getTransaction', [sig, { encoding: 'jsonParsed', commitment: 'confirmed', maxSupportedTransactionVersion: 0 }]);
   if (!tx || tx.meta?.err) return false;
   const signer = tx.transaction.message.accountKeys.find((k: { signer: boolean }) => k.signer)?.pubkey;
   if (signer !== from) return false;
   type Bal = { owner: string; mint: string; uiTokenAmount: { uiAmount: number | null } };
-  const bal = (list: Bal[]) => list.filter((x) => x.owner === to && (!mint || x.mint === mint)).reduce((s, x) => s + (x.uiTokenAmount.uiAmount ?? 0), 0);
+  const bal = (list: Bal[]) => list.filter((x) => x.owner === to && x.mint === mint).reduce((s, x) => s + (x.uiTokenAmount.uiAmount ?? 0), 0);
   const gained = bal(tx.meta.postTokenBalances ?? []) - bal(tx.meta.preTokenBalances ?? []);
   return gained + 1e-9 >= amount;
 }
