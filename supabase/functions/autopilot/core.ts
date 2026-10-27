@@ -138,6 +138,9 @@ function checkpointIx(signer: PublicKey, authority: PublicKey, roundId: bigint):
 /** The instructions for one automation this round, or null when there is nothing to do. */
 export function planFor(a: Auto, miner: Miner | null, roundId: bigint, signer: PublicKey): TransactionInstruction[] | null {
   if (!runnable(a)) return null;
+  // ORE only creates a Miner account when its own authority deploys, so a run for a player who never deployed
+  // can never land: skip it rather than let such automations fill the pass
+  if (!miner) return null;
   // already played this round (by us, the phone, or another executor)
   if (miner && miner.roundId === roundId && miner.deployed.some((x) => x > 0n)) return null;
   const ixs: TransactionInstruction[] = [ComputeBudgetProgram.setComputeUnitLimit({ units: CU_LIMIT }), ComputeBudgetProgram.setComputeUnitPrice({ microLamports: CU_PRICE })];
@@ -146,6 +149,12 @@ export function planFor(a: Auto, miner: Miner | null, roundId: bigint, signer: P
   ixs.push(deployIx(signer, a.authority, roundId, Number(a.mask & 0x1ffffffn)));
   return ixs;
 }
+
+/** SOL one round of this automation deploys. */
+const roundSize = (a: Auto) => a.amount * BigInt(bits(a.mask));
+/** Players whose sends keep failing are left alone for the rest of this invocation. */
+const MAX_FAILURES = 2;
+const failures = new Map<string, number>();
 
 export interface PassResult { phase: Phase; round: string; candidates: number; sent: number; skipped: number; failed: number; errors: string[]; /** slots until the round ends (mining or locked), else 0 */ slotsLeft: number }
 
@@ -165,7 +174,12 @@ export async function pass(conn: Connection, signer: Keypair, done: Set<string>)
     commitment: 'confirmed',
     filters: [{ dataSize: SIZE.automation }, { memcmp: { offset: DISC + 48, bytes: EXECUTOR_ADDRESS.toBase58() } }],
   });
-  const autos = accounts.map((x) => decodeAutomation(Buffer.from(x.account.data))).filter(runnable).filter((a) => !done.has(`${a.authority.toBase58()}:${board.roundId}`));
+  // biggest rounds first, so a crowd of dust automations cannot push real players out of the pass
+  const autos = accounts
+    .map((x) => decodeAutomation(Buffer.from(x.account.data)))
+    .filter(runnable)
+    .filter((a) => !done.has(`${a.authority.toBase58()}:${board.roundId}`) && (failures.get(a.authority.toBase58()) ?? 0) < MAX_FAILURES)
+    .sort((x, y) => (roundSize(y) > roundSize(x) ? 1 : roundSize(y) < roundSize(x) ? -1 : 0));
   res.candidates = autos.length;
   const batch = autos.slice(0, MAX_PER_PASS);
   const miners = batch.length ? await conn.getMultipleAccountsInfo(batch.map((a) => minerPda(a.authority)), 'confirmed') : [];
@@ -188,6 +202,8 @@ export async function pass(conn: Connection, signer: Keypair, done: Set<string>)
         done.add(tag);
         res.sent++;
       } catch (e) {
+        const k = a.authority.toBase58();
+        failures.set(k, (failures.get(k) ?? 0) + 1);
         res.failed++;
         if (res.errors.length < 5) res.errors.push(`${a.authority.toBase58().slice(0, 6)}: ${String((e as Error)?.message ?? e).slice(0, 160)}`);
       }
@@ -212,6 +228,7 @@ export function nextGap(r: PassResult, gapMs: number): number {
 /** Run passes until `budgetMs` is used up, so every round in the window is played. */
 export async function run(conn: Connection, signer: Keypair, budgetMs: number, gapMs = 4000, now: () => number = Date.now, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))): Promise<PassResult[]> {
   const done = new Set<string>();
+  failures.clear();
   const out: PassResult[] = [];
   const end = now() + budgetMs;
   while (now() < end) {

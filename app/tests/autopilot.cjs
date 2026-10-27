@@ -53,8 +53,8 @@ const minerPda = (a) => PublicKey.findProgramAddressSync([Buffer.from('miner'), 
 
 (async () => {
   const server = Keypair.generate();
-  const players = Array.from({ length: 6 }, () => Keypair.generate().publicKey);
-  const [ok, deployed, needsCk, closedExec, discretionary, poor] = players;
+  const players = Array.from({ length: 7 }, () => Keypair.generate().publicKey);
+  const [ok, deployed, needsCk, closedExec, discretionary, poor, fresh] = players;
   const other = Keypair.generate().publicKey;
   const state = {
     slot: 1000,
@@ -66,6 +66,7 @@ const minerPda = (a) => PublicKey.findProgramAddressSync([Buffer.from('miner'), 
       { key: other, data: autoData({ authority: closedExec, executor: Keypair.generate().publicKey }) },
       { key: other, data: autoData({ authority: discretionary, strategy: 3n }) },
       { key: other, data: autoData({ authority: poor, balance: 1000n }) },
+      { key: other, data: autoData({ authority: fresh, amount: 3_000_000n }) }, // never deployed itself: no Miner account
     ],
     miners: new Map([
       [minerPda(deployed).toBase58(), { data: minerData({ authority: deployed, roundId: 77, checkpointId: 76, deployedOn: 4 }) }],
@@ -78,7 +79,8 @@ const minerPda = (a) => PublicKey.findProgramAddressSync([Buffer.from('miner'), 
   const r = await C.pass(conn, server, done);
   assert.equal(r.phase, 'mining');
   assert.equal(r.sent, 2, 'two automations played: the ready one and the one that needed settling');
-  assert.equal(r.skipped, 1, 'the one already played this round was skipped');
+  assert.equal(r.skipped, 2, 'the one already played this round and the one with no Miner account were skipped');
+  assert.ok(!conn.sent.some((tx) => tx.instructions.at(-1).keys[1].pubkey.equals(fresh)), 'no send for a player ORE has no Miner for');
   const byAuth = new Map(conn.sent.map((tx) => [tx.instructions.at(-1).keys[1].pubkey.toBase58(), tx]));
   assert.ok(byAuth.has(ok.toBase58()) && byAuth.has(needsCk.toBase58()));
   assert.ok(!byAuth.has(discretionary.toBase58()), 'discretionary automations are never run');
