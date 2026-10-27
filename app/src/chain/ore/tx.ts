@@ -287,6 +287,8 @@ export async function startLiveAutomation(args: {
   /** a fresh random set of the same size each round (Smart) */
   random: boolean;
   expectedOwner?: PublicKey;
+  /** A TV paired to this run: topped up to EXECUTOR_TOPUP_LAMPORTS in the same approval so it can pay its own deploy fees. */
+  topUpKey?: PublicKey;
 }): Promise<void> {
   if (args.rounds < 1 || args.maxSquares < 1 || args.maxSquares > 25) throw new Error('Bad autopilot setup');
   const mask = squaresToMask(args.squares);
@@ -301,6 +303,10 @@ export async function startLiveAutomation(args: {
     const have = await connection.getBalance(exec.publicKey);
     const ixs: TransactionInstruction[] = [priorityIx()];
     if (have < EXECUTOR_MIN_LAMPORTS) ixs.push(SystemProgram.transfer({ fromPubkey: owner, toPubkey: exec.publicKey, lamports: EXECUTOR_TOPUP_LAMPORTS - have }));
+    if (args.topUpKey && !args.topUpKey.equals(exec.publicKey)) {
+      const tv = await connection.getBalance(args.topUpKey);
+      if (tv < EXECUTOR_MIN_LAMPORTS) ixs.push(SystemProgram.transfer({ fromPubkey: owner, toPubkey: args.topUpKey, lamports: EXECUTOR_TOPUP_LAMPORTS - tv }));
+    }
     ixs.push(
       automateIx({
         authority: owner,

@@ -46,3 +46,9 @@ dist-*/
 dist_*/
 web-build/
 coverage/
+
+# TV build (tv/): generated native projects and local env
+tv/android
+tv/ios
+tv/.expo
+tv/dist

@@ -9,6 +9,7 @@ import { useView } from './pixel/view';
 import { BLOCKS } from './game/constants';
 import { AppState, Platform, StyleSheet, View } from 'react-native';
 import { MobileGate, MOBILE_BROWSER } from './ui/MobileGate';
+import { TvLinkSheet } from './ui/TvLink';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from './game/constants';
 import { oreLive } from './chain/light';
@@ -273,6 +274,7 @@ function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTa
       </>}
         <Toasts />
         <Busy />
+        <TvLinkSheet />
         <WalletGate />
         <Onboarding />
         <WalletPicker />

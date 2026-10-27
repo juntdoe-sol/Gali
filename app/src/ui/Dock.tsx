@@ -14,6 +14,7 @@ import { BAR_H } from './TabBar';
 import { PixIcon } from './PixIcon';
 import type { PixName } from './pixIcons';
 import { useLayout } from './layout';
+import { openScanTv, TV_PAIR } from './TvLink';
 
 const SHAKE_G = 2.1;
 const layoutNowDesktop = () => layoutNow().desktop;
@@ -531,6 +532,14 @@ function ProPanel({ compact }: { compact: boolean }) {
                   <Chip label="STOP" onPress={() => void useGame.getState().stopAutopilot()} disabled={Boolean(busy)} />
                 </>
               }
+            />
+          ) : null}
+          {TV_PAIR && live && !autopilot ? (
+            <Row
+              icon="bot"
+              label="Play on a TV"
+              info="Gali: ORE Island on Android TV shows a QR when you press START MINING. Scan it with your camera, or tap SCAN TV and type its code, then approve one all-spots autopilot. The TV presses deploy and shows your strikes; your SOL stays in ORE's autopilot."
+              right={<Chip label="SCAN TV" onPress={openScanTv} disabled={Boolean(busy)} />}
             />
           ) : null}
           <Row
