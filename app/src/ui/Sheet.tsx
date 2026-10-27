@@ -597,7 +597,7 @@ function Me() {
   const w = useGame((s) => s.wallet);
   const save = useGame((s) => s.save);
   const live = useGame(isLive);
-  const { connect, disconnect, airdrop, setMute, refreshWallet, sweepSession } = useGame.getState();
+  const { connect, disconnect, airdrop, setMute, setMusicOff, refreshWallet, sweepSession } = useGame.getState();
   return (
     <>
       <Card>
@@ -655,9 +655,14 @@ function Me() {
         <PixIcon name={save.muted ? 'mute' : 'sound'} size={22} />
         <PixSwitch value={save.muted} onChange={setMute} label="Mute sound" />
       </Card>
+      <Card style={styles.rowCard}>
+        <T style={{ flex: 1 }}>Music off</T>
+        <PixIcon name={save.musicOff ? 'mute' : 'note'} size={22} />
+        <PixSwitch value={Boolean(save.musicOff)} onChange={setMusicOff} label="Music off" />
+      </Card>
       {live ? (
         <T v="muted">
-          Live mode: real rounds on ORE&apos;s mainnet board, about every 80 seconds. Put SOL on 1 to 25 spots and one strikes gold. ORE keeps 1% of every spot and 10% more of spots that miss; the rest comes back for you to claim. The gold spot mines the round&apos;s ORE, split by SOL there, or all to one miner on a solo spot. Gali takes no cut and never holds your SOL. ORE is credited as the board Gali plays on; Gali is not affiliated with or endorsed by ORE. This is a game of chance with real money: 18+ only, and only play with SOL you can afford to lose.
+          Live mode: real rounds on ORE&apos;s mainnet board, about every 80 seconds. Put SOL on 1 to 25 spots and one strikes gold. ORE keeps 1% of every spot and 10% more of spots that miss; the rest comes back for you to claim. The gold spot mines the round&apos;s ORE, split by SOL there, or all to one miner on a solo spot. Gali never holds your SOL. ORE is credited as the board Gali plays on; Gali is not affiliated with or endorsed by ORE. This is a game of chance with real money: 18+ only, and only play with SOL you can afford to lose.
         </T>
       ) : (
       <T v="muted">How it works: each minute is a round on an island with 25 mining spots. Put SOL on 1 to 25 spots. One spot strikes gold. ORE keeps 1% of every spot and 10% more of spots that miss; the rest of your SOL comes back to claim. The gold spot mines the round's ORE, split by SOL there, or on one of the round's 10 solo spots (★) taken whole by one miner, with odds equal to their share. Fewer spots pay more points: 1,000 for a single spot, 40 for all 25. A 1-in-500 motherlode pays out the whole SKR Motherlode Pool on top. Everything lands in Unclaimed until you claim it. This is a game of chance: only play with SOL you can afford to lose.</T>

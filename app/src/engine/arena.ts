@@ -813,7 +813,9 @@ export class ArenaEngine {
     // down too); it scrolls sideways with you
     const availH = Math.max(100, this.H - this.opts.top - this.opts.bottom);
     const fit = availH / AH;
-    this.z = this.opts.touch ? Math.min(3, Math.max(fit, 1.9)) : Math.max(1, Math.min(4, fit));
+    // a portrait phone is narrow: zoom out so about 200 px of the hall fits across, not 140
+    const portrait = this.opts.touch && this.H > this.W * 1.2;
+    this.z = portrait ? Math.max(1.4, Math.min(3, fit, this.W / 200)) : this.opts.touch ? Math.min(3, Math.max(fit, 1.9)) : Math.max(1, Math.min(4, fit));
     const viewW = this.W / this.z;
     const viewH = availH / this.z;
     const fx = this.me.x + this.me.facing * 24;

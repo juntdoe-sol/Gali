@@ -13,6 +13,7 @@ import { useMinersHere } from './World';
 import { PixIcon } from './PixIcon';
 import type { PixName } from './pixIcons';
 import { GUTTER, LANDSCAPE_APP, RAIL_W, TOP_H, useLayout } from './layout';
+import { HollowBadge } from './Season';
 
 /** the landscape app's top bar is narrow: numbers keep their width, labels and the address go */
 const TIGHT = LANDSCAPE_APP;
@@ -152,6 +153,7 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
           </View>
         </PixelBox>
         ) : null}
+        <HollowBadge compact={w < 1300} />
         <View style={[styles.chipRow, { flex: 1, maxWidth: 560 }]}>
           <Stat icon="star" color={COLORS.gold} value={points.toLocaleString()} label="PTS" tip="Points from rounds you mined. They rank you on the season board." />
           <LevelStat lvl={lvl} pct={pct} xp={xp} />
@@ -173,6 +175,7 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
             ORE MINING
           </T>
         </View>
+        <HollowBadge compact />
         <View style={styles.chipRow}>
           <WalletChip onMenu={onMenu} />
           <InboxBtn />

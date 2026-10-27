@@ -37,6 +37,12 @@ export const onChainMode = chainReady || oreLive;
 export const LIVE_MAX_ROUND_SOL = 0.5;
 /** Most SOL a live autopilot (ORE automation) may be funded with at once. */
 export const LIVE_AUTOPILOT_MAX_SOL = 1;
+/** Gali's platform fee on SOL deployed into ORE, in basis points (25 = 0.25%, beta rate; plan is 50 or 100). */
+export const PLATFORM_FEE_BPS = 25n;
+/** Where the platform fee goes. */
+export const REVENUE_WALLET = 'HDa2MTDdZXnrjTs6RRUUzEqCcrWMWu1fM673Cg7pzQMw';
+/** The fee on a deploy of `lamports`, rounded down. */
+export const platformFee = (lamports: bigint) => (lamports * PLATFORM_FEE_BPS) / 10_000n;
 
 // Public transaction transport/local validator only. EXPO_PUBLIC_* is bundled;
 // never configure a credential-bearing provider URL here.

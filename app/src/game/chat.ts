@@ -119,7 +119,7 @@ export const useChat = create<ChatState>((set, get) => ({
     try {
       const m = await post(body);
       set((s) => ({ msgs: [...s.msgs.filter((x) => x.id !== m.id), m], lastId: Math.max(s.lastId, m.id), error: null }));
-      play('select');
+      play('chat');
       return true;
     } catch (e) {
       useGame.getState().toast(String((e as Error).message ?? e), 'bad');
