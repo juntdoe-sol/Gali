@@ -16,7 +16,7 @@ import '../polyfill-web';
 import { getSecret, setSecret } from '../secure';
 import { ComputeBudgetProgram, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, TransactionInstruction } from '@solana/web3.js';
 import { assertSessionFundingAllowed, connection, sendWithKey, sendWithWallet } from '../client';
-import { LIVE_AUTOPILOT_MAX_SOL } from '../light';
+import { LIVE_AUTOPILOT_MAX_SOL, platformFee, REVENUE_WALLET } from '../light';
 import { AUTOMATION_STRATEGY, EXECUTOR_ADDRESS } from './consts';
 import { automateIx, checkpointIx, claimOreIx, claimSolIx, deployIx } from './ix';
 import { fetchClock, fetchOreAutomation, fetchOreMiner, needsCheckpoint } from './read';
@@ -93,6 +93,26 @@ async function checkpointFirst(owner: PublicKey): Promise<TransactionInstruction
  */
 export const LIVE_LOCK_SLOTS = 15;
 
+/** Rent-exempt minimum for a plain SOL account: a transfer that leaves the revenue wallet below it would fail the whole transaction. */
+const RENT_MIN_LAMPORTS = 890_880n;
+let revenueOk = false;
+let revenueCheckedAt = 0;
+/**
+ * The platform fee transfer for a deploy of `lamports`, or nothing. It is left out while the revenue wallet
+ * is still below the rent minimum, so a deploy can never fail because of the fee.
+ */
+async function feeIx(owner: PublicKey, lamports: bigint): Promise<TransactionInstruction[]> {
+  const fee = platformFee(lamports);
+  if (fee <= 0n) return [];
+  const to = new PublicKey(REVENUE_WALLET);
+  if (!revenueOk && Date.now() - revenueCheckedAt > 60_000) {
+    revenueCheckedAt = Date.now();
+    revenueOk = BigInt(await connection.getBalance(to).catch(() => 0)) >= RENT_MIN_LAMPORTS;
+  }
+  if (!revenueOk) return [];
+  return [SystemProgram.transfer({ fromPubkey: owner, toPubkey: to, lamports: fee })];
+}
+
 /**
  * Deploy into the current ORE round, signed and paid by the player's own wallet.
  * No session key and no Gali program: this is a plain ORE deploy, the same one
@@ -116,9 +136,9 @@ export async function oreDeployWithWallet(
     const ixs: TransactionInstruction[] = [priorityIx()];
     const pending = needsCheckpoint(miner, clock);
     if (pending !== null) ixs.push(checkpointIx({ signer: owner, authority: owner, roundId: pending }));
-    ixs.push(
-      deployIx({ signer: owner, authority: owner, roundId, amount: lamportsPerSquare, squares: squaresToMask(squares) }),
-    );
+    const mask = squaresToMask(squares);
+    ixs.push(deployIx({ signer: owner, authority: owner, roundId, amount: lamportsPerSquare, squares: mask }));
+    ixs.push(...(await feeIx(owner, lamportsPerSquare * BigInt(maskToSquares(mask).length))));
     return ixs;
   }, expectedOwner);
   return { sig, roundId };
@@ -313,6 +333,8 @@ export async function startLiveAutomation(args: {
         executor: EXECUTOR_ADDRESS,
       }),
     );
+    // autopilot rounds deploy without the wallet, so the platform fee on every funded round is paid here, once
+    ixs.push(...(await feeIx(owner, args.lamportsPerSquare * BigInt(n) * BigInt(args.rounds))));
     return ixs;
   }, args.expectedOwner);
 }

@@ -18,6 +18,8 @@ import { CLAIMS, MAP_H, MAP_W, REGIONS, claimAt, claimForTap, isLand, shipAt, to
 import { Particles } from './particles';
 import { findPath } from './path';
 import { Sky } from './sky';
+import { drawPumpkin, flicker, PUMPKIN_LIGHT } from './hollow';
+import { IS_HOLLOW } from '../game/season';
 import type { EngineEvent, Look, PeerView, Pose, Snapshot } from './types';
 import { Water } from './water';
 import { drawHp, drawKo, drawShield, FightFx, hitFlash, jumpLift, koAge, pickTarget, swingTilt } from './brawlfx';
@@ -1132,6 +1134,14 @@ export class Engine {
     // light: lamps, windows, the lighthouse, helmet lamps; skipped at noon
     const lights: { x: number; y: number; r: number; c: string; k: number }[] = [];
     const L = (x: number, y: number, r: number, col: string, k = 1) => lights.push({ x: OX + x * S, y: OY + y * S, r: r * S, c: col, k });
+    // Hollow Night: a jack-o'-lantern beside every spot, lighting the ground orange
+    if (IS_HOLLOW) {
+      CLAIMS.forEach((cl, i) => {
+        const px = cl.cx + 9, py = cl.cy + 7;
+        drawPumpkin(c, OX + px * S, OY + py * S, S, now, i);
+        L(px, py - 4, 26, PUMPKIN_LIGHT, flicker(now, i));
+      });
+    }
     const night = this.sky.night;
     if (night > 0.02 || this.sky.rain > 0.3) {
       for (const l of ISLE.lights as { x: number; y: number; r: number; c: string; f: number }[]) {
@@ -1216,6 +1226,7 @@ export class Engine {
     const parting = el >= 1400 ? Math.max(0.1, 1 - (el - 1400) / 600) : 1;
     this.sky.drawClouds(c, OX, OY, S, Math.max(0, Math.min(1, 1.6 - zoomK * 0.6)) * parting);
     this.sky.drawRain(c, DW, DH, Math.max(1, Math.round(dpr)));
+    this.sky.drawHollow(c, DW, DH, now, dpr, { right: Math.min(s?.view.right ?? 0, this.W * 0.45) * dpr, top: Math.min(s?.view.top ?? 0, this.H * 0.3) * dpr });
     if (this.sky.lightning > 0.3) {
       c.fillStyle = `rgba(255,255,255,${(this.sky.lightning - 0.3) * 0.5})`;
       c.fillRect(0, 0, DW, DH);

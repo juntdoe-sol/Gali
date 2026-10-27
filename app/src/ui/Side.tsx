@@ -24,7 +24,7 @@ export function SidePanel() {
             Click spots on the map
           </T>
         </View>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator>
+        <ScrollView style={{ flexGrow: 0 }} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator>
           <Dock embedded />
         </ScrollView>
       </PixelBox>
@@ -54,9 +54,10 @@ function KeyHint({ k, t }: { k: string; t: string }) {
 
 const styles = StyleSheet.create({
   side: { position: 'absolute', gap: 12, zIndex: 15 },
-  dockBox: { flex: 1, minHeight: 0, paddingTop: 12 },
+  // the deploy card hugs its controls; it only scrolls when the window is too short for them
+  dockBox: { flexShrink: 1, minHeight: 0, paddingTop: 10 },
   dockHead: { paddingHorizontal: 16, paddingBottom: 8, flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', borderBottomWidth: U, borderColor: '#22356f', marginHorizontal: U * 2 },
-  scroll: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 16 },
+  scroll: { paddingHorizontal: 14, paddingTop: 8, paddingBottom: 12 },
   keys: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10, paddingVertical: 2 },
   key: { flexDirection: 'row', alignItems: 'center', gap: 5 },
 });

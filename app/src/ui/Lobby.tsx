@@ -10,7 +10,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { COLORS, levelFromXp } from '../game/constants';
+import { COLORS, levelFromXp, xpForLevel } from '../game/constants';
 import { useCave } from '../game/caveStore';
 import { loadChain } from '../chain/lazy';
 import { TIP_LIMITS, TIP_SKR_MINT, short } from '../chain/light';
@@ -26,7 +26,7 @@ import LobbyView, { type LobbyRef } from '../pixel/LobbyView';
 import { islandFight, islandJump, myLook } from '../pixel/PixelMine';
 import { useArena } from '../game/arena';
 import { useView } from '../pixel/view';
-import { Btn, Choice, F, FocusRing, Frame, IconBtn, INPUT, Kbd, MapButton, PixelBox, Scrim, T, Tip, U, Window } from './kit';
+import { Bar, Btn, Choice, F, FocusRing, Frame, IconBtn, INPUT, Kbd, MapButton, PixelBox, Scrim, T, Tip, U, Window } from './kit';
 import { GUTTER, LANDSCAPE_APP, RAIL_W, TOP_H, sideWidth, useChrome, useLayout } from './layout';
 import { BAR_H, TabBar, type SheetTab } from './TabBar';
 import { Arcade } from './Arcade';
@@ -43,6 +43,7 @@ import { FightPad } from './ActionPad';
 import { TouchZone, useDomZones, zoneEvent } from './zones';
 import type { PixName } from './pixIcons';
 import { GAME_IDS, GAME_META, useArcade, type GameId } from '../game/arcade';
+import { HollowBadge } from './Season';
 
 const GAME_SHORT: Record<GameId, string> = { tunnel: 'TUNNEL', pot: 'GOLD RUSH', crash: 'CRASH CART' };
 
@@ -333,6 +334,7 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
               </View>
             </View>
           </PixelBox>
+          <HollowBadge />
           <View style={[styles.headRow, { gap: 8 }]}>
             <NameChip name={name} lvl={lvl} status={status} onPress={() => setEditing(true)} />
             <SolChip sol={sol} />
@@ -356,20 +358,16 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
                 LOBBY
               </T>
             </View>
+            <HollowBadge compact />
             <NameChip name={name} lvl={lvl} status={status} onPress={() => setEditing(true)} />
           </View>
           <View style={styles.headRow} pointerEvents="box-none">
             <SolChip sol={sol} />
-            <View style={{ flexDirection: 'row', gap: 6 }}>
+            <View style={{ flexDirection: 'row', gap: 6, flexShrink: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
               <IconBtn onPress={() => setHowTo(true)} label="How to play">
-                <View style={styles.headRow}>
-                  <T v="display" style={{ fontSize: 20, color: COLORS.gold, paddingLeft: 8 }}>
-                    ?
-                  </T>
-                  <T v="display" style={{ fontSize: 16, paddingRight: 10 }}>
-                    HOW TO PLAY
-                  </T>
-                </View>
+                <T v="display" style={{ fontSize: 22, color: COLORS.gold }}>
+                  ?
+                </T>
               </IconBtn>
               <PixelBox fill="rgba(8,13,32,0.86)" hi="rgba(60,86,160,0.5)" lo="#04060f" style={styles.statusChip}>
                 <PixIcon name="users" size={16} />
@@ -520,11 +518,27 @@ function NameChip({ name, lvl, status, onPress }: { name: string; lvl: number; s
         <T v="display" style={{ fontSize: 18 }} numberOfLines={1}>
           {name || 'PICK A NAME'}
         </T>
-        <T v="display" style={{ fontSize: 15, color: COLORS.teal }}>
-          LV {lvl}
-        </T>
+        <XpBar lvl={lvl} />
       </View>
     </IconBtn>
+  );
+}
+
+/** The island's XP bar, in the lobby too: level badge plus progress to the next level. */
+function XpBar({ lvl }: { lvl: number }) {
+  const xp = useLevelXp();
+  const pct = Math.max(0, Math.min(100, ((xp - xpForLevel(lvl)) / (xpForLevel(lvl + 1) - xpForLevel(lvl))) * 100));
+  return (
+    <View style={styles.xp} accessible accessibilityLabel={`Level ${lvl}, ${Math.round(pct)}% to level ${lvl + 1}, ${xp.toLocaleString()} XP`}>
+      <PixelBox fill={COLORS.teal} hi="#d9fbff" lo="#15809a" edge="#021418" style={styles.xpLvl}>
+        <T v="display" style={{ color: '#032026', fontSize: 15, lineHeight: 16 }}>
+          {lvl}
+        </T>
+      </PixelBox>
+      <View style={{ width: 64 }}>
+        <Bar pct={pct} colors={['#15809a', COLORS.teal]} height={6} />
+      </View>
+    </View>
   );
 }
 
@@ -1057,6 +1071,8 @@ const styles = StyleSheet.create({
   head: { position: 'absolute', left: 0, right: 0, top: 0, paddingHorizontal: 12, gap: 8 },
   deskHead: { position: 'absolute', top: GUTTER, height: TOP_H - GUTTER, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 6 },
+  xp: { flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 2 },
+  xpLvl: { width: 22, height: 22, alignItems: 'center', justifyContent: 'center' },
   deskTitle: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, height: 44 },
   titleBox: { alignItems: 'center' },
   logo: { width: 90, height: 38 },

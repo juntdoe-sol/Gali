@@ -46,3 +46,8 @@ dist-*/
 dist_*/
 web-build/
 coverage/
+
+# private admin site (not public)
+admin-live/
+
+.DS_Store

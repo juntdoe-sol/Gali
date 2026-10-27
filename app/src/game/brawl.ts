@@ -16,6 +16,7 @@
  */
 import { create } from 'zustand';
 import { announce, sendLobbyBx, useLobby } from './lobby';
+import { announce as say, play } from './sfx';
 import { baseDamage, GAP, GUARD_MS, GUARD_STING, REACH as W_REACH, swingDmg, taken, type Weapon } from './powers';
 import { roomHooks, type Scope } from './rx';
 import { loadJson, saveJson } from './storage';
@@ -338,6 +339,8 @@ function credit(scope: Scope, foe: string, now: number) {
   const r = koXp(rec, { now, foeKeys: keys, myLvl: myLevel(), foeLvl: info?.lvl ?? myLevel(), base: rooms[scope]?.koXp });
   saveRecord({ ...r.rec, off: useBrawl.getState().off });
   if (r.xp > 0) gainXp(r.xp);
+  play('ko');
+  say('ko');
   if (info?.name) announce({ k: 'ko', tn: info.name });
   brawlHooks.koed?.(scope, foe, info?.name ?? null, r.xp);
 }
