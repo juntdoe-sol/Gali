@@ -47,6 +47,11 @@ dist_*/
 web-build/
 coverage/
 
+# private admin site (not public)
+admin-live/
+
+.DS_Store
+
 # TV build (tv/): generated native projects and local env
 tv/android
 tv/ios

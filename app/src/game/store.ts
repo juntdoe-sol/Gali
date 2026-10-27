@@ -4,7 +4,7 @@ import { loadBoard, loadChain, loadOreTx } from '../chain/lazy';
 import { announce, announceXp } from './lobby';
 import {
   chainReady, clockOffsetMs, isPickWalletError, isRateLimited, LIVE_MAX_ROUND_SOL, MAX_SESSION_FUND_SOL, NOTHING_CLAIMABLE,
-  onChainMode, oreLive, REFINING_FEE, short,
+  onChainMode, oreLive, PLATFORM_FEE_BPS, REFINING_FEE, short,
   type ChainPlayer, type Claimable, type ShopConfig, type WebWalletInfo,
 } from '../chain/light';
 import {
@@ -12,7 +12,7 @@ import {
   pointsFor, QUESTS, REVEAL_MIN_MS, ROUND_REWARD_ORE, ROUND_SECS, type Gear,
 } from './constants';
 import { addToPot, emptyPot, idxOf, maskOf, MIN_SOL_PER_BLOCK, payoutFor, practiceMotherlode, practiceOreMotherlode, PRACTICE_SOL, randomPick, simPot, soloMask, DEFAULT_SMART, SMART_COUNTS, type PotView } from './pot';
-import { haptic, play, setMuted } from './sfx';
+import { announce as say, haptic, play, setMuted } from './sfx';
 import { loadJson, saveJson } from './storage';
 
 export type Phase = 'mining' | 'settling' | 'reveal';
@@ -37,6 +37,7 @@ export interface RoundResult {
 export interface Preset {
   amount: string; // older saves: SOL per round (no longer used)
   perSpot?: string; // SOL on each spot, like the amount per block on other mining boards
+  perRound?: string; // PRO: SOL a round, split evenly over the tiles (like ORE)
   blocks: 'manual' | 'all' | 'smart';
   smartN: number;
   rounds: number;
@@ -72,6 +73,8 @@ export interface Pending {
   onChain: boolean;
   perBlock: number; // SOL on each covered block
   total: number; // SOL deployed
+  /** the mask is exactly what ORE deployed (false for Smart autopilot: ORE picks those spots itself) */
+  exact?: boolean;
 }
 
 export interface Toast {
@@ -112,6 +115,12 @@ export interface Save {
   presets: Preset[];
   preset: number;
   muted: boolean;
+  /** music off, sound effects still on */
+  musicOff?: boolean;
+  /** the player turned off the "hold your unrefined ORE" reminder */
+  holdTipOff?: boolean;
+  /** the last season whose welcome this device has seen */
+  seasonSeen?: string;
   onboarded: boolean;
   /** Accepted the real-money notice for live ORE rounds. */
   liveAccepted: boolean;
@@ -256,6 +265,9 @@ interface GameState {
   startTvAutopilot: (perSpot: number, rounds: number, tv: PublicKey) => Promise<PublicKey | null>;
   airdrop: () => Promise<void>;
   setMute: (m: boolean) => void;
+  setMusicOff: (off: boolean) => void;
+  setHoldTipOff: (off: boolean) => void;
+  markSeason: (id: string) => void;
   finishOnboarding: () => void;
   toast: (text: string, tone?: Toast['tone']) => void;
   setDockTab: (t: DockTab) => void;
@@ -438,7 +450,8 @@ export const useGame = create<GameState>((set, get) => {
             if (i >= 75) throw new Error('SlowDraw');
             await new Promise((res) => setTimeout(res, 2000));
           }
-          r = await board.readOutcome(owner, roundId);
+          // the game knows what it deployed, so the result still reads after autopilot's next deploy
+          r = await board.readOutcome(owner, roundId, pending.exact ? { mask: pending.mask, lamportsPerSquare: BigInt(Math.floor(pending.perBlock * 1e9)) } : undefined);
         } else {
           if (!session) throw new Error('wallet disconnected');
           r = await board.settleAndRead(owner, session, roundId);
@@ -520,6 +533,7 @@ export const useGame = create<GameState>((set, get) => {
       if (won) {
         announce({ k: 'win', sol: Math.round(solOut * 10000) / 10000, pts: points });
         play(motherlode ? 'motherlode' : 'win');
+        setTimeout(() => say(motherlode ? 'motherlode' : 'gold-strike'), motherlode ? 500 : 250);
         haptic.win();
         if (get().save.winStreak >= 2) get().toast(`🔥 Hot streak x${get().save.winStreak}`, 'gold');
       } else {
@@ -688,7 +702,7 @@ export const useGame = create<GameState>((set, get) => {
     haptic.thud();
     const cur = get().run;
     set({
-      pending: { roundId, mask, boostBps: boostFor(staked()), onChain, perBlock, total },
+      pending: { roundId, mask, boostBps: boostFor(staked()), onChain, perBlock, total, exact: !(run.automated && run.blocks === 'smart') },
       roundId,
       run: cur ? { ...cur, left: cur.left - 1 } : null,
       pot: addToPot(get().pot.roundId === roundId ? get().pot : emptyPot(roundId), mask, perBlock),
@@ -1328,7 +1342,8 @@ export const useGame = create<GameState>((set, get) => {
         // each round also pays its executor 0.00001 SOL, the network fee
         const deposit = (per * n + 0.00001) * r.total;
         // setup costs: ORE account rent (~0.0022), the device key's fee float (0.002), network fees; +0.0055 once if the player has no ORE miner account yet
-        const need = deposit + 0.0065;
+        // plus Gali's platform fee on the funded rounds, paid in the same approval
+        const need = deposit + (per * n * r.total * Number(PLATFORM_FEE_BPS)) / 10_000 + 0.0065;
         if (st.wallet.sol < need) return st.toast(`Autopilot needs about ${need.toFixed(4)} SOL (${deposit.toFixed(4)} for the rounds + ~0.0065 setup). You have ${st.wallet.sol.toFixed(4)}`, 'bad');
         try {
           const [board, owner] = await Promise.all([loadBoard(), ownerKey()]);
@@ -1384,9 +1399,9 @@ export const useGame = create<GameState>((set, get) => {
       if (st.wallet.busy) return null;
       if (st.autopilot) { st.toast('Autopilot is already on. Stop it first', 'info'); return null; }
       if (perSpot < MIN_SOL_PER_BLOCK) { st.toast(`At least ${MIN_SOL_PER_BLOCK} SOL per spot`, 'bad'); return null; }
-      // the same sums as startRun, plus the TV's fee float (0.002)
+      // the same sums as startRun (rounds, Gali's platform fee, setup), plus the TV's fee float (0.002)
       const deposit = (perSpot * BLOCKS + 0.00001) * rounds;
-      const need = deposit + 0.0085;
+      const need = deposit + (perSpot * BLOCKS * rounds * Number(PLATFORM_FEE_BPS)) / 10_000 + 0.0085;
       if (st.wallet.sol < need) {
         st.toast(`TV autopilot needs about ${need.toFixed(4)} SOL (${deposit.toFixed(4)} for the rounds + ~0.0085 setup). You have ${st.wallet.sol.toFixed(4)}`, 'bad');
         return null;
@@ -1453,6 +1468,9 @@ export const useGame = create<GameState>((set, get) => {
       setMuted(m);
       updateSave((s) => ({ ...s, muted: m }));
     },
+    setMusicOff: (off) => updateSave((s) => ({ ...s, musicOff: off })),
+    setHoldTipOff: (off) => updateSave((s) => ({ ...s, holdTipOff: off })),
+    markSeason: (id) => updateSave((s) => ({ ...s, seasonSeen: id })),
     finishOnboarding: () => updateSave((s) => ({ ...s, onboarded: true })),
     dismissLevel: () => set({ levelUp: null }),
     dismissGear: () => set({ gearReveal: null }),

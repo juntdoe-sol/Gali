@@ -12,6 +12,7 @@
 import { useState, type ReactNode } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
 import { COLORS } from '../game/constants';
+import { IS_HOLLOW } from '../game/season';
 import { haptic } from '../game/sfx';
 import { LANDSCAPE_APP, useLayout } from './layout';
 
@@ -41,6 +42,33 @@ export const TONE = {
   teal: { fill: '#2fc7dd', hi: '#b6f6ff', lo: '#15809a', edge: '#021418', lip: '#0a4250', text: '#032026' },
 } as const;
 export type ToneName = keyof typeof TONE;
+
+/**
+ * Hollow Night re-tints the kit: navy blues lean purple (gold, green and cyan are left alone), and the gold
+ * button turns pumpkin. Looks only; nothing a button does changes.
+ */
+const tintCache = new Map<string, string>();
+export function seasonTint(col: string | undefined): string | undefined {
+  if (!IS_HOLLOW || !col) return col;
+  const hit = tintCache.get(col);
+  if (hit) return hit;
+  let r = 0, g = 0, b = 0, a = 1, ok = false;
+  const hx = /^#([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(col);
+  const rg = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)$/i.exec(col);
+  if (hx) { const n = parseInt(hx[1], 16); r = n >> 16; g = (n >> 8) & 255; b = n & 255; a = hx[2] ? parseInt(hx[2], 16) / 255 : 1; ok = true; }
+  else if (rg) { r = +rg[1]; g = +rg[2]; b = +rg[3]; a = rg[4] !== undefined ? +rg[4] : 1; ok = true; }
+  let out = col;
+  if (ok && b > r + 20 && b >= g && g < b * 0.75) {
+    const r2 = Math.min(255, Math.round(r + (b - r) * 0.5)), g2 = Math.round(g * 0.85);
+    out = a < 1 ? `rgba(${r2},${g2},${b},${a})` : `#${((1 << 24) | (r2 << 16) | (g2 << 8) | b).toString(16).slice(1)}`;
+  }
+  tintCache.set(col, out);
+  return out;
+}
+if (IS_HOLLOW) {
+  Object.assign(TONE.gold, { fill: '#ff9a2e', hi: '#ffd08a', lo: '#c2560c', edge: '#2a0e00', lip: '#6a2a04', text: '#2a0e00' });
+  Object.assign(TONE.teal, { fill: '#6fe05a', hi: '#d4ffc4', lo: '#2f8a26', edge: '#071a04', lip: '#1d4a14', text: '#0b2406' });
+}
 
 const isWeb = Platform.OS === 'web';
 
@@ -109,6 +137,10 @@ export function PixelBox({
   rivets?: string;
   pointerEvents?: 'box-none' | 'none' | 'auto' | 'box-only';
 }) {
+  fill = seasonTint(fill) as string;
+  hi = seasonTint(hi);
+  lo = seasonTint(lo);
+  edge = seasonTint(edge) as string;
   const top = inset ? lo : hi;
   const bottom = inset ? hi : lo;
   const s = shadow * u;
@@ -601,7 +633,32 @@ export function Window({
       </View>
       <View style={styles.winRule} />
       {children}
+      {IS_HOLLOW ? <WebCorner /> : null}
     </Frame>
+  );
+}
+
+/** Hollow Night: a cobweb in a window's bottom-right corner: threads from the corner, two sagging arcs. */
+const WEB_N = 14;
+const WEB_DOTS: [number, number][] = (() => {
+  const out: [number, number][] = [];
+  for (let y = 0; y < WEB_N; y++)
+    for (let x = 0; x < WEB_N; x++) {
+      const dx = WEB_N - 1 - x, dy = WEB_N - 1 - y, d = Math.hypot(dx, dy);
+      const thread = dx === 0 || dy === 0 || dx === dy || Math.abs(dx - 2 * dy) < 0.6 || Math.abs(dy - 2 * dx) < 0.6;
+      const arc = Math.abs(d - 5) < 0.55 || Math.abs(d - 10) < 0.55;
+      if ((thread || arc) && d < WEB_N) out.push([x, y]);
+    }
+  return out;
+})();
+function WebCorner() {
+  const px = 2;
+  return (
+    <View pointerEvents="none" style={{ position: 'absolute', right: 5, bottom: 5, width: WEB_N * px, height: WEB_N * px, opacity: 0.8 }}>
+      {WEB_DOTS.map(([x, y]) => (
+        <View key={`${x}.${y}`} style={{ position: 'absolute', left: x * px, top: y * px, width: px, height: px, backgroundColor: 'rgba(235,230,255,0.42)' }} />
+      ))}
+    </View>
   );
 }
 

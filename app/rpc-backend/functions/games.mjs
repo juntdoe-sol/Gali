@@ -20,6 +20,11 @@ const MUTEX_LAMPORTS = 890_880n; // rent-exempt minimum for a 0-byte account
 const BATCH = 5; // payouts per transaction
 
 const MEMO_PROGRAM = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr';
+const ATA_PROGRAM = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
+// Platform revenue: Tunnel Collapse and Gold Rush Pot fees are sent here as each round settles. Override with REVENUE_WALLET.
+export const REVENUE_DEFAULT = 'HDa2MTDdZXnrjTs6RRUUzEqCcrWMWu1fM673Cg7pzQMw';
+const ADMIN_SESSION_MS = 12 * 3600_000; // an admin sign-in lasts 12 hours
+const ADMIN_SIG_MS = 5 * 60_000; // a signed admin request is good for 5 minutes
 const SYSTEM_PROGRAM = '11111111111111111111111111111111';
 const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 const TOKEN_2022 = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
@@ -143,6 +148,36 @@ const createMutex = (house, address, seed, lamports) => ({
   keys: [{ pubkey: house, signer: true, writable: true }, { pubkey: address, writable: true }],
   data: concat(u32le(3), b58dec(house), u64le(seed.length), enc.encode(seed), u64le(lamports), u64le(0), b58dec(SYSTEM_PROGRAM)),
 });
+
+// ---------- program addresses (associated token accounts) ----------
+const ED_P = 2n ** 255n - 19n;
+const modp = (a) => ((a % ED_P) + ED_P) % ED_P;
+function powmod(b, e) { let r = 1n; b = modp(b); while (e > 0n) { if (e & 1n) r = (r * b) % ED_P; b = (b * b) % ED_P; e >>= 1n; } return r; }
+const ED_D = modp(-121665n * powmod(121666n, ED_P - 2n));
+/** true when 32 bytes decode to a point on ed25519 (a PDA must not) */
+export function onCurve(bytes) {
+  let y = 0n;
+  for (let i = 31; i >= 0; i--) y = (y << 8n) | BigInt(i === 31 ? bytes[i] & 0x7f : bytes[i]);
+  if (y >= ED_P) return false;
+  const y2 = (y * y) % ED_P;
+  const u = modp(y2 - 1n), v = modp(ED_D * y2 + 1n);
+  const w = (u * powmod(v, ED_P - 2n)) % ED_P;
+  return w === 0n || powmod(w, (ED_P - 1n) / 2n) === 1n;
+}
+export async function findPda(seeds, programId) {
+  for (let bump = 255; bump >= 0; bump--) {
+    const h = await sha256(concat(...seeds, Uint8Array.from([bump]), b58dec(programId), enc.encode('ProgramDerivedAddress')));
+    if (!onCurve(h)) return b58enc(h);
+  }
+  throw new Error('no program address');
+}
+export const ataOf = (owner, mint, tokenProgram) => findPda([b58dec(owner), b58dec(tokenProgram), b58dec(mint)], ATA_PROGRAM);
+const createAtaIdem = (payer, ata, owner, mint, tokenProgram) => ({
+  program: ATA_PROGRAM,
+  keys: [{ pubkey: payer, signer: true, writable: true }, { pubkey: ata, writable: true }, { pubkey: owner }, { pubkey: mint }, { pubkey: SYSTEM_PROGRAM }, { pubkey: tokenProgram }],
+  data: Uint8Array.from([1]),
+});
+const revenueOf = (env) => (typeof env?.REVENUE_WALLET === 'string' && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(env.REVENUE_WALLET) ? env.REVENUE_WALLET : REVENUE_DEFAULT);
 
 // ---------- RPC ----------
 function providers(env) {
@@ -362,7 +397,7 @@ export function classify({ deposits, game, token, round, decimals }) {
 }
 
 // ---------- payouts ----------
-async function sendBatch(env, house, label, mintAddr, program, decimals, houseAta, items, memoText) {
+async function sendBatch(env, house, label, mintAddr, program, decimals, houseAta, items, memoText, pre = []) {
   const seed = label;
   const mutex = await mutexAddress(house.owner, seed);
   const existing = await call(env, 'getAccountInfo', [mutex, { encoding: 'base64', commitment: 'confirmed' }]);
@@ -370,6 +405,7 @@ async function sendBatch(env, house, label, mintAddr, program, decimals, houseAt
   const bh = await call(env, 'getLatestBlockhash', [{ commitment: 'confirmed' }]);
   const ixs = [
     createMutex(house.owner, mutex, seed, MUTEX_LAMPORTS),
+    ...pre,
     ...items.map((it) => transferChecked(program, houseAta, mintAddr, it.to, house.owner, it.amount, decimals)),
     memoIx(memoText),
   ];
@@ -423,6 +459,15 @@ export async function settleRound(env, house, { game, token, round, now = Date.n
     const k = i / BATCH;
     batches.push(await sendBatch(env, house, `${key}.${k}`, mint, program, decimals, houseAta, items.slice(i, i + BATCH), `gali1pay|${g}|${t}|${round}|${k}`));
   }
+  // the platform's 5% (Tunnel Collapse, Gold Rush Pot) goes to the revenue wallet in its own one-time batch
+  let feePaid = null;
+  const fee = played.outcome?.fee ? BigInt(played.outcome.fee) : 0n;
+  if (fee > 0n && !played.outcome.void) {
+    const rev = revenueOf(env);
+    const revAta = await ataOf(rev, mint, program);
+    feePaid = await sendBatch(env, house, `${key}.f`, mint, program, decimals, houseAta, [{ to: revAta, amount: fee }], `gali1fee|${g}|${t}|${round}`, [createAtaIdem(house.owner, revAta, rev, mint, program)]);
+    batches.push(feePaid);
+  }
   const odd = [];
   for (const { d, why } of rest) {
     const r = await sendBatch(env, house, `r${t}${d.sig.slice(0, 28)}`, mint, program, decimals, houseAta, [{ to: d.source, amount: d.amount }], `gali1refund|${d.sig.slice(0, 40)}`);
@@ -442,6 +487,75 @@ export async function settleRound(env, house, { game, token, round, now = Date.n
   };
 }
 
+// ---------- admin ----------
+async function verifySig(wallet, text, sigB58) {
+  const pub = b58dec(wallet), sig = b58dec(sigB58);
+  if (pub.length !== 32 || sig.length !== 64) return false;
+  const key = await crypto.subtle.importKey('raw', pub, 'Ed25519', false, ['verify']);
+  return crypto.subtle.verify('Ed25519', key, sig, enc.encode(text));
+}
+const adminWallet = (env) => (typeof env?.ADMIN_WALLET === 'string' && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(env.ADMIN_WALLET.trim()) ? env.ADMIN_WALLET.trim() : null);
+async function sessionTag(env, wallet, exp) { return hex(await hmac(String(env.GAMES_MASTER), `admin|${wallet}|${exp}`)); }
+/** A signed request from the admin wallet: `Gali admin <op> <args...> <ts>`, fresh within 5 minutes. */
+async function checkSigned(env, body, op, args) {
+  const admin = adminWallet(env);
+  if (!admin) throw Object.assign(new Error('No admin wallet is set on the server yet'), { status: 403 });
+  const ts = Number(body.ts);
+  if (!Number.isSafeInteger(ts) || Math.abs(Date.now() - ts) > ADMIN_SIG_MS) throw Object.assign(new Error('That signature is too old. Sign again.'), { status: 401 });
+  if (body.wallet !== admin) throw Object.assign(new Error('This wallet is not the Gali admin'), { status: 403 });
+  const text = ['Gali admin', op, ...args, String(ts)].join(' ');
+  if (!(await verifySig(admin, text, String(body.sig ?? '')))) throw Object.assign(new Error('Signature check failed'), { status: 401 });
+  return { admin, ts };
+}
+async function checkSession(env, body) {
+  const admin = adminWallet(env);
+  const [wallet, expS, tag] = String(body.session ?? '').split('.');
+  const exp = Number(expS);
+  if (!admin || wallet !== admin || !Number.isSafeInteger(exp) || exp < Date.now() || tag !== (await sessionTag(env, wallet, exp)))
+    throw Object.assign(new Error('Sign in again'), { status: 401 });
+  return admin;
+}
+async function tokenBalance(env, ata) {
+  try { const b = await call(env, 'getTokenAccountBalance', [ata, { commitment: 'confirmed' }]); return BigInt(b.value.amount); } catch { return 0n; }
+}
+/** House and revenue balances, stakes still owed to players, and what can be swept per token. */
+async function treasury(env, house) {
+  const rev = revenueOf(env);
+  const [houseSol, revSol] = await Promise.all([call(env, 'getBalance', [house.owner, { commitment: 'confirmed' }]), call(env, 'getBalance', [rev, { commitment: 'confirmed' }])]);
+  const tokens = {};
+  for (const [t, info] of Object.entries(TOKENS)) {
+    const m = await loadMint(env, t);
+    let houseAta = null;
+    try { houseAta = await loadHouseAta(env, house, t); } catch { /* not funded */ }
+    const revAta = await ataOf(rev, info.mint, m.program);
+    const houseBal = houseAta ? await tokenBalance(env, houseAta) : 0n;
+    const revBal = await tokenBalance(env, revAta);
+    // stakes from the last 10 minutes may still be paid out or refunded: never sweep them
+    let owed = 0n;
+    if (houseAta) for (const d of await fetchDeposits(env, houseAta, Math.floor((Date.now() - LATE_SCAN_MS) / 1000))) owed += d.amount;
+    // keep at least one maximum Crash Cart win (5 x top chip x 10) in the bankroll
+    const floorMin = unitsOf(info.chips[2], m.decimals) * CAP_MULT * 10n;
+    tokens[info.id] = { decimals: m.decimals, houseAta, revenueAta: revAta, house: String(houseBal), revenue: String(revBal), owed: String(owed), floorMin: String(floorMin) };
+  }
+  return { house: house.owner, revenue: rev, houseSol: houseSol.value, revenueSol: revSol.value, tokens, feeBps: Number(FEE_BPS) };
+}
+async function sweep(env, house, token, floorUi, ts) {
+  const t = TOKEN_KEY[token];
+  if (!t) throw new Error('unknown token');
+  const info = TOKENS[t];
+  const m = await loadMint(env, t);
+  const tr = await treasury(env, house);
+  const row = tr.tokens[info.id];
+  if (!row.houseAta) throw new Error(`The ${info.id} table is not funded yet`);
+  let floor;
+  try { floor = unitsOf(String(floorUi), m.decimals); } catch { throw new Error('bad floor'); }
+  if (floor < BigInt(row.floorMin)) throw new Error(`The floor must be at least ${fmt(BigInt(row.floorMin), m.decimals)} ${info.id.toUpperCase()}`);
+  const amount = BigInt(row.house) - BigInt(row.owed) - floor;
+  if (amount <= 0n) throw new Error('Nothing above the floor to sweep');
+  const r = await sendBatch(env, house, `sw${t}${suffix(Math.floor(ts / 1000))}`, info.mint, m.program, m.decimals, row.houseAta, [{ to: row.revenueAta, amount }], `gali1sweep|${t}|${ts}`, [createAtaIdem(house.owner, row.revenueAta, tr.revenue, info.mint, m.program)]);
+  return { ...r, amount: fmt(amount, m.decimals), token: info.id };
+}
+
 // ---------- HTTP ----------
 export async function configFor(env, house) {
   const tokens = {};
@@ -457,7 +571,28 @@ export async function configFor(env, house) {
   return { ok: true, house: house.owner, tokens, roundMs: ROUND_MS, betMs: BET_MS, settleAfterMs: SETTLE_AFTER_MS, feeBps: Number(FEE_BPS), serverNow: Date.now() };
 }
 
+// Browsers may call the house only from these sites (deployed with --cors passthrough, so this function answers
+// preflight itself). The Android app sends no Origin and is unaffected. ALLOWED_ORIGINS (comma separated) overrides.
+const ORIGINS_DEFAULT = ['https://galiisland.bounded.page', 'https://galiadmin.bounded.page', 'https://gali.fun', 'https://www.gali.fun', 'http://localhost:8081'];
+function originsOf(env) {
+  const raw = typeof env?.ALLOWED_ORIGINS === 'string' ? env.ALLOWED_ORIGINS : '';
+  const list = raw.split(',').map((x) => x.trim().replace(/\/$/, '')).filter((x) => /^https?:\/\/[^\s/]+$/.test(x));
+  return list.length ? list : ORIGINS_DEFAULT;
+}
+function corsHeaders(req, env) {
+  const origin = req.headers.get('origin');
+  if (!origin || !originsOf(env).includes(origin)) return {};
+  return { 'access-control-allow-origin': origin, 'access-control-allow-methods': 'POST, OPTIONS', 'access-control-allow-headers': 'content-type', 'access-control-max-age': '600', vary: 'Origin' };
+}
 export default async function games(req, ctx) {
+  const cors = corsHeaders(req, ctx?.env ?? {});
+  if (req.method === 'OPTIONS') return new Response(null, { status: cors['access-control-allow-origin'] ? 204 : 403, headers: cors });
+  const res = await handle(req, ctx);
+  for (const [k, v] of Object.entries(cors)) res.headers.set(k, v);
+  return res;
+}
+
+async function handle(req, ctx) {
   if (req.method !== 'POST') return fail(405, 'POST required');
   if (!/^application\/json/i.test(req.headers.get('content-type') || '')) return fail(415, 'JSON required');
   let body;
@@ -477,6 +612,20 @@ export default async function games(req, ctx) {
       const ok = await crypto.subtle.verify('Ed25519', house.pubKey, sig, msg);
       return reply(200, { ok, house: house.owner });
     }
+    if (body.action === 'admin-login') {
+      const { admin } = await checkSigned(env, body, 'login', []);
+      const exp = Date.now() + ADMIN_SESSION_MS;
+      return reply(200, { ok: true, session: `${admin}.${exp}.${await sessionTag(env, admin, exp)}`, expires: exp });
+    }
+    if (body.action === 'admin-treasury') {
+      await checkSession(env, body);
+      return reply(200, { ok: true, ...(await treasury(env, house)) });
+    }
+    if (body.action === 'admin-sweep') {
+      // moving money needs a fresh wallet signature, not only the session
+      const { ts } = await checkSigned(env, body, 'sweep', [String(body.token), String(body.floor)]);
+      return reply(200, { ok: true, ...(await sweep(env, house, String(body.token), String(body.floor), ts)) });
+    }
     if (body.action === 'commit' || body.action === 'settle') {
       const game = body.game, token = body.token, round = body.round;
       const g = GAME_KEY[game], t = TOKEN_KEY[token];
@@ -493,6 +642,7 @@ export default async function games(req, ctx) {
     }
     return fail(400, 'unknown action');
   } catch (e) {
+    if (e?.status === 401 || e?.status === 403) return fail(e.status, e.message);
     return fail(502, String(e?.message ?? 'failed').replace(/api-key=[^&\s]+/gi, '').slice(0, 200));
   }
 }

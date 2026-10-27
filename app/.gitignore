@@ -51,3 +51,6 @@ yarn-error.*
 .env
 .env.*
 !.env.example
+
+# local build tarballs
+*.tar.gz

@@ -10,7 +10,7 @@ import { PublicKey } from '@solana/web3.js';
 import { useEffect, useState } from 'react';
 import { Linking, Modal, Platform, StyleSheet, TextInput, View } from 'react-native';
 import { create } from 'zustand';
-import { short } from '../chain/light';
+import { PLATFORM_FEE_BPS, short } from '../chain/light';
 import { COLORS } from '../game/constants';
 import { useGame } from '../game/store';
 import { cleanCode, openPairChannel, parseTvUrl, perSpotLamports, prettyCode, readRequest, TV_SPOTS, type PairChannel, type PairRequest } from '../tv/link';
@@ -170,6 +170,7 @@ function Body() {
         <Line k="Rounds" v={`${req.rounds} × ${sol(perRound)} SOL`} />
         <Line k="Spots" v="All 25" />
         <Line k="Network fee" v="0.00001 SOL / round" />
+        <Line k={`Gali fee (${Number(PLATFORM_FEE_BPS) / 100}%)`} v={`${sol((perRound * req.rounds * Number(PLATFORM_FEE_BPS)) / 10_000)} SOL`} />
         <Line k="TV fee float (once)" v="up to 0.002 SOL" />
         <T v="muted" style={{ fontSize: 12, lineHeight: 18, marginTop: 8 }}>
           {"Your SOL sits in ORE's autopilot, not on the TV. The TV can only press deploy; it can't move your SOL. Stop any time to get the unused SOL back."}

@@ -12,7 +12,7 @@ const entry = path.join(os.tmpdir(), 'gali-brawl-entry.ts');
 const src = path.join(__dirname, '../src/game');
 fs.writeFileSync(entry, `export * from ${JSON.stringify(path.join(src, 'brawl'))};\nexport { joinLobby, publishLobbyMe, useLobby } from ${JSON.stringify(path.join(src, 'lobby'))};\n`);
 const S = (f) => path.join(__dirname, 'stubs', f);
-const plugin = `{name:'stub',setup(b){b.onResolve({filter:/\\.\\/(world|storage|username)$/},a=>({path:{world:${JSON.stringify(S('world.ts'))},storage:${JSON.stringify(S('storage.ts'))},username:${JSON.stringify(S('username.ts'))}}[a.path.slice(2)]}))}}`;
+const plugin = `{name:'stub',setup(b){b.onResolve({filter:/(^|\\/)sfx$/},()=>({path:${JSON.stringify(S('sfx.ts'))}}));b.onResolve({filter:/\\.\\/(world|storage|username)$/},a=>({path:{world:${JSON.stringify(S('world.ts'))},storage:${JSON.stringify(S('storage.ts'))},username:${JSON.stringify(S('username.ts'))}}[a.path.slice(2)]}))}}`;
 const script = `require(${JSON.stringify(require.resolve('esbuild', { paths: [path.join(__dirname, '..')] }))}).build({entryPoints:[${JSON.stringify(entry)}],bundle:true,platform:'node',format:'cjs',outfile:${JSON.stringify(out)},nodePaths:[${JSON.stringify(path.join(__dirname, '../node_modules'))}],logLevel:'error',plugins:[${plugin}]})`;
 fs.writeFileSync(out + '.build.cjs', script);
 execFileSync(process.execPath, [out + '.build.cjs'], { stdio: 'inherit' });

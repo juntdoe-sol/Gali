@@ -19,6 +19,8 @@ import { draw, has, makeCanvas, ctx2d, rect, sprite, text, textCentered, textWid
 import { drawMiner, drawPet, frameAt, lampOf, stepBody, type Body , drawDancer, isDance } from './actors';
 import { Particles } from './particles';
 import { Sky } from './sky';
+import { drawPumpkin, flicker, PUMPKIN_LIGHT } from './hollow';
+import { IS_HOLLOW } from '../game/season';
 import type { BrawlSnap, Look, Pose } from './types';
 import { drawHp, drawKo, drawShield, FightFx, hitFlash, jumpLift, koAge, pickTarget, swingTilt } from './brawlfx';
 import { FLAG_H, FLAG_W, paintFlag, ARENA_FLAGS, ARENA_TORCHES, paintColosseum, paintPotw, paintSign, paintSmash, POTW_H, POTW_W, paintSolBase, paintSolLogo, SIGN_H, SIGN_W, SMASH_COLORS, SMASH_DIM, SOL_BASE, SOL_LOGO } from './lobbyArt';
@@ -1575,6 +1577,15 @@ export class LobbyEngine {
       } else this.tapMark = null;
     }
 
+    // Hollow Night: a jack-o'-lantern at the foot of every lamp
+    if (IS_HOLLOW) {
+      m.lamps.forEach(([lx, ly], i) => {
+        const X = sx(lx * LT + 17), Y = sy(ly * LT + 14);
+        if (X < -60 || X > W + 60 || Y < -60 || Y > H + 60) return;
+        drawPumpkin(c, X, Y, z, now, i);
+        lights.push({ x: X * dpr, y: (Y - 4 * z) * dpr, r: 34 * z * dpr, c: PUMPKIN_LIGHT, k: flicker(now, i) });
+      });
+    }
     // night: lamps, windows, the cave mouth, the fountain
     for (const [lx, ly] of m.lamps) {
       const X = sx(lx * LT + 8);
@@ -1591,6 +1602,7 @@ export class LobbyEngine {
     for (const cl of this.sky.clouds) c.drawImage(cl.cv, Math.round((ox + cl.x * CLOUD_KX * z) * dpr), Math.round((oy + cl.y * CLOUD_KY * z) * dpr), cl.w * CLOUD_S * z * dpr, cl.cv.height * CLOUD_S * z * dpr);
     c.globalAlpha = 1;
     this.sky.drawRain(c, this.canvas.width, this.canvas.height, Math.max(1, Math.round(dpr)));
+    this.sky.drawHollow(c, this.canvas.width, this.canvas.height, now, dpr, { right: (this.opts.right ?? 0) * dpr, top: (this.opts.top ?? 0) * dpr });
     if (this.sky.lightning > 0.3) {
       c.fillStyle = `rgba(255,255,255,${(this.sky.lightning - 0.3) * 0.5})`;
       c.fillRect(0, 0, this.canvas.width, this.canvas.height);

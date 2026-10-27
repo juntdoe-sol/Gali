@@ -14,6 +14,7 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import { COLORS } from './game/constants';
 import { oreLive } from './chain/light';
 import { initAudio } from './game/sfx';
+import { startSoundscape } from './game/soundscape';
 import { useGame } from './game/store';
 import { fetchMiner, reportMiner } from './game/ranks';
 import { useName } from './game/username';
@@ -38,6 +39,7 @@ import { LobbyBack, LobbyScreen, SharedChat } from './ui/Lobby';
 import { useLobby } from './game/lobby';
 import { useCave } from './game/caveStore';
 import { useArcade } from './game/arcade';
+import { HollowSplash } from './ui/Season';
 
 
 // lets browser tests watch the game state
@@ -94,10 +96,12 @@ function Game() {
       const unlock = () => {
         initAudio();
         window.removeEventListener('pointerdown', unlock, true);
+        window.removeEventListener('keydown', unlock, true);
       };
       window.addEventListener('pointerdown', unlock, true);
+      window.addEventListener('keydown', unlock, true);
     } else initAudio();
-    void useGame.getState().boot();
+    void useGame.getState().boot().then(() => startSoundscape());
     // Check this wallet in on the miner ranks whenever its level, XP or points change (throttled)
     const checkIn = () => {
       const g = useGame.getState();
@@ -270,6 +274,7 @@ function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTa
         <GearReveal />
         <SharedChat />
         <LobbyScreen onMarket={() => setSheet('gear')} sheet={sheet} onTab={setSheet} />
+        <HollowSplash />
         <Sheet tab={sheet} onTab={setSheet} />
       </>}
         <Toasts />
