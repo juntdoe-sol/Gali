@@ -132,6 +132,11 @@ impl OreRound {
     /// The account is only accepted once it has settled: an all-zero entropy
     /// value means the draw has not happened, and awarding anything from that
     /// would be awarding from a result nobody knows yet.
+    ///
+    /// An all-0xFF entropy is ORE's marker for a round it could not draw and
+    /// refunded instead. ORE's own `Round::rng` returns `None` for it, so no
+    /// square wins and nobody is paid; this mirrors that by loading the round
+    /// with `winning_square: None`, which every caller treats as "no winner".
     pub fn load(info: &AccountInfo<'_>, round_id: u64) -> Result<Self> {
         let (expected, _) = Pubkey::find_program_address(
             &[ORE_ROUND_SEED, &round_id.to_le_bytes()],
@@ -144,15 +149,7 @@ impl OreRound {
 
         let entropy = &data[DISC + round_at::SLOT_HASH..DISC + round_at::SLOT_HASH + 32];
         require!(entropy.iter().any(|b| *b != 0), GaliError::OreRoundUnsettled);
-
-        // ORE picks the square by xoring the four words of the entropy, mod 25.
-        let mut rng = 0u64;
-        for chunk in entropy.chunks_exact(8) {
-            let mut w = [0u8; 8];
-            w.copy_from_slice(chunk);
-            rng ^= u64::from_le_bytes(w);
-        }
-        let square = (rng % 25) as usize;
+        let square = winning_square_from(entropy);
 
         // Range checks: if ORE moves a field, these trip before a misread value pays anything.
         let expires_at = u64_at(&data, round_at::EXPIRES_AT);
@@ -168,7 +165,7 @@ impl OreRound {
         Ok(Self {
             id,
             deployed: squares_at(&data, round_at::DEPLOYED),
-            winning_square: Some(square),
+            winning_square: square,
             split: top_miner == ORE_SPLIT,
             motherlode,
             expires_at,
@@ -229,17 +226,64 @@ pub fn board_round_id(info: &AccountInfo<'_>) -> Result<u64> {
     Ok(u64_at(&data, board_at::ROUND_ID))
 }
 
-/// A miner's share of the winning square, in basis points of that square's total.
-///
-/// This is what Gali's SKR motherlode bonus is paid on, so that the SKR follows
-/// exactly the proportions ORE used for the ORE.
-pub fn winning_share_bps(round: &OreRound, miner: &OreMiner) -> u64 {
-    let Some(square) = round.winning_square else {
-        return 0;
-    };
-    let total = round.deployed[square];
-    if total == 0 {
-        return 0;
+/// The square ORE's entropy picks, exactly as ORE's `Round::rng` and
+/// `Round::winning_square` do: `None` for an all-zero (undrawn) or all-0xFF
+/// (refunded) value, otherwise the xor of the four little-endian words, mod 25.
+pub fn winning_square_from(entropy: &[u8]) -> Option<usize> {
+    if entropy.len() != 32 || entropy.iter().all(|b| *b == 0) || entropy.iter().all(|b| *b == u8::MAX) {
+        return None;
     }
-    ((miner.deployed[square] as u128 * 10_000u128) / total as u128) as u64
+    let mut rng = 0u64;
+    for chunk in entropy.chunks_exact(8) {
+        let mut w = [0u8; 8];
+        w.copy_from_slice(chunk);
+        rng ^= u64::from_le_bytes(w);
+    }
+    Some((rng % 25) as usize)
+}
+
+/// A miner's stake on the winning square and that square's total, as
+/// `(stake, square_total)`, or `None` if the round has no winner or the miner
+/// was not on it.
+///
+/// This is what Gali's jackpot is paid on, as the exact fraction
+/// `stake / square_total`, so the SKR and ORE follow the proportions ORE used for
+/// its own motherlode. No rounding to basis points: a dust stake still gets its
+/// exact (floored) share of the snapshot.
+pub fn winning_stake(round: &OreRound, miner: &OreMiner) -> Option<(u64, u64)> {
+    let square = round.winning_square?;
+    let total = round.deployed[square];
+    let stake = miner.deployed[square];
+    if total == 0 || stake == 0 {
+        return None;
+    }
+    // A miner's slice of a square can never exceed the square; clamp so a
+    // malformed account cannot pay more than the whole snapshot.
+    Some((stake.min(total), total))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entropy(words: [u64; 4]) -> Vec<u8> {
+        words.iter().flat_map(|w| w.to_le_bytes()).collect()
+    }
+
+    #[test]
+    fn undrawn_and_refunded_rounds_have_no_square() {
+        assert_eq!(winning_square_from(&[0u8; 32]), None);
+        assert_eq!(winning_square_from(&[0xFFu8; 32]), None);
+    }
+
+    #[test]
+    fn square_is_xor_of_words_mod_25() {
+        assert_eq!(winning_square_from(&entropy([7, 0, 0, 0])), Some(7));
+        assert_eq!(winning_square_from(&entropy([25, 0, 0, 0])), Some(0));
+        assert_eq!(winning_square_from(&entropy([3, 5, 0, 0])), Some((3 ^ 5) % 25));
+        // All 0xFF in three words only is a real draw, not the refund marker.
+        let mut e = vec![0xFFu8; 32];
+        e[31] = 0xFE;
+        assert!(winning_square_from(&e).is_some());
+    }
 }

@@ -347,7 +347,7 @@ const FIELDS: { key: keyof Form; label: string; unit: string; hint: string; whol
   { key: 'boostTier2Skr', label: '1.5x boost at', unit: 'SKR staked', hint: 'At least the 1.25x level, or 0 for off.' },
   { key: 'boostTier1Ore', label: '1.25x boost at', unit: 'ORE staked', hint: 'The better of the SKR and ORE boosts applies; they do not stack.' },
   { key: 'boostTier2Ore', label: '1.5x boost at', unit: 'ORE staked', hint: 'At least the 1.25x level, or 0 for off.' },
-  { key: 'priceMaxAgeSecs', label: 'Price max age', unit: 'seconds', hint: 'Gear sales stop when the token prices are older than this. 0 turns the check off (test validators only).', whole: true, max: U32_MAX },
+  { key: 'priceMaxAgeSecs', label: 'Price max age', unit: 'seconds', hint: 'Gear sales stop when the token prices are older than this. Must be more than 0.', whole: true, max: U32_MAX },
 ];
 
 /** The fields that differ from the chain, as a ConfigChange, plus anything that makes them invalid. */

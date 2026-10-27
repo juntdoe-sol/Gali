@@ -80,6 +80,21 @@ describe('gali on ORE', () => {
 
   const balance = async (ata: PublicKey) => (await getAccount(conn, ata)).amount;
 
+  /** Must match RELEASE_AFTER_ROUNDS in the program. */
+  const RELEASE_AFTER_ROUNDS = 10_000;
+  /** A price max age long enough that no test run goes stale by accident (the program refuses 0). */
+  const LONG_MAX_AGE = 10 * 365 * 86_400;
+
+  /** What the program charges for `item`: usd_micro * 10^decimals / rate_micro, floored. */
+  const priceOf = (item: number, rateMicro: number, decimals: number) =>
+    (BigInt(GEAR_USD[item]) * 10n ** BigInt(decimals)) / BigInt(rateMicro);
+
+  /** SKR and ORE already promised to snapshotted jackpots. */
+  const reserved = async () => {
+    const c = await acc.config.fetch(config);
+    return { skr: BigInt(c.skrReserved.toString()), ore: BigInt(c.oreReserved.toString()) };
+  };
+
   /** The Gali events a confirmed transaction emitted, by name. */
   const eventsOf = async (sig: string) => {
     await conn.confirmTransaction(sig, 'confirmed');
@@ -172,9 +187,10 @@ describe('gali on ORE', () => {
       })
       .rpc();
 
-  const buySkr = (kp: Keypair, ata: PublicKey, item: number) =>
+  /** Defaults the most the buyer accepts to the current price, so the shop tests are unaffected. */
+  const buySkr = (kp: Keypair, ata: PublicKey, item: number, maxPrice?: bigint) =>
     program.methods
-      .buyGear(item)
+      .buyGear(item, new BN((maxPrice ?? priceOf(item, SKR_MICRO, SKR_DECIMALS)).toString()))
       .accountsStrict({
         owner: kp.publicKey,
         config,
@@ -207,7 +223,7 @@ describe('gali on ORE', () => {
         gearPricesUsd: GEAR_USD.map((v) => new BN(v)),
         skrPriceMicro: new BN(rates.skr),
         orePriceMicro: new BN(rates.ore),
-        priceMaxAgeSecs: 0,
+        priceMaxAgeSecs: LONG_MAX_AGE,
         motherlodePoolBps: 7_000,
         oreMotherlodeBps: 5_000,
       })
@@ -316,7 +332,7 @@ describe('gali on ORE', () => {
       const before = await balance(oreAta);
 
       await program.methods
-        .buyGearOre(1)
+        .buyGearOre(1, new BN(priceOf(1, ORE_MICRO, ORE_DECIMALS).toString()))
         .accountsStrict({
           owner: kp.publicKey,
           config,
@@ -363,9 +379,90 @@ describe('gali on ORE', () => {
       await buySkr(kp, skrAta, 2); // refreshing re-opens it
 
       await program.methods
-        .updateConfig(configUpdate({ priceMaxAgeSecs: 0 }) as any)
+        .updateConfig(configUpdate({ priceMaxAgeSecs: LONG_MAX_AGE }) as any)
         .accountsStrict({ authority: admin.publicKey, config })
         .rpc();
+    });
+
+    it('refuses to turn the staleness check off', async () => {
+      try {
+        await program.methods
+          .updateConfig(configUpdate({ priceMaxAgeSecs: 0 }) as any)
+          .accountsStrict({ authority: admin.publicKey, config })
+          .rpc();
+        expect.fail('a zero max age would let a forgotten rate sell gear forever');
+      } catch (e) {
+        expect(String(e)).to.match(/BadConfig/);
+      }
+    });
+
+    it('refuses a sale priced above the most the buyer said they would pay', async () => {
+      // Item 2, since every player starts out owning item 0 (the starter pickaxe).
+      const { kp, skrAta, oreAta } = await fundedPlayer();
+      const skrPrice = priceOf(2, SKR_MICRO, SKR_DECIMALS);
+      const before = await balance(skrAta);
+      try {
+        await buySkr(kp, skrAta, 2, skrPrice - 1n);
+        expect.fail('a price one unit above max_price should be refused');
+      } catch (e) {
+        expect(String(e)).to.match(/PriceAboveMax/);
+      }
+      expect(await balance(skrAta)).to.equal(before);
+
+      const orePrice = priceOf(2, ORE_MICRO, ORE_DECIMALS);
+      try {
+        await program.methods
+          .buyGearOre(2, new BN((orePrice - 1n).toString()))
+          .accountsStrict({
+            owner: kp.publicKey,
+            config,
+            player: playerPda(kp.publicKey),
+            oreMint,
+            userAta: oreAta,
+            oreTreasury,
+            oreMotherlode,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([kp])
+          .rpc();
+        expect.fail('the ORE path should refuse the same way');
+      } catch (e) {
+        expect(String(e)).to.match(/PriceAboveMax/);
+      }
+
+      // Exactly the price, or more slack than needed, goes through and charges the real price.
+      await buySkr(kp, skrAta, 2, skrPrice + skrPrice / 50n);
+      expect(before - (await balance(skrAta))).to.equal(skrPrice);
+    });
+
+    it('refuses a rate change of more than 50% in one update', async () => {
+      const setPrices = (skr: number, oreRate: number) =>
+        program.methods
+          .setTokenPrices(new BN(skr), new BN(oreRate))
+          .accountsStrict({ authority: admin.publicKey, config })
+          .rpc();
+      for (const [skr, oreRate] of [
+        [SKR_MICRO * 2, ORE_MICRO],
+        [SKR_MICRO, Math.floor(ORE_MICRO / 2) - 1],
+        [Math.floor((SKR_MICRO * 3) / 2) + 1, ORE_MICRO],
+      ]) {
+        try {
+          await setPrices(skr, oreRate);
+          expect.fail(`a move to ${skr}/${oreRate} should be capped`);
+        } catch (e) {
+          expect(String(e)).to.match(/PriceMoveTooLarge/);
+        }
+      }
+      // Exactly +50% and exactly -50% are allowed; then back to the test rates.
+      await setPrices((SKR_MICRO * 3) / 2, ORE_MICRO / 2);
+      let c = await acc.config.fetch(config);
+      expect(c.skrPriceMicro.toNumber()).to.equal((SKR_MICRO * 3) / 2);
+      expect(c.orePriceMicro.toNumber()).to.equal(ORE_MICRO / 2);
+      await setPrices(SKR_MICRO, ORE_MICRO / 2 + ORE_MICRO / 4);
+      await setPrices(SKR_MICRO, ORE_MICRO);
+      c = await acc.config.fetch(config);
+      expect(c.skrPriceMicro.toNumber()).to.equal(SKR_MICRO);
+      expect(c.orePriceMicro.toNumber()).to.equal(ORE_MICRO);
     });
   });
 
@@ -676,8 +773,10 @@ describe('gali on ORE', () => {
       b[9] = 1 * LAMPORTS_PER_SOL;
       await setMiner({ authority: small.kp.publicKey, roundId, deployed: b });
 
-      const poolBefore = await balance(motherlode);
-      const orePoolBefore = await balance(oreMotherlode);
+      // The snapshot is the part of each pool no other jackpot has already promised.
+      const r0 = await reserved();
+      const poolBefore = (await balance(motherlode)) - r0.skr;
+      const orePoolBefore = (await balance(oreMotherlode)) - r0.ore;
       const bigBefore = await balance(big.skrAta);
       const smallBefore = await balance(small.skrAta);
       const bigOreBefore = await balance(big.oreAta);
@@ -689,12 +788,11 @@ describe('gali on ORE', () => {
 
       const bigGot = (await balance(big.skrAta)) - bigBefore;
       const smallGot = (await balance(small.skrAta)) - smallBefore;
-      expect(bigGot).to.equal((poolBefore * 7_500n) / 10_000n);
-      expect(smallGot).to.equal((poolBefore * 2_500n) / 10_000n);
-      expect(bigGot).to.equal(smallGot * 3n);
+      expect(bigGot).to.equal((poolBefore * 3n) / 4n);
+      expect(smallGot).to.equal(poolBefore / 4n);
       // One hit, both assets, the same share of the square.
       const bigOreGot = (await balance(big.oreAta)) - bigOreBefore;
-      expect(bigOreGot).to.equal((orePoolBefore * 7_500n) / 10_000n);
+      expect(bigOreGot).to.equal((orePoolBefore * 3n) / 4n);
     });
 
     it('pays nothing on a round where ORE did not hit its motherlode', async () => {
@@ -779,49 +877,154 @@ describe('gali on ORE', () => {
       const oreAta = getAssociatedTokenAddressSync(oreMint, kp.publicKey);
       expect(await conn.getAccountInfo(skrAta)).to.equal(null);
       expect(await conn.getAccountInfo(oreAta)).to.equal(null);
-      const skrPool = await balance(motherlode);
-      const orePool = await balance(oreMotherlode);
+      const r0 = await reserved();
+      const skrPool = (await balance(motherlode)) - r0.skr;
+      const orePool = (await balance(oreMotherlode)) - r0.ore;
 
       await claim(kp, skrAta, oreAta, roundId);
-      // Sole winner on the square, so the whole of both pools.
+      // Sole winner on the square, so the whole of both pools' unpromised balance.
       expect(await balance(skrAta)).to.equal(skrPool);
       expect(await balance(oreAta)).to.equal(orePool);
     });
 
-    it('never pays out more than 10,000 bps or the pools, and leaves rounding dust in them', async () => {
-      // 1, 2 and 4 SOL on a 7 SOL square: 1428 + 2857 + 5714 = 9999 bps once floored.
-      const players = [await fundedPlayer(), await fundedPlayer(), await fundedPlayer()];
-      const lamports = [1, 2, 4].map((x) => x * LAMPORTS_PER_SOL);
+    it('pays each stake its exact fraction of the square, never more than the snapshot', async () => {
+      // 1, 2 and 4 SOL on a 7 SOL square, plus a 1-lamport dust stake that bps
+      // rounding would have floored to nothing.
+      const players = [await fundedPlayer(), await fundedPlayer(), await fundedPlayer(), await fundedPlayer()];
+      const lamports = [1 * LAMPORTS_PER_SOL, 2 * LAMPORTS_PER_SOL, 4 * LAMPORTS_PER_SOL, 1];
+      const total = BigInt(lamports.reduce((a, b) => a + b, 0));
       const roundId = 2_050;
-      // Floored shares leave 1 bp unpaid; the odd ORE amount also floors below a unit.
       await fundJackpot(10_007);
       await fundOrePool(whole(3, ORE_DECIMALS) + 7n);
       await motherlodeRound(roundId, 16, players.map((p) => p.kp.publicKey), lamports);
 
-      const skrSnap = await balance(motherlode);
-      const oreSnap = await balance(oreMotherlode);
+      const r0 = await reserved();
+      const poolBefore = await balance(motherlode);
+      const orePoolBefore = await balance(oreMotherlode);
+      const skrSnap = poolBefore - r0.skr;
+      const oreSnap = orePoolBefore - r0.ore;
       let skrPaid = 0n;
       let orePaid = 0n;
+      const got: bigint[] = [];
       for (const p of players) {
         const skrBefore = await balance(p.skrAta);
         const oreBefore = await balance(p.oreAta);
         await claim(p.kp, p.skrAta, p.oreAta, roundId);
-        skrPaid += (await balance(p.skrAta)) - skrBefore;
+        const g = (await balance(p.skrAta)) - skrBefore;
+        got.push(g);
+        skrPaid += g;
         orePaid += (await balance(p.oreAta)) - oreBefore;
       }
 
-      const jackpot = await acc.jackpot.fetch(jackpotPda(roundId));
-      expect(jackpot.bpsPaid.toNumber()).to.equal(9_999);
-      expect(jackpot.bpsPaid.toNumber()).to.be.at.most(10_000);
-      const expectSkr = [1_428n, 2_857n, 5_714n].reduce((a, bps) => a + (skrSnap * bps) / 10_000n, 0n);
-      const expectOre = [1_428n, 2_857n, 5_714n].reduce((a, bps) => a + (oreSnap * bps) / 10_000n, 0n);
-      expect(skrPaid).to.equal(expectSkr);
+      lamports.forEach((l, i) => expect(got[i]).to.equal((skrSnap * BigInt(l)) / total));
+      expect(got[3] > 0n).to.equal(true); // the dust stake is paid
+      const expectOre = lamports.reduce((a, l) => a + (oreSnap * BigInt(l)) / total, 0n);
       expect(orePaid).to.equal(expectOre);
-      // Never overdrawn, and what rounding left behind stays in the pools.
-      expect(await balance(motherlode)).to.equal(skrSnap - skrPaid);
-      expect(await balance(oreMotherlode)).to.equal(oreSnap - orePaid);
-      expect(skrSnap - skrPaid > 0n).to.equal(true);
-      expect(oreSnap - orePaid > 0n).to.equal(true);
+
+      const jackpot = await acc.jackpot.fetch(jackpotPda(roundId));
+      expect(BigInt(jackpot.skrSnapshot.toString())).to.equal(skrSnap);
+      expect(BigInt(jackpot.skrPaid.toString())).to.equal(skrPaid);
+      expect(BigInt(jackpot.orePaid.toString())).to.equal(orePaid);
+      expect(skrPaid <= skrSnap).to.equal(true);
+      expect(orePaid <= oreSnap).to.equal(true);
+      // Never overdrawn, and the rounding dust stays reserved until released.
+      expect(await balance(motherlode)).to.equal(poolBefore - skrPaid);
+      expect(await balance(oreMotherlode)).to.equal(orePoolBefore - orePaid);
+      const r1 = await reserved();
+      expect(r1.skr).to.equal(r0.skr + skrSnap - skrPaid);
+      expect(r1.ore).to.equal(r0.ore + oreSnap - orePaid);
+    });
+
+    it('does not let a second jackpot snapshot tokens an earlier one has promised', async () => {
+      const a1 = await fundedPlayer();
+      const a2 = await fundedPlayer();
+      const b = await fundedPlayer();
+      const first = 2_060;
+      const second = 2_070;
+      await fundJackpot(20_000);
+
+      // First hit: two equal stakes. Only one claims before the second hit lands.
+      await motherlodeRound(first, 17, [a1.kp.publicKey, a2.kp.publicKey], [LAMPORTS_PER_SOL, LAMPORTS_PER_SOL]);
+      const r0 = await reserved();
+      const firstSnap = (await balance(motherlode)) - r0.skr;
+      const a1Before = await balance(a1.skrAta);
+      await claim(a1.kp, a1.skrAta, a1.oreAta, first);
+      const a1Got = (await balance(a1.skrAta)) - a1Before;
+      expect(a1Got).to.equal(firstSnap / 2n);
+
+      // Gear sales top the pool up, then a second motherlode hits with a sole winner.
+      await fundJackpot(3_000);
+      await motherlodeRound(second, 18, [b.kp.publicKey], [LAMPORTS_PER_SOL]);
+      const r1 = await reserved();
+      const pool = await balance(motherlode);
+      // a2's half of the first jackpot is still promised, so it is not in the second snapshot.
+      expect(r1.skr >= firstSnap - a1Got).to.equal(true);
+      const secondSnap = pool - r1.skr;
+      const bBefore = await balance(b.skrAta);
+      await claim(b.kp, b.skrAta, b.oreAta, second);
+      expect((await balance(b.skrAta)) - bBefore).to.equal(secondSnap);
+
+      // The earlier winner who claimed late is paid in full.
+      const a2Before = await balance(a2.skrAta);
+      await claim(a2.kp, a2.skrAta, a2.oreAta, first);
+      expect((await balance(a2.skrAta)) - a2Before).to.equal(firstSnap / 2n);
+      const r2 = await reserved();
+      expect(r2.skr <= (await balance(motherlode))).to.equal(true);
+    });
+
+    it('releases an unclaimed jackpot once, and only after the delay', async () => {
+      const claimer = await fundedPlayer();
+      const absent = await fundedPlayer();
+      const roundId = 2_080;
+      await fundJackpot(5_000);
+      await motherlodeRound(roundId, 19, [claimer.kp.publicKey, absent.kp.publicKey], [LAMPORTS_PER_SOL, 3 * LAMPORTS_PER_SOL]);
+      await claim(claimer.kp, claimer.skrAta, claimer.oreAta, roundId);
+
+      const release = () =>
+        program.methods
+          .releaseJackpot(new BN(roundId))
+          .accountsStrict({ config, jackpot: jackpotPda(roundId), oreBoard: oreBoardPda() })
+          .rpc();
+
+      // One round short of the delay: still claimable, so still reserved.
+      await setBoard(roundId + RELEASE_AFTER_ROUNDS - 1);
+      try {
+        await release();
+        expect.fail('a jackpot should stay reserved until the delay has passed');
+      } catch (e) {
+        expect(String(e)).to.match(/ReleaseTooEarly/);
+      }
+
+      const jp = await acc.jackpot.fetch(jackpotPda(roundId));
+      const unpaidSkr = BigInt(jp.skrSnapshot.toString()) - BigInt(jp.skrPaid.toString());
+      const unpaidOre = BigInt(jp.oreSnapshot.toString()) - BigInt(jp.orePaid.toString());
+      expect(unpaidSkr > 0n).to.equal(true);
+      const before = await reserved();
+      const poolBefore = await balance(motherlode);
+
+      await setBoard(roundId + RELEASE_AFTER_ROUNDS);
+      await release();
+      const after = await reserved();
+      expect(after.skr).to.equal(before.skr - unpaidSkr);
+      expect(after.ore).to.equal(before.ore - unpaidOre);
+      expect(await balance(motherlode)).to.equal(poolBefore); // bookkeeping only, no tokens move
+      expect((await acc.jackpot.fetch(jackpotPda(roundId))).released).to.equal(true);
+
+      try {
+        await release();
+        expect.fail('a jackpot should release once');
+      } catch (e) {
+        expect(String(e)).to.match(/AlreadyReleased/);
+      }
+      expect((await reserved()).skr).to.equal(after.skr);
+
+      // The winner who never showed up can no longer claim what was released.
+      try {
+        await claim(absent.kp, absent.skrAta, absent.oreAta, roundId);
+        expect.fail('a released jackpot should not pay');
+      } catch (e) {
+        expect(String(e)).to.match(/ClaimWindowClosed/);
+      }
     });
   });
 
