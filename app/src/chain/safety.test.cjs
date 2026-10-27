@@ -133,7 +133,7 @@ test('mainnet never creates or funds insecure sessions; existing key remains rec
   assert.equal((await h.c.loadSession(A.publicKey)).publicKey.toBase58(), B.publicKey.toBase58());
 });
 function store(board = {}, chainOverride = {}) {
-  const constants = load('../game/constants.ts');
+  const constants = load('../game/constants.ts', { './season': load('../game/season.ts') });
   const pot = load('../game/pot.ts', { './constants': constants });
   const sounds = [];
   const c = { ...client().c, ...chainOverride };
@@ -141,7 +141,7 @@ function store(board = {}, chainOverride = {}) {
     './lobby': { announce() {}, announceXp() {} }, '../chain/lazy': { loadChain: async () => c, loadBoard: async () => board, loadOreTx: async () => ({}) },
     '../chain/light': { oreLive: true, chainReady: false, onChainMode: true, NOTHING_CLAIMABLE: { sol: 0, unrefined: 0, refined: 0, fee: 0 }, short: x => x, isRateLimited: () => false },
     './constants': constants, './pot': pot,
-    './sfx': { play: x => sounds.push(x), setMuted() {}, haptic: { win() {}, thud() {}, tap() {}, heavy() {} } },
+    './sfx': { play: x => sounds.push(x), announce() {}, setMuted() {}, haptic: { win() {}, thud() {}, tap() {}, heavy() {} } },
     './storage': { saveJson() {}, loadJson: async (_, fallback) => fallback },
   }, { setTimeout: () => 0 });
   return { ...s, sounds };

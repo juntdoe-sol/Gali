@@ -2,7 +2,7 @@
  * Hollow Night in the interface: a flickering pixel jack-o'-lantern, the season badge with its countdown,
  * cobwebs for window corners, and the once-a-season welcome. Looks only: nothing here changes a number.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { Modal, StyleSheet, View } from 'react-native';
 import { COLORS } from '../game/constants';
 import { HOLLOW, IS_HOLLOW, seasonLeft } from '../game/season';
@@ -16,7 +16,7 @@ export function PixelArt({ rows, palette, px }: { rows: string[]; palette: Recor
   return (
     <View style={{ width: w * px, height: rows.length * px }} pointerEvents="none">
       {rows.flatMap((row, y) => {
-        const runs: JSX.Element[] = [];
+        const runs: ReactElement[] = [];
         let x = 0;
         while (x < w) {
           const ch = row[x];
