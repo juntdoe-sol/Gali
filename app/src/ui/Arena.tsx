@@ -241,9 +241,11 @@ export function ArenaScreen() {
   if (!open) return null;
   // the landscape Android app is a touch screen: it keeps the phone's stick and skill wheel
   const desk = L.desktop && !LANDSCAPE_APP;
-  const barTop = insets.top + 64;
-  // PC: the skill bar sits under the pit. Phone: the buttons float over it, like a MOBA.
-  const barBottom = desk ? insets.bottom + 100 : insets.bottom + 8;
+  // portrait phone: the top bar wraps to two rows and the skill wheel needs its own strip, so the hall sits between them
+  const portrait = !desk && L.h > L.w * 1.2;
+  const barTop = insets.top + (portrait ? 112 : 64);
+  // PC: the skill bar sits under the pit. Landscape phone: the buttons float over it, like a MOBA.
+  const barBottom = desk ? insets.bottom + 100 : portrait ? insets.bottom + 270 : insets.bottom + 8;
   return (
     <Modal visible transparent={false} animationType="fade" statusBarTranslucent onRequestClose={() => useArena.getState().close()}>
       <View ref={zw.wrap} collapsable={false} onLayout={zw.onLayout} style={[styles.screen, LANDSCAPE_APP && { marginLeft: insets.left, marginRight: insets.right }]}>
@@ -682,7 +684,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#120c1a' },
   top: { position: 'absolute', left: 12, right: 12, flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   modeBox: { paddingHorizontal: 12, paddingVertical: 6, flexShrink: 1, minWidth: 180 },
-  topBtns: { flexDirection: 'row', gap: 8, marginLeft: 'auto' },
+  topBtns: { flexDirection: 'row', gap: 8, marginLeft: 'auto', flexWrap: 'wrap', flexShrink: 1 },
   controls: { position: 'absolute', left: 12, right: 12, gap: 8, alignItems: 'flex-end' },
   ctrlRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' },
   watch: { padding: 10, maxWidth: 420 },

@@ -7,6 +7,7 @@
  * sees the sun go down. Night is moody, never so dark a claim can't be read.
  */
 import { makeCanvas, ctx2d, type Ctx } from './art';
+import { IS_HOLLOW } from '../game/season';
 
 export const DAY_MS = 8 * 60_000;
 
@@ -41,6 +42,13 @@ export class Sky {
   wind = 0.4;
   private drops: { x: number; y: number; v: number; l: number }[] = [];
   lightning = 0;
+  // Hollow Night, in screen fractions: wisps drift up, bats cross in flocks, a ghost wanders now and then
+  private wisps: { x: number; y: number; v: number; ph: number; c: string; r: number }[] = [];
+  private bats: { x: number; y: number; v: number; ph: number; s: number }[] = [];
+  private nextBats = Date.now() + 4000;
+  private ghost: { x: number; y: number; dir: number; at: number } | null = null;
+  private nextGhost = Date.now() + 9000;
+  private fog: HTMLCanvasElement | null = null;
 
   constructor() {
     this.light = makeCanvas(8, 8);
@@ -57,6 +65,8 @@ export class Sky {
   }
   /** 0 in full day, 1 in full night */
   get night() {
+    // Hollow Night: the sun never comes up
+    if (IS_HOLLOW) return 1;
     const d = this.day;
     if (d < 0.22 || d > 0.82) return 1;
     if (d < 0.32) return 1 - (d - 0.22) / 0.1;
@@ -64,6 +74,14 @@ export class Sky {
     return 0;
   }
   ambient(): RGB {
+    if (IS_HOLLOW) {
+      // a purple moonlit night that slowly breathes, bright enough to read every spot
+      const br = 0.5 + 0.5 * Math.sin(Date.now() / 9000);
+      let h: RGB = mix([104, 84, 160], [126, 104, 178], br);
+      h = mix(h, [120, 120, 150], this.rain * 0.4);
+      if (this.lightning > 0) h = mix(h, [230, 220, 255], this.lightning);
+      return h;
+    }
     const d = this.day;
     let i = 0;
     while (i < KEYS.length - 2 && KEYS[i + 1][0] <= d) i++;
@@ -110,6 +128,7 @@ export class Sky {
   }
 
   update(dtS: number, now: number, quality: number) {
+    if (IS_HOLLOW) this.updateHollow(dtS, now, quality);
     // weather: mostly fair, with passing showers
     if (now > this.nextWeather) {
       const roll = Math.random();
@@ -152,6 +171,127 @@ export class Sky {
     c.globalAlpha = fade * (0.72 + this.rain * 0.2) * (1 - n * 0.35);
     for (const cl of this.clouds) c.drawImage(cl.cv, Math.round(ox + cl.x * s), Math.round(oy + cl.y * s), cl.w * s, cl.cv.height * s);
     c.globalAlpha = 1;
+  }
+
+  private updateHollow(dtS: number, now: number, quality: number) {
+    const want = quality ? 22 : 10;
+    while (this.wisps.length < want)
+      this.wisps.push({ x: Math.random(), y: 0.35 + Math.random() * 0.75, v: 0.012 + Math.random() * 0.025, ph: Math.random() * 6.28, c: Math.random() < 0.6 ? '#7dff6a' : '#ff9a2e', r: 0.6 + Math.random() * 0.8 });
+    for (const w of this.wisps) {
+      w.y -= w.v * dtS;
+      w.x += Math.sin(now / 1400 + w.ph) * 0.004 * dtS * 10 + this.wind * 0.002 * dtS;
+      if (w.y < -0.05) { w.y = 1.05; w.x = Math.random(); }
+    }
+    if (now > this.nextBats && this.bats.length === 0) {
+      const n = 4 + Math.floor(Math.random() * 5), y0 = 0.08 + Math.random() * 0.3, dir = Math.random() < 0.5 ? 1 : -1;
+      for (let i = 0; i < n; i++) this.bats.push({ x: dir > 0 ? -0.05 - i * 0.035 : 1.05 + i * 0.035, y: y0 + (Math.random() - 0.5) * 0.08, v: dir * (0.09 + Math.random() * 0.05), ph: Math.random() * 6.28, s: 0.8 + Math.random() * 0.5 });
+      this.nextBats = now + 14_000 + Math.random() * 16_000;
+    }
+    for (const b of this.bats) { b.x += b.v * dtS; b.y += Math.sin(now / 300 + b.ph) * 0.0015; }
+    this.bats = this.bats.filter((b) => b.x > -0.2 && b.x < 1.2);
+    if (!this.ghost && now > this.nextGhost) {
+      const dir = Math.random() < 0.5 ? 1 : -1;
+      this.ghost = { x: dir > 0 ? -0.08 : 1.08, y: 0.3 + Math.random() * 0.4, dir, at: now };
+      this.nextGhost = now + 22_000 + Math.random() * 25_000;
+    }
+    if (this.ghost) {
+      this.ghost.x += this.ghost.dir * 0.035 * dtS;
+      if (this.ghost.x < -0.15 || this.ghost.x > 1.15) this.ghost = null;
+    }
+  }
+
+  private fogLayer() {
+    if (this.fog) return this.fog;
+    const f = makeCanvas(256, 64);
+    const g = f.getContext('2d')!;
+    for (let i = 0; i < 26; i++) {
+      const x = Math.random() * 256, y = 20 + Math.random() * 30, r = 18 + Math.random() * 30;
+      const gr = g.createRadialGradient(x, y, 0, x, y, r);
+      gr.addColorStop(0, 'rgba(196,178,255,0.55)');
+      gr.addColorStop(1, 'rgba(196,178,255,0)');
+      g.fillStyle = gr;
+      g.fillRect(x - r, y - r, r * 2, r * 2);
+      // wrap so the layer tiles sideways
+      g.save(); g.translate(x > 128 ? -256 : 256, 0); g.fillRect(x - r, y - r, r * 2, r * 2); g.restore();
+    }
+    this.fog = f;
+    return f;
+  }
+
+  /**
+   * Hollow Night over the scene, in screen pixels: the moon, drifting fog, glowing wisps, bat flocks and the
+   * odd ghost. `px` is the screen pixels per art pixel. Draw after the light pass so it glows.
+   */
+  drawHollow(c: Ctx, W: number, H: number, now: number, px: number, inset: { right?: number; top?: number } = {}) {
+    if (!IS_HOLLOW) return;
+    const P = Math.max(1, Math.round(px * 2));
+    c.save();
+    // the moon, top right of the open view (clear of side panels and top bars), with a halo
+    const mx = W - (inset.right ?? 0) - 70 * P, my = (inset.top ?? 0) + 46 * P, mr = 20 * P;
+    c.globalCompositeOperation = 'lighter';
+    const halo = c.createRadialGradient(mx, my, mr * 0.6, mx, my, mr * 4);
+    halo.addColorStop(0, 'rgba(255,236,190,0.35)');
+    halo.addColorStop(1, 'rgba(255,236,190,0)');
+    c.fillStyle = halo;
+    c.fillRect(mx - mr * 4, my - mr * 4, mr * 8, mr * 8);
+    c.globalCompositeOperation = 'source-over';
+    c.fillStyle = '#fff1c8';
+    for (let yy = -10; yy <= 10; yy++) {
+      const half = Math.round(Math.sqrt(Math.max(0, 100 - yy * yy)));
+      c.fillRect(mx - half * (mr / 10), my + yy * (mr / 10), half * 2 * (mr / 10), Math.ceil(mr / 10));
+    }
+    c.fillStyle = '#e8d6a4';
+    for (const [cx, cy, cr] of [[-4, -3, 3], [3, 2, 2], [-1, 5, 2], [5, -5, 1.5]] as const)
+      c.fillRect(mx + (cx - cr) * (mr / 10), my + (cy - cr) * (mr / 10), cr * 2 * (mr / 10), cr * 2 * (mr / 10));
+    // fog: three slow layers along the lower screen
+    const fog = this.fogLayer();
+    for (let k = 0; k < 3; k++) {
+      const fw = W * (1.1 + k * 0.3), fh = H * (0.18 + k * 0.05);
+      const off = ((now / (60 - k * 15)) * (k % 2 ? -1 : 1) * P) % fw;
+      c.globalAlpha = 0.16 + 0.04 * Math.sin(now / 4000 + k);
+      const y = H * (0.55 + k * 0.15);
+      for (let x = off - fw; x < W + fw; x += fw) c.drawImage(fog, Math.round(x), Math.round(y), Math.ceil(fw), Math.ceil(fh));
+    }
+    c.globalAlpha = 1;
+    // wisps: soft glows with a bright core
+    c.globalCompositeOperation = 'lighter';
+    for (const w of this.wisps) {
+      const X = w.x * W, Y = w.y * H, r = 9 * P * w.r * (0.85 + 0.15 * Math.sin(now / 240 + w.ph));
+      const gr = c.createRadialGradient(X, Y, 0, X, Y, r);
+      gr.addColorStop(0, w.c + 'cc');
+      gr.addColorStop(1, w.c + '00');
+      c.fillStyle = gr;
+      c.fillRect(X - r, Y - r, r * 2, r * 2);
+      c.fillStyle = '#ffffff';
+      c.fillRect(Math.round(X - P / 2), Math.round(Y - P / 2), P, P);
+    }
+    c.globalCompositeOperation = 'source-over';
+    // bats: two-frame flaps
+    c.fillStyle = '#120a1c';
+    for (const b of this.bats) {
+      const X = Math.round(b.x * W), Y = Math.round(b.y * H), q = Math.max(1, Math.round(P * b.s));
+      const up = Math.sin(now / 90 + b.ph) > 0;
+      c.fillRect(X - q, Y - q, q * 2, q * 2); // body
+      c.fillRect(X - q, Y - 2 * q, q * 0.6, q); c.fillRect(X + q * 0.4, Y - 2 * q, q * 0.6, q); // ears
+      if (up) { c.fillRect(X - 4 * q, Y - 2 * q, 3 * q, q); c.fillRect(X + q, Y - 2 * q, 3 * q, q); c.fillRect(X - 5 * q, Y - 3 * q, q, q); c.fillRect(X + 4 * q, Y - 3 * q, q, q); }
+      else { c.fillRect(X - 4 * q, Y, 3 * q, q); c.fillRect(X + q, Y, 3 * q, q); c.fillRect(X - 5 * q, Y + q, q, q); c.fillRect(X + 4 * q, Y + q, q, q); }
+    }
+    // a ghost, wobbling as it drifts, fading in and out
+    if (this.ghost) {
+      const gh = this.ghost, q = P * 1.4;
+      const X = gh.x * W, Y = gh.y * H + Math.sin(now / 500) * 6 * P;
+      const edge = Math.min(1, Math.min(gh.x + 0.1, 1.1 - gh.x) * 5);
+      c.globalAlpha = 0.55 * Math.max(0, edge);
+      const rows = ['..xxxx..', '.xxxxxx.', 'xxoxxoxx', 'xxoxxoxx', 'xxxxxxxx', 'xxxooxxx', 'xxxxxxxx', 'xx.xx.xx'];
+      rows.forEach((row, ry) => [...row].forEach((ch, rx) => {
+        if (ch === '.') return;
+        c.fillStyle = ch === 'o' ? '#1a1030' : '#eef0ff';
+        const fx = gh.dir < 0 ? 7 - rx : rx;
+        c.fillRect(Math.round(X + (fx - 4) * q), Math.round(Y + (ry - 4) * q), Math.ceil(q), Math.ceil(q));
+      }));
+      c.globalAlpha = 1;
+    }
+    c.restore();
   }
 
   drawRain(c: Ctx, W: number, H: number, px: number) {

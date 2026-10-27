@@ -4,13 +4,15 @@ import { COLORS, gearByKey, RARITY_COLOR } from '../game/constants';
 import { fmtSol } from '../game/pot';
 import { GEAR_ICON as PIXEL_ICON } from './gearIcons';
 import { GEAR_ICON } from './icons';
-import { play } from '../game/sfx';
+import { announce, bark, play } from '../game/sfx';
+import { useName } from '../game/username';
 import { chainReady, CLUSTER, LIVE_MAX_ROUND_SOL, oreLive } from '../chain/light';
 import { useGame, type RoundResult } from '../game/store';
 import { Btn, FocusRing, Frame, Kbd, ModalCenter, PixelBox, Scrim, T, TONE, U, Window } from './kit';
 import { PixIcon } from './PixIcon';
 import type { PixName } from './pixIcons';
 import { LANDSCAPE_APP, useLayout } from './layout';
+import { HollowBadge } from './Season';
 
 const isWeb = Platform.OS === 'web';
 
@@ -180,8 +182,14 @@ export function LevelUp() {
   useEffect(() => {
     if (!show) return;
     play('levelup');
+    const say = setTimeout(() => announce('level-up'), 700);
+    const cry = setTimeout(() => bark('levelup', useName.getState().sex === 'f' ? 'f' : 'm'), 1700);
     const id = setTimeout(dismiss, 2800);
-    return () => clearTimeout(id);
+    return () => {
+      clearTimeout(id);
+      clearTimeout(say);
+      clearTimeout(cry);
+    };
   }, [show, dismiss]);
   if (!show) return null;
   return (
@@ -331,7 +339,7 @@ export function LiveNotice() {
       <Scrim>
         <Window title="REAL SOL, REAL ROUNDS" onClose={decline} width={460} accent={COLORS.gold}>
           <Bullet icon="ore" text="With a wallet connected you play live rounds on ORE's board on Solana mainnet with real SOL. ORE keeps 1% of every spot, plus 10% more of spots that miss. Only the gold spot mines ORE." />
-          <Bullet icon="wallet" text={`Your wallet signs every deploy and every claim. Gali takes no cut and never holds your SOL. A round is capped at ${LIVE_MAX_ROUND_SOL} SOL.`} />
+          <Bullet icon="wallet" text={`Your wallet signs every deploy and every claim. Gali never holds your SOL. A round is capped at ${LIVE_MAX_ROUND_SOL} SOL.`} />
           <Bullet icon="warn" text="This is a game of chance with real SOL. Only play with SOL you can afford to lose." muted />
           <Btn kind="skr" label="Got it · connect wallet" onPress={accept} kbd="ENTER" />
           <EnterKey fn={accept} />
@@ -382,6 +390,9 @@ export function WalletGate() {
           <T v="display" style={{ fontSize: desktop ? 22 : 18, textAlign: 'center', color: COLORS.gold, letterSpacing: 2 }}>
             THE ORE MINING GAME
           </T>
+          <View style={{ alignSelf: 'center', marginTop: 8 }}>
+            <HollowBadge />
+          </View>
           <T style={{ textAlign: 'center', marginTop: 6, fontSize: 15, lineHeight: 21, color: COLORS.muted }}>
             Mine ORE in a mini open-world pixel game on Solana.
           </T>

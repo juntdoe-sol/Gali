@@ -1,3 +1,4 @@
+import { IS_HOLLOW } from './season';
 // Mirrors the on-chain config set by scripts/setup-devnet.ts.
 export const GRID = 5;
 export const BLOCKS = GRID * GRID;
@@ -185,3 +186,19 @@ export const COLORS = {
   sol: '#14f195',
   skr: '#c7f284',
 };
+// Hollow Night: the island's colours go purple, gold turns pumpkin, cyan turns ghost green (looks only)
+if (IS_HOLLOW)
+  Object.assign(COLORS, {
+    bg: '#12091f',
+    bg2: 'rgba(30,14,48,0.8)',
+    card: 'rgba(38,18,62,0.7)',
+    card2: 'rgba(58,28,92,0.72)',
+    line: '#5a2f8a',
+    trim: '#ff8a1e',
+    trimHi: '#ffd08a',
+    muted: '#ab9ccf',
+    gold: '#ffa62b',
+    gold2: '#e0561e',
+    teal: '#8dff7a',
+    pink: '#c77dff',
+  });

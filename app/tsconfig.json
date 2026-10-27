@@ -4,5 +4,6 @@
     "strict": true,
     "resolveJsonModule": true,
     "skipLibCheck": true
-  }
+  },
+  "exclude": ["node_modules", "src/tv"]
 }

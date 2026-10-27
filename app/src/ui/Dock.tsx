@@ -1,6 +1,6 @@
 import { layoutNow } from './layout';
 import { useEffect, useState, type ReactNode } from 'react';
-import { Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Modal, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CLUSTER, LIVE_AUTOPILOT_MAX_SOL, LIVE_MAX_ROUND_SOL, REFINING_FEE } from '../chain/light';
 import { BLOCKS, boostFor, COLORS, pointsFor } from '../game/constants';
@@ -8,8 +8,9 @@ import { watchMotion } from '../game/motion';
 import { DEFAULT_SMART, fmtSol, liveReturn, maskOf, randomPick, MIN_SOL_PER_BLOCK, SMART_COUNTS } from '../game/pot';
 import { isLive, isOnChain, soloOf, useGame, type DockTab, type Preset } from '../game/store';
 import { fx } from '../pixel/fx';
+import { play } from '../game/sfx';
 import { useView } from '../pixel/view';
-import { Btn, F, FocusRing, PixelBox, T, Tip, U } from './kit';
+import { Btn, F, FocusRing, ModalCenter, PixelBox, Scrim, T, Tip, U, Window } from './kit';
 import { BAR_H } from './TabBar';
 import { PixIcon } from './PixIcon';
 import type { PixName } from './pixIcons';
@@ -92,7 +93,7 @@ export function Dock({ embedded }: { embedded?: boolean } = {}) {
       <View style={styles.embedded}>
         {head}
         <UnclaimedRow />
-        {tab === 'lite' ? <LitePanel compact={compact} /> : <ProPanel compact={compact} />}
+        {tab === 'lite' ? <DeskLite /> : <DeskPro />}
       </View>
     );
   }
@@ -137,8 +138,17 @@ export function UnclaimedRow() {
   const busy = useGame((s) => s.wallet.busy);
   const claim = useGame((s) => s.claimRewards);
   const fee = useGame((s) => (onChain ? s.wallet.unclaimed.fee : (s.save.practiceUnclaimedSkr ?? 0) * REFINING_FEE));
-  // nothing to claim yet: give the island the room
-  if (sol < 0.00005 && unrefined < 0.005 && refined < 0.005) return null;
+  const holdTipOff = useGame((s) => Boolean(s.save.holdTipOff));
+  const [askHold, setAskHold] = useState(false);
+  // claiming unrefined ORE pays ORE's 10% to everyone still holding: say so, in a fun way, before it happens
+  const claimOre = () => {
+    if (unrefined > 0.0000001 && !holdTipOff) {
+      play('pop');
+      setAskHold(true);
+    } else void claim('skr');
+  };
+  // nothing to claim yet: give the island the room. Any ORE at all shows: one autopilot round can mine well under 0.005
+  if (sol < 0.00005 && unrefined + refined <= 0) return null;
   return (
     <View style={styles.unclaimed} accessibilityLabel={`Unclaimed ${sol.toFixed(4)} SOL, ${Math.floor(unrefined)} unrefined ORE, ${Math.floor(refined)} refined ORE`}>
       <View style={styles.uRow}>
@@ -162,14 +172,60 @@ export function UnclaimedRow() {
         <T v="black" numberOfLines={1} style={{ fontSize: 13, color: COLORS.skr }}>
           {fmtAmt(unrefined - fee + refined)} ORE
         </T>
-        <Chip label="CLAIM" on={unrefined + refined > 0} disabled={!(unrefined + refined > 0) || Boolean(busy)} onPress={() => void claim('skr')} />
+        <Chip label="CLAIM" on={unrefined + refined > 0} disabled={!(unrefined + refined > 0) || Boolean(busy)} onPress={claimOre} />
       </View>
+      {askHold ? <HoldPrompt unrefined={unrefined} refined={refined} fee={fee} onKeep={() => setAskHold(false)} onClaim={() => { setAskHold(false); void claim('skr'); }} /> : null}
     </View>
   );
 }
 
+/** "Wait, miner!": ORE's refining fee explained at the moment it would be paid, with the choice to keep holding. */
+function HoldPrompt({ unrefined, refined, fee, onKeep, onClaim }: { unrefined: number; refined: number; fee: number; onKeep: () => void; onClaim: () => void }) {
+  const off = useGame((s) => Boolean(s.save.holdTipOff));
+  const setOff = useGame((s) => s.setHoldTipOff);
+  return (
+    <Modal transparent visible animationType="fade" onRequestClose={onKeep}>
+      <Scrim onPress={onKeep}>
+        <ModalCenter>
+          <Window title="WAIT, MINER!" sub="Your unrefined ORE is still earning" accent={COLORS.gold} onClose={onKeep} width={440}>
+            <View style={{ alignItems: 'center', gap: 8, paddingVertical: 4 }}>
+              <PixIcon name="ore" size={56} />
+              <T style={{ textAlign: 'center', fontSize: 15, lineHeight: 21 }}>
+                Every miner who claims unrefined ORE pays ORE's 10% refining fee. That fee is shared out to everyone still holding, as refined ORE that claims free.
+              </T>
+              <T v="display" style={{ textAlign: 'center', fontSize: 20, lineHeight: 22, color: COLORS.gold }}>
+                Hold, and other miners' claims pay you.
+              </T>
+            </View>
+            <View style={styles.holdRows}>
+              <View style={styles.holdRow}>
+                <T v="muted">Claim now, refining fee</T>
+                <T v="black" style={{ color: COLORS.red }}>-{fmtAmt(fee)} ORE</T>
+              </View>
+              <View style={styles.holdRow}>
+                <T v="muted">Refined ORE earned so far</T>
+                <T v="black" style={{ color: COLORS.skr }}>+{fmtAmt(refined)} ORE</T>
+              </View>
+              <View style={styles.holdRow}>
+                <T v="muted">Unrefined ORE you hold</T>
+                <T v="black">{fmtAmt(unrefined)} ORE</T>
+              </View>
+            </View>
+            <Btn kind="gold" label="KEEP HOLDING" sub="Earn from every claim" onPress={onKeep} style={{ marginTop: 12 }} />
+            <Btn kind="plain" label="CLAIM ANYWAY" sub={`Pay ${fmtAmt(fee)} ORE now`} onPress={onClaim} style={{ marginTop: 8 }} />
+            <Pressable onPress={() => setOff(!off)} accessibilityRole="checkbox" accessibilityState={{ checked: off }} style={styles.holdCheck}>
+              <View style={[styles.holdBox, off && { backgroundColor: COLORS.gold }]} />
+              <T v="muted" style={{ fontSize: 13 }}>Don't remind me again</T>
+            </Pressable>
+          </Window>
+        </ModalCenter>
+      </Scrim>
+    </Modal>
+  );
+}
+
 /** Small ORE amounts keep their decimals; big practice numbers stay whole. */
-const fmtAmt = (v: number) => (v >= 100 ? Math.floor(v).toLocaleString() : v.toFixed(v >= 1 ? 2 : 4));
+const fmtAmt = (v: number) => (v >= 100 ? Math.floor(v).toLocaleString() : v.toFixed(v >= 1 ? 2 : v >= 0.01 ? 4 : 6));
 
 /** SOL kept back in live mode for fees and ORE's miner account rent. */
 const LIVE_FEE_SOL = 0.008;
@@ -217,7 +273,10 @@ function Row({ icon, label, info, right, last }: { icon: PixName; label: string;
 
 function Chip({ label, on, onPress, disabled, grow }: { label: string; on?: boolean; onPress: () => void; disabled?: boolean; grow?: boolean }) {
   return (
-    <Pressable onPress={onPress} disabled={disabled} accessibilityRole="button" accessibilityState={{ selected: Boolean(on), disabled: Boolean(disabled) }} style={[grow && styles.chipGrow, disabled && { opacity: 0.4 }]}>
+    <Pressable onPress={() => {
+      play('button');
+      onPress();
+    }} disabled={disabled} accessibilityRole="button" accessibilityState={{ selected: Boolean(on), disabled: Boolean(disabled) }} style={[grow && styles.chipGrow, disabled && { opacity: 0.4 }]}>
       {(st) => {
         const { hovered, pressed, focused } = st as { hovered?: boolean; pressed: boolean; focused?: boolean };
         const hot = hovered && !disabled;
@@ -240,6 +299,342 @@ function Chip({ label, on, onPress, disabled, grow }: { label: string; on?: bool
   );
 }
 
+const trim = (v: number) => (v > 0 ? String(Math.floor(v * 1e4) / 1e4) : '');
+/** a + b on a typed amount, without float dust (0.1 + 0.01 = 0.11, not 0.11000000000000001) */
+const addTo = (cur: string, v: number) => String(Math.round(((Number(cur) || 0) + v) * 1e4) / 1e4);
+const cleanAmt = (t: string) => t.replace(',', '.').replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+/** ORE charges each autopilot round its executor's network fee */
+const EXEC_FEE = 0.00001;
+
+function RunButton({ ready, label, sub, onStart }: { ready: boolean; label: string; sub?: string; onStart: () => void }) {
+  const run = useGame((s) => s.run);
+  const stop = useGame((s) => s.stopRun);
+  const busy = useGame((s) => s.wallet.busy);
+  if (run)
+    return (
+      <Btn
+        kind="red"
+        label={`STOP · ${run.total - run.left}/${run.total} rounds`}
+        sub={`${fmtSol(run.perRound)} SOL a round · ${run.kind.toUpperCase()}`}
+        onPress={stop}
+        style={{ marginTop: 10 }}
+      />
+    );
+  const start = () => {
+    onStart();
+    // a phone folds the panel away to show the dig; the desktop panel stays where it is
+    if (!layoutNowDesktop()) useGame.getState().setDockOpen(false);
+  };
+  return <Btn kind={ready ? 'gold' : 'plain'} label={busy ?? label} sub={sub} onPress={start} disabled={!ready || Boolean(busy)} style={{ marginTop: 10, minHeight: 54 }} />;
+}
+
+/** ORE-style big amount: type it, or build it with the +0.01 / +0.1 / +1 / MAX chips below. */
+function BigAmount({ value, onChange, hint, disabled }: { value: string; onChange: (v: string) => void; hint: string; disabled?: boolean }) {
+  const { balance, live, onChain } = useBalance();
+  const empty = !(Number(value) > 0);
+  return (
+    <View style={styles.big}>
+      <TextInput
+        value={value}
+        onChangeText={(t) => onChange(cleanAmt(t))}
+        keyboardType="decimal-pad"
+        placeholder="0"
+        placeholderTextColor={COLORS.muted}
+        editable={!disabled}
+        selectTextOnFocus
+        style={[styles.bigInput, empty && { color: COLORS.muted }]}
+        accessibilityLabel={hint}
+        numberOfLines={1}
+      />
+      <View style={styles.bigBal} accessibilityLabel={`Wallet ${balance.toFixed(4)} SOL`}>
+        <PixIcon name="sol" size={16} />
+        <T v="muted" style={{ fontSize: 13 }}>
+          {balance.toFixed(4)} {live || onChain ? 'SOL' : 'practice SOL'}
+        </T>
+      </View>
+    </View>
+  );
+}
+
+function QuickAdd({ onAdd, onMax, disabled }: { onAdd: (v: number) => void; onMax: () => void; disabled?: boolean }) {
+  return (
+    <View style={[styles.lineRight, { marginTop: 4, marginBottom: 4 }]}>
+      {[0.01, 0.1, 1].map((v) => (
+        <Chip key={v} grow label={`+${v}`} onPress={() => onAdd(v)} disabled={disabled} />
+      ))}
+      <Chip grow label="MAX" onPress={onMax} disabled={disabled} />
+    </View>
+  );
+}
+
+function Stepper({ value, onMinus, onPlus, disabled, label }: { value: number; onMinus: () => void; onPlus: () => void; disabled?: boolean; label: string }) {
+  return (
+    <>
+      <Chip label="−" onPress={onMinus} disabled={disabled} />
+      <View accessible accessibilityLabel={`${value} ${label}`}>
+        <T v="black" style={{ fontSize: 15, minWidth: 28, textAlign: 'center' }}>
+          {value}
+        </T>
+      </View>
+      <Chip label="+" onPress={onPlus} disabled={disabled} />
+    </>
+  );
+}
+
+function AutopilotRow() {
+  const live = useGame(isLive);
+  const autopilot = useGame((s) => s.autopilot);
+  const busy = useGame((s) => s.wallet.busy);
+  if (!live || !autopilot) return null;
+  return (
+    <Row
+      icon="bot"
+      label="Autopilot on"
+      info="Your SOL sits in ORE's automation and is deployed round by round, even with the app closed (0.00001 SOL a round covers the network fee). Stopping closes it and sends what is left back to your wallet."
+      right={
+        <>
+          <T v="black" style={{ fontSize: 12, color: COLORS.teal, marginRight: 6 }}>
+            {fmtSol(autopilot.balance)} SOL left
+          </T>
+          <Chip label="STOP" onPress={() => void useGame.getState().stopAutopilot()} disabled={Boolean(busy)} />
+        </>
+      }
+    />
+  );
+}
+
+/* ---------------- RIGHT BAR (desktop ORE Island) LITE, like ORE: one amount, 0.01 SOL a round on all 25 spots ---------------- */
+const LITE_PER_ROUND = 0.01;
+
+function DeskLite() {
+  const compact = false;
+  const { balance, live } = useBalance();
+  const startRun = useGame((s) => s.startRun);
+  const run = useGame((s) => s.run);
+  const autopilot = useGame((s) => s.autopilot);
+  const busy = useGame((s) => s.wallet.busy);
+  const liteMode = useGame((s) => s.liteMode);
+  const [amount, setAmount] = useState('');
+  // LITE always covers the whole board. Clicking spots on the map (or shaking) means picking tiles: that is PRO.
+  useEffect(() => {
+    if (run || liteMode === 'all') return;
+    const st = useGame.getState();
+    const n = st.selected.length;
+    if (n > 0) {
+      if (liteMode === 'smart') st.editPreset({ blocks: 'smart', smartN: n });
+      else st.editPreset({ blocks: 'manual' });
+      useGame.setState({ liteMode: 'all', dockTab: 'pro' });
+    } else useGame.setState({ liteMode: 'all' });
+  }, [liteMode, run]);
+
+  const amt = Number(amount) || 0;
+  const rounds = Math.floor(amt / LITE_PER_ROUND + 1e-9);
+  const total = rounds * LITE_PER_ROUND;
+  const need = total + (rounds > 1 ? EXEC_FEE * rounds : 0);
+  const enough = need <= balance + 1e-9;
+  const autoCapped = live && rounds > 1 && total > LIVE_AUTOPILOT_MAX_SOL + 1e-9;
+  const ready = rounds > 0 && enough && !autoCapped && !(live && autopilot) && !busy;
+  const max = () => {
+    const room = Math.min(live ? LIVE_AUTOPILOT_MAX_SOL : Infinity, balance - 0.001);
+    setAmount(trim(Math.max(0, Math.floor(room / LITE_PER_ROUND + 1e-9)) * LITE_PER_ROUND));
+  };
+  const label = !amt
+    ? 'ENTER AMOUNT'
+    : !rounds
+      ? `MIN ${LITE_PER_ROUND} SOL`
+      : !enough
+        ? 'NOT ENOUGH SOL'
+        : autoCapped
+          ? `AUTOPILOT MAX ${LIVE_AUTOPILOT_MAX_SOL} SOL`
+          : live && autopilot
+            ? 'STOP AUTOPILOT FIRST'
+            : `DEPLOY ${fmtSol(total)} SOL`;
+  const lock = Boolean(run);
+  return (
+    <>
+      {compact ? null : (
+        <>
+          <BigAmount value={amount} onChange={setAmount} hint="SOL to mine with" disabled={lock} />
+          <QuickAdd onAdd={(v) => setAmount((c) => addTo(c, v))} onMax={max} disabled={lock} />
+          <Row
+            icon="hourglass"
+            label="Rounds"
+            info={`LITE splits your SOL into ${LITE_PER_ROUND} SOL rounds on all 25 spots, so you hit the gold spot every round. More than 1 round runs on autopilot: one wallet approval, then rounds deploy by themselves. Stop any time to get the unused SOL back.`}
+            right={
+              <T v="black" style={{ fontSize: 15, color: rounds ? COLORS.text : COLORS.muted }}>
+                {rounds}
+              </T>
+            }
+          />
+          <Row
+            icon="sol"
+            label="Per round"
+            last
+            right={
+              <T v="black" style={{ fontSize: 15, color: rounds ? COLORS.sol : COLORS.muted }}>
+                {rounds ? LITE_PER_ROUND : 0} SOL
+              </T>
+            }
+          />
+          <AutopilotRow />
+        </>
+      )}
+      <RunButton
+        ready={ready}
+        label={label}
+        sub={ready ? `All 25 spots · ${rounds > 1 ? `${rounds} rounds on autopilot` : 'this round'}` : undefined}
+        onStart={() =>
+          void startRun({
+            kind: 'lite',
+            perRound: LITE_PER_ROUND,
+            perSpot: LITE_PER_ROUND / BLOCKS,
+            blocks: 'all',
+            smartN: BLOCKS,
+            manualMask: (1 << BLOCKS) - 1,
+            total: rounds,
+          })
+        }
+      />
+    </>
+  );
+}
+
+/* ---------------- RIGHT BAR PRO, like ORE: SOL a round, how many tiles, how many rounds ---------------- */
+function DeskPro() {
+  const compact = false;
+  const { balance, live } = useBalance();
+  const presets = useGame((s) => s.save.presets);
+  const idx = useGame((s) => s.save.preset);
+  const selected = useGame((s) => s.selected);
+  const pending = useGame((s) => s.pending);
+  const run = useGame((s) => s.run);
+  const autopilot = useGame((s) => s.autopilot);
+  const busy = useGame((s) => s.wallet.busy);
+  const { editPreset, startRun, selectAll, clearSelection } = useGame.getState();
+  const p: Preset = presets[idx] ?? presets[0];
+
+  const tiles = p.blocks === 'all' ? BLOCKS : p.blocks === 'smart' ? p.smartN : selected.length;
+  // older saves kept SOL per spot: show it as SOL a round
+  const perRoundStr = p.perRound ?? (p.perSpot ? trim((Number(p.perSpot) || 0) * Math.max(1, tiles)) : '');
+  const per = Number(perRoundStr) || 0;
+  const perSpot = tiles ? Math.floor((per / tiles) * 1e9) / 1e9 : 0;
+  const rounds = p.rounds;
+  const lock = Boolean(run);
+  // ALL and random tiles show on the map as soon as PRO opens
+  useEffect(() => {
+    if (run || pending) return;
+    if (p.blocks === 'all' && selected.length !== BLOCKS) selectAll();
+    else if (p.blocks === 'smart' && selected.length !== p.smartN) useGame.setState({ selected: randomPick(p.smartN) });
+  }, [p.blocks, p.smartN, selected.length, run, pending, selectAll]);
+
+  const setPer = (v: string) => editPreset({ perRound: v });
+  const setTiles = (n: number) => {
+    const t = Math.max(0, Math.min(BLOCKS, n));
+    if (t === BLOCKS) {
+      editPreset({ blocks: 'all', smartN: BLOCKS });
+      selectAll();
+    } else if (t === 0) {
+      editPreset({ blocks: 'manual' });
+      clearSelection();
+    } else {
+      // n tiles at random; tap spots on the map to choose them yourself
+      editPreset({ blocks: 'smart', smartN: t });
+      useGame.setState({ selected: randomPick(t) });
+    }
+  };
+  const max = () => {
+    const room = Math.min(balance - 0.001, live && rounds > 1 ? LIVE_AUTOPILOT_MAX_SOL : Infinity) / Math.max(1, rounds);
+    setPer(trim(Math.max(0, Math.min(room, live ? LIVE_MAX_ROUND_SOL : Infinity))));
+  };
+
+  const need = per * rounds + (live && rounds > 1 ? EXEC_FEE * rounds : 0);
+  const enough = need <= balance + 1e-9;
+  const capped = live && per > LIVE_MAX_ROUND_SOL + 1e-9;
+  const autoCapped = live && rounds > 1 && per * rounds > LIVE_AUTOPILOT_MAX_SOL + 1e-9;
+  const ready = tiles > 0 && per > 0 && perSpot >= MIN_SOL_PER_BLOCK && enough && !pending && !capped && !autoCapped && !(live && autopilot) && !busy;
+  const label = !per
+    ? 'ENTER AMOUNT'
+    : !tiles
+      ? 'PICK TILES'
+      : perSpot < MIN_SOL_PER_BLOCK
+        ? `MIN ${trim(MIN_SOL_PER_BLOCK * tiles)} SOL A ROUND`
+        : !enough
+          ? 'NOT ENOUGH SOL'
+          : capped
+            ? `MAX ${LIVE_MAX_ROUND_SOL} SOL A ROUND`
+            : autoCapped
+              ? `AUTOPILOT MAX ${LIVE_AUTOPILOT_MAX_SOL} SOL`
+              : live && autopilot
+                ? 'STOP AUTOPILOT FIRST'
+                : pending
+                  ? 'WAIT FOR THIS ROUND'
+                  : `DEPLOY ${fmtSol(per * rounds)} SOL`;
+  const solo = useGame((s) => soloOf(s, s.roundId));
+  const picked = p.blocks === 'all' ? [...Array(BLOCKS).keys()] : selected;
+  const soloCount = picked.filter((i) => solo & (1 << i)).length;
+
+  return (
+    <>
+      {compact ? null : (
+        <>
+          <BigAmount value={perRoundStr} onChange={setPer} hint="SOL a round" disabled={lock} />
+          <QuickAdd onAdd={(v) => setPer(addTo(perRoundStr, v))} onMax={max} disabled={lock} />
+          <Row
+            icon="grid"
+            label="Tiles"
+            info={`${LIVE_INFO} The SOL a round is split evenly over your tiles. − and + pick tiles at random (new ones every round); tap spots on the map to choose them yourself.`}
+            right={
+              <>
+                <Chip label="ALL" on={p.blocks === 'all'} onPress={() => setTiles(BLOCKS)} disabled={lock} />
+                <Stepper value={tiles} label="tiles" onMinus={() => setTiles(tiles - 1)} onPlus={() => setTiles(tiles + 1)} disabled={lock} />
+              </>
+            }
+          />
+          <Row
+            icon="hourglass"
+            label="Rounds"
+            info={live ? `1 = this round only (you approve in your wallet). More = autopilot: one wallet approval funds ORE's automation for every round, then rounds deploy with no pop-up. Up to ${LIVE_AUTOPILOT_MAX_SOL} SOL in total. Stop it any time to get the unused SOL back.` : '1 = this round only. More = autopilot repeats the same setup each round.'}
+            right={<Stepper value={rounds} label="rounds" onMinus={() => editPreset({ rounds: Math.max(1, rounds - 1) })} onPlus={() => editPreset({ rounds: Math.min(100, rounds + 1) })} disabled={lock} />}
+          />
+          <Row
+            icon="sol"
+            label="Per round"
+            last
+            right={
+              <T v="black" style={{ fontSize: 15, color: per ? COLORS.sol : COLORS.muted }}>
+                {per ? fmtSol(per) : 0} SOL
+              </T>
+            }
+          />
+          <AutopilotRow />
+        </>
+      )}
+      <RunButton
+        ready={ready}
+        label={label}
+        sub={
+          ready
+            ? `${fmtSol(perSpot, 5)} SOL × ${tiles} tile${tiles > 1 ? 's' : ''} · ${Math.round((tiles / BLOCKS) * 100)}% odds${soloCount ? ` · ${soloCount} ★` : ''}${rounds > 1 ? ` · ${rounds} rounds` : ''}`
+            : undefined
+        }
+        onStart={() =>
+          void startRun({
+            kind: 'pro',
+            perRound: per,
+            perSpot,
+            blocks: p.blocks,
+            smartN: p.smartN,
+            manualMask: maskOf(selected),
+            total: rounds,
+          })
+        }
+      />
+    </>
+  );
+}
+
+
+/* ---------------- phone / APK panels (unchanged) ---------------- */
 function BalanceRow({ onHalf, onAll }: { onHalf?: () => void; onAll?: () => void }) {
   const { balance, onChain, live } = useBalance();
   const refill = useGame((s) => s.refillPractice);
@@ -294,30 +689,7 @@ function AmountBox({ value, onChange, hint, suffix }: { value: string; onChange:
   );
 }
 
-const trim = (v: number) => (v > 0 ? String(Math.floor(v * 1e4) / 1e4) : '');
 const RESERVE = 0.01; // leave room for fees and rent
-
-function RunButton({ ready, label, sub, onStart }: { ready: boolean; label: string; sub?: string; onStart: () => void }) {
-  const run = useGame((s) => s.run);
-  const stop = useGame((s) => s.stopRun);
-  const busy = useGame((s) => s.wallet.busy);
-  if (run)
-    return (
-      <Btn
-        kind="red"
-        label={`STOP · ${run.total - run.left}/${run.total} rounds`}
-        sub={`${fmtSol(run.perRound)} SOL a round · ${run.kind.toUpperCase()}`}
-        onPress={stop}
-        style={{ marginTop: 10 }}
-      />
-    );
-  const start = () => {
-    onStart();
-    // a phone folds the panel away to show the dig; the desktop panel stays where it is
-    if (!layoutNowDesktop()) useGame.getState().setDockOpen(false);
-  };
-  return <Btn kind={ready ? 'gold' : 'plain'} label={busy ?? label} sub={sub} onPress={start} disabled={!ready || Boolean(busy)} style={{ marginTop: 10, minHeight: 54 }} />;
-}
 
 /** 4 / 8 / 15 / 20: tapping a count, even the one already on, rolls a fresh random set. */
 function SmartCounts({ value, onPick, disabled }: { value: number; onPick: (n: number) => void; disabled: boolean }) {
@@ -330,7 +702,7 @@ function SmartCounts({ value, onPick, disabled }: { value: number; onPick: (n: n
   );
 }
 
-/* ---------------- LITE: one round; All 25, Smart (random) or spots tapped on the map ---------------- */
+/* LITE: one round; All 25, Smart (random) or spots tapped on the map */
 function LitePanel({ compact }: { compact: boolean }) {
   const { balance, live } = useBalance();
   const startRun = useGame((s) => s.startRun);
@@ -409,7 +781,7 @@ function LitePanel({ compact }: { compact: boolean }) {
   );
 }
 
-/* ---------------- PRO: presets, block picking, manual rounds ---------------- */
+/* PRO: presets, block picking, manual rounds */
 function ProPanel({ compact }: { compact: boolean }) {
   const staked = useGame((s) => s.wallet.player?.stakedSkr ?? 0);
   const { balance, live } = useBalance();
@@ -519,21 +891,7 @@ function ProPanel({ compact }: { compact: boolean }) {
             }
           />
           </>
-          {live && autopilot ? (
-            <Row
-              icon="bot"
-              label="Autopilot on"
-              info="Your SOL sits in ORE's automation and is deployed round by round, even with the app closed (0.00001 SOL a round covers the network fee). Stopping closes it and sends what is left back to your wallet."
-              right={
-                <>
-                  <T v="black" style={{ fontSize: 12, color: COLORS.teal, marginRight: 6 }}>
-                    {fmtSol(autopilot.balance)} SOL left
-                  </T>
-                  <Chip label="STOP" onPress={() => void useGame.getState().stopAutopilot()} disabled={Boolean(busy)} />
-                </>
-              }
-            />
-          ) : null}
+          <AutopilotRow />
           {TV_PAIR && live && !autopilot ? (
             <Row
               icon="bot"
@@ -632,4 +990,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(4,8,22,0.6)',
   },
   tag: { borderWidth: U, borderColor: '#22356f', paddingHorizontal: 6, paddingVertical: 1 },
+  holdRows: { marginTop: 10, gap: 4 },
+  holdRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 10, backgroundColor: 'rgba(4,6,15,0.55)' },
+  holdCheck: { flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'center', marginTop: 10, paddingVertical: 4 },
+  holdBox: { width: 14, height: 14, borderWidth: U, borderColor: COLORS.gold },
+  big: { alignItems: 'center', paddingTop: 0, paddingBottom: 2 },
+  bigInput: { width: '100%', textAlign: 'center', color: COLORS.gold, fontFamily: F.display, fontSize: 48, lineHeight: 52, paddingVertical: 0, paddingHorizontal: 0, ...WEB_NO_OUTLINE },
+  bigBal: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
 });

@@ -78,6 +78,10 @@ function rpcHandler(method, params) {
           assert.ok(d.newAccountPubkey.equals(web3.PublicKey.createWithSeed ? tx.instructions && d.newAccountPubkey : d.newAccountPubkey));
           if (chain.accounts.has(d.newAccountPubkey.toBase58()) || created.includes(d.newAccountPubkey.toBase58())) { const e = new Error('Transaction simulation failed: account already in use'); e.code = -32002; throw e; }
           created.push(d.newAccountPubkey.toBase58());
+        } else if (ix.programId.equals(spl.ASSOCIATED_TOKEN_PROGRAM_ID)) {
+          // create-idempotent: opens the revenue wallet's token account the first time a fee is sent
+          const ata = ix.keys[1].pubkey.toBase58();
+          if (!chain.tokens.has(ata)) chain.tokens.set(ata, { owner: ix.keys[2].pubkey.toBase58(), mint: ix.keys[3].pubkey.toBase58(), amount: 0n });
         } else if (ix.programId.equals(spl.TOKEN_PROGRAM_ID)) {
           const d = spl.decodeTransferCheckedInstruction(ix);
           moves.push({ src: d.keys.source.pubkey.toBase58(), dst: d.keys.destination.pubkey.toBase58(), amount: d.data.amount });
@@ -154,7 +158,10 @@ const fee = (x) => (x * 500n) / 10_000n;
   const houseDelta = bal(ataOf(H, MINTS.ore.key)) - pre; // = deposits - payouts
   const survivorsPaid = r.pays.filter((p) => p.kind === 'win');
   assert.equal(survivorsPaid.length, 4);
-  assert.ok(houseDelta >= fee(lose) - 5n && houseDelta <= fee(lose) + 5n, `house keeps about the 5% fee (${houseDelta} vs ${fee(lose)})`);
+  // the 5% goes to the platform revenue wallet; the house keeps only rounding dust
+  const revAta = await G.ataOf(G.REVENUE_DEFAULT, MINTS.ore.key, spl.TOKEN_PROGRAM_ID.toBase58());
+  assert.equal(bal(revAta), fee(lose), `revenue wallet gets the 5% fee (${bal(revAta)} vs ${fee(lose)})`);
+  assert.ok(houseDelta >= 0n && houseDelta <= 5n, `house keeps only dust (${houseDelta})`);
   assert.ok(paidOut <= 0n, 'players cannot gain more than the house loses');
   // replay and concurrency never pay twice
   const snap = new Map([...chain.tokens].map(([k, v]) => [k, v.amount]));
@@ -165,7 +172,7 @@ const fee = (x) => (x * 500n) / 10_000n;
   assert.equal(crypto.createHash('sha256').update(Buffer.from(r.secret, 'hex')).digest('hex'), r.commit);
   const seed = await G.seedOf(Buffer.from(r.secret, 'hex'), ROUND, r.bets.map((b) => b.sig));
   assert.equal(Buffer.from(seed).toString('hex'), r.seed);
-  console.log('PASS tunnel pays survivors once, keeps ~5%, replay-safe, secret verifiable');
+  console.log('PASS tunnel pays survivors once, sends the 5% to the revenue wallet, replay-safe, secret verifiable');
 }
 
 // 3. Concurrent first settle: three callers at once still pay exactly once

@@ -227,7 +227,8 @@ function Rail({ active, onTab, inSheet, lobby }: { active: SheetTab | null; onTa
     onTab(null);
     useView.getState().go(-1);
   };
-  const items: Item[] = lobby ? [...LOBBY_LEFT, ...LOBBY_RIGHT] : [...LEFT, ...RIGHT];
+  // the desktop rail keeps QUEST in the lobby too (the phone's bottom bar has no room for it)
+  const items: Item[] = lobby ? [LEFT[0], ...LOBBY_LEFT, ...LOBBY_RIGHT] : [...LEFT, ...RIGHT];
   const tabs = items.filter((t) => t.id !== 'chat');
   const chat = items.find((t) => t.id === 'chat');
 

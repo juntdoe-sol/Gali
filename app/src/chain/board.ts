@@ -261,7 +261,7 @@ function reverseBits64(x: bigint): bigint {
  * arithmetic mirrors ORE's own checkpoint, fee for fee, so it is right whether or
  * not the round has been checkpointed yet.
  */
-function outcomeOf(round: OreRound, miner: OreMiner, owner: PublicKey): RoundOutcome | null {
+function outcomeOf(round: OreRound, miner: Pick<OreMiner, 'roundId' | 'deployed' | 'cumulative'>, owner: PublicKey, cumKnown = true): RoundOutcome | null {
   const rng = rngOf(round);
   if (rng === null || miner.roundId !== round.id) return null;
   if (rng === 'refund') {
@@ -297,7 +297,8 @@ function outcomeOf(round: OreRound, miner: OreMiner, owner: PublicKey): RoundOut
       // Reset usually writes the winner into top_miner, but checkpoint is the one that pays.
       const sample = reverseBits64(rng) % sqTotal;
       const cum = miner.cumulative[w];
-      lucky = round.topMiner.equals(owner) || (sample >= cum && sample < cum + mineOnWin);
+      // without the miner account (overwritten by a later deploy) only ORE's recorded winner is known
+      lucky = round.topMiner.equals(owner) || (cumKnown && sample >= cum && sample < cum + mineOnWin);
       if (lucky) oreGrams = rewardGrams;
     }
   }
@@ -319,13 +320,32 @@ function outcomeOf(round: OreRound, miner: OreMiner, owner: PublicKey): RoundOut
   };
 }
 
-/** Read what a round paid this player. Throws while it is not drawn, or once it is gone. */
-export async function readOutcome(owner: PublicKey, roundId: number): Promise<RoundOutcome> {
+/** What this player put on the board in a round, when the game knows it: the spots and the SOL on each. */
+export interface KnownDeploy {
+  mask: number;
+  lamportsPerSquare: bigint;
+}
+
+/**
+ * Read what a round paid this player. Throws while it is not drawn, or once it is gone.
+ *
+ * ORE's miner account only holds the player's latest round, so during autopilot the next round's
+ * deploy can overwrite it before the result is read. With `known` (what the game deployed that
+ * round) the result is worked out from the round account alone, with the same arithmetic.
+ */
+export async function readOutcome(owner: PublicKey, roundId: number, known?: KnownDeploy): Promise<RoundOutcome> {
   const [round, miner] = await Promise.all([
     fetchOreRound(connection, BigInt(roundId)),
     fetchOreMiner(connection, owner),
   ]);
-  if (!round || !miner) throw new Error(`ORE round ${roundId} is gone; it expired before it was settled`);
+  if (!round) throw new Error(`ORE round ${roundId} is gone; it expired before it was settled`);
+  if ((!miner || miner.roundId !== BigInt(roundId)) && known && known.mask && known.lamportsPerSquare > 0n) {
+    const deployed = Array.from({ length: 25 }, (_, i) => (known.mask & (1 << i) ? known.lamportsPerSquare : 0n));
+    const out = outcomeOf(round, { roundId: round.id, deployed, cumulative: Array(25).fill(0n) }, owner, false);
+    if (!out) throw new Error(`ORE round ${roundId} has not been drawn`);
+    return out;
+  }
+  if (!miner) throw new Error(`ORE round ${roundId} is gone; it expired before it was settled`);
   if (miner.roundId !== BigInt(roundId)) throw new Error(`ORE round ${roundId} was replaced by a later deploy`);
   const out = outcomeOf(round, miner, owner);
   if (!out) throw new Error(`ORE round ${roundId} has not been drawn`);
