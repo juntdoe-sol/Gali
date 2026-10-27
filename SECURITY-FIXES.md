@@ -48,7 +48,7 @@ one round, open the arcade, chat in the lobby.
 
 ## 5. APK
 
-Build 1.7.0 (versionCode 21) with `npx eas-cli build -p android --profile apk-live` and test on a Seeker and on a
+Build 1.7.0 (versionCode 22) with `npx eas-cli build -p android --profile apk-live` and test on a Seeker and on a
 non-Seeker phone with Phantom.
 
 ## 6. Before the Gali program is ever deployed
