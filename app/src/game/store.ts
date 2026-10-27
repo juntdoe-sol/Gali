@@ -252,6 +252,8 @@ interface GameState {
   refreshWallet: () => Promise<void>;
   /** live: close the autopilot and take its balance back (one wallet approval) */
   stopAutopilot: () => Promise<void>;
+  /** TV pairing: fund an all-spots autopilot for a TV and top up the TV's fee key, in one approval. Resolves to the owner, or null. */
+  startTvAutopilot: (perSpot: number, rounds: number, tv: PublicKey) => Promise<PublicKey | null>;
   airdrop: () => Promise<void>;
   setMute: (m: boolean) => void;
   finishOnboarding: () => void;
@@ -1369,6 +1371,36 @@ export const useGame = create<GameState>((set, get) => {
         get().toast('Autopilot closed. Your balance is back in your wallet', 'good');
       } catch (e) {
         get().toast(errMsg(e), 'bad');
+      } finally {
+        setWallet({ busy: null });
+        void get().refreshWallet();
+      }
+    },
+
+    startTvAutopilot: async (perSpot, rounds, tv) => {
+      const st = get();
+      if (!oreLive) { st.toast('TV autopilot plays ORE on mainnet only', 'bad'); return null; }
+      if (!st.wallet.owner) { st.toast('Connect a wallet first', 'info'); return null; }
+      if (st.wallet.busy) return null;
+      if (st.autopilot) { st.toast('Autopilot is already on. Stop it first', 'info'); return null; }
+      if (perSpot < MIN_SOL_PER_BLOCK) { st.toast(`At least ${MIN_SOL_PER_BLOCK} SOL per spot`, 'bad'); return null; }
+      // the same sums as startRun, plus the TV's fee float (0.002)
+      const deposit = (perSpot * BLOCKS + 0.00001) * rounds;
+      const need = deposit + 0.0085;
+      if (st.wallet.sol < need) {
+        st.toast(`TV autopilot needs about ${need.toFixed(4)} SOL (${deposit.toFixed(4)} for the rounds + ~0.0085 setup). You have ${st.wallet.sol.toFixed(4)}`, 'bad');
+        return null;
+      }
+      try {
+        const [board, owner] = await Promise.all([loadBoard(), ownerKey()]);
+        if (!owner) throw new Error('wallet disconnected');
+        setWallet({ busy: `Approve TV autopilot in your wallet: ${deposit.toFixed(4)} SOL for ${rounds} rounds` });
+        await board.startAutopilot(perSpot, [...Array(BLOCKS).keys()], false, rounds, owner, tv);
+        get().track('autopilot');
+        return owner;
+      } catch (e) {
+        get().toast(errMsg(e), 'bad');
+        return null;
       } finally {
         setWallet({ busy: null });
         void get().refreshWallet();

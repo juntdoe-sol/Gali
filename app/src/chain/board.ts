@@ -370,8 +370,8 @@ export async function deployLive(squares: number[], solPerSquare: number, expect
 }
 
 /** Live autopilot (ORE's automation). One approval to start, none per round, one to stop and refund. */
-export const startAutopilot = (perSpotSol: number, squares: number[], random: boolean, rounds: number, expectedOwner?: PublicKey) =>
-  startLiveAutomation({ lamportsPerSquare: BigInt(Math.floor(perSpotSol * LAMPORTS_PER_SOL)), maxSquares: squares.length, squares, random, rounds, expectedOwner });
+export const startAutopilot = (perSpotSol: number, squares: number[], random: boolean, rounds: number, expectedOwner?: PublicKey, topUpKey?: PublicKey) =>
+  startLiveAutomation({ lamportsPerSquare: BigInt(Math.floor(perSpotSol * LAMPORTS_PER_SOL)), maxSquares: squares.length, squares, random, rounds, expectedOwner, topUpKey });
 export const stopAutopilot = (expectedOwner?: PublicKey) => closeLiveAutomation(expectedOwner);
 export const readAutopilot = (owner: PublicKey) => readAutomation(owner);
 export async function deployAutopilot(owner: PublicKey, squares: number[], solPerSquare: number): Promise<number> {
