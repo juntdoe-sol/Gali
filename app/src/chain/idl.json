@@ -101,7 +101,11 @@
         "Gear is priced in dollars, so this is the only thing that decides how many",
         "tokens an item costs. It is admin-only and stamped with the time, and",
         "`price_max_age_secs` is what stops a forgotten rate from selling a $270 item",
-        "for pennies after the token moves."
+        "for pennies after the token moves.",
+        "",
+        "Each rate may move at most 50% up or down per call, so a fat-fingered or",
+        "compromised update cannot reprice the shop by orders of magnitude in one",
+        "transaction. Buyers are protected separately by `max_price` on each buy."
       ],
       "discriminator": [
         99,
@@ -588,7 +592,8 @@
           "signer": true
         },
         {
-          "name": "config"
+          "name": "config",
+          "writable": true
         },
         {
           "name": "player",
@@ -653,6 +658,50 @@
       ]
     },
     {
+      "name": "release_jackpot",
+      "docs": [
+        "Hand a jackpot's unclaimed remainder back to the pools.",
+        "",
+        "Permissionless: once ORE's board is `RELEASE_AFTER_ROUNDS` past `round_id`,",
+        "nobody can claim that round any more, so what its winners left unclaimed",
+        "(including rounding dust) stops being reserved and is available to the next",
+        "hit. Moves no tokens, since the reservation is only bookkeeping on top of",
+        "the pool balance. Runs once per jackpot."
+      ],
+      "discriminator": [
+        193,
+        65,
+        184,
+        148,
+        28,
+        251,
+        153,
+        142
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true
+        },
+        {
+          "name": "jackpot",
+          "writable": true
+        },
+        {
+          "name": "ore_board",
+          "docs": [
+            "ORE's board, checked by address and owner inside `ore::board_round_id`."
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "round_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "fund_motherlode",
       "docs": [
         "Anyone (team, sponsors, partners) can add SKR to the Motherlode Pool."
@@ -702,7 +751,11 @@
       "docs": [
         "Buy a gear item with $ORE instead of SKR. Same items, same USD prices, same",
         "one-per-player rule. `ore_motherlode_bps` of the ORE goes to Gali's ORE jackpot",
-        "pool and the rest to the treasury, so ORE spent on cosmetics comes back to winners."
+        "pool and the rest to the treasury, so ORE spent on cosmetics comes back to winners.",
+        "",
+        "`max_price` is the most raw ORE the buyer accepts. A rate change landing",
+        "between the buyer seeing a price and their transaction executing makes the",
+        "sale fail with `PriceAboveMax` instead of charging more."
       ],
       "discriminator": [
         48,
@@ -750,6 +803,10 @@
         {
           "name": "item",
           "type": "u8"
+        },
+        {
+          "name": "max_price",
+          "type": "u64"
         }
       ]
     },
@@ -807,8 +864,11 @@
     {
       "name": "unstake_ore",
       "docs": [
-        "Take staked $ORE back. Locked for the round it is boosting, same rule as SKR,",
-        "so the same ORE can't boost two wallets in one round."
+        "Take staked $ORE back, at any time; there is no lock. The same ORE still",
+        "cannot boost two wallets for one round: `record_ore_round` reads the stake",
+        "at record time and only honours it if `stake_slot` predates the round's end,",
+        "so tokens moved to another wallet after a round cannot boost that round",
+        "there, and the wallet they left no longer holds them when it is recorded."
       ],
       "discriminator": [
         37,
@@ -963,6 +1023,10 @@
     },
     {
       "name": "buy_gear",
+      "docs": [
+        "Buy a gear item with SKR. `max_price` is the most raw SKR the buyer accepts;",
+        "see `buy_gear_ore`."
+      ],
       "discriminator": [
         202,
         140,
@@ -1009,6 +1073,10 @@
         {
           "name": "item",
           "type": "u8"
+        },
+        {
+          "name": "max_price",
+          "type": "u64"
         }
       ]
     }
@@ -1132,6 +1200,19 @@
         231
       ],
       "name": "JackpotClaimed"
+    },
+    {
+      "discriminator": [
+        7,
+        178,
+        66,
+        132,
+        122,
+        65,
+        132,
+        189
+      ],
+      "name": "JackpotReleased"
     },
     {
       "discriminator": [
@@ -1377,6 +1458,31 @@
       "code": 6019,
       "name": "PriceStale",
       "msg": "The exchange rate is stale; gear sales are paused until it is refreshed"
+    },
+    {
+      "code": 6020,
+      "name": "PriceAboveMax",
+      "msg": "The price is above the most you said you would pay"
+    },
+    {
+      "code": 6021,
+      "name": "PriceMoveTooLarge",
+      "msg": "A rate may move at most 50% up or down in one update"
+    },
+    {
+      "code": 6022,
+      "name": "ClaimWindowClosed",
+      "msg": "The claim window for that jackpot has closed"
+    },
+    {
+      "code": 6023,
+      "name": "ReleaseTooEarly",
+      "msg": "That jackpot cannot be released yet"
+    },
+    {
+      "code": 6024,
+      "name": "AlreadyReleased",
+      "msg": "That jackpot has already been released"
     }
   ],
   "types": [
@@ -1514,8 +1620,7 @@
           {
             "name": "price_max_age_secs",
             "docs": [
-              "how stale a rate may be before gear sales are refused. 0 disables the check,",
-              "which is only reasonable on a test validator."
+              "how stale a rate may be before gear sales are refused. Must be non-zero."
             ],
             "type": "u32"
           },
@@ -1534,6 +1639,20 @@
               "the platform can actually spend."
             ],
             "type": "u16"
+          },
+          {
+            "name": "skr_reserved",
+            "docs": [
+              "Raw SKR and ORE in the pools already promised to snapshotted jackpots and",
+              "not yet paid or released. A new jackpot snapshots only `pool - reserved`.",
+              "Never exceeds the pool balance: it grows by at most the unreserved balance",
+              "and shrinks by every payout (which also leaves the pool) and every release."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "ore_reserved",
+            "type": "u64"
           }
         ]
       }
@@ -1746,7 +1865,8 @@
         "The snapshots are the point. Winners claim over minutes, and both pools keep",
         "growing from gear sales the whole time. Paying a share of the live balance would",
         "hand the first claimer more than the last for the same slice of the square. The",
-        "first claim freezes the numbers everyone is then paid out of."
+        "first claim freezes the numbers everyone is then paid out of, and reserves them",
+        "in `Config` so a later hit cannot snapshot the same tokens."
       ],
       "type": {
         "kind": "struct",
@@ -1758,7 +1878,8 @@
           {
             "name": "skr_snapshot",
             "docs": [
-              "raw SKR and raw ORE in the pools when the first winner claimed"
+              "raw SKR and raw ORE promised to this round's winners: the unreserved part of",
+              "each pool when the first winner claimed"
             ],
             "type": "u64"
           },
@@ -1767,11 +1888,29 @@
             "type": "u64"
           },
           {
-            "name": "bps_paid",
+            "name": "skr_paid",
             "docs": [
-              "basis points of the winning square already paid; never exceeds 10,000"
+              "raw SKR and raw ORE already paid out of the snapshots; never exceed them"
             ],
             "type": "u64"
+          },
+          {
+            "name": "ore_paid",
+            "type": "u64"
+          },
+          {
+            "name": "snapshotted",
+            "docs": [
+              "set on the first claim, when the snapshots are taken"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "released",
+            "docs": [
+              "set by `release_jackpot`; the unpaid remainder is no longer reserved"
+            ],
+            "type": "bool"
           },
           {
             "name": "bump",
@@ -1790,6 +1929,9 @@
       }
     },
     {
+      "docs": [
+        "`stake / square_total` is the exact share of the snapshots this claim was paid."
+      ],
       "name": "JackpotClaimed",
       "type": {
         "fields": [
@@ -1802,7 +1944,34 @@
             "type": "u64"
           },
           {
-            "name": "share_bps",
+            "name": "stake",
+            "type": "u64"
+          },
+          {
+            "name": "square_total",
+            "type": "u64"
+          },
+          {
+            "name": "skr",
+            "type": "u64"
+          },
+          {
+            "name": "ore",
+            "type": "u64"
+          }
+        ],
+        "kind": "struct"
+      }
+    },
+    {
+      "docs": [
+        "The unclaimed remainder of a jackpot, no longer reserved and back in play."
+      ],
+      "name": "JackpotReleased",
+      "type": {
+        "fields": [
+          {
+            "name": "round_id",
             "type": "u64"
           },
           {

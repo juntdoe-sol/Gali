@@ -657,13 +657,33 @@ export const unstakeSkr = (amount: number) =>
       .instruction(),
   ]);
 
+/**
+ * The most raw tokens a buyer accepts for `item`: the price the program will compute from the
+ * config right now (usd_micro * 10^decimals / rate_micro, floored, exactly as `token_units` does),
+ * plus 2% slack. If the rate moves further than that before the transaction lands, the program
+ * refuses with PriceAboveMax instead of charging more.
+ */
+const MAX_PRICE_SLACK_BPS = 200n;
+async function maxPriceFor(item: number, pay: 'skr' | 'ore', mint: PublicKey): Promise<BN> {
+  const c = await accounts.config.fetch(pda.config);
+  const usd = (c.gearPricesUsd as BN[])[item];
+  if (!usd || usd.isZero()) throw new Error('That item is not for sale.');
+  const rate = BigInt((pay === 'skr' ? c.skrPriceMicro : c.orePriceMicro).toString());
+  if (rate === 0n) throw new Error('No exchange rate is set for that token.');
+  const decimals = (await connection.getTokenSupply(mint)).value.decimals;
+  const price = (BigInt(usd.toString()) * 10n ** BigInt(decimals)) / rate;
+  const max = price + (price * MAX_PRICE_SLACK_BPS + 9_999n) / 10_000n; // round the slack up
+  return new BN(max.toString());
+}
+
 /** Buy gear with ORE at the config's dollar rate. The mint must be the one the config names. */
 export const buyGearOre = (item: number, oreMintB58: string) =>
   sendWithWallet(async (o) => {
     const oreMint = new PublicKey(oreMintB58);
+    const maxPrice = await maxPriceFor(item, 'ore', oreMint);
     return [
       await program.methods
-      .buyGearOre(item)
+      .buyGearOre(item, maxPrice)
       .accountsStrict({
         owner: o,
         config: pda.config,
@@ -679,12 +699,15 @@ export const buyGearOre = (item: number, oreMintB58: string) =>
   });
 
 export const buyGear = (item: number) =>
-  sendWithWallet(async (o) => [
-    await program.methods
-      .buyGear(item)
-      .accountsStrict({ owner: o, config: pda.config, player: pda.player(o), skrMint: SKR_MINT, userAta: ata(o), treasury: pda.treasury, motherlode: pda.motherlode, tokenProgram: TOKEN_PROGRAM_ID })
-      .instruction(),
-  ]);
+  sendWithWallet(async (o) => {
+    const maxPrice = await maxPriceFor(item, 'skr', SKR_MINT);
+    return [
+      await program.methods
+        .buyGear(item, maxPrice)
+        .accountsStrict({ owner: o, config: pda.config, player: pda.player(o), skrMint: SKR_MINT, userAta: ata(o), treasury: pda.treasury, motherlode: pda.motherlode, tokenProgram: TOKEN_PROGRAM_ID })
+        .instruction(),
+    ];
+  });
 
 export async function requestDevnetSol(owner: PublicKey) {
   const sig = await connection.requestAirdrop(owner, LAMPORTS_PER_SOL);
