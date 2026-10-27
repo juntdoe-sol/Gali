@@ -7,7 +7,7 @@ import { GEAR_ICON as PIXEL_ICON } from './gearIcons';
 import { GEAR_ICON } from './icons';
 import { announce, bark, play } from '../game/sfx';
 import { useName } from '../game/username';
-import { chainReady, CLUSTER, LIVE_MAX_ROUND_SOL, oreLive } from '../chain/light';
+import { chainReady, CLUSTER, LIVE_MAX_ROUND_SOL, oreLive, PLATFORM_FEE_BPS } from '../chain/light';
 import { useGame, type RoundResult } from '../game/store';
 import { Btn, FocusRing, Frame, Kbd, ModalCenter, PixelBox, Scrim, T, TONE, U, Window } from './kit';
 import { PixIcon } from './PixIcon';
@@ -340,7 +340,7 @@ export function LiveNotice() {
       <Scrim>
         <Window title="REAL SOL, REAL ROUNDS" onClose={decline} width={460} accent={COLORS.gold}>
           <Bullet icon="ore" text="With a wallet connected you play live rounds on ORE's board on Solana mainnet with real SOL. ORE keeps 1% of every spot, plus 10% more of spots that miss. Only the gold spot mines ORE." />
-          <Bullet icon="wallet" text={`Your wallet signs every deploy and every claim. Gali never holds your SOL. A round is capped at ${LIVE_MAX_ROUND_SOL} SOL.`} />
+          <Bullet icon="wallet" text={`Your wallet signs every deploy and every claim, and your SOL goes straight to ORE. Gali adds a ${Number(PLATFORM_FEE_BPS) / 100}% fee on SOL you deploy, paid in the same transaction. A round is capped at ${LIVE_MAX_ROUND_SOL} SOL.`} />
           <Bullet icon="warn" text="This is a game of chance with real SOL. Only play with SOL you can afford to lose." muted />
           <Btn kind="skr" label="Got it · connect wallet" onPress={accept} kbd="ENTER" />
           <EnterKey fn={accept} />

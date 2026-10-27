@@ -53,17 +53,49 @@ function useClock(ms: number) {
   return Date.now() + useArcade.getState().offsetMs;
 }
 
-/** sha256(secret) must equal the commitment the house showed before the round. */
+const hexOf = (b: Uint8Array) => [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+const unhexOf = (h: string) => Uint8Array.from(h.match(/../g)!.map((x) => parseInt(x, 16)));
+
+/**
+ * Checks a round three ways: sha256(secret) is the commitment this player saw before staking (not just the one in
+ * the same reply), the seed is sha256(secret | round | every bet signature, sorted), and the outcome follows from
+ * the seed by the rules in rpc-backend/functions/games.mjs.
+ */
 function useVerified(r: RoundResult | undefined) {
   const [ok, setOk] = useState<boolean | null>(null);
   useEffect(() => {
     setOk(null);
     const subtle = (globalThis as { crypto?: { subtle?: SubtleCrypto } }).crypto?.subtle;
     if (!r || !subtle || !/^[0-9a-f]{64}$/.test(r.secret)) return;
-    const bytes = Uint8Array.from(r.secret.match(/../g)!.map((h) => parseInt(h, 16)));
-    subtle
-      .digest('SHA-256', bytes)
-      .then((d) => setOk([...new Uint8Array(d)].map((x) => x.toString(16).padStart(2, '0')).join('') === r.commit))
+    (async () => {
+      const secret = unhexOf(r.secret);
+      const commit = hexOf(new Uint8Array(await subtle.digest('SHA-256', secret)));
+      if (commit !== r.commit || (r.committed && r.committed !== commit)) return false;
+      const sigs = r.bets.map((b) => b.sig).sort().join(',');
+      const enc = new TextEncoder();
+      const msg = new Uint8Array([...secret, ...enc.encode(String(r.round)), ...enc.encode(sigs)]);
+      const seed = new Uint8Array(await subtle.digest('SHA-256', msg));
+      if (hexOf(seed) !== r.seed) return false;
+      const n = BigInt('0x' + hexOf(seed.slice(0, 16)));
+      const o = r.outcome;
+      if (o.collapsed !== undefined && Number(n % 5n) !== o.collapsed) return false;
+      if (o.crash !== undefined) {
+        let m = (95n * 1_000_000_000n) / (1_000_000_000n - (n % 1_000_000_000n));
+        if (m < 100n) m = 100n;
+        if (m > 1_000_000n) m = 1_000_000n;
+        if (Number(m) / 100 !== o.crash) return false;
+      }
+      if (o.winner && r.decimals !== undefined) {
+        const units = (ui: string) => { const [w, f = ''] = ui.split('.'); return BigInt(w) * 10n ** BigInt(r.decimals!) + BigInt((f + '0'.repeat(r.decimals!)).slice(0, r.decimals!) || '0'); };
+        const total = r.bets.reduce((t, b) => t + units(b.amount), 0n);
+        let pick = n % total;
+        let winner = r.bets[r.bets.length - 1]?.who;
+        for (const b of r.bets) { const a = units(b.amount); if (pick < a) { winner = b.who; break; } pick -= a; }
+        if (winner !== o.winner) return false;
+      }
+      return true;
+    })()
+      .then(setOk)
       .catch(() => undefined);
   }, [r]);
   return ok;
@@ -348,7 +380,7 @@ function ResultCard({ r, verified, color }: { r: RoundResult; verified: boolean 
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
         {verified === true ? <PixIcon name="check" size={16} /> : null}
         <T v="muted" style={{ fontSize: 10, flex: 1 }} numberOfLines={2}>
-          {verified === true ? 'Checked: the secret matches the commitment.' : verified === false ? 'The secret does not match the commitment.' : `Commitment ${r.commit.slice(0, 12)}…`}
+          {verified === true ? 'Checked: the secret, the seed and the result match the commitment.' : verified === false ? 'This round does not check out against the commitment.' : `Commitment ${r.commit.slice(0, 12)}…`}
         </T>
       </View>
     </Box>
