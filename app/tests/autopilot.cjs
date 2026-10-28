@@ -74,9 +74,20 @@ const minerPda = (a) => PublicKey.findProgramAddressSync([Buffer.from('miner'), 
       [minerPda(ok).toBase58(), { data: minerData({ authority: ok, roundId: 76, checkpointId: 76 }) }],
     ]),
   };
+  // the round 'ok' played last (76): drawn, square 4 wins (entropy word 0 = 4), no motherlode
+  const roundData = Buffer.alloc(8 + 944);
+  w64(roundData, 0, 76);
+  roundData.writeBigUInt64LE(4n, 8 + 608);
+  const roundKey = PublicKey.findProgramAddressSync([Buffer.from('round'), Buffer.from(new BigUint64Array([76n]).buffer)], C.ORE_PROGRAM_ID)[0];
+  state.miners.set(roundKey.toBase58(), { data: roundData, owner: C.ORE_PROGRAM_ID });
+  const okMiner = minerData({ authority: ok, roundId: 76, checkpointId: 76 });
+  for (const sq of [4, 9]) okMiner.writeBigUInt64LE(5000n, 8 + 56 + sq * 8);
+  state.miners.set(minerPda(ok).toBase58(), { data: okMiner });
+  const scores = [];
   const conn = fakeConn(state);
   const done = new Set();
-  const r = await C.pass(conn, server, done);
+  const r = await C.pass(conn, server, done, async (wallet, roundId, s) => { scores.push({ wallet, roundId, ...s }); });
+  assert.deepEqual(scores, [{ wallet: ok.toBase58(), roundId: 76n, covered: 2, won: true, motherlode: false, points: 500, xp: 62 }], 'the finished round is scored before the next deploy');
   assert.equal(r.phase, 'mining');
   assert.equal(r.sent, 2, 'two automations played: the ready one and the one that needed settling');
   assert.equal(r.skipped, 2, 'the one already played this round and the one with no Miner account were skipped');

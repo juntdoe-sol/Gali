@@ -120,7 +120,7 @@ interface MinersState {
 }
 
 const oreMarked = new Map<string, string>();
-/** Write down this wallet's ORE total once a day, so the day, month and year boards have a starting mark. */
+/** Once a day, have the server write down this wallet's ORE total (it reads ORE's Miner account itself). */
 function markOre(life: Record<string, { ore: number }>) {
   const me = playWallet();
   const v = me ? life[me] : undefined;
@@ -129,7 +129,7 @@ function markOre(life: Record<string, { ore: number }>) {
   const key = `${day}:${v.ore.toFixed(6)}`;
   if (oreMarked.get(me) === key) return;
   oreMarked.set(me, key);
-  playReport('ore', { ore: Math.round(v.ore * 1e6) / 1e6 });
+  playReport('ore', {});
 }
 
 export const useMinerRanks = create<MinersState>((set, get) => ({
@@ -186,16 +186,18 @@ export const useMinerRanks = create<MinersState>((set, get) => ({
 }));
 
 let lastSeen = { key: '', at: 0 };
-/** Check in this wallet's name, level, XP and points. Throttled; the database also keeps only rises. */
+/** Check in this wallet's name. Throttled. */
 export function reportMiner(o: { wallet: string; name: string; level: number; xp: number; points: number }) {
   const base = restBase();
   if (!base || !o.wallet) return;
-  const key = `${o.wallet}|${o.name}|${o.level}|${Math.floor(o.xp / 25)}|${o.points}`;
+  const key = `${o.wallet}|${o.name}`;
   const now = Date.now();
-  if (key === lastSeen.key || now - lastSeen.at < 15_000) return;
+  if (key === lastSeen.key && now - lastSeen.at < 10 * 60_000) return;
+  if (now - lastSeen.at < 15_000) return;
   lastSeen = { key, at: now };
   if (playWallet() && playWallet() !== o.wallet) return;
-  playReport('seen', { name: clean(o.name), level: Math.round(o.level), xp: Math.round(o.xp), points: Math.round(o.points) }, true);
+  // only the name: the server works out level, XP and points itself (supabase/sql/verified-scores.sql)
+  playReport('seen', { name: clean(o.name) }, true);
 }
 
 /** This wallet's saved level, XP and points, so a second device (web and app) picks up where the first left off. */

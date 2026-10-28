@@ -144,6 +144,7 @@ function store(board = {}, chainOverride = {}) {
     './constants': constants, './pot': pot,
     './sfx': { play: x => sounds.push(x), announce() {}, setMuted() {}, haptic: { win() {}, thud() {}, tap() {}, heavy() {} } },
     './storage': { saveJson() {}, loadJson: async (_, fallback) => fallback },
+    './play': { addBonusXp() {}, reportRound() {} },
   }, { setTimeout: () => 0 });
   return { ...s, sounds };
 }
