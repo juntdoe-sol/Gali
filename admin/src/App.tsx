@@ -3,6 +3,7 @@ import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import { useCallback, useEffect, useState } from 'react';
 import { CLUSTER, fetchBalances, fetchConfig, fetchPlayers, PROGRAM_ID, explorerAddr, short, type Balances, type Config, type PlayerRow } from './chain';
 import { ChatTab, MoneyTab, OverviewTab, PlayersTab, SettingsTab } from './sections';
+import { TvTab } from './tvTab';
 
 export interface Data {
   cfg: Config;
@@ -18,7 +19,7 @@ export interface Notice {
   sig?: string;
 }
 
-const TABS = ['Overview', 'Money', 'Settings', 'Players', 'Chat'] as const;
+const TABS = ['Overview', 'Money', 'Settings', 'Players', 'Chat', 'TV'] as const;
 type Tab = (typeof TABS)[number];
 
 const NONE = { SKR: 0, ORE: 0 };
@@ -165,9 +166,10 @@ export function App() {
       ) : null}
 
       <main>
-        {error ? <div className="card err">{error}</div> : null}
-        {warn ? <div className="card warn">{warn}</div> : null}
-        {!data && !error ? <div className="card">Loading Gali from {CLUSTER}…</div> : null}
+        {tab === 'TV' ? <TvTab setNotice={setNotice} /> : null}
+        {error && tab !== 'TV' ? <div className="card err">{error}</div> : null}
+        {warn && tab !== 'TV' ? <div className="card warn">{warn}</div> : null}
+        {!data && !error && tab !== 'TV' ? <div className="card">Loading Gali from {CLUSTER}…</div> : null}
         {data ? (
           <>
             {tab === 'Overview' && <OverviewTab d={data} />}
