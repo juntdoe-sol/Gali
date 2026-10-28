@@ -71,6 +71,10 @@
       #boot .hint { font: 15px 'Jersey15_400Regular', monospace; letter-spacing: 2px; color: #8ea2cc; }
       @keyframes boot { to { width: 62%; } }
     </style>
+    <style id="gali-hide-host-widget">
+      /* the hosting platform adds its own floating widget to every site; Gali has its own UI */
+      [data-bounded-live-edit-root] { display: none !important; }
+    </style>
   </head>
   <body>
     <noscript><p style="color:#f2f5ff;font-family:monospace;text-align:center;padding:40px">Gali needs JavaScript to run.</p></noscript>

@@ -592,7 +592,7 @@ function Me() {
   const w = useGame((s) => s.wallet);
   const save = useGame((s) => s.save);
   const live = useGame(isLive);
-  const { connect, disconnect, airdrop, setMute, setMusicOff, refreshWallet, sweepSession } = useGame.getState();
+  const { connect, disconnect, airdrop, setMute, setMusicOff, setAutoPopBig, refreshWallet, sweepSession } = useGame.getState();
   return (
     <>
       <Card>
@@ -654,6 +654,11 @@ function Me() {
         <T style={{ flex: 1 }}>Music off</T>
         <PixIcon name={save.musicOff ? 'mute' : 'note'} size={22} />
         <PixSwitch value={Boolean(save.musicOff)} onChange={setMusicOff} label="Music off" />
+      </Card>
+      <Card style={styles.rowCard}>
+        <T style={{ flex: 1 }}>Big pop-up for every autopilot round</T>
+        <PixIcon name="bot" size={22} />
+        <PixSwitch value={Boolean(save.autoPopBig)} onChange={setAutoPopBig} label="Big pop-up for every autopilot round" />
       </Card>
       {live ? (
         <T v="muted">
