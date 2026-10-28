@@ -8,7 +8,7 @@ import { GEAR_ICON } from './icons';
 import { announce, bark, play } from '../game/sfx';
 import { useName } from '../game/username';
 import { chainReady, CLUSTER, LIVE_MAX_ROUND_SOL, oreLive } from '../chain/light';
-import { useGame, type RoundResult } from '../game/store';
+import { quietPop, useGame, type RoundResult } from '../game/store';
 import { Btn, FocusRing, Frame, Kbd, ModalCenter, PixelBox, Scrim, T, TONE, U, Window } from './kit';
 import { PixIcon } from './PixIcon';
 import type { PixName } from './pixIcons';
@@ -70,6 +70,7 @@ function Rays({ color }: { color: string }) {
 export function ResultPop() {
   const res = useGame((s) => s.lastResult);
   const at = useGame((s) => s.resultAt);
+  const quiet = useGame((s) => (s.lastResult ? quietPop(s.lastResult, s.save) : false));
   const [hidden, setHidden] = useState(0);
   const scale = usePop(at);
   useEffect(() => {
@@ -77,7 +78,7 @@ export function ResultPop() {
     const id = setTimeout(() => setHidden(at), res?.motherlode ? 6500 : 3600);
     return () => clearTimeout(id);
   }, [at, res]);
-  if (!res || hidden === at || !at) return null;
+  if (!res || hidden === at || !at || quiet) return null;
   const mother = Boolean(res.motherlode && res.won);
   const t = mother ? { fill: '#7a3fc4', hi: '#d9b0ff', lo: '#3a1a6a', edge: '#12052a' } : res.won ? TONE.gold : { fill: 'rgba(15,23,52,0.97)', hi: '#33498c', lo: '#0c1430', edge: '#04060f' };
   return (

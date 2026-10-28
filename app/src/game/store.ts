@@ -12,7 +12,7 @@ import {
   ACHIEVEMENTS, BLOCKS, boostFor, FREE_GEAR_MASK, GEAR, LOCK_MS, localDay, levelFromXp, MOTHERLODE_ODDS,
   pointsFor, QUESTS, REVEAL_MIN_MS, ROUND_REWARD_ORE, ROUND_SECS, type Gear,
 } from './constants';
-import { addToPot, emptyPot, idxOf, maskOf, MIN_SOL_PER_BLOCK, payoutFor, practiceMotherlode, practiceOreMotherlode, PRACTICE_SOL, randomPick, simPot, soloMask, DEFAULT_SMART, SMART_COUNTS, type PotView } from './pot';
+import { addToPot, emptyPot, fmtOreAmt, idxOf, maskOf, MIN_SOL_PER_BLOCK, payoutFor, practiceMotherlode, practiceOreMotherlode, PRACTICE_SOL, randomPick, simPot, soloMask, DEFAULT_SMART, SMART_COUNTS, type PotView } from './pot';
 import { announce as say, haptic, play, setMuted } from './sfx';
 import { loadJson, saveJson } from './storage';
 
@@ -33,6 +33,7 @@ export interface RoundResult {
   oreMined: number; // ORE the gold spot mined this round
   split?: boolean; // the round's SKR was split (false: a solo spot won and one miner took it)
   lucky?: boolean; // you were the lucky winner
+  auto?: boolean; // a round of an autopilot run
 }
 
 export interface Preset {
@@ -67,6 +68,11 @@ export interface Run {
   lastRound: number;
 }
 
+/** An autopilot round that should stay quiet: a small note instead of the big pop-up. A motherlode or a solo win always pops. */
+export function quietPop(r: RoundResult, save: { autoPopBig?: boolean }): boolean {
+  return Boolean(r.auto) && !save.autoPopBig && !(r.motherlode && r.won) && !r.lucky;
+}
+
 export interface Pending {
   roundId: number;
   mask: number;
@@ -76,6 +82,8 @@ export interface Pending {
   total: number; // SOL deployed
   /** the mask is exactly what ORE deployed (false for Smart autopilot: ORE picks those spots itself) */
   exact?: boolean;
+  /** one round of a multi-round run (autopilot): its result shows as a small note, not the big pop-up */
+  auto?: boolean;
 }
 
 export interface Toast {
@@ -120,6 +128,8 @@ export interface Save {
   musicOff?: boolean;
   /** the player turned off the "hold your unrefined ORE" reminder */
   holdTipOff?: boolean;
+  /** show the big result pop-up for every autopilot round too (default: a short note, big only for a motherlode or a solo win) */
+  autoPopBig?: boolean;
   /** the last season whose welcome this device has seen */
   seasonSeen?: string;
   onboarded: boolean;
@@ -267,6 +277,7 @@ interface GameState {
   airdrop: () => Promise<void>;
   setMute: (m: boolean) => void;
   setMusicOff: (off: boolean) => void;
+  setAutoPopBig: (on: boolean) => void;
   setHoldTipOff: (off: boolean) => void;
   markSeason: (id: string) => void;
   finishOnboarding: () => void;
@@ -505,7 +516,7 @@ export const useGame = create<GameState>((set, get) => {
     const solIn = pending.total;
     setTimeout(async () => {
       if (pending.onChain) await get().refreshWallet();
-      const result: RoundResult = { roundId, winning, covered, won, points, motherlode, onChain: pending.onChain, skr, oreMotherlode, solIn, solOut, oreMined, split, lucky };
+      const result: RoundResult = { roundId, winning, covered, won, points, motherlode, onChain: pending.onChain, skr, oreMotherlode, solIn, solOut, oreMined, split, lucky, auto: pending.auto };
       updateSave((s) => {
         const winStreak = won ? s.winStreak + 1 : 0;
         const qp = { ...s.questProgress };
@@ -531,12 +542,15 @@ export const useGame = create<GameState>((set, get) => {
           history: [result, ...s.history].slice(0, 30),
         };
       });
-      if (won) {
+      if (won && quietPop(result, get().save)) {
+        // an autopilot round on the gold spot (Lite covers all 25, so most are): a soft coin sound, no fanfare
+        play('mint');
+      } else if (won) {
         announce({ k: 'win', sol: Math.round(solOut * 10000) / 10000, pts: points });
         play(motherlode ? 'motherlode' : 'win');
         setTimeout(() => say(motherlode ? 'motherlode' : 'gold-strike'), motherlode ? 500 : 250);
         haptic.win();
-        if (get().save.winStreak >= 2) get().toast(`🔥 Hot streak x${get().save.winStreak}`, 'gold');
+        if (FEATURE_GALI_PROGRAM && get().save.winStreak >= 2) get().toast(`Hot streak x${get().save.winStreak}`, 'gold');
       } else {
         play('lose');
         haptic.lose();
@@ -551,6 +565,13 @@ export const useGame = create<GameState>((set, get) => {
         roundId: curRound(get()),
         run: run && run.left <= 0 ? null : run,
       });
+      // autopilot: a short note per round instead of the big pop-up (unless the player asked for big ones)
+      if (result.auto && !quietPop(result, get().save)) {
+        /* the big pop-up shows */
+      } else if (result.auto) {
+        const ore = result.oreMined + (result.oreMotherlode ?? 0);
+        get().toast(`Round #${roundId % 100000}: ${ore > 0 ? `+${fmtOreAmt(ore)} ORE · ` : ''}${result.solOut.toFixed(4)} SOL back`, ore > 0 ? 'good' : 'info');
+      }
       if (run && run.left <= 0 && run.total > 1) get().toast(`Autopilot finished ${run.total} rounds`, 'info');
     }, REVEAL_MIN_MS - 1400);
   }
@@ -703,7 +724,7 @@ export const useGame = create<GameState>((set, get) => {
     haptic.thud();
     const cur = get().run;
     set({
-      pending: { roundId, mask, boostBps: boostFor(staked()), onChain, perBlock, total, exact: !(run.automated && run.blocks === 'smart') },
+      pending: { roundId, mask, boostBps: boostFor(staked()), onChain, perBlock, total, exact: !(run.automated && run.blocks === 'smart'), auto: run.total > 1 || run.automated },
       roundId,
       run: cur ? { ...cur, left: cur.left - 1 } : null,
       pot: addToPot(get().pot.roundId === roundId ? get().pot : emptyPot(roundId), mask, perBlock),
@@ -1474,6 +1495,7 @@ export const useGame = create<GameState>((set, get) => {
     },
     setMusicOff: (off) => updateSave((s) => ({ ...s, musicOff: off })),
     setHoldTipOff: (off) => updateSave((s) => ({ ...s, holdTipOff: off })),
+    setAutoPopBig: (on) => updateSave((s) => ({ ...s, autoPopBig: on })),
     markSeason: (id) => updateSave((s) => ({ ...s, seasonSeen: id })),
     finishOnboarding: () => updateSave((s) => ({ ...s, onboarded: true })),
     dismissLevel: () => set({ levelUp: null }),
