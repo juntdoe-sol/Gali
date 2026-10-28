@@ -41,3 +41,6 @@ Neither SKR nor ORE has a Pyth feed. The admin sets both rates on chain (`set_to
 
 - **Gear as NFTs and a player Market.** Picks, hats, outfits and pets as tradeable NFTs (Metaplex Core planned): Gali drops at set SKR prices, resales between players, a 5% royalty split 70/30 between the SKR pool and the treasury. Cosmetic only: gear never changes odds or payouts. The design exists as notes and pixel art (`scripts/pixel-art.py` draws the gear); there is no Market screen or door in the app.
 - **Clans.** Clan ranks by the XP their miners earn. The app shows "coming soon" on the Clans tab.
+
+## Clans (planned)
+Level 10 miners create clans of up to 10. Clan Pool vault mines all 25 tiles, pays out ORE weekly, clans rank by ORE mined, shareable clan card. Full plan: docs/CLANS.md
