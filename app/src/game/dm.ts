@@ -113,6 +113,19 @@ async function restore() {
   }
 }
 
+/** Domains the server accepts in the sign-in text (supabase/functions/_shared/pass.ts SIGNIN_DOMAINS). */
+const SIGNIN_DOMAINS = ['betatest.gali.lol', 'galiisland.bounded.page'];
+/** The site the player sees in their wallet: the one the game is open on, or the main one (the Android app). */
+function signInDomain(): string {
+  try {
+    const host = typeof location !== 'undefined' ? location.hostname : '';
+    if (SIGNIN_DOMAINS.includes(host)) return host;
+  } catch {
+    /* no location (Android) */
+  }
+  return SIGNIN_DOMAINS[0];
+}
+
 /** Sign in with the connected wallet: one signature, no fee. */
 export async function signIn() {
   const g = useGame.getState();
@@ -120,7 +133,7 @@ export async function signIn() {
   if (!owner) throw new Error('Connect a wallet first');
   const ts = Date.now();
   // the same text as supabase/functions/_shared/pass.ts; it names the site so a signature made elsewhere is useless here
-  const text = `galiisland.bounded.page wants you to sign in to Gali.\nWallet: ${owner}\nTime: ${ts}\nThis costs nothing and sends no transaction.`;
+  const text = `${signInDomain()} wants you to sign in to Gali.\nWallet: ${owner}\nTime: ${ts}\nThis costs nothing and sends no transaction.`;
   const chain = await loadChain();
   const { owner: signer, sig } = await chain.signTextWithWallet(text);
   if (signer !== owner) throw new Error('That is a different wallet from the one connected');

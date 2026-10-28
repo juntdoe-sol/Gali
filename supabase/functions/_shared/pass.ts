@@ -7,8 +7,11 @@ import bs58 from 'npm:bs58@6';
 
 const PASS_DAYS = 30;
 const LOGIN_WINDOW_MS = 10 * 60_000;
-/** The domain the sign-in text names, so a signature made for another site is useless here. */
-export const SIGNIN_DOMAIN = 'galiisland.bounded.page';
+/** The domains the sign-in text may name, so a signature made for another site is useless here. The first is the
+ * main one (and what the Android app names); the app names whichever of these it is open on. Keep in step with
+ * SIGNIN_DOMAINS in app/src/game/dm.ts. */
+export const SIGNIN_DOMAINS = ['betatest.gali.lol', 'galiisland.bounded.page'] as const;
+export const SIGNIN_DOMAIN = SIGNIN_DOMAINS[0];
 
 const B58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 export const isWallet = (w: unknown): w is string => {
@@ -54,8 +57,8 @@ export async function readPass(pass: unknown): Promise<string | null> {
 }
 
 /** What the wallet signs to sign in. The app builds the same text (app/src/game/dm.ts). */
-export const signInText = (wallet: string, ts: number) =>
-  `${SIGNIN_DOMAIN} wants you to sign in to Gali.\nWallet: ${wallet}\nTime: ${ts}\nThis costs nothing and sends no transaction.`;
+export const signInText = (wallet: string, ts: number, domain: string = SIGNIN_DOMAIN) =>
+  `${domain} wants you to sign in to Gali.\nWallet: ${wallet}\nTime: ${ts}\nThis costs nothing and sends no transaction.`;
 /** The text app 1.6 and older signed. Still accepted for messages only. */
 export const oldSignInText = (wallet: string, ts: number) => `Gali: sign in to your messages\nWallet: ${wallet}\nTime: ${ts}\nThis costs nothing and sends no transaction.`;
 
@@ -72,7 +75,7 @@ export function checkSignIn(wallet: unknown, ts: unknown, sigB64: unknown): 'new
   }
   const key = bs58.decode(wallet);
   try {
-    if (ed25519.verify(sig, enc.encode(signInText(wallet, t)), key)) return 'new';
+    for (const domain of SIGNIN_DOMAINS) if (ed25519.verify(sig, enc.encode(signInText(wallet, t, domain)), key)) return 'new';
     if (ed25519.verify(sig, enc.encode(oldSignInText(wallet, t)), key)) return 'old';
   } catch {
     return null;
