@@ -7,12 +7,12 @@
 **A pixel open world on Solana Seeker, built on top of ORE's live mining board.**
 Walk into a shared town and ride a mine cart around it. Head to the island and deploy SOL on real ORE rounds. Stay for the arcade, the Arena and the people.
 
-[![Live on Solana mainnet](https://img.shields.io/badge/Solana-mainnet%20beta-14F195?style=for-the-badge&logo=solana&logoColor=black)](https://galiisland.bounded.page)
+[![Live on Solana mainnet](https://img.shields.io/badge/Solana-mainnet%20beta-14F195?style=for-the-badge&logo=solana&logoColor=black)](https://betatest.gali.lol)
 [![Built for Seeker](https://img.shields.io/badge/Built%20for-Seeker-ffcf4a?style=for-the-badge)](https://expo.dev/accounts/gali-app/projects/gali/builds/3cd0a6d6-2aaf-41f0-9bf5-3cedeab7c386)
 [![Plays ORE's board](https://img.shields.io/badge/Plays-ORE's%20board-ff8a1e?style=for-the-badge)](https://ore.supply)
 [![License MIT](https://img.shields.io/badge/license-MIT-3de0c8?style=for-the-badge)](LICENSE)
 
-**[Play on desktop](https://galiisland.bounded.page)** · **[Android APK](https://expo.dev/accounts/gali-app/projects/gali/builds/3cd0a6d6-2aaf-41f0-9bf5-3cedeab7c386)** · **[gali.lol](https://gali.lol)** · **[Docs](https://galidocs.bounded.page)** · **[Demo video](https://www.youtube.com/watch?v=PCXDZZQpGm8)** · **[@Gali_Game](https://x.com/Gali_Game)**
+**[Play on desktop](https://betatest.gali.lol)** · **[Android APK](https://expo.dev/accounts/gali-app/projects/gali/builds/3cd0a6d6-2aaf-41f0-9bf5-3cedeab7c386)** · **[gali.lol](https://gali.lol)** · **[Docs](https://docs.gali.lol)** · **[Demo video](https://www.youtube.com/watch?v=PCXDZZQpGm8)** · **[@Gali_Game](https://x.com/Gali_Game)**
 
 Submitted to **CLOCK IN** (Solana Mobile) and the **Colosseum Crypto World's Fair**.
 
@@ -44,7 +44,7 @@ The result: the same ORE round, with a reason to stay for the next one.
 
 ## Try it in 60 seconds
 
-1. Open **[galiisland.bounded.page](https://galiisland.bounded.page)** in a desktop browser, or install the **[Android APK](https://expo.dev/accounts/gali-app/projects/gali/builds/3cd0a6d6-2aaf-41f0-9bf5-3cedeab7c386)** on a Seeker.
+1. Open **[betatest.gali.lol](https://betatest.gali.lol)** in a desktop browser, or install the **[Android APK](https://expo.dev/accounts/gali-app/projects/gali/builds/3cd0a6d6-2aaf-41f0-9bf5-3cedeab7c386)** on a Seeker.
 2. Connect a Solana wallet and pick a miner name.
 3. Walk down the pier (or tap **GO → ORE ISLAND**).
 4. In **LITE**, tap **+0.01** and **DEPLOY**. That is one round of 0.01 SOL across all 25 spots, on mainnet.
@@ -146,7 +146,7 @@ flowchart LR
 
 ## Business model
 
-- **ORE mining:** a 0.25% platform fee on SOL deployed during the beta, stated in the [docs](https://galidocs.bounded.page). It goes to a fixed revenue wallet in the same transaction. Gali never takes a cut of winnings.
+- **ORE mining:** a 0.25% platform fee on SOL deployed during the beta, stated in the [docs](https://docs.gali.lol). It goes to a fixed revenue wallet in the same transaction. Gali never takes a cut of winnings.
 - **Arcade:** a 5% house fee on Tunnel Collapse and Gold Rush Pot, and a house edge on Crash Cart.
 - **Next:** cosmetic gear as NFTs with resale royalties (see the roadmap).
 

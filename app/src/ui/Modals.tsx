@@ -304,8 +304,8 @@ export function WalletPicker() {
 function NoWallet() {
   const { mouse } = useLayout();
   const connect = useGame((s) => s.connect);
-  const here = typeof window !== 'undefined' && window.location ? window.location.href : 'https://galiisland.bounded.page';
-  const ref = typeof window !== 'undefined' && window.location ? window.location.origin : 'https://galiisland.bounded.page';
+  const here = typeof window !== 'undefined' && window.location ? window.location.href : 'https://betatest.gali.lol';
+  const ref = typeof window !== 'undefined' && window.location ? window.location.origin : 'https://betatest.gali.lol';
   const open = (u: string) => {
     if (typeof window !== 'undefined') window.location.href = u;
   };
