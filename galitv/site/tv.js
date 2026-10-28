@@ -1,6 +1,6 @@
 // Gali TV: plays the published videos on a pixel CRT, or on a Seeker phone for vertical Matt the Miner episodes.
 // The list comes from feed.json in the public gali-tv bucket, which the tv-admin function rewrites on every change.
-// The newest upload autoplays (muted, as browsers require) until someone taps for sound.
+// The newest upload autoplays with sound where the browser allows it; otherwise muted until the first tap or key press.
 const FILES = 'https://rckvfpwtdyvvvjqqlffn.supabase.co/storage/v1/object/public/gali-tv/';
 
 const CHANNELS = {
@@ -324,6 +324,21 @@ function unlockSound() {
   syncPlayUi();
 }
 
+// Browsers only allow sound after a tap, click or key press, so a muted autoplay gets its sound on the first one
+// anywhere on the page. Controls that set sound themselves (mute, the sticker, M) are left to do that.
+let soundUnlockedAt = 0;
+function firstGesture(e) {
+  if (soundUnlocked || !el.video.muted) return dropFirstGesture();
+  if (e.type === 'keydown' && (e.key === 'm' || e.key === 'M' || e.metaKey || e.ctrlKey || e.altKey)) return;
+  if (e.target.closest?.('#b-mute, #sound, #big-play')) return;
+  soundUnlockedAt = performance.now();
+  unlockSound();
+  dropFirstGesture();
+}
+const GESTURES = ['pointerdown', 'keydown'];
+const dropFirstGesture = () => GESTURES.forEach((t) => removeEventListener(t, firstGesture, true));
+GESTURES.forEach((t) => addEventListener(t, firstGesture, true));
+
 function syncPlayUi() {
   const playing = !el.video.paused && !el.video.ended;
   el.play.textContent = playing ? '❚❚' : '▶';
@@ -456,6 +471,8 @@ el.video.addEventListener('error', () => {
 
 el.screen.addEventListener('click', (e) => {
   if (e.target.closest('button')) return;
+  // the tap that just turned the sound on shouldn't also pause the video
+  if (performance.now() - soundUnlockedAt < 800) return;
   if (el.video.muted && !soundUnlocked && !el.video.paused) return unlockSound();
   togglePlay();
 });
@@ -557,6 +574,6 @@ addEventListener('keydown', (e) => {
     syncPlayUi();
     return;
   }
-  el.video.muted = true;
+  // try with sound; start() falls back to muted when the browser blocks it
   await tune(first, { quiet: true });
 })();
