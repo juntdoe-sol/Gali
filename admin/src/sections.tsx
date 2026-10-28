@@ -114,8 +114,8 @@ export function OverviewTab({ d }: { d: Data }) {
         />
         <Stat
           label="Token prices"
-          value={`SKR ${dollars(cfg.priceUsd.SKR)} · ORE ${dollars(cfg.priceUsd.ORE)}`}
-          sub={age.stale ? `set ${duration(age.secs)} ago: stale, gear sales are refused` : `set ${duration(age.secs)} ago`}
+          value={cfg.legacy ? 'Not used' : `SKR ${dollars(cfg.priceUsd.SKR)} · ORE ${dollars(cfg.priceUsd.ORE)}`}
+          sub={cfg.legacy ? 'this program version prices gear in SKR' : age.stale ? `set ${duration(age.secs)} ago: stale, gear sales are refused` : `set ${duration(age.secs)} ago`}
           tone={age.stale ? 'bad' : undefined}
         />
         <Stat label="Admin wallet" value={`${fmt(bal.authoritySol, 3)} SOL`} sub={<Addr a={cfg.authority} />} />
@@ -258,7 +258,7 @@ export function MoneyTab({ d, wallet, isAdmin, run }: { d: Data; wallet?: Anchor
   return (
     <div className="two">
       <WithdrawCard d={d} wallet={wallet} isAdmin={isAdmin} run={run} />
-      <FundCard d={d} wallet={wallet} run={run} />
+      {cfg.legacy ? null : <FundCard d={d} wallet={wallet} run={run} />}
       <Card title="Where gear sales go" hint="Gear is priced in dollars and paid in SKR or ORE at the token prices set in Settings.">
         <table>
           <tbody>

@@ -91,6 +91,9 @@ export function App() {
   const me = publicKey?.toBase58() ?? null;
   const isAdmin = Boolean(data && me && me === data.cfg.authority);
   const isPending = Boolean(data && me && me === data.cfg.pendingAuthority);
+  // the older program on this cluster doesn't have this page's instructions, so on-chain changes stay off
+  const legacy = Boolean(data?.cfg.legacy);
+  const canChange = isAdmin && !legacy;
 
   const run: Run = async (label, fn) => {
     setNotice({ tone: 'busy', text: `${label}… approve in your wallet` });
@@ -130,7 +133,9 @@ export function App() {
 
       {data ? (
         <div className={`role ${isAdmin ? 'admin' : isPending ? 'pending' : 'viewer'}`}>
-          {isAdmin
+          {legacy
+            ? `${CLUSTER} runs an older version of the Gali program, so this page shows it read-only. Redeploy the program to ${CLUSTER} to manage it here. Chat and TV still work.`
+            : isAdmin
             ? 'Connected as the admin wallet. Changes are live on-chain.'
             : isPending
               ? 'This wallet was proposed as the new admin. Accept it in Settings.'
@@ -173,8 +178,8 @@ export function App() {
         {data ? (
           <>
             {tab === 'Overview' && <OverviewTab d={data} />}
-            {tab === 'Money' && <MoneyTab d={data} wallet={wallet} isAdmin={isAdmin} run={run} />}
-            {tab === 'Settings' && <SettingsTab d={data} wallet={wallet} isAdmin={isAdmin} isPending={isPending} run={run} />}
+            {tab === 'Money' && <MoneyTab d={data} wallet={wallet} isAdmin={canChange} run={run} />}
+            {tab === 'Settings' && <SettingsTab d={data} wallet={wallet} isAdmin={canChange} isPending={isPending && !legacy} run={run} />}
             {tab === 'Players' && <PlayersTab d={data} />}
             {tab === 'Chat' && <ChatTab isAdmin={isAdmin} setNotice={setNotice} />}
           </>
