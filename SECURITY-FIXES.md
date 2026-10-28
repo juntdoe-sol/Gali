@@ -14,6 +14,16 @@ so roll out in this order. Every step names who runs it and where.
 
 ## 2. Supabase (from the repo folder in macOS Terminal)
 
+First make the arena ticket key (once, on your Mac; keep the file out of the repo):
+
+```sh
+node scripts/ticket-key.mjs ~/gali-ticket-key.txt
+```
+
+It prints a `npx supabase secrets set TICKET_KEY=...` line to run, and an `EXPO_PUBLIC_TICKET_KEY=...` value. Add that
+value on expo.dev as a `production` environment variable (plain text, it is public), and use it for the web build
+in step 4. Without it the arena falls back to the old smallest-id host.
+
 ```sh
 npx supabase secrets set DM_SECRET=<a new random value of 32+ characters>
 npx supabase secrets set SOLANA_RPC=<a mainnet RPC URL>
@@ -35,6 +45,9 @@ In the Supabase SQL Editor, run in this order:
 2. `supabase/sql/arcade-ledger.sql`
 3. `supabase/sql/signed-reports.sql`, after the new web build (step 4) is live. From then on, apps older than
    1.7 stop saving KOs, wins, check-ins and chat history; the game itself keeps working for them.
+4. `supabase/sql/verified-scores.sql`, right after signed-reports.sql. From then on the boards use only XP and
+   points the server worked out itself. Every wallet's current total is kept, frozen, as its starting point;
+   the day, week, month and year boards count verified gains only.
 
 ## 3. Arcade house (Bounded, macOS Terminal)
 
@@ -43,8 +56,16 @@ Until both are set, the tables show "not ready" and take no stakes.
 
 ## 4. Web
 
-Deploy the new web build to galiisland and test: connect a wallet, sign the one-time sign-in, deploy and claim
-one round, open the arcade, chat in the lobby.
+Build and deploy from `app/` with the ticket key's public half:
+
+```sh
+EXPO_PUBLIC_TICKET_KEY=<value from step 2> npm run deploy:bounded
+```
+
+(with the same `EXPO_PUBLIC_NETWORK`, `EXPO_PUBLIC_RPC_READ_URL`, `EXPO_PUBLIC_WORLD_URL` and `EXPO_PUBLIC_WORLD_KEY`
+values as the `apk-live` profile in `app/eas.json`). Then test: connect a wallet, sign the one-time sign-in,
+deploy and claim one round and check it appears on the TODAY board, open the arcade, chat in the lobby, and join
+the arena from two browsers.
 
 ## 5. APK
 
@@ -53,13 +74,27 @@ non-Seeker phone with Phantom.
 
 ## 6. Before the Gali program is ever deployed
 
-The program fixes need `anchor test` (or the `program` CI workflow) to pass, and the upgrade authority and the
-config authority should both sit behind a multisig.
+1. Tests: pushing to `main` runs the `program` workflow, which builds both programs from source and runs
+   `tests/gali.ts` on a local validator. It must pass. To run it on your Mac instead: install the Solana CLI
+   2.1.21 and Anchor 0.31.1, build with `cargo-build-sbf` for both programs, then `bash scripts/test-local.sh`.
+   The `target/deploy/*.so` files in the repo are old builds; always rebuild first.
+2. Make a Squads v4 multisig at app.squads.so with at least 2 of 3 members on separate devices.
+3. Deploy, then run `init_config` with the deploying key (it needs the upgrade authority's signature).
+4. Run `RPC_URL=<mainnet RPC> npx ts-node scripts/multisig-handover.ts <multisig address>`. It proposes the
+   multisig's vault as config authority, creates the Squads proposal for the vault to accept it, and prints the
+   command that moves the upgrade authority to the vault. Approve and execute the proposal in Squads first, then
+   run that command.
 
-## Not fixed in code
+Deploys made after this point: the app records each finished round and claims a jackpot in the same transaction
+as the next deploy, so a player who keeps mining no longer forfeits them.
 
-- The arena host is still the smallest player id, so a player who joins with a chosen id can run matches. Matches
-  only award capped XP and Brawl points, now limited to 60 KOs and 60 wins per wallet a day.
-- XP, level and points are still reported by each player's own app, so a player can inflate their own numbers
-  (never anyone else's).
+## Limits that remain
+
+- The arena host is now chosen among players with a server ticket (an ORE miner account, which costs real SOL),
+  by a half-hourly hash. Someone with many funded miner wallets has more chances at the seat, and a host can still
+  run matches unfairly; the damage stays inside the arena's capped XP and the 60 KOs and 60 wins a day.
+- Bonus XP (fights, quests, moles) is still reported by the app; the server caps it at 600 a day per wallet.
+  Live-round XP and all points are worked out by the server from ORE's accounts.
+- A live round only scores if the app or the autopilot reports it before the player's next deploy, the same
+  window ORE's own miner account has.
 - Old mutex accounts from the previous arcade design hold about 0.0009 SOL each and stay where they are.

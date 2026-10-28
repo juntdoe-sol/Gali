@@ -9,6 +9,8 @@ import {
   SystemProgram,
   Transaction,
   TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
 } from '@solana/web3.js';
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { Buffer } from 'buffer';
@@ -20,7 +22,8 @@ export { listWebWallets, PickWalletError, type WebWalletInfo } from './webWallet
 import idlJson from './idl.json';
 import deployment from './deployment.json';
 import { CLUSTER, MAX_SESSION_FUND_SOL, PROGRAM_ID_STR, RPC_URL, retryingFetch, SKR_MINT_STR, TIP_LIMITS, TIP_SKR_MINT } from './light';
-import { ORE_MINT } from './ore/consts';
+import { ORE_MINT, BOARD_ADDRESS, minerPda as oreMinerPda, roundPda as oreRoundPda } from './ore/consts';
+import { decodeBoard, decodeMiner, decodeRound } from './ore/accounts';
 
 export { CLUSTER, RPC_URL, chainReady, oreLive, onChainMode, isRateLimited, clockOffsetMs, MAX_SESSION_FUND_SOL, short, explorer } from './light';
 // PublicKey for code outside src/chain, which reaches web3 only through this lazily loaded module.
@@ -713,4 +716,102 @@ export async function requestDevnetSol(owner: PublicKey) {
   const sig = await connection.requestAirdrop(owner, LAMPORTS_PER_SOL);
   await connection.confirmTransaction(sig, 'confirmed');
   return sig;
+}
+
+/* ---------- Gali's record and jackpot claim, riding along with the next ORE deploy ---------- */
+/** How many ORE rounds after a hit its jackpot can still be claimed (RELEASE_AFTER_ROUNDS in the program). */
+const JACKPOT_CLAIM_ROUNDS = 10_000n;
+const u64le = (v: bigint) => {
+  const b = Buffer.alloc(8);
+  b.writeBigUInt64LE(v);
+  return b;
+};
+/** ORE's winning square for a round's entropy, as programs/gali/src/ore.rs works it out; null while undrawn or refunded. */
+function winningSquare(entropy: Uint8Array): number | null {
+  if (entropy.length !== 32 || entropy.every((b) => b === 0) || entropy.every((b) => b === 0xff)) return null;
+  let rng = 0n;
+  for (let w = 0; w < 4; w++) rng ^= Buffer.from(entropy.slice(w * 8, w * 8 + 8)).readBigUInt64LE(0);
+  return Number(rng % 25n);
+}
+
+/**
+ * Gali's `record_ore_round`, and `claim_jackpot` when that round hit ORE's motherlode and the player was on the winning
+ * square, for the finished round the player's ORE miner still holds. They go between ORE's checkpoint and the next
+ * deploy in the same transaction: the deploy replaces the round in the miner, after which neither could run any more,
+ * so a player who keeps mining no longer forfeits points or a jackpot by deploying first.
+ *
+ * Empty when Gali's program is not live on this network, the player has no Gali account, the round is already
+ * recorded, or anything about it would make the program refuse: an instruction that fails would sink the deploy.
+ */
+export async function galiRoundIxs(owner: PublicKey): Promise<TransactionInstruction[]> {
+  try {
+    const [cfgInfo, playerInfo, boardInfo, minerInfo] = await connection.getMultipleAccountsInfo([pda.config, pda.player(owner), BOARD_ADDRESS, oreMinerPda(owner)]);
+    if (!cfgInfo || !playerInfo || !boardInfo || !minerInfo || !cfgInfo.owner.equals(PROGRAM_ID) || !playerInfo.owner.equals(PROGRAM_ID)) return [];
+    const cfg = program.coder.accounts.decode('config', cfgInfo.data);
+    const player = program.coder.accounts.decode('player', playerInfo.data);
+    if (cfg.paused) return [];
+    const current = decodeBoard(boardInfo.data).roundId;
+    const miner = decodeMiner(minerInfo.data);
+    const roundId = miner.roundId;
+    if (roundId >= current || !miner.deployed.some((v) => v > 0n)) return [];
+    const roundInfo = await connection.getAccountInfo(oreRoundPda(roundId));
+    if (!roundInfo) return [];
+    const round = decodeRound(roundInfo.data);
+    if (round.slotHash.every((b) => b === 0)) return []; // not drawn yet
+    const oreRound = oreRoundPda(roundId);
+    const oreMiner = oreMinerPda(owner);
+    const ixs: TransactionInstruction[] = [];
+    if (BigInt(player.lastOreRound.toString()) < roundId) {
+      ixs.push(
+        await program.methods
+          .recordOreRound(new BN(roundId.toString()))
+          .accountsStrict({ cranker: owner, config: pda.config, player: pda.player(owner), oreBoard: BOARD_ADDRESS, oreRound, oreMiner })
+          .instruction(),
+      );
+    }
+    const square = winningSquare(round.slotHash);
+    const onIt = square !== null && miner.deployed[square] > 0n;
+    if (round.motherlode > 0n && onIt && BigInt(player.jackpotRound.toString()) < roundId && current - roundId < JACKPOT_CLAIM_ROUNDS) {
+      const skrMint = new PublicKey(cfg.skrMint);
+      const oreMint = new PublicKey(cfg.oreMint);
+      ixs.push(
+        await program.methods
+          .claimJackpot(new BN(roundId.toString()))
+          .accountsStrict({
+            owner,
+            config: pda.config,
+            player: pda.player(owner),
+            jackpot: find(Buffer.from('jackpot'), u64le(roundId)),
+            skrMint,
+            oreMint,
+            motherlode: pda.motherlode,
+            oreMotherlode: pda.oreMotherlode,
+            ownerSkr: ata(owner, skrMint),
+            ownerOre: ata(owner, oreMint),
+            oreBoard: BOARD_ADDRESS,
+            oreRound,
+            oreMiner,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+          })
+          .instruction(),
+      );
+    }
+    return ixs;
+  } catch {
+    return []; // Gali's extras never stop a deploy
+  }
+}
+
+/** True when these instructions would run as one transaction (a simulation without signatures). */
+export async function simulates(owner: PublicKey, ixs: TransactionInstruction[]): Promise<boolean> {
+  try {
+    const { blockhash } = await connection.getLatestBlockhash('confirmed');
+    const msg = new TransactionMessage({ payerKey: owner, recentBlockhash: blockhash, instructions: ixs }).compileToLegacyMessage();
+    const r = await connection.simulateTransaction(new VersionedTransaction(msg), { sigVerify: false, commitment: 'confirmed' });
+    return !r.value.err;
+  } catch {
+    return false;
+  }
 }

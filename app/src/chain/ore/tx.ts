@@ -15,7 +15,7 @@
 import '../polyfill-web';
 import { getSecret, setSecret } from '../secure';
 import { ComputeBudgetProgram, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, TransactionInstruction } from '@solana/web3.js';
-import { connection, sendWithKey, sendWithWallet } from '../client';
+import { connection, galiRoundIxs, sendWithKey, sendWithWallet, simulates } from '../client';
 import { LIVE_AUTOPILOT_MAX_SOL, LIVE_MAX_ROUND_SOL, platformFee, REVENUE_WALLET } from '../light';
 import { AUTOMATION_STRATEGY, EXECUTOR_ADDRESS } from './consts';
 import { automateIx, checkpointIx, claimOreIx, claimSolIx, deployIx } from './ix';
@@ -138,9 +138,13 @@ export async function oreDeployWithWallet(
     const ixs: TransactionInstruction[] = [priorityIx()];
     const pending = needsCheckpoint(miner, clock);
     if (pending !== null) ixs.push(checkpointIx({ signer: owner, authority: owner, roundId: pending }));
+    // Gali's record and jackpot claim for the round the miner still holds, before this deploy replaces it
+    const gali = await galiRoundIxs(owner);
     const mask = squaresToMask(squares);
-    ixs.push(deployIx({ signer: owner, authority: owner, roundId, amount: lamportsPerSquare, squares: mask }));
-    ixs.push(...(await feeIx(owner, lamportsPerSquare * BigInt(maskToSquares(mask).length))));
+    const tail = [deployIx({ signer: owner, authority: owner, roundId, amount: lamportsPerSquare, squares: mask }), ...(await feeIx(owner, lamportsPerSquare * BigInt(maskToSquares(mask).length)))];
+    // they only ride along when the whole transaction would still go through: the deploy always comes first
+    if (gali.length && (await simulates(owner, [...ixs, ...gali, ...tail]))) ixs.push(...gali);
+    ixs.push(...tail);
     return ixs;
   }, expectedOwner);
   return { sig, roundId };
