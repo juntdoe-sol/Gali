@@ -40,7 +40,7 @@ function client(options = {}) {
     './secure': { getSecret: async k => data.get(k) ?? null, setSecret: async (k,v) => { data.set(k,v); }, removeSecret: async k => { data.delete(k); } },
     'react-native': { Platform: { OS: 'android' } },
     './webWallet': {}, './idl.json': { accounts: [{ name: 'Player', discriminator: [] }] }, './deployment.json': { skrDecimals: 6 },
-    './ore/consts': { ORE_MINT: A.publicKey }, './light': { CLUSTER: 'mainnet-beta', PROGRAM_ID_STR: web3.PublicKey.default.toBase58(), SKR_MINT_STR: A.publicKey.toBase58(), TIP_LIMITS: {}, TIP_SKR_MINT: '', MAX_SESSION_FUND_SOL: .1 },
+    './ore/consts': { ORE_MINT: A.publicKey, BOARD_ADDRESS: A.publicKey, minerPda: () => A.publicKey, roundPda: () => A.publicKey }, './ore/accounts': {}, './light': { CLUSTER: 'mainnet-beta', PROGRAM_ID_STR: web3.PublicKey.default.toBase58(), SKR_MINT_STR: A.publicKey.toBase58(), TIP_LIMITS: {}, TIP_SKR_MINT: '', MAX_SESSION_FUND_SOL: .1 },
   }, options.globals);
   return { c, data, rpc, authorized: () => authorized, authCalls: () => authCalls, signs: () => signs, sends: () => sends };
 }
@@ -144,6 +144,7 @@ function store(board = {}, chainOverride = {}) {
     './constants': constants, './pot': pot,
     './sfx': { play: x => sounds.push(x), announce() {}, setMuted() {}, haptic: { win() {}, thud() {}, tap() {}, heavy() {} } },
     './storage': { saveJson() {}, loadJson: async (_, fallback) => fallback },
+    './play': { addBonusXp() {}, reportRound() {} },
   }, { setTimeout: () => 0 });
   return { ...s, sounds };
 }

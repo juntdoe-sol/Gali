@@ -53,8 +53,8 @@ const minerPda = (a) => PublicKey.findProgramAddressSync([Buffer.from('miner'), 
 
 (async () => {
   const server = Keypair.generate();
-  const players = Array.from({ length: 6 }, () => Keypair.generate().publicKey);
-  const [ok, deployed, needsCk, closedExec, discretionary, poor] = players;
+  const players = Array.from({ length: 7 }, () => Keypair.generate().publicKey);
+  const [ok, deployed, needsCk, closedExec, discretionary, poor, fresh] = players;
   const other = Keypair.generate().publicKey;
   const state = {
     slot: 1000,
@@ -66,6 +66,7 @@ const minerPda = (a) => PublicKey.findProgramAddressSync([Buffer.from('miner'), 
       { key: other, data: autoData({ authority: closedExec, executor: Keypair.generate().publicKey }) },
       { key: other, data: autoData({ authority: discretionary, strategy: 3n }) },
       { key: other, data: autoData({ authority: poor, balance: 1000n }) },
+      { key: other, data: autoData({ authority: fresh, amount: 3_000_000n }) }, // never deployed itself: no Miner account
     ],
     miners: new Map([
       [minerPda(deployed).toBase58(), { data: minerData({ authority: deployed, roundId: 77, checkpointId: 76, deployedOn: 4 }) }],
@@ -73,12 +74,24 @@ const minerPda = (a) => PublicKey.findProgramAddressSync([Buffer.from('miner'), 
       [minerPda(ok).toBase58(), { data: minerData({ authority: ok, roundId: 76, checkpointId: 76 }) }],
     ]),
   };
+  // the round 'ok' played last (76): drawn, square 4 wins (entropy word 0 = 4), no motherlode
+  const roundData = Buffer.alloc(8 + 944);
+  w64(roundData, 0, 76);
+  roundData.writeBigUInt64LE(4n, 8 + 608);
+  const roundKey = PublicKey.findProgramAddressSync([Buffer.from('round'), Buffer.from(new BigUint64Array([76n]).buffer)], C.ORE_PROGRAM_ID)[0];
+  state.miners.set(roundKey.toBase58(), { data: roundData, owner: C.ORE_PROGRAM_ID });
+  const okMiner = minerData({ authority: ok, roundId: 76, checkpointId: 76 });
+  for (const sq of [4, 9]) okMiner.writeBigUInt64LE(5000n, 8 + 56 + sq * 8);
+  state.miners.set(minerPda(ok).toBase58(), { data: okMiner });
+  const scores = [];
   const conn = fakeConn(state);
   const done = new Set();
-  const r = await C.pass(conn, server, done);
+  const r = await C.pass(conn, server, done, async (wallet, roundId, s) => { scores.push({ wallet, roundId, ...s }); });
+  assert.deepEqual(scores, [{ wallet: ok.toBase58(), roundId: 76n, covered: 2, won: true, motherlode: false, points: 500, xp: 62 }], 'the finished round is scored before the next deploy');
   assert.equal(r.phase, 'mining');
   assert.equal(r.sent, 2, 'two automations played: the ready one and the one that needed settling');
-  assert.equal(r.skipped, 1, 'the one already played this round was skipped');
+  assert.equal(r.skipped, 2, 'the one already played this round and the one with no Miner account were skipped');
+  assert.ok(!conn.sent.some((tx) => tx.instructions.at(-1).keys[1].pubkey.equals(fresh)), 'no send for a player ORE has no Miner for');
   const byAuth = new Map(conn.sent.map((tx) => [tx.instructions.at(-1).keys[1].pubkey.toBase58(), tx]));
   assert.ok(byAuth.has(ok.toBase58()) && byAuth.has(needsCk.toBase58()));
   assert.ok(!byAuth.has(discretionary.toBase58()), 'discretionary automations are never run');

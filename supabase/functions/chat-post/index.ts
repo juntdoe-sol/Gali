@@ -14,6 +14,7 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return reply(405, { error: 'POST only' });
   try {
     const { wallet, session, body, ts, sig, room = 'global', tip } = await req.json();
+    if (room !== 'global') return reply(400, { error: 'unknown room' });
     const text = String(body ?? '').trim().slice(0, 280);
     if (!wallet || !session || !sig || !text) return reply(400, { error: 'missing fields' });
     if (Math.abs(Date.now() - Number(ts)) > 60_000) return reply(400, { error: 'stale message' });
@@ -37,9 +38,10 @@ Deno.serve(async (req) => {
       Object.assign(row, { kind: 'tip', tip_to: tip.to, tip_amount: amount, tip_sig: tip.sig });
     }
     const { data, error } = await db.from('messages').insert(row).select().single();
-    if (error) return reply(400, { error: error.message });
+    if (error) throw error;
     return reply(200, data);
   } catch (e) {
-    return reply(500, { error: String((e as Error).message ?? e) });
+    console.error('chat-post', (e as Error)?.message ?? e);
+    return reply(500, { error: 'Something went wrong. Try again.' });
   }
 });

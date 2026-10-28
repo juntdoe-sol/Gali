@@ -25,7 +25,7 @@ const ORE_DECIMALS = 11;
 /** A stand-in rate for the mock ORE mint. Set real rates in the admin page (Settings, Token prices). */
 const ORE_USD = Number(process.env.ORE_USD ?? 61);
 /** 0 never refuses a stale price, which suits mock tokens nobody quotes. Set a max age on mainnet. */
-const PRICE_MAX_AGE_SECS = Number(process.env.PRICE_MAX_AGE_SECS ?? 0);
+const PRICE_MAX_AGE_SECS = Number(process.env.PRICE_MAX_AGE_SECS ?? 86_400); // the program refuses 0
 
 /** Whole tokens to raw units, through a decimal string so 11-decimal ORE doesn't lose precision. */
 const units = (whole: number, decimals: number) => new anchor.BN(whole.toFixed(decimals).replace('.', ''));

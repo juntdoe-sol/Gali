@@ -1,22 +1,28 @@
 // Gali arcade house: Tunnel Collapse, Gold Rush Pot and Crash Cart with real ORE and SKR.
 //
-// Stateless by design. Rounds are 40 s slots of the server clock. A player's bet is an SPL transfer to the
-// house token account carrying a memo "gali1|<game>|<token>|<round>|<choice>". Nothing is stored here: the
-// chain is the ledger. Settling a round re-reads the chain, so any caller (and any number of callers at once)
-// computes the same outcome, and each payout batch is protected on chain by a one-time "mutex" account, so a
-// batch can never be paid twice.
+// Rounds are 40 s slots of the server clock. A player's bet is an SPL transfer to the house's associated token
+// account carrying a memo "gali1|<game>|<token>|<round>|<choice>". The chain holds the stakes; the ledger in
+// Supabase (supabase/sql/arcade-ledger.sql) holds each round's result and every payout, written once. The first
+// settle call after the betting window is finalized works the result out and records it; every later call reads it
+// back, so the result can never change between calls. Each payout is signed once and only resent with the same
+// bytes, so it can never be paid twice.
 //
 // Fairness: before a round opens the server publishes commit = SHA256(secret) with secret = HMAC(master, table|round).
 // The round's seed is SHA256(secret | round | every valid bet signature, sorted). The secret is revealed with the
-// result, so anyone can recompute the seed and the outcome.
+// result, so anyone can recompute the seed and the outcome. Whoever holds GAMES_MASTER knows every secret in
+// advance, so the operator must never play.
 
 export const ROUND_MS = 40_000;
 export const BET_MS = 30_000; // stakes must land on chain before this point of the round
-export const SETTLE_AFTER_MS = 46_000; // results are final this long after the round starts
-const LATE_SCAN_MS = 10 * 60_000; // how far back late or malformed deposits are still refunded
+export const SETTLE_AFTER_MS = 52_000; // the round settles once its betting window is finalized, about this long after it starts
+export const MAX_SETTLE_AGE_MS = 30 * 60_000; // a round nobody settled within 30 minutes needs a manual refund
+const LATE_SHIFT_MS = 10_000; // a late deposit is refunded by the round 10 s after it landed
+const MAX_SCAN_PAGES = 20; // 20,000 signatures back; beyond that settle refuses rather than miss a stake
+const CONFIRM_POLL_MS = 1000;
+const SEND_BUDGET_MS = 10_000;
+const LATE_SCAN_MS = 10 * 60_000; // admin: stakes this recent may not be in the ledger yet
 const FEE_BPS = 500n; // 5% of the redistributed pot (Crash Cart: 5% built into the multiplier)
 const CAP_MULT = 5n; // one wallet may stake at most 5 x the top chip per round
-const MUTEX_LAMPORTS = 890_880n; // rent-exempt minimum for a 0-byte account
 const BATCH = 5; // payouts per transaction
 
 const MEMO_PROGRAM = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr';
@@ -139,15 +145,6 @@ const transferChecked = (program, source, mint, dest, owner, amount, decimals) =
   data: concat(Uint8Array.from([12]), u64le(amount), Uint8Array.from([decimals])),
 });
 const memoIx = (text) => ({ program: MEMO_PROGRAM, keys: [], data: enc.encode(text) });
-export async function mutexAddress(houseOwner, seed) {
-  const addr = await sha256(concat(b58dec(houseOwner), enc.encode(seed), b58dec(SYSTEM_PROGRAM)));
-  return b58enc(addr);
-}
-const createMutex = (house, address, seed, lamports) => ({
-  program: SYSTEM_PROGRAM,
-  keys: [{ pubkey: house, signer: true, writable: true }, { pubkey: address, writable: true }],
-  data: concat(u32le(3), b58dec(house), u64le(seed.length), enc.encode(seed), u64le(lamports), u64le(0), b58dec(SYSTEM_PROGRAM)),
-});
 
 // ---------- program addresses (associated token accounts) ----------
 const ED_P = 2n ** 255n - 19n;
@@ -215,16 +212,60 @@ export async function call(env, method, params = [], ms = 4500) {
   throw last;
 }
 
+// ---------- ledger (Supabase) ----------
+// Every round result and every transfer the house makes is recorded once in Supabase (supabase/sql/arcade-ledger.sql).
+// The first settle call stores the result; every later call reads it, so a round cannot be settled twice with
+// different bets. A transfer is signed once, its signature stored before it is sent, and resent with the same bytes
+// until it lands or its blockhash expires, so it is never paid twice and needs no rent-funded marker account.
+export function ledgerOf(env) {
+  if (env?.__ledger) return env.__ledger; // tests
+  const url = typeof env?.SUPABASE_URL === 'string' ? env.SUPABASE_URL.replace(/\/$/, '') : '';
+  const key = env?.SUPABASE_SERVICE_KEY;
+  if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(url) || typeof key !== 'string' || key.length < 20) throw new Error('arcade ledger not configured');
+  const headers = { apikey: key, authorization: `Bearer ${key}`, 'content-type': 'application/json' };
+  async function rest(path, init = {}) {
+    const res = await fetch(`${url}/rest/v1/${path}`, { ...init, headers: { ...headers, ...(init.headers ?? {}) } });
+    if (!res.ok) throw new Error('ledger unavailable');
+    const text = await res.text();
+    return text ? JSON.parse(text) : null;
+  }
+  const rpc = (fn, args) => rest(`rpc/${fn}`, { method: 'POST', body: JSON.stringify(args) });
+  const q = encodeURIComponent;
+  return {
+    async getRound(key) { return (await rest(`arcade_rounds?key=eq.${q(key)}&select=result`))?.[0]?.result ?? null; },
+    storeRound: (a) => rpc('arcade_store', { p_key: a.key, p_token: a.token, p_round: a.round, p_result: a.result, p_sends: a.sends, p_need: String(a.need), p_balance: String(a.balance) }),
+    addSend: (a) => rpc('arcade_add_send', { p_label: a.label, p_token: a.token, p_items: a.items, p_pre: a.pre ?? [], p_memo: a.memo, p_need: String(a.need ?? 0n), p_balance: String(a.balance ?? 0n) }),
+    async getSend(label) { return (await rest(`arcade_sends?label=eq.${q(label)}&select=*`))?.[0] ?? null; },
+    async lease(label, secs) { return (await rpc('arcade_lease', { p_label: label, p_secs: secs }))?.[0] ?? null; },
+    async update(label, patch) { await rest(`arcade_sends?label=eq.${q(label)}`, { method: 'PATCH', headers: { prefer: 'return=minimal' }, body: JSON.stringify({ ...patch, updated_at: new Date().toISOString() }) }); },
+    async owed(token) { const v = await rpc('arcade_owed', { p_token: token }); return BigInt(String(v ?? 0).split('.')[0]); },
+  };
+}
+
 // ---------- tables ----------
 const mintInfo = new Map();
+// Token-2022 extensions that would let a mint take fees, run code on transfer, move the house's tokens or freeze them.
+const BAD_EXTENSIONS = new Set([1, 9, 12, 14, 26]); // TransferFeeConfig, NonTransferable, PermanentDelegate, TransferHook, Pausable
+export function mintProblem(owner, data) {
+  if (owner === TOKEN_PROGRAM) return data.length >= 82 ? null : 'bad mint';
+  if (owner !== TOKEN_2022) return 'unsupported token program';
+  for (let o = 166; o + 4 <= data.length;) {
+    const type = data[o] | (data[o + 1] << 8), len = data[o + 2] | (data[o + 3] << 8);
+    if (type === 0) break;
+    if (BAD_EXTENSIONS.has(type)) return 'unsupported token extension';
+    o += 4 + len;
+  }
+  return null;
+}
 async function loadMint(env, t) {
   const cached = mintInfo.get(t);
   if (cached) return cached;
   const acc = await call(env, 'getAccountInfo', [TOKENS[t].mint, { encoding: 'base64', commitment: 'confirmed' }]);
   if (!acc?.value) throw new Error(`${TOKENS[t].id} mint not found`);
   const data = Uint8Array.from(atob(acc.value.data[0]), (c) => c.charCodeAt(0));
+  const problem = mintProblem(acc.value.owner, data);
+  if (problem) throw new Error(problem);
   const info = { program: acc.value.owner, decimals: data[44] };
-  if (info.program !== TOKEN_PROGRAM && info.program !== TOKEN_2022) throw new Error('unsupported token program');
   mintInfo.set(t, info);
   return info;
 }
@@ -232,11 +273,13 @@ const houseAtaCache = new Map();
 async function loadHouseAta(env, house, t) {
   const cached = houseAtaCache.get(t);
   if (cached) return cached;
-  const res = await call(env, 'getTokenAccountsByOwner', [house.owner, { mint: TOKENS[t].mint }, { encoding: 'jsonParsed', commitment: 'confirmed' }]);
-  const first = res?.value?.[0];
-  if (!first) throw new Error(`The ${TOKENS[t].id} table is not funded yet`);
-  houseAtaCache.set(t, first.pubkey);
-  return first.pubkey;
+  const { program } = await loadMint(env, t);
+  // Only the house's own associated account counts, never any other account it may own.
+  const ata = await ataOf(house.owner, TOKENS[t].mint, program);
+  const acc = await call(env, 'getAccountInfo', [ata, { encoding: 'base64', commitment: 'confirmed' }]);
+  if (!acc?.value) throw new Error(`The ${TOKENS[t].id} table is not funded yet`);
+  houseAtaCache.set(t, ata);
+  return ata;
 }
 const unitsOf = (ui, decimals) => {
   const [w, f = ''] = String(ui).split('.');
@@ -262,8 +305,31 @@ export async function seedOf(secret, round, sigs) {
 }
 const bigOf = (bytes) => BigInt('0x' + hex(bytes.slice(0, 16)));
 
-// ---------- reading bets from chain ----------
-const txCache = new Map(); // signature -> parsed deposit or null (only confirmed, successful transactions)
+// ---------- reading stakes from chain ----------
+export function parseMemo(memo) {
+  const m = /^gali1\|([tpc])\|([os])\|(\d{1,9})\|(\d{1,4})$/.exec(memo ?? '');
+  return m ? { g: m[1], t: m[2], round: Number(m[3]), choice: Number(m[4]) } : null;
+}
+/** The gali1 stake memo inside an RPC signature-list memo field ("[24] gali1|t|o|123|2", several joined by "; "). */
+export function memoFromList(field) {
+  if (typeof field !== 'string') return null;
+  for (const part of field.split('; ')) {
+    const text = part.replace(/^\[\d+\]\s*/, '');
+    if (parseMemo(text)) return text;
+  }
+  return null;
+}
+/**
+ * The one round that settles a deposit. A stake with valid timing belongs to the round its memo names. Anything
+ * else (late, far too early) is refunded by the round in which it landed, counted 10 s late so a deposit landing at
+ * the very end of a round is settled by the next one, after it is surely visible.
+ */
+export function ownerOf(memo, blockTimeSec) {
+  const ms = blockTimeSec * 1000;
+  if (memo && ms >= startOf(memo.round) - 60_000 && ms < startOf(memo.round) + BET_MS) return memo.round;
+  return roundAt(ms + LATE_SHIFT_MS);
+}
+const txCache = new Map(); // signature -> parsed deposit or null (only finalized, successful transactions)
 export function parseDeposit(tx, houseAta) {
   if (!tx || tx.meta?.err) return null;
   const msg = tx.transaction?.message;
@@ -282,33 +348,41 @@ export function parseDeposit(tx, houseAta) {
   if (amount === 0n || !from || !source) return null;
   return { amount, from, source, mint, memo, blockTime: tx.blockTime ?? 0, sig: tx.transaction.signatures[0] };
 }
-export function parseMemo(memo) {
-  const m = /^gali1\|([tpc])\|([os])\|(\d{1,9})\|(\d{1,4})$/.exec(memo ?? '');
-  return m ? { g: m[1], t: m[2], round: Number(m[3]), choice: Number(m[4]) } : null;
-}
-async function fetchDeposits(env, houseAta, sinceSec) {
-  const found = [];
+/**
+ * Every finalized stake that this table's round owns. Only transactions whose memo names this table are fetched,
+ * so unrelated traffic costs one list read per 1,000 signatures. Throws when the scan cannot reach the start of the
+ * round, rather than settle on a partial list.
+ */
+async function fetchOwned(env, houseAta, g, t, round) {
+  const since = Math.floor(startOf(round) / 1000) - 60;
+  const wanted = [];
   let before;
-  for (let page = 0; page < 5; page++) {
-    const sigs = await call(env, 'getSignaturesForAddress', [houseAta, { limit: 200, commitment: 'confirmed', ...(before ? { before } : {}) }]);
-    if (!sigs.length) break;
-    for (const s of sigs) if (!s.err && (s.blockTime ?? 0) >= sinceSec) found.push(s.signature);
-    const last = sigs[sigs.length - 1];
-    before = last.signature;
-    if (sigs.length < 200 || (last.blockTime ?? 0) < sinceSec) break;
+  let reached = false;
+  for (let page = 0; page < MAX_SCAN_PAGES; page++) {
+    const sigs = await call(env, 'getSignaturesForAddress', [houseAta, { limit: 1000, commitment: 'finalized', ...(before ? { before } : {}) }], 8000);
+    if (!Array.isArray(sigs)) throw new Error('RPC unavailable');
+    for (const s of sigs) {
+      if (s.err || (s.blockTime ?? 0) < since) continue;
+      if (s.memo === undefined) { wanted.push(s.signature); continue; } // provider gave no memo field: read the transaction
+      const memo = parseMemo(memoFromList(s.memo));
+      if (!memo || memo.g !== g || memo.t !== t) continue; // only this table's stakes are ever played or refunded
+      if (ownerOf(memo, s.blockTime) === round) wanted.push(s.signature);
+    }
+    if (!sigs.length || sigs.length < 1000 || (sigs[sigs.length - 1].blockTime ?? 0) < since) { reached = true; break; }
+    before = sigs[sigs.length - 1].signature;
   }
+  if (!reached) throw Object.assign(new Error('The arcade is busy. Try again in a minute.'), { busy: true });
   const out = [];
-  const todo = found.filter((s) => { if (txCache.has(s)) { const d = txCache.get(s); if (d) out.push(d); return false; } return true; });
+  const keep = (d) => { const m = d && parseMemo(d.memo); if (m && m.g === g && m.t === t && ownerOf(m, d.blockTime) === round) out.push(d); };
+  const todo = wanted.filter((s) => { if (txCache.has(s)) { keep(txCache.get(s)); return false; } return true; });
   for (let i = 0; i < todo.length; i += 8) {
     await Promise.all(todo.slice(i, i + 8).map(async (s) => {
-      try {
-        const tx = await call(env, 'getTransaction', [s, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0, commitment: 'confirmed' }]);
-        if (!tx) return; // not visible yet: try again next call
-        const d = parseDeposit(tx, houseAta);
-        if (txCache.size > 4000) txCache.clear();
-        txCache.set(s, d);
-        if (d) out.push(d);
-      } catch { /* leave it for the next call */ }
+      const tx = await call(env, 'getTransaction', [s, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0, commitment: 'finalized' }]);
+      if (!tx) throw new Error('RPC unavailable'); // listed as finalized but not readable: do not settle without it
+      const d = parseDeposit(tx, houseAta);
+      if (txCache.size > 4000) txCache.clear();
+      txCache.set(s, d);
+      keep(d);
     }));
   }
   return out;
@@ -322,6 +396,7 @@ export function playRound(game, bets, seed, ctx) {
   const refundAll = (why) => ({ outcome: { void: why }, pays: bets.map((bet) => ({ bet, amount: bet.amount, kind: 'refund' })) });
   const n = bigOf(seed);
   if (!bets.length) return { outcome: { none: true }, pays: [] };
+  if (ctx?.refundAll) return refundAll(ctx.refundAll);
   if (game === 't') {
     const collapsed = Number(n % 5n);
     const pool = [0n, 0n, 0n, 0n, 0n];
@@ -348,42 +423,41 @@ export function playRound(game, bets, seed, ctx) {
   if (m100 < 100n) m100 = 100n;
   if (m100 > 1_000_000n) m100 = 1_000_000n;
   const pays = [];
-  let owed = 0n;
   for (const bet of bets) {
     const t100 = BigInt(bet.choice) * 10n;
-    if (t100 <= m100) { const amount = (bet.amount * t100) / 100n; pays.push({ bet, amount, kind: 'win' }); owed += amount; }
+    if (t100 <= m100) pays.push({ bet, amount: (bet.amount * t100) / 100n, kind: 'win' });
   }
-  if (ctx?.houseBalance !== undefined && ctx.houseBalance < owed) return refundAll('the house bankroll is too low for this round');
   return { outcome: { crash: Number(m100) / 100 }, pays };
 }
 
-// ---------- validating bets ----------
+// ---------- validating stakes ----------
 export function validChoice(game, choice) {
   if (game === 't') return choice >= 0 && choice <= 4;
   if (game === 'p') return choice === 0;
   return choice >= 12 && choice <= 100;
 }
+/** deposits: this table's deposits owned by this round (see ownerOf). Dust below the smallest chip is ignored. */
 export function classify({ deposits, game, token, round, decimals }) {
   const g = game, t = token;
-  const chips = new Set(TOKENS[t].chips.map((c) => unitsOf(c, decimals)));
-  const cap = unitsOf(TOKENS[t].chips[2], decimals) * CAP_MULT;
+  const chips = TOKENS[t].chips.map((c) => unitsOf(c, decimals));
+  const chipSet = new Set(chips);
+  const cap = chips[2] * CAP_MULT;
   const start = startOf(round) / 1000;
   const mine = [];
-  const rest = []; // deposits owned by this round that are refunded one by one
+  const rest = []; // refunded one by one: late, wrong size, wrong choice
   for (const d of deposits) {
     const m = parseMemo(d.memo);
-    const owner = m ? m.round : roundAt(d.blockTime * 1000);
-    if (owner !== round) continue;
-    if (m && (m.g !== g || m.t !== t)) continue; // another table's deposit
-    if (!m && roundAt(d.blockTime * 1000) !== round) continue;
-    if (!m) { rest.push({ d, why: 'no valid memo' }); continue; }
+    if (!m || m.g !== g || m.t !== t) continue;
+    if (d.amount < chips[0]) continue; // dust: never worth a refund transaction
     if (d.mint && d.mint !== TOKENS[t].mint) { rest.push({ d, why: 'wrong token' }); continue; }
+    if (m.round !== round) { rest.push({ d, why: m.round > round ? 'too early' : 'landed after betting closed' }); continue; }
     if (d.blockTime < start - 60) { rest.push({ d, why: 'too early' }); continue; }
     if (d.blockTime >= start + BET_MS / 1000) { rest.push({ d, why: 'landed after betting closed' }); continue; }
-    if (!validChoice(g, m.choice) || !chips.has(d.amount)) { rest.push({ d, why: 'not a valid bet' }); continue; }
+    if (!validChoice(g, m.choice) || !chipSet.has(d.amount)) { rest.push({ d, why: 'not a valid bet' }); continue; }
     mine.push({ ...d, choice: m.choice });
   }
   mine.sort((a, b) => a.blockTime - b.blockTime || (a.sig < b.sig ? -1 : 1));
+  rest.sort((a, b) => (a.d.sig < b.d.sig ? -1 : 1));
   const spent = new Map();
   const bets = [];
   const capped = [];
@@ -396,39 +470,170 @@ export function classify({ deposits, game, token, round, decimals }) {
   return { bets, capped, rest };
 }
 
-// ---------- payouts ----------
-async function sendBatch(env, house, label, mintAddr, program, decimals, houseAta, items, memoText, pre = []) {
-  const seed = label;
-  const mutex = await mutexAddress(house.owner, seed);
-  const existing = await call(env, 'getAccountInfo', [mutex, { encoding: 'base64', commitment: 'confirmed' }]);
-  if (existing?.value) return { label, state: 'paid' };
-  const bh = await call(env, 'getLatestBlockhash', [{ commitment: 'confirmed' }]);
-  const ixs = [
-    createMutex(house.owner, mutex, seed, MUTEX_LAMPORTS),
-    ...pre,
-    ...items.map((it) => transferChecked(program, houseAta, mintAddr, it.to, house.owner, it.amount, decimals)),
-    memoIx(memoText),
-  ];
-  const { raw, signature } = await signTransaction(house, bh.value.blockhash, ixs);
-  try {
-    await call(env, 'sendTransaction', [b64(raw), { encoding: 'base64', skipPreflight: false, preflightCommitment: 'confirmed', maxRetries: 3 }]);
-  } catch (e) {
-    const again = await call(env, 'getAccountInfo', [mutex, { encoding: 'base64', commitment: 'confirmed' }]).catch(() => null);
-    if (again?.value) return { label, state: 'paid' };
-    return { label, state: 'failed', error: String(e.message).slice(0, 160) };
+// ---------- transfers ----------
+const LEASE_SECS = 25;
+/**
+ * Sends one recorded transfer at most once. The signed bytes and signature are stored before the first send; a
+ * later call resends the same bytes while the blockhash is valid, and signs afresh only once the old one has expired
+ * without landing. A batch the chain refuses (one bad recipient) is split into single transfers so the others still pay.
+ */
+export async function sendRecorded(env, house, ledger, label, depth = 0) {
+  let row = await ledger.lease(label, LEASE_SECS);
+  if (!row) {
+    const cur = await ledger.getSend(label);
+    if (!cur) return { label, state: 'failed', error: 'unknown transfer' };
+    if (cur.state === 'split' && depth === 0) return sendChildren(env, house, ledger, cur);
+    return { label, state: cur.state === 'paid' ? 'paid' : 'pending', signature: cur.sig ?? undefined };
   }
+  try {
+    if (row.sig) {
+      const st = (await call(env, 'getSignatureStatuses', [[row.sig], { searchTransactionHistory: true }]))?.value?.[0];
+      if (st && !st.err && (st.confirmationStatus === 'confirmed' || st.confirmationStatus === 'finalized')) {
+        await ledger.update(label, { state: 'paid', error: null });
+        return { label, state: 'paid', signature: row.sig };
+      }
+      if (st && st.err) {
+        await ledger.update(label, { state: 'failed', tx: null, sig: null, last_valid: null, error: 'transaction failed on chain', attempts: row.attempts + 1 });
+        row = { ...row, tx: null, sig: null };
+      } else {
+        const height = await call(env, 'getBlockHeight', [{ commitment: 'confirmed' }]);
+        if (Number(height) <= Number(row.last_valid)) {
+          await call(env, 'sendTransaction', [row.tx, { encoding: 'base64', skipPreflight: true, maxRetries: 2 }]).catch(() => null);
+          return await confirm(env, ledger, label, row.sig);
+        }
+        // expired: it can never land now, but make sure it did not land before
+        const landed = await call(env, 'getTransaction', [row.sig, { encoding: 'json', maxSupportedTransactionVersion: 0, commitment: 'confirmed' }]);
+        if (landed && !landed.meta?.err) {
+          await ledger.update(label, { state: 'paid', error: null });
+          return { label, state: 'paid', signature: row.sig };
+        }
+        await ledger.update(label, { tx: null, sig: null, last_valid: null });
+        row = { ...row, tx: null, sig: null };
+      }
+    }
+    const { program, decimals } = await loadMint(env, row.token);
+    const houseAta = await loadHouseAta(env, house, row.token);
+    const ixs = [
+      ...(row.pre ?? []).map((p) => createAtaIdem(house.owner, p.ata, p.owner, TOKENS[row.token].mint, program)),
+      ...row.items.map((it) => transferChecked(program, houseAta, TOKENS[row.token].mint, it.to, house.owner, BigInt(it.amount), decimals)),
+      memoIx(row.memo),
+    ];
+    const bh = await call(env, 'getLatestBlockhash', [{ commitment: 'confirmed' }]);
+    const { raw, signature } = await signTransaction(house, bh.value.blockhash, ixs);
+    const tx = b64(raw);
+    await ledger.update(label, { state: 'sending', tx, sig: signature, last_valid: bh.value.lastValidBlockHeight, error: null });
+    try {
+      await call(env, 'sendTransaction', [tx, { encoding: 'base64', skipPreflight: false, preflightCommitment: 'confirmed', maxRetries: 3 }]);
+    } catch (e) {
+      if (!e?.rpc) return { label, state: 'pending', signature }; // network trouble: the stored signature is checked next time
+      // the node refused it in simulation, so it was never sent
+      const error = String(e.message).replace(/api-key=[^&\s]+/gi, '').slice(0, 160);
+      const blockhashOnly = /blockhash/i.test(error);
+      await ledger.update(label, { state: 'failed', tx: null, sig: null, last_valid: null, error, attempts: row.attempts + 1 });
+      if (!blockhashOnly && row.items.length > 1 && depth === 0) {
+        for (const [i, it] of row.items.entries()) {
+          await ledger.addSend({ label: `${label}.${i}`, token: row.token, items: [it], pre: i === 0 ? row.pre : [], memo: `${row.memo}|${i}` });
+        }
+        await ledger.update(label, { state: 'split', error });
+        return sendChildren(env, house, ledger, { ...row, state: 'split' });
+      }
+      return { label, state: 'failed', error };
+    }
+    return await confirm(env, ledger, label, signature);
+  } finally {
+    await ledger.update(label, { lease_until: null }).catch(() => null);
+  }
+}
+async function confirm(env, ledger, label, signature) {
   for (let i = 0; i < 6; i++) {
-    await new Promise((r) => setTimeout(r, 1000));
-    const st = await call(env, 'getSignatureStatuses', [[signature]]).catch(() => null);
-    const s = st?.value?.[0];
-    if (s?.err) return { label, state: 'failed', error: 'transaction failed' };
-    if (s?.confirmationStatus === 'confirmed' || s?.confirmationStatus === 'finalized') return { label, state: 'paid', signature };
+    await new Promise((r) => setTimeout(r, env?.__pollMs ?? CONFIRM_POLL_MS));
+    const s = (await call(env, 'getSignatureStatuses', [[signature]]).catch(() => null))?.value?.[0];
+    if (s?.err) return { label, state: 'pending', signature }; // recorded; the next call clears it and retries
+    if (s?.confirmationStatus === 'confirmed' || s?.confirmationStatus === 'finalized') {
+      await ledger.update(label, { state: 'paid', error: null });
+      return { label, state: 'paid', signature };
+    }
   }
   return { label, state: 'pending', signature };
+}
+async function sendChildren(env, house, ledger, parent) {
+  const states = [];
+  for (let i = 0; i < parent.items.length; i++) states.push(await sendRecorded(env, house, ledger, `${parent.label}.${i}`, 1));
+  const all = states.map((s) => s.state);
+  return { label: parent.label, state: all.every((s) => s === 'paid') ? 'paid' : all.includes('pending') ? 'pending' : 'failed', parts: states };
 }
 
 const shortKey = (k) => `${k.slice(0, 4)}…${k.slice(-4)}`;
 const suffix = (n) => n.toString(36);
+const roundKey = (g, t, round) => `${g}${t}${suffix(round)}`;
+
+/** Works out a round's result from finalized chain data and records it, or returns the result already recorded. */
+async function recordRound(env, house, ledger, { g, t, round, now }) {
+  const key = roundKey(g, t, round);
+  const stored = await ledger.getRound(key);
+  if (stored) return stored;
+  if (now - startOf(round) > MAX_SETTLE_AGE_MS) throw Object.assign(new Error('This round is too old to settle. Ask support for a refund.'), { status: 410 });
+  // Settle only from finalized data that covers the whole betting window.
+  const fslot = await call(env, 'getSlot', [{ commitment: 'finalized' }]);
+  const ftime = await call(env, 'getBlockTime', [fslot]);
+  const close = (startOf(round) + BET_MS) / 1000;
+  if (!(Number(ftime) >= close + 1)) return { early: true, retryMs: 3000 };
+  const { decimals, program } = await loadMint(env, t);
+  const houseAta = await loadHouseAta(env, house, t);
+  const mint = TOKENS[t].mint;
+  const secret = await roundSecret(env, g, t, round);
+  const commit = hex(await sha256(secret));
+  const deposits = await fetchOwned(env, houseAta, g, t, round);
+  const { bets, capped, rest } = classify({ deposits, game: g, token: t, round, decimals });
+  const seed = await seedOf(secret, round, bets.map((b) => b.sig));
+  const balance = g === 'c' ? BigInt((await call(env, 'getTokenAccountBalance', [houseAta, { commitment: 'confirmed' }])).value.amount) : 0n;
+  const build = (played) => {
+    const pays = [
+      ...played.pays,
+      ...capped.map((bet) => ({ bet, amount: bet.amount, kind: 'refund' })),
+      ...rest.map(({ d, why }) => ({ bet: d, amount: d.amount, kind: 'refund', why })),
+    ];
+    const items = pays.map((p) => ({ to: p.bet.source, amount: p.amount, kind: p.kind, from: p.bet.from, sig: p.bet.sig, why: p.why }));
+    const sends = [];
+    for (let i = 0; i < items.length; i += BATCH) {
+      const k = i / BATCH;
+      sends.push({ label: `${key}.${k}`, items: items.slice(i, i + BATCH).map((it) => ({ to: it.to, amount: String(it.amount) })), memo: `gali1pay|${g}|${t}|${round}|${k}` });
+    }
+    const fee = played.outcome?.fee && !played.outcome.void ? BigInt(played.outcome.fee) : 0n;
+    return { pays, items, sends, fee, outcome: played.outcome };
+  };
+  let plan = build(playRound(g, bets, seed));
+  const result = async (p) => {
+    const sends = [...p.sends];
+    if (p.fee > 0n) {
+      const rev = revenueOf(env);
+      const revAta = await ataOf(rev, mint, program);
+      sends.push({ label: `${key}.f`, items: [{ to: revAta, amount: String(p.fee) }], pre: [{ ata: revAta, owner: rev }], memo: `gali1fee|${g}|${t}|${round}` });
+    }
+    return {
+      sends,
+      result: {
+        game: GAMES[g], token: TOKENS[t].id, round, commit, secret: hex(secret), seed: hex(seed), startsAt: startOf(round), decimals,
+        outcome: p.outcome,
+        bets: bets.map((b) => ({ who: b.from, short: shortKey(b.from), sig: b.sig, amount: fmt(b.amount, decimals), choice: b.choice })),
+        pays: p.items.filter((it) => !it.why).map((it) => ({ who: it.from, short: shortKey(it.from), amount: fmt(it.amount, decimals), kind: it.kind, sig: it.sig })),
+        refunds: p.items.filter((it) => it.why).map((it) => ({ who: it.from, from: shortKey(it.from), amount: fmt(it.amount, decimals), why: it.why, sig: it.sig })),
+        labels: sends.map((s) => s.label),
+        feeBps: Number(FEE_BPS),
+      },
+    };
+  };
+  // Crash Cart pays from the bankroll: the house must hold the winnings on top of everything it already owes.
+  const need = g === 'c' ? plan.pays.filter((p) => p.kind === 'win').reduce((n, p) => n + p.amount, 0n) : 0n;
+  let r = await result(plan);
+  let saved = await ledger.storeRound({ key, token: t, round, result: r.result, sends: r.sends, need, balance });
+  if (saved === null) {
+    plan = build(playRound(g, bets, seed, { refundAll: 'the house bankroll is too low for this round' }));
+    r = await result(plan);
+    saved = await ledger.storeRound({ key, token: t, round, result: r.result, sends: r.sends, need: 0n, balance });
+  }
+  return saved;
+}
 
 export async function settleRound(env, house, { game, token, round, now = Date.now() }) {
   const g = GAME_KEY[game], t = TOKEN_KEY[token];
@@ -436,55 +641,17 @@ export async function settleRound(env, house, { game, token, round, now = Date.n
   if (!Number.isSafeInteger(round) || round < 0) throw new Error('bad round');
   const wait = startOf(round) + SETTLE_AFTER_MS - now;
   if (wait > 0) return { ok: false, early: true, retryMs: wait };
-  const { decimals, program } = await loadMint(env, t);
-  const houseAta = await loadHouseAta(env, house, t);
-  const mint = TOKENS[t].mint;
-  const secret = await roundSecret(env, g, t, round);
-  const commit = hex(await sha256(secret));
-  const since = Math.floor(startOf(round) / 1000) - 60;
-  const deposits = await fetchDeposits(env, houseAta, since);
-  const { bets, capped, rest } = classify({ deposits, game: g, token: t, round, decimals });
-  const seed = await seedOf(secret, round, bets.map((b) => b.sig));
-  let houseBalance;
-  if (g === 'c') {
-    const bal = await call(env, 'getTokenAccountBalance', [houseAta, { commitment: 'confirmed' }]);
-    houseBalance = BigInt(bal.value.amount);
-  }
-  const played = playRound(g, bets, seed, { houseBalance });
-  const pays = [...played.pays, ...capped.map((bet) => ({ bet, amount: bet.amount, kind: 'refund' }))];
-  const items = pays.map((p) => ({ to: p.bet.source, amount: p.amount, kind: p.kind, from: p.bet.from, sig: p.bet.sig }));
+  const ledger = ledgerOf(env);
+  const rec = await recordRound(env, house, ledger, { g, t, round, now });
+  if (rec.early) return { ok: false, early: true, retryMs: rec.retryMs };
+  // keep inside the function's 20 s limit: whatever is left is picked up by the next settle call
+  const began = Date.now();
   const batches = [];
-  const key = `${g}${t}${suffix(round)}`;
-  for (let i = 0; i < items.length; i += BATCH) {
-    const k = i / BATCH;
-    batches.push(await sendBatch(env, house, `${key}.${k}`, mint, program, decimals, houseAta, items.slice(i, i + BATCH), `gali1pay|${g}|${t}|${round}|${k}`));
-  }
-  // the platform's 5% (Tunnel Collapse, Gold Rush Pot) goes to the revenue wallet in its own one-time batch
-  let feePaid = null;
-  const fee = played.outcome?.fee ? BigInt(played.outcome.fee) : 0n;
-  if (fee > 0n && !played.outcome.void) {
-    const rev = revenueOf(env);
-    const revAta = await ataOf(rev, mint, program);
-    feePaid = await sendBatch(env, house, `${key}.f`, mint, program, decimals, houseAta, [{ to: revAta, amount: fee }], `gali1fee|${g}|${t}|${round}`, [createAtaIdem(house.owner, revAta, rev, mint, program)]);
-    batches.push(feePaid);
-  }
-  const odd = [];
-  for (const { d, why } of rest) {
-    const r = await sendBatch(env, house, `r${t}${d.sig.slice(0, 28)}`, mint, program, decimals, houseAta, [{ to: d.source, amount: d.amount }], `gali1refund|${d.sig.slice(0, 40)}`);
-    odd.push({ from: shortKey(d.from), amount: fmt(d.amount, decimals), why, state: r.state });
-  }
+  for (const label of rec.labels) batches.push(Date.now() - began > SEND_BUDGET_MS ? { label, state: 'pending' } : await sendRecorded(env, house, ledger, label));
   const states = batches.map((b) => b.state);
-  const status = !bets.length && !capped.length ? 'none' : states.every((s) => s === 'paid') ? (played.outcome.void ? 'void' : 'paid') : states.includes('failed') ? 'failed' : 'pending';
-  return {
-    ok: true, game, token, round, status, commit, secret: hex(secret), seed: hex(seed),
-    startsAt: startOf(round), decimals,
-    outcome: played.outcome,
-    bets: bets.map((b) => ({ who: b.from, short: shortKey(b.from), sig: b.sig, amount: fmt(b.amount, decimals), choice: b.choice })),
-    pays: items.map((p) => ({ who: p.from, short: shortKey(p.from), amount: fmt(p.amount, decimals), kind: p.kind, sig: p.sig })),
-    refunds: odd,
-    batches,
-    feeBps: Number(FEE_BPS),
-  };
+  const hasStakes = rec.bets.length || rec.refunds.length || rec.pays.length;
+  const status = !hasStakes ? 'none' : states.every((s) => s === 'paid') ? (rec.outcome.void ? 'void' : 'paid') : states.includes('pending') ? 'pending' : 'failed';
+  return { ok: true, ...rec, status, batches };
 }
 
 // ---------- admin ----------
@@ -496,6 +663,12 @@ async function verifySig(wallet, text, sigB58) {
 }
 const adminWallet = (env) => (typeof env?.ADMIN_WALLET === 'string' && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(env.ADMIN_WALLET.trim()) ? env.ADMIN_WALLET.trim() : null);
 async function sessionTag(env, wallet, exp) { return hex(await hmac(String(env.GAMES_MASTER), `admin|${wallet}|${exp}`)); }
+function sameText(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
+}
 /** A signed request from the admin wallet: `Gali admin <op> <args...> <ts>`, fresh within 5 minutes. */
 async function checkSigned(env, body, op, args) {
   const admin = adminWallet(env);
@@ -511,16 +684,30 @@ async function checkSession(env, body) {
   const admin = adminWallet(env);
   const [wallet, expS, tag] = String(body.session ?? '').split('.');
   const exp = Number(expS);
-  if (!admin || wallet !== admin || !Number.isSafeInteger(exp) || exp < Date.now() || tag !== (await sessionTag(env, wallet, exp)))
+  if (!admin || wallet !== admin || !Number.isSafeInteger(exp) || exp < Date.now() || !sameText(tag, await sessionTag(env, wallet, exp)))
     throw Object.assign(new Error('Sign in again'), { status: 401 });
   return admin;
 }
 async function tokenBalance(env, ata) {
   try { const b = await call(env, 'getTokenAccountBalance', [ata, { commitment: 'confirmed' }]); return BigInt(b.value.amount); } catch { return 0n; }
 }
-/** House and revenue balances, stakes still owed to players, and what can be swept per token. */
+/** Stakes that landed in the last 10 minutes and may not be recorded in the ledger yet. */
+async function recentStakes(env, houseAta) {
+  const since = Math.floor((Date.now() - LATE_SCAN_MS) / 1000);
+  const sigs = await call(env, 'getSignaturesForAddress', [houseAta, { limit: 1000, commitment: 'confirmed' }]);
+  let owed = 0n;
+  const todo = (sigs ?? []).filter((s) => !s.err && (s.blockTime ?? 0) >= since && memoFromList(s.memo)).map((s) => s.signature);
+  for (const s of todo.slice(0, 200)) {
+    const tx = await call(env, 'getTransaction', [s, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0, commitment: 'confirmed' }]).catch(() => null);
+    const d = parseDeposit(tx, houseAta);
+    if (d) owed += d.amount;
+  }
+  return owed;
+}
+/** House and revenue balances, stakes and payouts still owed, and what can be swept per token. */
 async function treasury(env, house) {
   const rev = revenueOf(env);
+  const ledger = ledgerOf(env);
   const [houseSol, revSol] = await Promise.all([call(env, 'getBalance', [house.owner, { commitment: 'confirmed' }]), call(env, 'getBalance', [rev, { commitment: 'confirmed' }])]);
   const tokens = {};
   for (const [t, info] of Object.entries(TOKENS)) {
@@ -530,9 +717,8 @@ async function treasury(env, house) {
     const revAta = await ataOf(rev, info.mint, m.program);
     const houseBal = houseAta ? await tokenBalance(env, houseAta) : 0n;
     const revBal = await tokenBalance(env, revAta);
-    // stakes from the last 10 minutes may still be paid out or refunded: never sweep them
-    let owed = 0n;
-    if (houseAta) for (const d of await fetchDeposits(env, houseAta, Math.floor((Date.now() - LATE_SCAN_MS) / 1000))) owed += d.amount;
+    // never sweep recent stakes or payouts the ledger has not confirmed yet
+    const owed = (houseAta ? await recentStakes(env, houseAta) : 0n) + (await ledger.owed(t));
     // keep at least one maximum Crash Cart win (5 x top chip x 10) in the bankroll
     const floorMin = unitsOf(info.chips[2], m.decimals) * CAP_MULT * 10n;
     tokens[info.id] = { decimals: m.decimals, houseAta, revenueAta: revAta, house: String(houseBal), revenue: String(revBal), owed: String(owed), floorMin: String(floorMin) };
@@ -544,6 +730,7 @@ async function sweep(env, house, token, floorUi, ts) {
   if (!t) throw new Error('unknown token');
   const info = TOKENS[t];
   const m = await loadMint(env, t);
+  const ledger = ledgerOf(env);
   const tr = await treasury(env, house);
   const row = tr.tokens[info.id];
   if (!row.houseAta) throw new Error(`The ${info.id} table is not funded yet`);
@@ -552,7 +739,10 @@ async function sweep(env, house, token, floorUi, ts) {
   if (floor < BigInt(row.floorMin)) throw new Error(`The floor must be at least ${fmt(BigInt(row.floorMin), m.decimals)} ${info.id.toUpperCase()}`);
   const amount = BigInt(row.house) - BigInt(row.owed) - floor;
   if (amount <= 0n) throw new Error('Nothing above the floor to sweep');
-  const r = await sendBatch(env, house, `sw${t}${suffix(Math.floor(ts / 1000))}`, info.mint, m.program, m.decimals, row.houseAta, [{ to: row.revenueAta, amount }], `gali1sweep|${t}|${ts}`, [createAtaIdem(house.owner, row.revenueAta, tr.revenue, info.mint, m.program)]);
+  const label = `sw${t}${suffix(Math.floor(ts / 1000))}`;
+  const ok = await ledger.addSend({ label, token: t, items: [{ to: row.revenueAta, amount: String(amount) }], pre: [{ ata: row.revenueAta, owner: tr.revenue }], memo: `gali1sweep|${t}|${ts}`, need: amount + floor, balance: BigInt(row.house) });
+  if (!ok) throw new Error('Nothing above the floor to sweep');
+  const r = await sendRecorded(env, house, ledger, label);
   return { ...r, amount: fmt(amount, m.decimals), token: info.id };
 }
 
@@ -561,6 +751,7 @@ export async function configFor(env, house) {
   const tokens = {};
   for (const [t, info] of Object.entries(TOKENS)) {
     try {
+      ledgerOf(env); // no stakes are taken until results and payouts can be recorded
       const m = await loadMint(env, t);
       const ata = await loadHouseAta(env, house, t);
       tokens[info.id] = { ready: true, mint: info.mint, decimals: m.decimals, program: m.program, houseAta: ata, chips: info.chips, capUnits: String(unitsOf(info.chips[2], m.decimals) * CAP_MULT) };
@@ -642,7 +833,8 @@ async function handle(req, ctx) {
     }
     return fail(400, 'unknown action');
   } catch (e) {
-    if (e?.status === 401 || e?.status === 403) return fail(e.status, e.message);
+    if (e?.status === 401 || e?.status === 403 || e?.status === 410) return fail(e.status, e.message);
+    if (e?.busy) return fail(503, e.message);
     return fail(502, String(e?.message ?? 'failed').replace(/api-key=[^&\s]+/gi, '').slice(0, 200));
   }
 }
