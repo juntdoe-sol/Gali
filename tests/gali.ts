@@ -23,7 +23,7 @@ import {
   mintTo,
   TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
-import { Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram } from '@solana/web3.js';
+import { Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from '@solana/web3.js';
 import { expect } from 'chai';
 import galiIdl from '../target/idl/gali.json';
 import oreIdl from '../target/idl/ore_mock.json';
@@ -793,6 +793,40 @@ describe('gali on ORE', () => {
       // One hit, both assets, the same share of the square.
       const bigOreGot = (await balance(big.oreAta)) - bigOreBefore;
       expect(bigOreGot).to.equal((orePoolBefore * 3n) / 4n);
+    });
+
+    it('records and claims in the same transaction as the next deploy (as the app sends them)', async () => {
+      const p = await fundedPlayer();
+      await fundJackpot(10_000);
+      const roundId = 2_500;
+      await motherlodeRound(roundId, 3, [p.kp.publicKey], [LAMPORTS_PER_SOL]);
+      const before = await balance(p.skrAta);
+      // record + claim, then ORE's deploy moving the miner on to the next round (put_miner stands in for it here)
+      const next = zeros25();
+      next[4] = LAMPORTS_PER_SOL;
+      const tx = new Transaction().add(
+        await program.methods
+          .recordOreRound(new BN(roundId))
+          .accountsStrict({ cranker: p.kp.publicKey, config, player: playerPda(p.kp.publicKey), oreBoard: oreBoardPda(), oreRound: oreRoundPda(roundId), oreMiner: oreMinerPda(p.kp.publicKey) })
+          .instruction(),
+        await program.methods
+          .claimJackpot(new BN(roundId))
+          .accountsStrict({
+            owner: p.kp.publicKey, config, player: playerPda(p.kp.publicKey), jackpot: jackpotPda(roundId), skrMint, oreMint, motherlode, oreMotherlode,
+            ownerSkr: p.skrAta, ownerOre: p.oreAta, oreBoard: oreBoardPda(), oreRound: oreRoundPda(roundId), oreMiner: oreMinerPda(p.kp.publicKey),
+            tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
+          })
+          .instruction(),
+        await ore.methods
+          .putMiner(p.kp.publicKey, Buffer.from(minerBytes({ authority: p.kp.publicKey, roundId: roundId + 1, deployed: next })))
+          .accountsStrict({ payer: admin.publicKey, account: oreMinerPda(p.kp.publicKey), systemProgram: SystemProgram.programId })
+          .instruction(),
+      );
+      await provider.sendAndConfirm(tx, [p.kp]);
+      const pl = await acc.player.fetch(playerPda(p.kp.publicKey));
+      expect(pl.lastOreRound.toNumber()).to.equal(roundId);
+      expect(pl.jackpotRound.toNumber()).to.equal(roundId);
+      expect((await balance(p.skrAta)) > before).to.equal(true);
     });
 
     it('pays nothing on a round where ORE did not hit its motherlode', async () => {
