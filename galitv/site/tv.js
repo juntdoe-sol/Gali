@@ -163,8 +163,8 @@ function tapeHtml(v, i) {
   const tag = v.series === 'cartoon' ? (v.episode != null ? `EP ${String(v.episode).padStart(2, '0')}` : 'MATT') : 'TEAM';
   return `<li class="tape" data-id="${esc(v.id)}" data-series="${v.series}">
     <button aria-label="Play ${esc(v.title)}" data-n="${i + 1}">
+      ${v.id === state.latestId ? '<span class="sticker">NEW!</span>' : ''}
       <div class="case">
-        ${v.id === state.latestId ? '<span class="sticker">NEW!</span>' : ''}
         <div class="label">
           <div class="lbl-top"><span>CH ${ch.num} · ${tag}</span><span>${String(i + 1).padStart(2, '0')}</span></div>
           <div class="lbl-title">${esc(v.title)}</div>
