@@ -741,13 +741,7 @@ export class LobbyEngine {
       const y = 13 * LT + Math.floor(seeded(k * 7.7) * 7 * LT);
       px(x, y, 3, 2, k % 2 ? '#b38f5e' : '#c9a572');
     }
-    // the market sign over the door, and bunting across the square
-    const sx = 51 * LT - 8;
-    const sy = 2 * LT + 62;
-    px(sx, sy, 64, 14, '#4a2e18');
-    px(sx + 1, sy + 1, 62, 12, '#7a5330');
-    px(sx + 2, sy + 2, 60, 10, '#5e3b1e');
-    text(g, 'MARKET', Math.round(sx + 32 - textWidth('MARKET') / 2), sy + 4, 1, '#ffd24a');
+    // bunting across the square in front of the old hall
     const bx0 = 45 * LT;
     const bx1 = 60 * LT;
     const by = 9 * LT + 2;
@@ -2269,7 +2263,6 @@ export class LobbyEngine {
     // landmarks: a pixel icon and a name for every place worth walking to
     const marks: [number, number, string, string, string][] = [
       [15.5, 8.2, 'ui-pick', 'CAVE', DOOR_COLOR.cave],
-      [52.5, 7.4, 'ui-gift', 'MARKET', DOOR_COLOR.market],
       [64, 26.5, 'ui-gem', 'ISLAND', DOOR_COLOR.island],
       [36.5, 39.6, 'ui-cart', 'GAMES', DOOR_COLOR.pot],
       [36.5, 25.2, 'ui-star', 'PLAZA', '#ffe27a'],

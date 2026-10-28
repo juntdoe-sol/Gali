@@ -161,7 +161,6 @@ function Game() {
   }, []);
 
   useEffect(() => {
-    if (sheet === 'gear') useGame.getState().track('visit-market');
   }, [sheet]);
 
   useEffect(() => {
@@ -273,7 +272,7 @@ function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTa
         <LevelUp />
         <GearReveal />
         <SharedChat />
-        <LobbyScreen onMarket={() => setSheet('gear')} sheet={sheet} onTab={setSheet} />
+        <LobbyScreen sheet={sheet} onTab={setSheet} />
         <HollowSplash />
         <Sheet tab={sheet} onTab={setSheet} />
       </>}

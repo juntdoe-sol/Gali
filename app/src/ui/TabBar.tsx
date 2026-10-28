@@ -1,10 +1,11 @@
 /**
- * The menu: Quest, Rounds, Market, MINE, Boost, Ranks, Chat.
+ * The menu: Quest, Rounds, MINE, Boost (Gali program flag), Ranks, Chat.
  *
  * Phone: a bar along the bottom, MINE raised in the middle (it opens or closes the deploy panel).
  * Desktop: a rail down the left side, MINE at the top, every tab labelled with its key.
  * It hides on a phone while you are inside a spot's mine, where the spot panel owns the bottom.
  */
+import { FEATURE_GALI_PROGRAM } from '../config/features';
 import { Image, Pressable, ScrollView, StyleSheet, View, type ImageSourcePropType } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLobby } from '../game/lobby';
@@ -19,7 +20,7 @@ const C = LANDSCAPE_APP;
 import { PixIcon } from './PixIcon';
 import type { PixName } from './pixIcons';
 
-export type SheetTab = 'quests' | 'rounds' | 'gear' | 'skr' | 'ranks' | 'clans' | 'me';
+export type SheetTab = 'quests' | 'rounds' | 'skr' | 'ranks' | 'clans' | 'me';
 
 /** Height of the bar above the safe-area inset. The panel and the map frame sit on top of it. */
 export const BAR_H = 64;
@@ -28,7 +29,6 @@ export const BAR_H = 64;
 export const TAB_ICON: Record<SheetTab | 'chat' | 'mine', ImageSourcePropType> = {
   quests: require('../../assets/ui/tab-quest.png'),
   rounds: require('../../assets/ui/tab-rounds.png'),
-  gear: require('../../assets/ui/tab-store.png'),
   skr: require('../../assets/ui/tab-boost.png'),
   ranks: require('../../assets/ui/tab-ranks.png'),
   clans: require('../../assets/ui/tab-me.png'),
@@ -40,7 +40,6 @@ export const TAB_ICON: Record<SheetTab | 'chat' | 'mine', ImageSourcePropType> =
 export const TAB_PIX: Record<SheetTab | 'chat', PixName> = {
   quests: 'quest',
   rounds: 'hourglass',
-  gear: 'bag',
   skr: 'bolt',
   ranks: 'trophy',
   clans: 'users',
@@ -49,12 +48,13 @@ export const TAB_PIX: Record<SheetTab | 'chat', PixName> = {
 };
 
 /** Keyboard shortcuts for the tabs on a desktop browser (see useHotkeys in App.tsx). */
-export const TAB_KEY: Record<SheetTab | 'chat', string> = { quests: 'Q', rounds: 'R', gear: 'B', skr: 'T', ranks: 'K', clans: 'N', me: 'P', chat: 'C' };
+const TAB_KEY_ALL: Record<SheetTab | 'chat', string> = { quests: 'Q', rounds: 'R', skr: 'T', ranks: 'K', clans: 'N', me: 'P', chat: 'C' };
+/** Keyboard shortcuts for the tabs this build shows. */
+export const TAB_KEY = Object.fromEntries(Object.entries(TAB_KEY_ALL).filter(([t]) => t !== 'skr' || FEATURE_GALI_PROGRAM)) as Record<SheetTab | 'chat', string>;
 
 export const SHEET_TITLE: Record<SheetTab, string> = {
   quests: 'Quests',
   rounds: 'Rounds',
-  gear: 'Market',
   skr: 'Boost',
   ranks: 'Ranks',
   clans: 'Clans',
@@ -62,22 +62,24 @@ export const SHEET_TITLE: Record<SheetTab, string> = {
 };
 
 type Item = { id: SheetTab | 'chat'; label: string };
-const LEFT: Item[] = [
+/** BOOST (SKR staking) needs the Gali program, so it shows only with that flag on. */
+const program = (items: Item[]) => items.filter((i) => i.id !== 'skr' || FEATURE_GALI_PROGRAM);
+const LEFT: Item[] = program([
   { id: 'quests', label: 'QUEST' },
   { id: 'rounds', label: 'ROUNDS' },
   { id: 'skr', label: 'BOOST' },
-];
+]);
 const RIGHT: Item[] = [
   { id: 'ranks', label: 'RANKS' },
   { id: 'clans', label: 'CLANS' },
   { id: 'chat', label: 'CHAT' },
 ];
 
-/** The lobby bar drops QUEST and ROUNDS (they belong to the island); the games and the market live in the TRAVEL menu. */
-const LOBBY_LEFT: Item[] = [
+/** The lobby bar drops QUEST and ROUNDS (they belong to the island); the games live in the TRAVEL menu. */
+const LOBBY_LEFT: Item[] = program([
   { id: 'skr', label: 'BOOST' },
   { id: 'ranks', label: 'RANKS' },
-];
+]);
 const LOBBY_RIGHT: Item[] = [
   { id: 'clans', label: 'CLANS' },
   { id: 'chat', label: 'CHAT' },
@@ -173,7 +175,7 @@ function Bottom({ active, onTab, inSheet, lobby }: { active: SheetTab | null; on
         onPress={mine}
         style={styles.item}
         accessibilityRole="button"
-        accessibilityLabel={lobby ? 'Quick travel: island, cave or market' : dockOpen ? 'Close the mine panel' : 'Open the mine panel'}
+        accessibilityLabel={lobby ? 'Quick travel: island, cave, arena or games' : dockOpen ? 'Close the mine panel' : 'Open the mine panel'}
       >
         {(st) => (
           <>

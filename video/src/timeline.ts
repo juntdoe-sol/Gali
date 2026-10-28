@@ -62,7 +62,7 @@ export const T = {
   tipCoins: [93, 93.5, 94].map(b),
   tipsOut: b(95.25),
   tour: b(96),
-  stops: [96, 98, 100, 102].map(b), // the cave, the market, the pier, the games row
+  stops: [96, 98, 100, 102].map(b), // the town square, the pier, the games row, the cave
   tourOut: b(103.25),
   // ---- Cave Run ----
   caveIn: b(103.5),
@@ -77,15 +77,15 @@ export const T = {
   crash: b(132),
   fair: b(140),
   fairOut: b(143.25),
-  shut2: b(143.5), // shutters again, onto the gear
+  shut2: b(143.5), // shutters again, onto the end card (the Gear Market scene is cut: it is not in the game)
   gear: b(144),
   glint: b(148),
-  gearOut: b(151.25),
-  end: b(152),
-  line1: b(154),
-  line2: b(155),
-  line3: b(156),
-  badge: b(158),
+  gearOut: b(143.75),
+  end: b(144),
+  line1: b(146),
+  line2: b(147),
+  line3: b(148),
+  badge: b(150),
   sweep2: b(160),
   fade: b(163),
   total: b(165),

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { FEATURE_GALI_PROGRAM } from '../config/features';
 import { Animated, Easing, Image, Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { COLORS, gearByKey, RARITY_COLOR } from '../game/constants';
 import { fmtSol } from '../game/pot';
@@ -103,7 +104,7 @@ export function ResultPop() {
                   </T>
                 )}
                 <SolLine res={res} dark={false} />
-                {res.points > 0 ? (
+                {FEATURE_GALI_PROGRAM && res.points > 0 ? (
                   <T v="display" style={{ fontSize: 20, color: '#fff3c0' }}>
                     +{res.points.toLocaleString()} PTS
                   </T>
@@ -119,7 +120,7 @@ export function ResultPop() {
                   <PixIcon name="star" size={28} />
                 </View>
                 <SolLine res={res} dark big />
-                {res.points > 0 ? (
+                {FEATURE_GALI_PROGRAM && res.points > 0 ? (
                   <T v="display" style={{ fontSize: 20, color: '#4a1f00' }}>
                     +{res.points.toLocaleString()} PTS
                   </T>

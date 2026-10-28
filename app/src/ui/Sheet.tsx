@@ -1,4 +1,5 @@
 import { useBrawl } from '../game/brawl';
+import { FEATURE_GALI_PROGRAM } from '../config/features';
 import { useEffect, useState } from 'react';
 import { Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,7 +10,7 @@ import {
 import { isLive, isOnChain, useGame, useLevelXp, usePoints } from '../game/store';
 import { chainReady, CLUSTER, oreLive, PROGRAM_ID_STR, short, SKR_MINT_STR, type BoardRound } from '../chain/light';
 import { PERIOD_WORDS, useMinerRanks, useRanks, type Period } from '../game/ranks';
-import { ClansSoon, ComingSoon, MarketSoon, PeriodPicker } from './Clans';
+import { ClansSoon, ComingSoon, PeriodPicker } from './Clans';
 import { loadBoard, loadChain } from '../chain/lazy';
 import { ADMIN_FEE, fmtSol, POT_FEE, practiceMotherlode, practiceOreMotherlode, simPot, soloMask } from '../game/pot';
 import { UnclaimedRow } from './Dock';
@@ -35,7 +36,6 @@ export function Sheet({ tab, onTab }: { tab: SheetTab | null; onTab: (t: SheetTa
       <T v="display" style={{ fontSize: 30, lineHeight: 32, letterSpacing: 1, flex: 1 }}>
         {tab ? SHEET_TITLE[tab].toUpperCase() : ''}
       </T>
-      {tab === 'gear' ? <BackPill door="market" onBefore={close} /> : null}
       <IconBtn onPress={close} label="Close" kbd="ESC">
         <PixIcon name="close" size={18} />
       </IconBtn>
@@ -45,8 +45,7 @@ export function Sheet({ tab, onTab }: { tab: SheetTab | null; onTab: (t: SheetTa
     <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }} showsVerticalScrollIndicator>
       {tab === 'quests' && <Quests />}
       {tab === 'rounds' && <Rounds />}
-      {tab === 'gear' && <GearTab />}
-      {tab === 'skr' && <SkrTab />}
+      {tab === 'skr' && FEATURE_GALI_PROGRAM && <SkrTab />}
       {tab === 'ranks' && <Ranks />}
       {tab === 'clans' && <ClansSoon />}
       {tab === 'me' && <Me />}
@@ -54,7 +53,7 @@ export function Sheet({ tab, onTab }: { tab: SheetTab | null; onTab: (t: SheetTa
   );
   if (desktop) {
     // a window beside the rail; the map stays visible to its right
-    const width = Math.min(tab === 'gear' ? 860 : 600, w - RAIL_W - GUTTER * 3);
+    const width = Math.min(600, w - RAIL_W - GUTTER * 3);
     return (
       <Modal visible={tab !== null} animationType="fade" transparent onRequestClose={close}>
         <Pressable style={styles.deskScrim} onPress={close} accessibilityLabel="Close" />
@@ -109,7 +108,7 @@ function Quests() {
       <Card glow={COLORS.teal}>
         <T v="label">{SEASON.name}</T>
         <T v="bold" style={{ marginTop: 4 }}>
-          Ends in {days} days. Top miners by points take the season crown.
+          Ends in {days} days.{FEATURE_GALI_PROGRAM ? ' Top miners by points take the season crown.' : ''}
         </T>
       </Card>
       <T v="label" style={{ marginTop: 6 }}>
@@ -155,10 +154,6 @@ function Quests() {
   );
 }
 
-/** The gear tab: the player-to-player Market, not open yet. */
-function GearTab() {
-  return <MarketSoon />;
-}
 
 function MotherlodeCard() {
   const owner = useGame((s) => s.wallet.owner);
@@ -457,7 +452,7 @@ function Ranks() {
           <T v="muted" style={{ fontSize: 12 }}>
             {tab === 'level'
               ? shownPeriod === 'all'
-                ? 'Every Gali miner with a wallet, by XP. You: level ' + levelFromXp(xp) + ' · ' + points.toLocaleString() + ' pts.'
+                ? 'Every Gali miner with a wallet, by XP. You: level ' + levelFromXp(xp) + (FEATURE_GALI_PROGRAM ? ' · ' + points.toLocaleString() + ' pts.' : '.')
                 : `XP gained ${when}, by every Gali miner with a wallet. Days start at midnight Malaysia time.`
               : tab === 'ore'
                 ? shownPeriod === 'all'
@@ -626,7 +621,7 @@ function Me() {
           </>
         ) : (
           <>
-            <T style={{ marginVertical: 6 }}>Connect a Solana wallet (Seed Vault on Seeker) to mine ORE on-chain with SOL, climb the leaderboard, stake SKR and buy gear.</T>
+            <T style={{ marginVertical: 6 }}>Connect a Solana wallet (Seed Vault on Seeker) to mine ORE on-chain with SOL and climb the leaderboard{FEATURE_GALI_PROGRAM ? ', stake SKR and buy gear' : ''}.</T>
             <Btn kind="skr" label="Connect wallet" onPress={() => void connect()} />
           </>
         )}

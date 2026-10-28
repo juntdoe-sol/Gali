@@ -1,5 +1,5 @@
 /**
- * Pages for what is coming: Clans and the Market show only "will be available soon" until they open.
+ * Pages for what is coming: Clans shows only "will be available soon" until it opens.
  * Also here: the period picker every rank board shares, and the SOON tag.
  */
 import { StyleSheet, View } from 'react-native';
@@ -50,7 +50,6 @@ export function ComingSoon({ icon, title, line }: { icon: PixName; title: string
 }
 
 export const ClansSoon = () => <ComingSoon icon="users" title="CLANS" line="Build a clan with your crew or join one, level it up together and climb the clan ranks." />;
-export const MarketSoon = () => <ComingSoon icon="bag" title="MARKET" line="Buy, sell and trade gear with other miners." />;
 
 const styles = StyleSheet.create({
   periods: { flexDirection: 'row', gap: 6 },

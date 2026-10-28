@@ -58,15 +58,8 @@ const img = (src: string) =>
     i.onerror = rej;
     i.src = src;
   });
-const GEAR_KEYS = [
-  'pick-wood', 'pick-iron', 'pick-gold', 'pick-gem', 'pick-neon', 'pick-seeker',
-  'hat-yellow', 'hat-red', 'hat-teal', 'hat-songkok', 'hat-crown', 'hat-astro',
-  'fit-blue', 'fit-khaki', 'fit-batik', 'fit-hazard', 'fit-gold',
-  'pet-mole', 'pet-bat', 'pet-sprite', 'pet-firefly',
-];
 let LOGO: HTMLImageElement;
 let PICK: HTMLImageElement;
-const GEAR: Record<string, HTMLImageElement> = {};
 const logoPts: { x: number; y: number; c: string }[] = [];
 
 async function load() {
@@ -74,7 +67,6 @@ async function load() {
   for (const f of fonts) document.fonts.add(await f.load());
   LOGO = await img('wordmark.png');
   PICK = await img('gear/pick-gold.png');
-  await Promise.all(GEAR_KEYS.map(async (k) => (GEAR[k] = await img(`gear/${k}.png`))));
   // points of the logo for the particle build
   const cv = document.createElement('canvas');
   cv.width = LOGO.width;
@@ -714,102 +706,6 @@ function sceneAuto(t: number) {
   caption('STOP ANY TIME AND THE UNUSED SOL COMES BACK', W / 2, y + 96 * U, 25 * U, a * prog(t, T.auto + b(1.5), T.auto + b(2)));
 }
 
-function sceneGear(t: number) {
-  if (t < T.gear - 0.3 || t > T.end + 0.5) return;
-  g.fillStyle = NAVY;
-  g.fillRect(-60, -60, W + 120, H + 120);
-  const sg = g.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.6);
-  sg.addColorStop(0, '#2c56a855');
-  sg.addColorStop(1, '#00000000');
-  g.fillStyle = sg;
-  g.fillRect(0, 0, W, H);
-  const rowsOf = [GEAR_KEYS.slice(0, 6), GEAR_KEYS.slice(6, 12), GEAR_KEYS.slice(12, 17), GEAR_KEYS.slice(17)];
-  const rows = rowsOf.length;
-  const cell = (PORTRAIT ? 172 : 150) * U;
-  const gy = H / 2 - (rows * cell) / 2 + (PORTRAIT ? 40 : 60) * U;
-  const RC: Record<string, string> = { wood: '#b8c4d6', iron: '#b8c4d6', gold: '#4aa8ff', gem: '#b86bff', neon: '#ffb13d', seeker: '#ffb13d', yellow: '#b8c4d6', red: '#b8c4d6', teal: '#4aa8ff', songkok: '#b86bff', crown: '#ffb13d', astro: '#ffb13d', blue: '#b8c4d6', khaki: '#b8c4d6', batik: '#4aa8ff', hazard: '#b86bff', mole: '#b8c4d6', bat: '#4aa8ff', sprite: '#b86bff', firefly: '#ffb13d' };
-  const leave = inExpo(prog(t, T.gearOut, T.end));
-  rowsOf.forEach((keys, row) => {
-    // each row lands on a beat, its items an eighth apart
-    keys.forEach((k, col) => {
-      const t0 = T.gear + b(0.5) + b(row) + col * b(0.125);
-      const p = outBack(prog(t, t0, t0 + 0.45), 2.2);
-      if (p <= 0) return;
-      const i = row * 6 + col;
-      const bob = Math.sin(t * 4 + i) * 4 * U;
-      const x = W / 2 - (keys.length * cell) / 2 + col * cell + cell / 2;
-      const y = gy + row * cell + cell / 2 + bob + leave * (i % 2 ? 1 : -1) * H * 0.7;
-      const sz = cell * 0.84 * p;
-      const rc = RC[k.split('-')[1]] ?? '#b8c4d6';
-      const glint = Math.max(0, 1 - Math.abs(t - (T.glint + i * b(0.125))) / 0.18);
-      g.save();
-      g.translate(x, y);
-      g.rotate((1 - p) * 0.6 + leave * (i % 2 ? 0.8 : -0.8));
-      const gs = 1 + glint * 0.12;
-      g.scale(gs, gs);
-      rr(-sz / 2, -sz / 2, sz, sz, 16 * U);
-      g.fillStyle = '#0f1c3f';
-      g.fill();
-      g.lineWidth = (5 + glint * 5) * U;
-      g.strokeStyle = rc;
-      if (glint > 0) {
-        g.shadowColor = rc;
-        g.shadowBlur = 30 * U * glint;
-      }
-      g.stroke();
-      g.shadowBlur = 0;
-      g.imageSmoothingEnabled = false;
-      const is = sz * 0.8;
-      g.drawImage(GEAR[k], -is / 2, -is / 2, is, is);
-      // once the glint has passed, each item carries an NFT tag: gear is tradeable
-      const tag = outBack(prog(t, T.glint + i * b(0.125), T.glint + i * b(0.125) + 0.3), 2.4);
-      if (tag > 0) {
-        const tw = 46 * U * tag;
-        const th = 22 * U * tag;
-        g.imageSmoothingEnabled = true;
-        rr(sz / 2 - tw * 0.82, -sz / 2 - th * 0.35, tw, th, 6 * U);
-        g.fillStyle = GOLD;
-        g.fill();
-        font(15 * U * tag, BODY);
-        g.textAlign = 'center';
-        g.textBaseline = 'middle';
-        g.fillStyle = '#2a1a00';
-        g.fillText('NFT', sz / 2 - tw * 0.32, -sz / 2 + th * 0.18);
-      }
-      g.restore();
-    });
-  });
-  const ty = PORTRAIT ? gy - 120 * U : gy - 70 * U;
-  kinetic('GEAR MARKET', W / 2, ty, (PORTRAIT ? 104 : 100) * U, t, T.gear, { color: GOLD, shadow: '#3a1800', out: T.gearOut, stagger: 0.045, dur: 0.55 });
-  // "coming soon" sits over the title, so nobody takes the market for live
-  {
-    const a = prog(t, T.gear + b(1), T.gear + b(1.6)) * (1 - prog(t, T.gearOut, T.gearOut + 0.25));
-    if (a > 0) {
-      g.save();
-      g.globalAlpha = a;
-      font(24 * U, BODY);
-      g.textAlign = 'center';
-      g.textBaseline = 'middle';
-      const label = 'COMING SOON';
-      const pw = g.measureText(label).width + 36 * U;
-      const py = ty - (PORTRAIT ? 128 : 118) * U;
-      rr(W / 2 - pw / 2, py - 20 * U, pw, 40 * U, 10 * U);
-      g.fillStyle = GOLD;
-      g.fill();
-      g.fillStyle = '#2a1a00';
-      g.fillText(label, W / 2, py + 2 * U);
-      g.restore();
-    }
-  }
-  g.save();
-  g.globalAlpha = prog(t, T.gear + b(4.5), T.gear + b(5.2)) * (1 - prog(t, T.gearOut, T.gearOut + 0.25));
-  font(28 * U, BODY);
-  g.textAlign = 'center';
-  g.fillStyle = MUTED;
-  g.fillText('GEAR AS NFTS · MINT, TRADE, COLLECT · COSMETIC ONLY', W / 2, gy + rows * cell + 50 * U);
-  g.restore();
-}
-
 function sceneEnd(t: number) {
   if (t < T.end - 0.3) return;
   g.save();
@@ -970,12 +866,10 @@ function render(frame: number) {
     // into the cave through the dark, and back out into daylight
     if (t >= T.caveIn && t < T.cave + 0.4) flash(t < T.cave ? inCubic(prog(t, T.caveIn, T.cave)) : 1 - outCubic(prog(t, T.cave, T.cave + 0.4)), '5,3,10');
     if (t >= T.caveExit - 0.15 && t < T.caveExit + 0.45) flash(t < T.caveExit ? prog(t, T.caveExit - 0.15, T.caveExit) : 1 - outCubic(prog(t, T.caveExit, T.caveExit + 0.45)));
-    if (t >= T.gear && t < T.end) sceneGear(t);
     if (t >= T.end) sceneEnd(t);
-    // shutters: island to lobby, lobby to gear, gear to the end card
+    // shutters: island to lobby, lobby to the end card
     if (t >= T.shutIn && t < T.lobby + 0.6) shutters(prog(t, T.shutIn, T.lobby), prog(t, T.lobby, T.lobby + 0.6));
-    if (t >= T.shut2 && t < T.gear + 0.6) shutters(prog(t, T.shut2, T.gear), prog(t, T.gear, T.gear + 0.6));
-    if (t >= T.gearOut + 0.3 && t < T.end + 0.4) shutters(prog(t, T.gearOut + 0.3, T.end), prog(t, T.end, T.end + 0.4));
+    if (t >= T.shut2 && t < T.end + 0.4) shutters(prog(t, T.shut2, T.end), prog(t, T.end, T.end + 0.4));
   }
   if (t < T.wipe) sceneIntro(t);
   else if (t < T.wipe + b(1.5)) blockWipe(t, T.wipe, b(1.5));

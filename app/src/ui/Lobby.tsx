@@ -3,7 +3,7 @@
  *
  * The town itself is a canvas (pixel/LobbyView). This file opens it, hands it your miner and
  * the other players, and turns what it reports into app actions: walking through the island
- * door switches to the island, the cave door opens Cave Run, the market door opens the Market.
+ * door switches to the island, the cave door opens Cave Run.
  * It also holds the "back to lobby" pills the other screens use.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -50,7 +50,6 @@ const GAME_SHORT: Record<GameId, string> = { tunnel: 'TUNNEL', pot: 'GOLD RUSH',
 const DOOR_UI: { id: DoorId; label: string; sub: string; color: string }[] = [
   { id: 'island', label: 'ISLAND', sub: 'Mine ORE', color: '#3de0c8' },
   { id: 'cave', label: 'CAVE', sub: 'Dig for XP', color: '#ff9a3d' },
-  { id: 'market', label: 'MARKET', sub: 'Gear, pets', color: '#b86bff' },
   { id: 'arena', label: 'ARENA', sub: 'Brawl', color: '#ff4f5e' },
 ];
 const EMOTE_NAME: Record<string, string> = { wave: 'Wave', laugh: 'Laugh', heart: 'Love', fire: 'Fire', pick: 'Pickaxe', gem: 'Gem' };
@@ -62,14 +61,14 @@ function homeSpot(): number {
   return g.selected[0] ?? useCave.getState().spot;
 }
 
-export function LobbyScreen({ onMarket, sheet, onTab }: { onMarket: () => void; sheet: SheetTab | null; onTab: (t: SheetTab | null) => void }) {
+export function LobbyScreen({ sheet, onTab }: { sheet: SheetTab | null; onTab: (t: SheetTab | null) => void }) {
   const insets = useSafeAreaInsets();
   const where = useLobby((s) => s.where);
   if (where !== 'lobby') return null;
-  return <LobbyInner onMarket={onMarket} top={insets.top} bottomInset={insets.bottom} sheet={sheet} onTab={onTab} />;
+  return <LobbyInner top={insets.top} bottomInset={insets.bottom} sheet={sheet} onTab={onTab} />;
 }
 
-function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: () => void; top: number; bottomInset: number; sheet: SheetTab | null; onTab: (t: SheetTab | null) => void }) {
+function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomInset: number; sheet: SheetTab | null; onTab: (t: SheetTab | null) => void }) {
   const ref = useRef<LobbyRef>(null);
   // Android: the lobby hears fingers on HIT and JUMP itself, so they work while a thumb holds the stick
   const zw = useDomZones('lobby', (z) => ref.current?.zones?.(z));
@@ -226,12 +225,9 @@ function LobbyInner({ onMarket, top, bottomInset, sheet, onTab }: { onMarket: ()
         useLobby.setState({ spawn: 'arena' });
         if (!useName.getState().name) useGame.getState().toast('Pick a name to fight in the arena', 'info');
         else useArena.getState().show();
-      } else {
-        useLobby.setState({ spawn: 'market' });
-        onMarket();
       }
     },
-    [onMarket],
+    [],
   );
 
   /** The travel buttons: your miner walks to the door, and goes through it on arrival. */
@@ -637,9 +633,9 @@ const HOWTO: { icon: PixName; title: string; body: string }[] = [
   { icon: 'trophy', title: 'Arena', body: 'The colosseum west of the plaza. Last Miner Standing, King of the Ring, or team up against the boss. Q, E, R, C, V and X fire your powers as you level up. Wins and KOs put you on the Brawl ranks.' },
   { icon: 'pick', title: 'Cave Run', body: 'Walk into the cave in the north west. Dig down, dodge the rocks, and earn XP. It never spends SOL.' },
   { icon: 'cart', title: 'Mini games', body: 'Three pavilions south of the plaza: Tunnel Collapse, Gold Rush Pot and Crash Cart. Stake ORE or SKR, with a new round every 40 seconds. 5% house fee. 18+ only, stake only what you can afford to lose.' },
-  { icon: 'quest', title: 'Quests and ranks', body: 'QUEST has nine daily quests across the whole game, plus achievements. Claim each one for XP. RANKS shows miners by level, ORE mined on chain and Brawl points, for today, this month, this year or all time. Clans and the Market will be available soon.' },
+  { icon: 'quest', title: 'Quests and ranks', body: 'QUEST has nine daily quests across the whole game, plus achievements. Claim each one for XP. RANKS shows miners by level, ORE mined on chain and Brawl points, for today, this month, this year or all time. Clans will be available soon.' },
   { icon: 'user', title: 'Profile and wallet', body: 'PROFILE holds your wallet, gear and settings. The power button next to it disconnects your wallet from any screen.' },
-  { icon: 'wave', title: 'Back to the lobby', body: 'Every place has a LOBBY button. GO jumps straight to the island, cave, arena, games or market.' },
+  { icon: 'wave', title: 'Back to the lobby', body: 'Every place has a LOBBY button. GO jumps straight to the island, cave, arena or games.' },
 ];
 
 /** A short guide for new players, shown once and always one tap away from the lobby header. */
