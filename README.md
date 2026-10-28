@@ -18,6 +18,8 @@ Submitted to **CLOCK IN** (Solana Mobile) and the **Colosseum Crypto World's Fai
 
 </div>
 
+> **Judges, start here.** Play the hosted build at [betatest.gali.lol](https://betatest.gali.lol) (full game, nothing to set up). To run it yourself: [Run the app locally](#run-the-app-locally), four commands, no keys. Addresses: [Program IDs](#program-ids-and-addresses).
+
 ![The Gali lobby on Android: a shared pixel town during the Hollow Night season](docs/gali-lobby.jpg)
 
 ---
@@ -95,6 +97,22 @@ Gali shows each round's result in a strike pop-up, including small ORE wins down
 
 ---
 
+## Program IDs and addresses
+
+Gali plays straight on ORE's program: every deploy and claim calls it directly, signed by the player's wallet.
+
+| What | Address | Where it is used |
+|---|---|---|
+| ORE program (mainnet) | [`oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv`](https://solscan.io/account/oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv) | Deploy, checkpoint, claim and automation. `app/src/chain/ore/consts.ts` |
+| ORE mint | [`oreoU2P8bN6jkk3jbaiVxYnG1dCXcYxwhwyK9jSybcp`](https://solscan.io/token/oreoU2P8bN6jkk3jbaiVxYnG1dCXcYxwhwyK9jSybcp) | ORE balances, tips, arcade tables (11 decimals) |
+| SKR mint | [`SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3`](https://solscan.io/token/SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3) | SKR tips and arcade tables. `app/src/chain/light.ts` |
+| Arcade house wallet | [`9ma7yr5cMEWjZCWFHnQ1SGzYe7qQMumiRb7H6mfavPMz`](https://solscan.io/account/9ma7yr5cMEWjZCWFHnQ1SGzYe7qQMumiRb7H6mfavPMz) | Holds arcade stakes during a round, pays winners. `app/src/chain/arcade.ts` |
+| Platform fee wallet | [`HDa2MTDdZXnrjTs6RRUUzEqCcrWMWu1fM673Cg7pzQMw`](https://solscan.io/account/HDa2MTDdZXnrjTs6RRUUzEqCcrWMWu1fM673Cg7pzQMw) | Receives the 0.25% beta fee inside the deploy transaction. `app/src/chain/light.ts` |
+| Gali program (`programs/gali`) | `GamTh2wWNNGU6CB5G3aF7Xeu1m7fQEtd9caRGtgPcMmV` | In development. Runs on a local validator in the tests. IDL: `target/idl/gali.json` |
+| ORE mock (`programs/ore-mock`) | `oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv` | Test-only. Loaded at ORE's address on the local validator so the tests run offline |
+
+---
+
 ## Architecture
 
 ```mermaid
@@ -135,8 +153,8 @@ flowchart LR
 
 | | |
 |---|---|
-| **17 app test suites** | Wallet safety, live clock, poll budget, lobby and its networking, rides, Brawl, the Arena, Cave Run, the arcade server and the read proxy. `cd app && npm test`, no wallet or network needed. |
-| **27 program tests** | `programs/gali` against `programs/ore-mock` at ORE's address on a local validator. |
+| **20 app test suites** | Wallet safety, live clock, poll budget, lobby and its networking, rides, Brawl, the Arena, Cave Run, the arcade server and the read proxy. `cd app && npm test`, no wallet or network needed. |
+| **33 program tests** | `programs/gali` against `programs/ore-mock` at ORE's address on a local validator. |
 | **CI on every push** | Type checks, all suites, Android and web builds, dependency checks and a secret scan over the source and the built bundles. |
 | **Round caps** | 0.5 SOL a round and 1 SOL per autopilot during the beta. |
 | **Verifiable arcade** | The house publishes a hash before each round and the secret after it, so anyone can check the draw. |
@@ -190,37 +208,69 @@ ORE is credited as the board Gali plays on. Gali is not affiliated with or endor
 | `supabase/` | Edge functions (`autopilot`, `ore-rate`, `dm`, chat) and SQL for chat, ranks, autopilot and ORE stats |
 | `programs/gali` | Anchor program, in development |
 | `programs/ore-mock` | Test-only stand-in for ORE's program |
-| `tests/gali.ts` | Program tests against the mock (27 cases) |
+| `tests/gali.ts` | Program tests against the mock (33 cases) |
 | `admin/` | Admin page (Vite + React) |
 | `tv/` | Android TV app, in development |
 | `scripts/` | Pixel-art generator, ORE layout probe, devnet deploy, local test runner |
 | `video/` | The intro video, rendered from the real game engine |
 
-### Run the app
+### Run the app locally
 
-Needs Node 22+.
+Needs **Node 22.13 or newer** (`node -v`). No accounts, keys or wallet needed to start it.
 
 ```bash
 cd app
-npm install --legacy-peer-deps
-EXPO_PUBLIC_NETWORK=mainnet npx expo start --web
-npm test
+npm ci
+cp .env.example .env.local
+npx expo start --web
 ```
 
-Set `EXPO_PUBLIC_RPC_READ_URL` to a deployed read proxy so no RPC key ships in the app. `EXPO_PUBLIC_RPC_URL` is public; never put a secret there. Feature flags live in `app/.env.example`.
+Open **http://localhost:8081**. Press **ENTER** on the title screen.
 
-Release APK: `npx eas-cli build -p android --profile apk-live`. Web build: `EXPO_PUBLIC_NETWORK=mainnet npm run build:web`.
+What works with no keys: the island and ORE mining on mainnet (through the public Solana RPC), wallet connect in the browser (Phantom, Solflare, Backpack, Jupiter), the lobby on your own and Cave Run. The shared lobby, chat, the Arena and the arcade need Gali's servers: try those on [betatest.gali.lol](https://betatest.gali.lol), or fill in the optional lines in `app/.env.local`.
+
+Check it without a browser:
+
+```bash
+cd app
+npx tsc --noEmit
+npm test            # 20 suites, no wallet or network needed
+```
+
+| Variable | Needed | Default when empty |
+|---|---|---|
+| `EXPO_PUBLIC_NETWORK` | **Yes**, `mainnet` (set in `.env.example`) | Devnet build with wallets turned off |
+| `EXPO_PUBLIC_RPC_URL` | No | `https://api.mainnet-beta.solana.com` |
+| `EXPO_PUBLIC_RPC_READ_URL` | No | Reads use `EXPO_PUBLIC_RPC_URL` |
+| `EXPO_PUBLIC_GAMES_URL` | No | Arcade shows as unavailable |
+| `EXPO_PUBLIC_WORLD_URL`, `EXPO_PUBLIC_WORLD_KEY` | No | Lobby runs solo, Arena off |
+| `EXPO_PUBLIC_TICKET_KEY` | No | Arena tickets off |
+| `EXPO_PUBLIC_FEATURE_GALI_PROGRAM` | No | `0`, program screens hidden |
+
+Every `EXPO_PUBLIC_` value is bundled into the app. Never put a secret in one.
+
+**If something goes wrong**
+
+- **`EBADENGINE` or install errors:** upgrade Node to 22.13+.
+- **429 / rate limited:** the public RPC throttles. Put your own keyless RPC URL in `EXPO_PUBLIC_RPC_URL`.
+- **"Wallets are not available on this build":** `EXPO_PUBLIC_NETWORK` is not `mainnet`. Check `app/.env.local`, then restart with `npx expo start --web --clear`.
+- **Port 8081 in use:** `npx expo start --web --port 8082`.
+
+Release APK: `npx eas-cli build -p android --profile apk-live`. Web build: `npm run build:web` (output in `app/dist`).
 
 ### Program tests
 
-Needs the Solana CLI 2.1.21 and Node 20+.
+Needs Node 22.13+, Rust, and the Solana CLI 2.1.21 (for `cargo-build-sbf` and `solana-test-validator`). Run from the repo root:
 
 ```bash
 npm ci
 cargo-build-sbf --manifest-path programs/gali/Cargo.toml
 cargo-build-sbf --manifest-path programs/ore-mock/Cargo.toml
+solana-keygen new --no-bip39-passphrase -s -o ~/.config/solana/id.json   # skip if you have a wallet
 bash scripts/test-local.sh
 ```
+
+The script starts a throwaway validator with ORE's mock at ORE's address and Gali at `GamTh2wWNNGU6CB5G3aF7Xeu1m7fQEtd9caRGtgPcMmV`, then runs the 33 tests. The same steps run in CI (`.github/workflows/program.yml`).
 
 ### Supabase
 
