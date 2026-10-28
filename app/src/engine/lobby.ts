@@ -21,7 +21,8 @@ import { Particles } from './particles';
 import { Sky } from './sky';
 import { drawPumpkin, flicker, PUMPKIN_LIGHT } from './hollow';
 import { IS_HOLLOW } from '../game/season';
-import type { BrawlSnap, Look, Pose } from './types';
+import type { BrawlSnap, Look, Pose, RideKindView, RideView } from './types';
+import { drawRide, RIDE_LIFT } from './rideArt';
 import { drawHp, drawKo, drawShield, FightFx, hitFlash, jumpLift, koAge, pickTarget, swingTilt } from './brawlfx';
 import { FLAG_H, FLAG_W, paintFlag, ARENA_FLAGS, ARENA_TORCHES, paintColosseum, paintPotw, paintSign, paintSmash, POTW_H, POTW_W, paintSolBase, paintSolLogo, SIGN_H, SIGN_W, SMASH_COLORS, SMASH_DIM, SOL_BASE, SOL_LOGO } from './lobbyArt';
 import { CLIFF, DOORS, PAVILIONS, SMASH_HEAL, SMASHABLES, STRUCTURES, doorAt, GRASS, HALL, LCOLS, LH, LROWS, LT, LW, lidx, lobbyMap, lobbyPath, PLANK, PLAZA, ROAD, SAND, SPAWNS, standable, tileCentre, tileOf, WATER, type DoorId } from '../game/lobbyMap';
@@ -42,7 +43,9 @@ export type LobbyEvent =
   /** your miner broke a pot or crate (for the daily quest) */
   | { t: 'smash' }
   /** your miner cracked an ore vein: this much XP */
-  | { t: 'xp'; n: number };
+  | { t: 'xp'; n: number }
+  /** E: get on the nearest ride, or off the one you're on */
+  | { t: 'ride' };
 
 export interface LobbyPeerView {
   id: string;
@@ -56,6 +59,8 @@ export interface LobbyPeerView {
   look: Look;
   say: string | null;
   emoji: string | null;
+  /** the ride they are on */
+  rd?: number | null;
 }
 export interface LobbySnap {
   peers: LobbyPeerView[];
@@ -65,6 +70,11 @@ export interface LobbySnap {
   brawl?: BrawlSnap;
   /** the lobby's Player of the Week board: the most XP gained since Monday */
   potw?: { name: string; level: number; gain: number } | null;
+  /** the rides that show, parked or ridden */
+  rides?: RideView[];
+  /** the ride you are on, and the free one within reach (it gets a bobbing marker) */
+  myRide?: number | null;
+  nearRide?: number | null;
 }
 export interface LobbyOpts {
   spawn: 'start' | DoorId;
@@ -82,6 +92,8 @@ export interface LobbyOpts {
 }
 
 const SPEED = 58;
+/** riding: a cart rolls at about 1.9x walking, a scooter 2.1x (game/rideRules.ts RIDE_SPEED) */
+const RIDE_SPEED: Record<RideKindView, number> = { cart: 110, scoot: 122 };
 const seeded = (n: number) => {
   const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
   return x - Math.floor(x);
@@ -312,9 +324,29 @@ export class LobbyEngine {
   }
 
   /** Swing your pickaxe (F, or the FIGHT button). Hits the nearest fair fighter in reach, if any. */
+  /** The ride you are on, if any. */
+  private myRideKind(): RideKindView | null {
+    const id = this.snap.myRide;
+    if (id === null || id === undefined) return null;
+    return this.snap.rides?.find((r) => r.id === id)?.k ?? null;
+  }
+  private speedOf(kind: RideKindView | null | undefined) {
+    return kind ? RIDE_SPEED[kind] : SPEED;
+  }
+  private peerRideKind(v: LobbyPeerView): RideKindView | null {
+    if (v.rd === null || v.rd === undefined) return null;
+    return this.snap.rides?.find((r) => r.id === v.rd)?.k ?? null;
+  }
+  /** E or the RIDE button: the app decides (it knows which ride is free and near). */
+  ride() {
+    if (this.leaving || this.opts.away) return;
+    this.emit({ t: 'ride' });
+  }
+
   attack() {
     const b = this.snap.brawl;
-    if (!b || !b.on || this.leaving) return;
+    // no swinging from a ride
+    if (!b || !b.on || this.leaving || this.myRideKind()) return;
     const wall = Date.now();
     if (koAge(b.me, wall) >= 0 || wall - this.lastSwingWall < 450) return;
     this.lastSwingWall = wall;
@@ -1098,7 +1130,7 @@ export class LobbyEngine {
     if (n < 0.18) return false;
     const m = lobbyMap();
     const me = this.me;
-    const sp = SPEED * Math.min(1, n * 1.15);
+    const sp = this.speedOf(this.myRideKind()) * Math.min(1, n * 1.15);
     const ux = dx / n;
     const uy = dy / n;
     const ok = (x: number, y: number) => standable(m, x, y) && standable(m, x - 5, y) && standable(m, x + 5, y);
@@ -1156,6 +1188,11 @@ export class LobbyEngine {
     const k = e.key.toLowerCase();
     if (k === 'f' && down && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
       this.attack();
+      e.preventDefault();
+      return;
+    }
+    if (k === 'e' && down && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      this.ride();
       e.preventDefault();
       return;
     }
@@ -1272,7 +1309,7 @@ export class LobbyEngine {
         this.lastStep = now;
         this.parts.spawn('dust', me.x - 2 * me.facing, me.y, { vx: -6 * me.facing, vz: 8, life: 0.4, c: '#e8d4b0' });
       }
-      stepBody(me, dt, SPEED, now);
+      stepBody(me, dt, this.speedOf(this.myRideKind()), now);
     }
     if (wasWalking && !me.path.length && !this.direct) {
       me.pose = 'idle';
@@ -1332,7 +1369,7 @@ export class LobbyEngine {
     }
     // everyone else walks the same road to where they said they were going
     for (const p of this.peers.values()) {
-      if (p.path.length) stepBody(p, dt, SPEED, now);
+      if (p.path.length) stepBody(p, dt, this.speedOf(this.peerRideKind(p.view)), now);
       const walking = p.path.length > 0;
       const want = walking ? 'walk' : p.view.p === 'cheer' || isDance(p.view.p) ? p.view.p : 'idle';
       if (p.pose !== want) {
@@ -1479,6 +1516,12 @@ export class LobbyEngine {
       items.push({ y: st.y, draw: () => this.drawSmash(c, i, sx(st.x), sy(st.y), z, Date.now()) });
     });
 
+    // parked rides (a ridden one is drawn under its rider)
+    for (const r of this.snap.rides ?? []) {
+      if (r.rider !== null || !inView(r.x, r.y, 30)) continue;
+      items.push({ y: r.y, draw: () => drawRide(c, r.k, r.id, sx(r.x), sy(r.y), z, r.f, false, now, r.id === this.snap.nearRide) });
+    }
+
     // people
     const meSay = this.snap.say && now - this.mySayAt < 6000 ? this.snap.say : null;
     const meEmoji = this.snap.emoji && now - this.myEmojiAt < 3000 ? this.snap.emoji : null;
@@ -1503,6 +1546,8 @@ export class LobbyEngine {
     const labels: (() => void)[] = [];
     for (const pr of people) {
       const { b } = pr;
+      const rideKind = pr.mine ? this.myRideKind() : this.peerRideKind(this.peers.get(pr.id)?.view ?? ({} as LobbyPeerView));
+      const rideId = pr.mine ? this.snap.myRide ?? 0 : this.peers.get(pr.id)?.view.rd ?? 0;
       items.push({
         y: b.y,
         draw: () => {
@@ -1524,7 +1569,14 @@ export class LobbyEngine {
           const wall = Date.now();
           const ko = bv ? koAge(bv, wall) : -1;
           const lift = ko >= 0 ? 0 : jumpLift(pr.mine ? this.myJumpAt : bs?.jumps?.[pr.id], wall);
-          if (ko < 0 || !drawKo(c, pr.look, X, Y, z, b.facing, ko, wall)) {
+          if (rideKind && ko < 0) {
+            // on a ride: the scooter under the miner, or the miner sitting in the cart
+            const rolling = b.pose === 'walk' || b.path.length > 0;
+            const up = lift + RIDE_LIFT[rideKind];
+            if (rideKind === 'scoot') drawRide(c, rideKind, rideId, X, Y - lift * z, z, b.facing, rolling, now, false);
+            drawMiner(c, pr.look, 'idle' as never, 0, X, Y, z, b.facing, hitFlash(bv, wall) ? 0.45 : 1, up, 0);
+            if (rideKind === 'cart') drawRide(c, rideKind, rideId, X, Y - lift * z, z, b.facing, rolling, now, false);
+          } else if (ko < 0 || !drawKo(c, pr.look, X, Y, z, b.facing, ko, wall)) {
             // someone else's swing, as their client told us
             const sw = !pr.mine && bv && bv.sw && wall - bv.sw < 540 ? wall - bv.sw : -1;
             const pose = (sw >= 0 ? 'swing' : lift > 0 && b.pose !== 'walk' ? 'walk' : b.pose) as never;

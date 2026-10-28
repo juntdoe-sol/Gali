@@ -36,6 +36,8 @@ export interface LobbyPeer {
   lvl: number;
   /** the wallet they play with, if they connected one (for tips). It is their claim: the tip sheet shows it before you send. */
   wallet: string | null;
+  /** the lobby ride they are on (game/rides.ts), or null when walking */
+  rd: number | null;
   seen: number;
   say: Say | null;
   emoji: string | null;
@@ -224,6 +226,7 @@ function onState(p: any) {
     look,
     lvl: p.lvl === undefined && prev ? prev.lvl : Math.floor(num(p.lvl, 1, 999)),
     wallet: typeof p.w === 'string' && B58.test(p.w) ? p.w : !hasLook && prev ? prev.wallet : null,
+    rd: typeof p.rd === 'number' && Number.isInteger(p.rd) && p.rd >= 0 && p.rd < 64 ? p.rd : null,
     seen: Date.now(),
     say: prev?.say ?? null,
     emoji: prev?.emoji ?? null,
@@ -231,6 +234,7 @@ function onState(p: any) {
   };
   useLobby.setState((s) => ({ peers: { ...s.peers, [id]: peer } }));
   if (p.bw !== undefined) roomHooks.onBw?.('lobby', id, p.bw);
+  rideHooks.onPeer?.(id, p.rd, x, y, peer.facing);
   if (!prev && Date.now() - joinedAt > 3000) pushAct({ k: 'join', n: nm });
 }
 
@@ -483,8 +487,11 @@ export function joinLobby() {
     .on('broadcast', { event: 'emote' }, ({ payload }) => onEmote(payload))
     .on('broadcast', { event: 'bye' }, ({ payload }) => onBye(payload))
     .on('broadcast', { event: 'bx' }, ({ payload }) => roomHooks.onBx?.('lobby', payload))
-    // someone new: send them our full look with the next update
-    .on('broadcast', { event: 'hi' }, () => {
+    .on('broadcast', { event: 'rd' }, ({ payload }) => rideHooks.onRd?.(payload))
+    .on('broadcast', { event: 'rds' }, ({ payload }) => rideHooks.onRds?.(payload))
+    // someone new: send them our full look with the next update, and the rides that moved
+    .on('broadcast', { event: 'hi' }, ({ payload }) => {
+      rideHooks.onHi?.(payload?.id);
       lastKey = '';
       lastLookAt = 0;
       lastSent = Math.min(lastSent, Date.now() - SEND_MS);
@@ -592,7 +599,8 @@ export function publishLobbyMe(m: { x: number; y: number; tx: number; ty: number
   const now = Date.now();
   const r = (v: number) => Math.round(v);
   const bw = roomHooks.myBw?.();
-  const move = { id: me, nm: name, x: r(m.x), y: r(m.y), tx: r(m.tx), ty: r(m.ty), f: m.facing, p: asPose(m.pose), ...(bw ? { bw } : {}) };
+  const rd = rideHooks.myRide?.();
+  const move = { id: me, nm: name, x: r(m.x), y: r(m.y), tx: r(m.tx), ty: r(m.ty), f: m.facing, p: asPose(m.pose), ...(bw ? { bw } : {}), ...(rd !== undefined ? { rd } : {}) };
   const look = {
     h: m.look.hat,
     c: m.look.fit,
@@ -619,6 +627,24 @@ export function publishLobbyMe(m: { x: number; y: number; tx: number; ty: number
 }
 let lastLook = '';
 let lastLookAt = 0;
+
+/** The lobby's rides (game/rides.ts) plug in here, so this file doesn't import them. */
+export const rideHooks: {
+  onRd?: (p: unknown) => void;
+  onRds?: (p: unknown) => void;
+  onHi?: (id: unknown) => void;
+  onPeer?: (id: string, rd: unknown, x: number, y: number, f: 1 | -1) => void;
+  myRide?: () => number | undefined;
+} = {};
+
+/** Send a rides message to everyone in the lobby room. False when the room is not joined. */
+export const lobbyRoom = {
+  send(event: 'rd' | 'rds', payload: Record<string, unknown>): boolean {
+    if (!channel || useLobby.getState().status !== 'online') return false;
+    void channel.send({ type: 'broadcast', event, payload });
+    return true;
+  },
+};
 
 /** Send a Brawl message to everyone in the lobby room. False when the room is not joined. */
 export function sendLobbyBx(payload: Record<string, unknown>): boolean {

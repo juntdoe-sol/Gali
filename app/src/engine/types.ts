@@ -9,6 +9,18 @@
 
 export type Pose = 'idle' | 'walk' | 'swing' | 'cheer' | 'carry' | 'dance1' | 'dance2' | 'dance3';
 
+/** A lobby ride's kind, as the canvas sees it (game/rideRules.ts has the rules). */
+export type RideKindView = 'cart' | 'scoot';
+export interface RideView {
+  id: number;
+  k: RideKindView;
+  x: number;
+  y: number;
+  f: 1 | -1;
+  /** a lobby id, 'me' for you, or null when parked */
+  rider: string | null;
+}
+
 export interface Look {
   hat: string; // helmet gear key, e.g. 'hat-yellow'
   fit: string; // overalls colour

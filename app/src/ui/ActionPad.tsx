@@ -77,11 +77,12 @@ function SkillButton({ size, round, icon, label, kbd, left = 0, total = 1, locke
 }
 
 /** HIT (big) and JUMP, bottom right. `small` keeps the island's map clear. */
-export function FightPad({ bottom, right, onHit, onJump, hit = true, small, zone }: { bottom: number; right: number; onHit: () => void; onJump: () => void; hit?: boolean; small?: boolean; zone?: ZoneGroup }) {
+export function FightPad({ bottom, right, onHit, onJump, hit = true, small, zone, ride }: { bottom: number; right: number; onHit: () => void; onJump: () => void; hit?: boolean; small?: boolean; zone?: ZoneGroup; ride?: { label: string; on: boolean; onPress: () => void } | null }) {
   const H = small ? 62 : 80;
   const J = small ? 46 : 56;
   return (
-    <View style={{ position: 'absolute', right, bottom, width: H + J + 12, height: H + J / 2 + 6 }} pointerEvents="box-none">
+    <View style={{ position: 'absolute', right, bottom, width: H + J * 2 + 18, height: H + J / 2 + 6 }} pointerEvents="box-none">
+      {ride ? <SkillButton size={J} round gold={ride.on} icon="cart" label={ride.label} zone={zone} style={{ position: 'absolute', right: (hit ? H : 0) + J + 12, bottom: 0 }} onPress={ride.onPress} /> : null}
       {hit ? <SkillButton size={H} round gold icon="fist" label="HIT" zone={zone} style={{ position: 'absolute', right: 0, bottom: 0 }} onPress={onHit} /> : null}
       <SkillButton size={J} round icon="jump" label="JUMP" zone={zone} style={{ position: 'absolute', right: hit ? H + 6 : 0, bottom: hit ? H / 2 + 2 : 0 }} onPress={onJump} />
     </View>

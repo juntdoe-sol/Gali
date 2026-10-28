@@ -14,7 +14,7 @@ import './polyfill-web';
 import { Keypair, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
 import { connection, fetchOreBalance, fetchSolBalance } from './client';
 import { NOTHING_CLAIMABLE, REFINING_FEE, REFINING_FEE_BPS } from './light';
-import { ORE_MINT, ORE_SPLIT_ADDRESS_B58 } from './ore/consts';
+import { ORE_MINT, ORE_SPLIT_ADDRESS_B58, TREASURY_ADDRESS } from './ore/consts';
 import {
   fetchClock,
   fetchOreMiner,
@@ -26,7 +26,7 @@ import {
   readRewards,
 } from './ore/read';
 import { closeLiveAutomation, deployFromAutomation, oreCheckpoint, oreClaimOre, oreClaimSol, oreDeploy, oreDeployWithWallet, readAutomation, startLiveAutomation, toOre, toSol } from './ore/tx';
-import { decodeMiner, distributionMask, type OreMiner, type OreRound } from './ore/accounts';
+import { decodeMiner, decodeTreasury, distributionMask, type OreMiner, type OreRound } from './ore/accounts';
 import { minerPda } from './ore/consts';
 
 export type { OreClock } from './ore/read';
@@ -418,6 +418,39 @@ export async function fetchOreMotherlode(): Promise<number> {
 
 export const claimBoardSol = (expectedOwner?: PublicKey) => oreClaimSol(expectedOwner);
 export const claimBoardOre = (expectedOwner?: PublicKey) => oreClaimOre(10_000, expectedOwner);
+
+/** ORE's refining factor is Steel fixed point (48 fraction bits): refined ORE = unrefined x (factor now - factor then) / 2^48. */
+export const FACTOR_ONE = 1n << 48n;
+
+export interface OreStats {
+  /** whole ORE this wallet ever mined on ORE's board (ORE's own lifetime counter) */
+  lifetime: number;
+  /** whole ORE mined and not yet claimed or refined */
+  unrefined: number;
+  /** whole refined ORE ready to claim, including what accrued since ORE last updated the miner */
+  refined: number;
+  /** unrefined in grams, and ORE's refining factor now (as a decimal string), for the 24 hour gain */
+  unrefinedGrams: string;
+  factor: string;
+}
+
+/** One read: the wallet's ORE miner account and ORE's treasury. A wallet that never mined reads all zeros. */
+export async function fetchOreStats(owner: PublicKey): Promise<OreStats> {
+  const [mi, ti] = await connection.getMultipleAccountsInfo([minerPda(owner), TREASURY_ADDRESS]);
+  if (!ti) throw new Error('ORE treasury not found');
+  const t = decodeTreasury(ti.data);
+  const factor = t.minerRewardsFactor.toString();
+  if (!mi) return { lifetime: 0, unrefined: 0, refined: 0, unrefinedGrams: '0', factor };
+  const m = decodeMiner(mi.data);
+  const accrued = t.minerRewardsFactor > m.rewardsFactor ? (m.rewardsOre * (t.minerRewardsFactor - m.rewardsFactor)) / FACTOR_ONE : 0n;
+  return {
+    lifetime: toOre(m.lifetimeRewardsOre),
+    unrefined: toOre(m.rewardsOre),
+    refined: toOre(m.refinedOre + accrued),
+    unrefinedGrams: m.rewardsOre.toString(),
+    factor,
+  };
+}
 
 /** Lifetime ORE mined and SOL deployed for each wallet, read from ORE's Miner accounts (100 per call). */
 export async function fetchMinerLifetimes(wallets: string[]): Promise<Record<string, { ore: number; deployed: number }>> {
