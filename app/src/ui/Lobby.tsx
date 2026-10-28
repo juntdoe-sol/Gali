@@ -15,6 +15,7 @@ import { useCave } from '../game/caveStore';
 import { loadChain } from '../chain/lazy';
 import { TIP_LIMITS, TIP_SKR_MINT, short } from '../chain/light';
 import { announce, joinChat, joinLobby, leaveLobby, LOBBY_EMOTES, publishLobbyMe, useLobby, type LobbyMsg } from '../game/lobby';
+import { saveLobbySpot, takeBootSpot } from '../game/lastSpot';
 import { onRideBumped, parkAtDoor, rideMoved, startRides, stopRides, useRides } from '../game/rides';
 import { visible as visibleRides } from '../game/rideRules';
 import type { RideView } from '../engine/types';
@@ -77,6 +78,8 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
   const zw = useDomZones('lobby', (z) => ref.current?.zones?.(z));
   const [atlas, setAtlas] = useState<string | null>(null);
   const spawn = useRef(useLobby.getState().spawn).current;
+  // web: back on the spot you were on before a refresh
+  const bootAt = useRef(spawn === 'start' ? takeBootSpot() : null).current;
   const name = useName((s) => s.name);
   const nameReady = useName((s) => s.ready);
   const [editing, setEditing] = useState(false);
@@ -295,6 +298,7 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
       case 'me':
         rideMoved(e.x, e.y, e.facing);
         setMyPos('lobby', e.x, e.y);
+        saveLobbySpot(e.x, e.y);
         publishLobbyMe({ x: e.x, y: e.y, tx: e.tx, ty: e.ty, facing: e.facing, pose: e.pose, look, lvl: lvlRef.current, wallet: useGame.getState().wallet.owner });
         break;
       case 'peer': {
@@ -333,7 +337,7 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
           onEvent={onEvent}
           atlas={atlas}
           look={look}
-          opts={{ spawn, top: topH, bottom, left, right, touch, away }}
+          opts={{ spawn, at: bootAt, top: topH, bottom, left, right, touch, away }}
           dom={{ style: { flex: 1, backgroundColor: '#2f7fc4' }, scrollEnabled: false, nestedScrollEnabled: false, bounces: false, overScrollMode: 'never' } as never}
         />
       ) : null}

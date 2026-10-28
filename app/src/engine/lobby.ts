@@ -78,6 +78,8 @@ export interface LobbySnap {
 }
 export interface LobbyOpts {
   spawn: 'start' | DoorId;
+  /** web, after a page refresh: start on this map spot instead of the spawn (ignored if nobody can stand there) */
+  at?: { x: number; y: number } | null;
   /** CSS pixels the header covers, and the bottom panel covers */
   top: number;
   bottom: number;
@@ -237,7 +239,9 @@ export class LobbyEngine {
     private opts: LobbyOpts,
   ) {
     this.c = ctx2d(canvas);
-    const [sx, sy] = tileCentre(...SPAWNS[opts.spawn]);
+    let [sx, sy] = tileCentre(...SPAWNS[opts.spawn]);
+    const at = opts.at;
+    if (at && at.x > 0 && at.x < LW && at.y > 0 && at.y < LH && standable(lobbyMap(), at.x, at.y) && !doorAt(at.x, at.y)) [sx, sy] = [at.x, at.y];
     this.me = { x: sx, y: sy, path: [], pose: 'idle', since: 0, facing: 1, tx: sx, ty: sy, lastTx: sx, lastTy: sy, fp: '' };
     this.cam = { x: sx, y: sy };
     this.bindInput();

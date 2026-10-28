@@ -13,6 +13,7 @@ import type { RealtimeChannel } from '@supabase/realtime-js';
 import { create } from 'zustand';
 import type { Look } from '../engine/types';
 import { cleanChat, cleanName, LH, LOBBY_CAP, LW, SPAWNS, type DoorId } from './lobbyMap';
+import { bootWhere, saveWhere } from './lastSpot';
 import { loadJson, saveJson } from './storage';
 import { useName } from './username';
 import { publicKey, restBase, useWorld, worldClient, worldReady } from './world';
@@ -133,8 +134,9 @@ function readChatHidden(): boolean {
 }
 
 export const useLobby = create<LobbyState>((set, get) => ({
-  where: 'lobby',
-  spawn: 'start',
+  // web: a refresh opens the screen you were on
+  where: bootWhere(),
+  spawn: bootWhere() === 'island' ? 'island' : 'start',
   status: 'off',
   chatStatus: 'off',
   me: rid(),
@@ -157,7 +159,10 @@ export const useLobby = create<LobbyState>((set, get) => ({
       /* private window */
     }
   },
-  go: (where, spawn) => set({ where, spawn: spawn ?? get().spawn }),
+  go: (where, spawn) => {
+    saveWhere(where);
+    set({ where, spawn: spawn ?? get().spawn });
+  },
   say: (raw) => {
     const text = cleanChat(raw);
     const name = useName.getState().name;
