@@ -57,6 +57,8 @@ export interface Config {
   basePoints: number;
   motherlodePoints: number;
   gearPricesUsd: number[];
+  /** the cluster still runs the older SKR-only program, whose instructions this page can't send */
+  legacy: boolean;
 }
 
 async function mintDecimals(mint: PublicKey): Promise<number> {
@@ -67,9 +69,82 @@ async function mintDecimals(mint: PublicKey): Promise<number> {
   return decimals;
 }
 
+/** ORE's mint has 11 decimals; used when the older program never set an ORE mint. */
+const ORE_DECIMALS = 11;
+
+/**
+ * The older SKR-only program's Config (devnet still runs it):
+ * authority, skr_mint, round_secs u32, base_points, motherlode_points, boost_tier1, boost_tier2, gear_prices Vec<u64>,
+ * motherlode_skr, motherlode_pool_bps u16, rewards_pool_bps u16, pot_fee_bps u16, min_deploy, round_reward_skr,
+ * paused bool, pending_authority, bump u8, reward_drip_bps u16, buyback_bps u16, buyback_due, ore_mint,
+ * gear_prices_ore Vec<u64>, ore_motherlode_bps u16, ore_rewards_bps u16, ore_boost_tier1, ore_boost_tier2, ...
+ */
+async function legacyConfig(data: Uint8Array): Promise<Config> {
+  const v = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  let o = 8;
+  const key = () => new PublicKey(data.slice(o, (o += 32)));
+  const u16 = () => ((o += 2), v.getUint16(o - 2, true));
+  const u32 = () => ((o += 4), v.getUint32(o - 4, true));
+  const u64 = () => ((o += 8), Number(v.getBigUint64(o - 8, true)));
+  const vec = () => Array.from({ length: u32() }, u64);
+  const authority = key();
+  const skrMint = key();
+  u32(); // round_secs
+  const basePoints = u64();
+  const motherlodePoints = u64();
+  const boostTier1 = u64();
+  const boostTier2 = u64();
+  vec(); // gear prices in SKR, not dollars
+  u64(); // motherlode_skr
+  const motherlodePoolBps = u16();
+  u16(); // rewards_pool_bps
+  u16(); // pot_fee_bps
+  u64(); // min_deploy
+  u64(); // round_reward_skr
+  const paused = data[o++] === 1;
+  const pending = key();
+  o += 1; // bump
+  u16(); // reward_drip_bps
+  u16(); // buyback_bps
+  u64(); // buyback_due
+  const oreMint = key();
+  vec(); // gear_prices_ore
+  const oreMotherlodeBps = u16();
+  u16(); // ore_rewards_bps
+  const oreBoostTier1 = u64();
+  const oreBoostTier2 = u64();
+
+  const hasOre = !oreMint.equals(PublicKey.default);
+  const [skrDecimals, oreDecimals] = await Promise.all([mintDecimals(skrMint), hasOre ? mintDecimals(oreMint) : ORE_DECIMALS]);
+  return {
+    authority: authority.toBase58(),
+    pendingAuthority: pending.equals(PublicKey.default) ? null : pending.toBase58(),
+    paused,
+    mint: { SKR: skrMint, ORE: oreMint },
+    decimals: { SKR: skrDecimals, ORE: oreDecimals },
+    priceUsd: { SKR: 0, ORE: 0 },
+    priceUpdatedAt: 0,
+    priceMaxAgeSecs: 0,
+    boostTier1: { SKR: boostTier1 / 10 ** skrDecimals, ORE: oreBoostTier1 / 10 ** oreDecimals },
+    boostTier2: { SKR: boostTier2 / 10 ** skrDecimals, ORE: oreBoostTier2 / 10 ** oreDecimals },
+    motherlodeBps: { SKR: motherlodePoolBps, ORE: oreMotherlodeBps },
+    basePoints,
+    motherlodePoints,
+    gearPricesUsd: [],
+    legacy: true,
+  };
+}
+
 export async function fetchConfig(): Promise<Config | null> {
-  const c = await accounts.config.fetchNullable(pda.config);
-  if (!c) return null;
+  const info = await connection.getAccountInfo(pda.config);
+  if (!info) return null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let c: any;
+  try {
+    c = reader.coder.accounts.decode('Config', info.data);
+  } catch {
+    return legacyConfig(info.data);
+  }
   const [skrDecimals, oreDecimals] = await Promise.all([mintDecimals(c.skrMint), mintDecimals(c.oreMint)]);
   const whole = (v: BN, decimals: number) => num(v) / 10 ** decimals;
   const pending = c.pendingAuthority.toBase58();
@@ -88,6 +163,7 @@ export async function fetchConfig(): Promise<Config | null> {
     basePoints: num(c.basePoints),
     motherlodePoints: num(c.motherlodePoints),
     gearPricesUsd: c.gearPricesUsd.map(usd),
+    legacy: false,
   };
 }
 
