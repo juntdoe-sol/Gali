@@ -1,10 +1,10 @@
 // Halloween patch for gali.lol and tv.gali.lol. Self-contained: it adds its own styles and pixel art.
-// On from 15 Oct to 2 Nov (visitor's local date). ?halloween=1 forces it on, ?halloween=0 off.
+// On from 15 Oct to 5 Nov, the last day of the game's Hollow Night season (visitor's local date). ?halloween=1 forces it on, ?halloween=0 off.
 // Decorations never take clicks except the pumpkins, which cackle and let bats out.
 (() => {
   const q = new URLSearchParams(location.search).get('halloween');
   const now = new Date(), m = now.getMonth(), d = now.getDate();
-  const season = (m === 9 && d >= 15) || (m === 10 && d <= 2);
+  const season = (m === 9 && d >= 15) || (m === 10 && d <= 5);
   if (q === '0' || (!season && q !== '1')) return;
 
   const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
