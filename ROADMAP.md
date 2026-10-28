@@ -4,7 +4,7 @@ What is designed and partly built, but not in the shipped game. Nothing here is 
 
 ## In development: the Gali program
 
-`programs/gali` is an Anchor program written for ORE's board. It is tested against `programs/ore-mock` on a local validator (27 tests, `bash scripts/test-local.sh`) and has never run against ORE's live program. It is not deployed.
+`programs/gali` is an Anchor program written for ORE's board, tested against `programs/ore-mock` on a local validator (27 tests, `bash scripts/test-local.sh`).
 
 In the app its screens are behind `EXPO_PUBLIC_FEATURE_GALI_PROGRAM` (off by default): points, streaks, BOOST (SKR staking) and the SKR jackpot. With the flag off the app shows none of them and never sends a Gali program instruction.
 

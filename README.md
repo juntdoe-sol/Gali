@@ -157,7 +157,7 @@ flowchart LR
 | Stage | What |
 |---|---|
 | **Now** | Mainnet beta on desktop web and Android. Weekly APK releases from tester feedback. APK 1.7 lands this week. |
-| **In development** | The Gali program (`programs/gali`): points, streaks, an SKR jackpot on ORE's motherlode, gear and staking. Tested against a mock of ORE, not deployed; its screens are hidden behind `EXPO_PUBLIC_FEATURE_GALI_PROGRAM`. A Gali app for Android TV (`tv/`) that pairs with a Seeker. One-tap Seeker Connect. |
+| **In development** | The Gali program (`programs/gali`): points, streaks, an SKR jackpot on ORE's motherlode, gear and staking, tested against a mock of ORE. Its screens stay behind `EXPO_PUBLIC_FEATURE_GALI_PROGRAM` until it ships. A Gali app for Android TV (`tv/`) that pairs with a Seeker. One-tap Seeker Connect. |
 | **Planned** | Gear as tradeable NFTs and a player Market. Clans. More seasons. |
 
 Details in [ROADMAP.md](ROADMAP.md).
@@ -188,7 +188,7 @@ ORE is credited as the board Gali plays on. Gali is not affiliated with or endor
 | `app/` | Expo (React Native) app for Android and web. Canvas engines in `app/src/engine`, game state in `app/src/game`, chain code in `app/src/chain` |
 | `app/rpc-backend/` | Read proxy and the arcade server (`functions/games.mjs`) |
 | `supabase/` | Edge functions (`autopilot`, `ore-rate`, `dm`, chat) and SQL for chat, ranks, autopilot and ORE stats |
-| `programs/gali` | Anchor program, in development and not deployed |
+| `programs/gali` | Anchor program, in development |
 | `programs/ore-mock` | Test-only stand-in for ORE's program |
 | `tests/gali.ts` | Program tests against the mock (27 cases) |
 | `admin/` | Admin page (Vite + React) |

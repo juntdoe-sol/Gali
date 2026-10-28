@@ -6,5 +6,5 @@
  */
 const on = (v: string | undefined) => v === '1' || v === 'true';
 
-/** Points, streaks, the SKR jackpot, SKR staking (BOOST) and gear buying. Needs the Gali program, which is not deployed. */
+/** Points, streaks, the SKR jackpot, SKR staking (BOOST) and gear buying. Needs the Gali program. */
 export const FEATURE_GALI_PROGRAM = on(process.env.EXPO_PUBLIC_FEATURE_GALI_PROGRAM);

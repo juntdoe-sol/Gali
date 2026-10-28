@@ -158,7 +158,7 @@ function Quests() {
 function MotherlodeCard() {
   const owner = useGame((s) => s.wallet.owner);
   const live = useGame(isOnChain);
-  // ORE live mode before Gali's own program is deployed: there is no SKR pool on chain yet
+  // ORE live mode with Gali's own program off: there is no SKR pool on chain
   const noPool = useGame(isLive) && !chainReady;
   const skrPool = useGame((s) => (live ? s.wallet.pool : practiceMotherlode(s.roundId)));
   const orePool = useGame((s) => (live ? s.wallet.orePool : practiceOreMotherlode(s.roundId)));

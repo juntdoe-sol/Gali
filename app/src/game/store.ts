@@ -1104,7 +1104,7 @@ export const useGame = create<GameState>((set, get) => {
     },
 
     buyGear: async (key, pay = 'skr') => {
-      if (!FEATURE_GALI_PROGRAM) return; // the Gali program is not deployed: never send its instructions
+      if (!FEATURE_GALI_PROGRAM) return; // the Gali program is off: never send its instructions
       const g = GEAR.find((x) => x.key === key);
       const st = get();
       if (!g) return;
@@ -1134,7 +1134,7 @@ export const useGame = create<GameState>((set, get) => {
     },
 
     stake: async (amount) => {
-      if (!FEATURE_GALI_PROGRAM) return; // the Gali program is not deployed: never send its instructions
+      if (!FEATURE_GALI_PROGRAM) return; // the Gali program is off: never send its instructions
       const st = get();
       if (!st.wallet.player) return st.toast('Play one round first to create your miner', 'bad');
       if (amount <= 0 || amount > st.wallet.skr) return st.toast('Not enough SKR', 'bad');
@@ -1154,7 +1154,7 @@ export const useGame = create<GameState>((set, get) => {
     },
 
     unstake: async (amount) => {
-      if (!FEATURE_GALI_PROGRAM) return; // the Gali program is not deployed: never send its instructions
+      if (!FEATURE_GALI_PROGRAM) return; // the Gali program is off: never send its instructions
       const st = get();
       if (amount <= 0 || amount > staked()) return st.toast('Nothing to unstake', 'bad');
       try {
@@ -1170,7 +1170,7 @@ export const useGame = create<GameState>((set, get) => {
     },
 
     connect: async (webWallet?: string) => {
-      if (!onChainMode) return get().toast('On-chain mode is not deployed yet. Playing practice mode', 'info');
+      if (!onChainMode) return get().toast('Wallets are not available on this build', 'info');
       // real SOL on ORE's board: the player says yes to that once, before the wallet opens
       if (oreLive && !get().save.liveAccepted) return set({ liveNotice: typeof webWallet === 'string' ? webWallet : true, walletPicker: null });
       set({ walletPicker: null });
@@ -1359,7 +1359,7 @@ export const useGame = create<GameState>((set, get) => {
       const st = get();
       if (oreLive && !st.wallet.owner) return st.toast('Connect a wallet to deploy on ORE', 'info');
       if (st.run) return;
-      if (st.wallet.owner && !onChainMode) return st.toast('On-chain mode is not deployed yet', 'bad');
+      if (st.wallet.owner && !onChainMode) return st.toast('Mining is not available on this build', 'bad');
       let run = r;
       if (isLive(st) && r.total > 1) {
         // live autopilot: ORE's own automation. One wallet approval funds it; ORE picks the spots each round
