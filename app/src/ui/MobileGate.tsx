@@ -27,7 +27,7 @@ export function MobileGate() {
       <View style={styles.card}>
         <Image source={require('../../assets/brand/wordmark.png')} style={styles.logo} resizeMode="contain" />
         <Text style={styles.title}>PLAY ON A COMPUTER</Text>
-        <Text style={styles.body}>Gali runs in a desktop browser. Open galiisland.bounded.page on your computer in Chrome, Brave, Edge or Firefox.</Text>
+        <Text style={styles.body}>Gali runs in a desktop browser. Open betatest.gali.lol on your computer in Chrome, Brave, Edge or Firefox.</Text>
         {android ? (
           <>
             <Text style={styles.body}>On an Android phone, play in the Gali app instead.</Text>

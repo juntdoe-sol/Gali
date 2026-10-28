@@ -573,7 +573,7 @@ export async function configFor(env, house) {
 
 // Browsers may call the house only from these sites (deployed with --cors passthrough, so this function answers
 // preflight itself). The Android app sends no Origin and is unaffected. ALLOWED_ORIGINS (comma separated) overrides.
-const ORIGINS_DEFAULT = ['https://galiisland.bounded.page', 'https://galiadmin.bounded.page', 'https://gali.fun', 'https://www.gali.fun', 'http://localhost:8081'];
+const ORIGINS_DEFAULT = ['https://betatest.gali.lol', 'https://galiisland.bounded.page', 'https://galiadmin.bounded.page', 'https://gali.fun', 'https://www.gali.fun', 'http://localhost:8081'];
 function originsOf(env) {
   const raw = typeof env?.ALLOWED_ORIGINS === 'string' ? env.ALLOWED_ORIGINS : '';
   const list = raw.split(',').map((x) => x.trim().replace(/\/$/, '')).filter((x) => /^https?:\/\/[^\s/]+$/.test(x));
