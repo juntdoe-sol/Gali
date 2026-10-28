@@ -3,7 +3,6 @@ import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import { useCallback, useEffect, useState } from 'react';
 import { CLUSTER, fetchBalances, fetchConfig, fetchPlayers, PROGRAM_ID, explorerAddr, short, type Balances, type Config, type PlayerRow } from './chain';
 import { ChatTab, MoneyTab, OverviewTab, PlayersTab, SettingsTab } from './sections';
-import { TvTab } from './tvTab';
 
 export interface Data {
   cfg: Config;
@@ -19,7 +18,7 @@ export interface Notice {
   sig?: string;
 }
 
-const TABS = ['Overview', 'Money', 'Settings', 'Players', 'Chat', 'TV'] as const;
+const TABS = ['Overview', 'Money', 'Settings', 'Players', 'Chat'] as const;
 type Tab = (typeof TABS)[number];
 
 const NONE = { SKR: 0, ORE: 0 };
@@ -91,9 +90,6 @@ export function App() {
   const me = publicKey?.toBase58() ?? null;
   const isAdmin = Boolean(data && me && me === data.cfg.authority);
   const isPending = Boolean(data && me && me === data.cfg.pendingAuthority);
-  // the older program on this cluster doesn't have this page's instructions, so on-chain changes stay off
-  const legacy = Boolean(data?.cfg.legacy);
-  const canChange = isAdmin && !legacy;
 
   const run: Run = async (label, fn) => {
     setNotice({ tone: 'busy', text: `${label}… approve in your wallet` });
@@ -133,9 +129,7 @@ export function App() {
 
       {data ? (
         <div className={`role ${isAdmin ? 'admin' : isPending ? 'pending' : 'viewer'}`}>
-          {legacy
-            ? `${CLUSTER} runs an older version of the Gali program, so this page shows it read-only. Redeploy the program to ${CLUSTER} to manage it here. Chat and TV still work.`
-            : isAdmin
+          {isAdmin
             ? 'Connected as the admin wallet. Changes are live on-chain.'
             : isPending
               ? 'This wallet was proposed as the new admin. Accept it in Settings.'
@@ -171,15 +165,14 @@ export function App() {
       ) : null}
 
       <main>
-        {tab === 'TV' ? <TvTab setNotice={setNotice} /> : null}
-        {error && tab !== 'TV' ? <div className="card err">{error}</div> : null}
-        {warn && tab !== 'TV' ? <div className="card warn">{warn}</div> : null}
-        {!data && !error && tab !== 'TV' ? <div className="card">Loading Gali from {CLUSTER}…</div> : null}
+        {error ? <div className="card err">{error}</div> : null}
+        {warn ? <div className="card warn">{warn}</div> : null}
+        {!data && !error ? <div className="card">Loading Gali from {CLUSTER}…</div> : null}
         {data ? (
           <>
             {tab === 'Overview' && <OverviewTab d={data} />}
-            {tab === 'Money' && <MoneyTab d={data} wallet={wallet} isAdmin={canChange} run={run} />}
-            {tab === 'Settings' && <SettingsTab d={data} wallet={wallet} isAdmin={canChange} isPending={isPending && !legacy} run={run} />}
+            {tab === 'Money' && <MoneyTab d={data} wallet={wallet} isAdmin={isAdmin} run={run} />}
+            {tab === 'Settings' && <SettingsTab d={data} wallet={wallet} isAdmin={isAdmin} isPending={isPending} run={run} />}
             {tab === 'Players' && <PlayersTab d={data} />}
             {tab === 'Chat' && <ChatTab isAdmin={isAdmin} setNotice={setNotice} />}
           </>
