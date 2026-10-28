@@ -1,3 +1,4 @@
+import { addBonusXp, reportRound } from './play';
 import { create } from 'zustand';
 import { FEATURE_GALI_PROGRAM } from '../config/features';
 import type { Keypair, PublicKey } from '@solana/web3.js';
@@ -506,6 +507,8 @@ export const useGame = create<GameState>((set, get) => {
     setTimeout(async () => {
       if (pending.onChain) await get().refreshWallet();
       const result: RoundResult = { roundId, winning, covered, won, points, motherlode, onChain: pending.onChain, skr, oreMotherlode, solIn, solOut, oreMined, split, lucky };
+      // the boards only count what the server checks on chain itself
+      if (pending.onChain && oreLive) reportRound(roundId);
       updateSave((s) => {
         const winStreak = won ? s.winStreak + 1 : 0;
         const qp = { ...s.questProgress };
@@ -1013,6 +1016,7 @@ export const useGame = create<GameState>((set, get) => {
         bonusXp: s.bonusXp + 3,
         questProgress: { ...s.questProgress, mole3: (s.questProgress.mole3 ?? 0) + 1 },
       }));
+      addBonusXp(3);
       get().toast('Bonk! +3 XP', 'good');
     },
 
@@ -1045,6 +1049,7 @@ export const useGame = create<GameState>((set, get) => {
       if (add) {
         updateSave((s) => ({ ...s, xp: s.xp + add, bonusXp: s.bonusXp + add }));
         announceXp(add);
+        addBonusXp(add);
       }
     },
 

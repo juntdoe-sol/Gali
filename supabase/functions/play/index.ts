@@ -1,16 +1,28 @@
 // Gali play records: everything the game saves about a wallet goes through here, signed in with the same pass as
 // messages (../_shared/pass.ts). The tables are closed to the public key (sql/signed-reports.sql), so a player can
-// only ever write for their own wallet.
+// only ever write for their own wallet, and numbers the server can check it works out itself
+// (sql/verified-scores.sql).
 //
 // Calls (POST, JSON body with `a` for the action and `pass`):
-//   seen  { name, level, xp, points }  check in this wallet's name and progress (only rises are kept)
-//   ore   { ore }                      this wallet's lifetime ORE mined, as read from ORE's Miner account
-//   ko    { killer, scope }            this wallet was knocked out by `killer` (a wallet)
-//   win   { mode, players }            this wallet won an arena match or a raid
-//   chat  { mid, sender, name, body }  save one of this wallet's lobby chat lines
-// Deploy: npx supabase functions deploy play  (secret DM_SECRET, shared with dm)
+//   seen   { name }                     check in this wallet's name; level, XP and points are the server's own
+//   round  { round }                    score a finished live round, read from ORE's own Round and Miner accounts
+//   bonus  { n }                        XP from fights, quests and the like: at most 100 a report, 600 a day
+//   ore    {}                           write down this wallet's lifetime ORE mined, read from ORE's Miner account
+//   ko     { killer, scope }            this wallet was knocked out by `killer` (a wallet)
+//   win    { mode, players }            this wallet won an arena match or a raid
+//   chat   { mid, sender, name, body }  save one of this wallet's lobby chat lines
+//   ticket { id }                       a signed arena ticket for this wallet and player id (see below)
+// Deploy: npx supabase functions deploy play
+// Secrets: DM_SECRET (shared with dm), SOLANA_RPC, TICKET_KEY (32-byte ed25519 seed, hex; see scripts/ticket-key.mjs)
+//
+// Arena tickets: only a wallet that has played ORE (its ORE Miner account exists, which costs real SOL to create)
+// gets one. The app pins the ticket key's public half, so only tickets from here count, and the arena host is
+// chosen among ticketed players by a hash nobody can steer (app/src/game/arena.ts).
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { ed25519 } from 'npm:@noble/curves@2.4.0/ed25519.js';
 import { isWallet, readPass } from '../_shared/pass.ts';
+import { readMinerRound } from '../_shared/ore.ts';
+import { scoreRound } from '../_shared/score.ts';
 
 const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 const cors = {
@@ -27,6 +39,15 @@ const cleanBody = (b: unknown) => String(b ?? '').replace(/[\u0000-\u001f\u007f]
 const int = (v: unknown, lo: number, hi: number) => Math.min(hi, Math.max(lo, Math.round(Number(v) || 0)));
 const SCOPES = new Set(['lobby', 'island', 'arena']);
 const MODES = new Set(['lms', 'koth', 'boss', 'waves']);
+const TICKET_MS = 60 * 60_000;
+/** The text a ticket signs; the app checks the same text (app/src/game/ticket.ts). */
+export const ticketText = (wallet: string, id: string, exp: number) => `gali-ticket|${wallet}|${id}|${exp}`;
+
+function ticketKey(): Uint8Array | null {
+  const hex = Deno.env.get('TICKET_KEY') ?? '';
+  return /^[0-9a-f]{64}$/i.test(hex) ? Uint8Array.from(hex.match(/../g)!.map((h) => parseInt(h, 16))) : null;
+}
+const b64 = (b: Uint8Array) => btoa(String.fromCharCode(...b));
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
@@ -39,14 +60,40 @@ Deno.serve(async (req) => {
     const a = String(q.a ?? '');
 
     if (a === 'seen') {
-      const { error } = await db.rpc('gali_seen', { p_wallet: me, p_name: cleanName(q.name), p_level: int(q.level, 1, 200), p_xp: int(q.xp, 0, 50_000_000), p_points: int(q.points, 0, 500_000_000) });
+      const { error } = await db.rpc('gali_checkin', { p_wallet: me, p_name: cleanName(q.name) });
       return error ? fail(error) : reply(200, { ok: true });
     }
+    if (a === 'round') {
+      const round = BigInt(int(q.round, 0, Number.MAX_SAFE_INTEGER));
+      const { current, miner, round: r } = await readMinerRound(me);
+      // ORE's miner only holds its last round: a round already replaced by a newer deploy can't be checked any more
+      if (!miner || miner.roundId !== round || round >= current || !r || r.id !== round) return reply(200, { ok: false, reason: 'not checkable' });
+      const s = scoreRound(miner.deployed, r.entropy, r.motherlode);
+      if (!s) return reply(200, { ok: false, reason: 'nothing to score' });
+      const { data, error } = await db.rpc('gali_score_round', { p_wallet: me, p_round: Number(round), p_covered: s.covered, p_won: s.won, p_motherlode: s.motherlode, p_points: s.points, p_xp: s.xp });
+      return error ? fail(error) : reply(200, { ok: true, scored: data === true, ...s });
+    }
+    if (a === 'bonus') {
+      const { data, error } = await db.rpc('gali_bonus_xp', { p_wallet: me, p_n: int(q.n, 0, 100) });
+      return error ? fail(error) : reply(200, { ok: true, added: data ?? 0 });
+    }
     if (a === 'ore') {
-      const ore = Number(q.ore);
-      if (!(ore >= 0 && ore <= 100_000_000)) return reply(400, { error: 'bad value' });
+      const { miner } = await readMinerRound(me);
+      if (!miner) return reply(200, { ok: false });
+      const ore = Number(miner.lifetimeRewardsOre) / 1e11;
       const { error } = await db.rpc('gali_ore_seen', { p_wallet: me, p_ore: Math.round(ore * 1e6) / 1e6 });
       return error ? fail(error) : reply(200, { ok: true });
+    }
+    if (a === 'ticket') {
+      const key = ticketKey();
+      if (!key) return reply(503, { error: 'Arena tickets are off' });
+      const id = String(q.id ?? '');
+      if (!/^[1-9A-HJ-NP-Za-km-z]{8}[a-z0-9]{4}$/.test(id) || !id.startsWith(me.slice(0, 8))) return reply(400, { error: 'bad id' });
+      const { miner } = await readMinerRound(me);
+      if (!miner) return reply(403, { error: 'Play one live round to host arena matches' });
+      const exp = Date.now() + TICKET_MS;
+      const sig = ed25519.sign(new TextEncoder().encode(ticketText(me, id, exp)), key);
+      return reply(200, { ok: true, exp, sig: b64(sig) });
     }
     if (a === 'ko') {
       if (!isWallet(q.killer) || q.killer === me || !SCOPES.has(q.scope)) return reply(400, { error: 'bad report' });

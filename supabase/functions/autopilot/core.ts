@@ -13,6 +13,10 @@
  * sets 0.00001 SOL) pays it back. Automations whose fee would not cover the cost are skipped.
  */
 import { Buffer, ComputeBudgetProgram, Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction } from './deps.ts';
+import { roundFields, scoreRound, type RoundScore } from '../_shared/score.ts';
+
+/** Called with each finished round a player's miner still holds, before the next deploy replaces it. */
+export type ScoreHook = (wallet: string, roundId: bigint, s: RoundScore) => Promise<void>;
 
 export const ORE_PROGRAM_ID = new PublicKey('oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv');
 const ENTROPY_PROGRAM_ID = new PublicKey('3jSkUuYBoJzQPMEzTvkDFXCZUBksPamrVhrnHR9igu2X');
@@ -156,13 +160,39 @@ const roundSize = (a: Auto) => a.amount * BigInt(bits(a.mask));
 const MAX_FAILURES = 2;
 const failures = new Map<string, number>();
 
+const scored = new Set<string>();
+async function scorePrevious(conn: Connection, batch: Auto[], miners: ({ data: Buffer | Uint8Array } | null)[], current: bigint, onScore: ScoreHook) {
+  const todo: { wallet: string; miner: Miner }[] = [];
+  batch.forEach((a, i) => {
+    const info = miners[i];
+    if (!info || info.data.length !== SIZE.miner) return;
+    const miner = decodeMiner(Buffer.from(info.data));
+    const tag = `${a.authority.toBase58()}:${miner.roundId}`;
+    if (miner.roundId >= current || scored.has(tag) || !miner.deployed.some((x) => x > 0n)) return;
+    todo.push({ wallet: a.authority.toBase58(), miner });
+  });
+  if (!todo.length) return;
+  const ids = [...new Set(todo.map((t) => t.miner.roundId))];
+  const infos = await conn.getMultipleAccountsInfo(ids.map(roundPda), 'confirmed');
+  const rounds = new Map(ids.map((id, i) => [id, infos[i] && infos[i]!.owner?.equals(ORE_PROGRAM_ID) ? roundFields(new Uint8Array(infos[i]!.data)) : null]));
+  for (const t of todo) {
+    const r = rounds.get(t.miner.roundId);
+    if (!r || r.id !== t.miner.roundId) continue;
+    const s = scoreRound(t.miner.deployed, r.entropy, r.motherlode);
+    if (!s) continue;
+    await onScore(t.wallet, t.miner.roundId, s);
+    scored.add(`${t.wallet}:${t.miner.roundId}`);
+  }
+  if (scored.size > 20_000) scored.clear();
+}
+
 export interface PassResult { phase: Phase; round: string; candidates: number; sent: number; skipped: number; failed: number; errors: string[]; /** slots until the round ends (mining or locked), else 0 */ slotsLeft: number }
 
 /**
  * One pass: read the board, find automations to run, send one transaction each.
  * `done` remembers (authority, round) pairs already sent this invocation.
  */
-export async function pass(conn: Connection, signer: Keypair, done: Set<string>): Promise<PassResult> {
+export async function pass(conn: Connection, signer: Keypair, done: Set<string>, onScore?: ScoreHook): Promise<PassResult> {
   const [boardInfo, slot] = await Promise.all([conn.getAccountInfo(BOARD), conn.getSlot('confirmed')]);
   if (!boardInfo) throw new Error('ORE board not found');
   const board = decodeBoard(Buffer.from(boardInfo.data));
@@ -183,6 +213,8 @@ export async function pass(conn: Connection, signer: Keypair, done: Set<string>)
   res.candidates = autos.length;
   const batch = autos.slice(0, MAX_PER_PASS);
   const miners = batch.length ? await conn.getMultipleAccountsInfo(batch.map((a) => minerPda(a.authority)), 'confirmed') : [];
+  // score each player's finished round on Gali's boards before this deploy replaces it in their miner
+  if (onScore) await scorePrevious(conn, batch, miners, board.roundId, onScore).catch((e) => res.errors.push(`score: ${String((e as Error)?.message ?? e).slice(0, 120)}`));
   const { blockhash } = batch.length ? await conn.getLatestBlockhash('confirmed') : { blockhash: '' };
   await Promise.all(
     batch.map(async (a, i) => {
@@ -226,7 +258,7 @@ export function nextGap(r: PassResult, gapMs: number): number {
 }
 
 /** Run passes until `budgetMs` is used up, so every round in the window is played. */
-export async function run(conn: Connection, signer: Keypair, budgetMs: number, gapMs = 4000, now: () => number = Date.now, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))): Promise<PassResult[]> {
+export async function run(conn: Connection, signer: Keypair, budgetMs: number, gapMs = 4000, now: () => number = Date.now, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms)), onScore?: ScoreHook): Promise<PassResult[]> {
   const done = new Set<string>();
   failures.clear();
   const out: PassResult[] = [];
@@ -234,7 +266,7 @@ export async function run(conn: Connection, signer: Keypair, budgetMs: number, g
   while (now() < end) {
     let r: PassResult;
     try {
-      r = await pass(conn, signer, done);
+      r = await pass(conn, signer, done, onScore);
     } catch (e) {
       r = { phase: 'waiting', round: '?', candidates: 0, sent: 0, skipped: 0, failed: 1, errors: [String((e as Error)?.message ?? e).slice(0, 160)], slotsLeft: 0 };
     }

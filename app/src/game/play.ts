@@ -19,6 +19,22 @@ export function setPlayPass(p: string | null, wallet: string | null) {
 /** The wallet the pass is for, when signed in. */
 export const playWallet = () => passWallet;
 
+/** One call that needs the answer (an arena ticket). Null without a pass or on any failure. */
+export async function playCall<T>(a: 'ticket', body: Record<string, unknown>): Promise<T | null> {
+  const base = restBase();
+  if (!base || !pass) return null;
+  try {
+    const r = await fetch(`${base}/functions/v1/play`, {
+      method: 'POST',
+      headers: { apikey: publicKey(), authorization: `Bearer ${publicKey()}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ ...body, a, pass }),
+    });
+    return r.ok ? ((await r.json()) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
 function send(a: string, body: Record<string, unknown>) {
   const base = restBase();
   if (!base || !pass) return;
@@ -30,7 +46,33 @@ function send(a: string, body: Record<string, unknown>) {
 }
 
 /** Fire and forget. `keep` holds the report (up to 20) until the player signs in. */
-export function playReport(a: 'seen' | 'ore' | 'ko' | 'win' | 'chat', body: Record<string, unknown>, keep = false) {
+export type PlayAction = 'seen' | 'ore' | 'ko' | 'win' | 'chat' | 'bonus' | 'round';
+export function playReport(a: PlayAction, body: Record<string, unknown>, keep = false) {
   if (pass) return send(a, body);
   if (keep && waiting.length < 20) waiting.push({ a, body });
+}
+
+/* ---------- bonus XP (fights, quests, moles): sent in batches, capped by the server at 100 a report, 600 a day ---------- */
+let bonus = 0;
+let bonusTimer: ReturnType<typeof setTimeout> | null = null;
+function flushBonus() {
+  bonusTimer = null;
+  while (bonus > 0) {
+    const n = Math.min(100, bonus);
+    bonus -= n;
+    playReport('bonus', { n }, true);
+  }
+}
+/** XP the server cannot see happen. It counts on the boards up to the server's daily cap. */
+export function addBonusXp(n: number) {
+  const add = Math.max(0, Math.floor(n));
+  if (!add) return;
+  bonus = Math.min(600, bonus + add);
+  if (bonus >= 100) flushBonus();
+  else if (!bonusTimer) bonusTimer = setTimeout(flushBonus, 20_000);
+}
+
+/** Ask the server to score a finished live round from ORE's own accounts (it checks everything itself). */
+export function reportRound(roundId: bigint | number) {
+  playReport('round', { round: Number(roundId) }, true);
 }
