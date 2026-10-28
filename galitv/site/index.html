@@ -33,6 +33,8 @@
 <main class="stage">
   <h1 class="sr">Gali TV</h1>
 
+  <div class="watch">
+  <div class="watch-main">
   <div class="set" id="set">
     <div class="antenna" aria-hidden="true"><i class="rod l"></i><i class="rod r"></i><i class="base"></i></div>
 
@@ -64,9 +66,9 @@
           <div class="power-line" aria-hidden="true"></div>
         </div>
         <div class="deck">
-          <button class="ctl" id="b-prev" aria-label="Previous video">⏮</button>
+          <button class="ctl" id="b-prev" aria-label="Previous episode">⏮</button>
           <button class="ctl play" id="b-play" aria-label="Play">▶</button>
-          <button class="ctl" id="b-next" aria-label="Next video">⏭</button>
+          <button class="ctl" id="b-next" aria-label="Next episode">⏭</button>
           <div class="seek" id="seek" role="slider" tabindex="0" aria-label="Seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
             <div class="seek-fill" id="seek-fill"></div><div class="seek-head" id="seek-head"></div>
           </div>
@@ -80,7 +82,7 @@
         <div class="led" id="led" aria-hidden="true"></div>
         <div class="dial-wrap">
           <button class="dial" id="dial" aria-label="Change channel"><i></i></button>
-          <div class="dial-marks" aria-hidden="true"><b data-ch="all">ALL</b><b data-ch="cartoon">1</b><b data-ch="team">2</b></div>
+          <div class="dial-marks" aria-hidden="true"><b data-ch="cartoon">CH1</b><b data-ch="team">CH2</b></div>
         </div>
         <div class="grille" aria-hidden="true"></div>
         <div class="brandplate" aria-hidden="true">GALI<small>VISION</small></div>
@@ -98,23 +100,22 @@
     <div class="pl-actions" id="pl-actions"></div>
   </section>
 
-  <section class="guide" aria-label="Pick what to watch">
-    <div class="channels" role="tablist" aria-label="Channels" id="channels">
-      <button role="tab" data-ch="all" aria-selected="true"><span><em>ALL</em> Everything</span></button>
-      <button role="tab" data-ch="cartoon" aria-selected="false"><span><em>CH 1</em> Matt the Miner</span></button>
-      <button role="tab" data-ch="team" aria-selected="false"><span><em>CH 2</em> Team Updates</span></button>
+  </div>
+
+  <aside class="playlist" aria-label="Playlists">
+    <div class="pl-tabs" role="tablist" aria-label="Playlists" id="channels">
+      <button role="tab" data-ch="cartoon" aria-selected="true"><em>CH 1</em>Matt the Miner</button>
+      <button role="tab" data-ch="team" aria-selected="false"><em>CH 2</em>Team Updates</button>
     </div>
-    <div class="shelf-wrap">
-      <button class="shelf-nav l" id="shelf-l" aria-label="Scroll tapes left">◀</button>
-      <ol class="shelf" id="shelf" aria-label="Videos"></ol>
-      <button class="shelf-nav r" id="shelf-r" aria-label="Scroll tapes right">▶</button>
-    </div>
-    <p class="keys" aria-hidden="true"><kbd>Space</kbd> play · <kbd>←</kbd><kbd>→</kbd> tapes · <kbd>↑</kbd><kbd>↓</kbd> channels · <kbd>M</kbd> sound · <kbd>F</kbd> full screen</p>
-  </section>
+    <div class="series" id="series"></div>
+    <ol class="eps" id="eps" aria-label="Episodes"></ol>
+  </aside>
+  </div>
+  <p class="keys" aria-hidden="true"><kbd>Space</kbd> play · <kbd>←</kbd><kbd>→</kbd> episodes · <kbd>↑</kbd><kbd>↓</kbd> channels · <kbd>1</kbd>–<kbd>9</kbd> episode · <kbd>M</kbd> sound · <kbd>F</kbd> full screen</p>
 </main>
 
 <footer class="foot">
-  <a href="https://gali.lol">gali.lol</a> · <a href="https://betatest.gali.lol">Play the beta</a> · <a href="https://docs.gali.lol">Docs</a> · <a href="https://x.com/Gali_Game" target="_blank" rel="noopener">X</a> · <a href="https://www.tiktok.com/@gali_world" target="_blank" rel="noopener">TikTok</a>
+  <a href="https://gali.lol">gali.lol</a> · <a href="https://x.com/i/chat/group_join/g2106329104970924264/keRNMfmNp8" target="_blank" rel="noopener">Join the beta</a> · <a href="https://docs.gali.lol">Docs</a> · <a href="https://x.com/Gali_Game" target="_blank" rel="noopener">X</a> · <a href="https://www.tiktok.com/@gali_world" target="_blank" rel="noopener">TikTok</a>
 </footer>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
