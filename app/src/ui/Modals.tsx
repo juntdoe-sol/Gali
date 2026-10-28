@@ -370,7 +370,7 @@ function Bullet({ icon, text, muted }: { icon: PixName; text: string; muted?: bo
 const PILLARS: { icon: PixName; t: string; b: string }[] = [
   { icon: 'ore', t: 'MINE ORE', b: 'Pick spots on a live island and strike gold on ORE’s board.' },
   { icon: 'cart', t: 'PLAY TO EARN', b: 'Mini games with ORE and SKR tables, a new round every 40 seconds.' },
-  { icon: 'bag', t: 'TRADE GEAR', b: 'Pickaxes, helmets and pets for your miner.' },
+  { icon: 'chat', t: 'MEET MINERS', b: 'Walk the lobby, chat, brawl and ride carts with other miners.' },
 ];
 
 /** The title screen: the live game is wallet-gated, nothing plays until a wallet is connected. */

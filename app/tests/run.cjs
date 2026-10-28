@@ -13,6 +13,7 @@ const suites = [
   'tests/brawl.cjs',
   'tests/rides.cjs',
   'tests/ore-format.cjs',
+  'tests/last-spot.cjs',
   'tests/autopilot.cjs',
   'tests/score.cjs',
   'tests/arena.cjs',
