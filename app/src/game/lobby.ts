@@ -7,6 +7,8 @@
  * sends is trusted: every field is clamped, every colour checked, chat is length-capped
  * and rate-limited per sender, and one sender cannot fill the room with invented players.
  */
+import { boundWallet, idFor } from './peerId';
+import { playReport } from './play';
 import type { RealtimeChannel } from '@supabase/realtime-js';
 import { create } from 'zustand';
 import type { Look } from '../engine/types';
@@ -225,7 +227,9 @@ function onState(p: any) {
     pose: asPose(p.p),
     look,
     lvl: p.lvl === undefined && prev ? prev.lvl : Math.floor(num(p.lvl, 1, 999)),
-    wallet: typeof p.w === 'string' && B58.test(p.w) ? p.w : !hasLook && prev ? prev.wallet : null,
+    // a wallet only counts when this id was made from it (game/peerId.ts), so nobody can put their wallet on someone else
+    // (a packet whose wallet does not match its id is ignored for the wallet; one with a look and no wallet clears it)
+    wallet: boundWallet(id, p.w) ?? (p.w !== undefined || !hasLook ? prev?.wallet ?? null : null),
     rd: typeof p.rd === 'number' && Number.isInteger(p.rd) && p.rd >= 0 && p.rd < 64 ? p.rd : null,
     seen: Date.now(),
     say: prev?.say ?? null,
@@ -368,15 +372,10 @@ export async function loadChatHistory() {
 /** The wallet this player connected, if any (from publishLobbyMe), saved with their lines so the admin can mute it. */
 let myWallet: string | null = null;
 const restHeaders = () => ({ apikey: publicKey(), authorization: `Bearer ${publicKey()}`, 'content-type': 'application/json' });
-/** Save one of my lines to the lobby_chat table. Fire and forget: the database drops floods, repeats and muted wallets. */
+/** Save one of my lines to the lobby_chat table, signed in as my wallet. Fire and forget: the database drops floods, repeats and muted wallets. */
 function storeLine(l: { mid: string; sender: string; name: string; body: string }) {
-  const base = restBase();
-  if (!base) return;
-  void fetch(`${base}/rest/v1/lobby_chat`, {
-    method: 'POST',
-    headers: { ...restHeaders(), prefer: 'return=minimal' },
-    body: JSON.stringify({ ...l, wallet: myWallet }),
-  }).catch(() => undefined);
+  if (!myWallet) return;
+  playReport('chat', l);
 }
 let serverHistAt = 0;
 /** Read the last lines saved in the lobby_chat table and merge them in. At most once every 20 s. */
@@ -592,6 +591,14 @@ let lastKey = '';
 /** Called by the lobby screen when your miner moves or stops; sends when it changes, and as a slow heartbeat. */
 export function publishLobbyMe(m: { x: number; y: number; tx: number; ty: number; facing: 1 | -1; pose: string; look: Look; lvl: number; wallet?: string | null }) {
   if (m.wallet !== undefined) myWallet = typeof m.wallet === 'string' && B58.test(m.wallet) ? m.wallet : null;
+  // with a wallet, play under an id made from it (game/peerId.ts); the old id says goodbye
+  const bound = idFor(myWallet, useLobby.getState().me);
+  if (bound !== useLobby.getState().me) {
+    if (channel && useLobby.getState().status === 'online') void channel.send({ type: 'broadcast', event: 'bye', payload: { id: useLobby.getState().me } });
+    useLobby.setState({ me: bound });
+    lastKey = '';
+    lastLookAt = 0;
+  }
   const { status, me } = useLobby.getState();
   const name = useName.getState().name;
   if (!channel || status !== 'online' || !name) return;

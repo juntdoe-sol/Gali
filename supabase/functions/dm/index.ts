@@ -1,7 +1,7 @@
-// Gali direct messages. One function, one file, so it can be pasted into the Supabase dashboard.
+// Gali direct messages. Deploy with the Supabase CLI (it bundles ../_shared): npx supabase functions deploy dm
 //
 // A player signs in once by signing a short text with their wallet (no transaction, no fee). This
-// function checks the signature and hands back a pass that lasts 30 days. Every other call carries the
+// function checks the signature and hands back a pass that lasts 30 days (../_shared/pass.ts). Every other call carries the
 // pass, and only ever reads or writes messages the pass's wallet sent or received. The tables are closed
 // to the public key (sql/dm.sql), so nobody else can read a conversation.
 //
@@ -17,13 +17,10 @@
 //   tip    { pass, to, token, amount, sig, name } -> { msg }
 //   block  { pass, who, on }              -> { ok }
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { ed25519 } from 'npm:@noble/curves@2.4.0/ed25519.js';
-import bs58 from 'npm:bs58@6';
+import { checkSignIn, isWallet, makePass, readPass } from '../_shared/pass.ts';
 
 const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-const SECRET = Deno.env.get('DM_SECRET') || `gali-dm-v1:${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`;
 const RPC = Deno.env.get('SOLANA_RPC') || 'https://api.mainnet-beta.solana.com';
-const PASS_DAYS = 30;
 const MINTS: Record<string, string> = {
   ORE: 'oreoU2P8bN6jkk3jbaiVxYnG1dCXcYxwhwyK9jSybcp',
   SKR: Deno.env.get('SKR_MINT') || 'SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3',
@@ -36,15 +33,6 @@ const cors = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 const reply = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
-const B58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-const isWallet = (w: unknown): w is string => {
-  if (typeof w !== 'string' || !B58.test(w)) return false;
-  try {
-    return bs58.decode(w).length === 32;
-  } catch {
-    return false;
-  }
-};
 const cleanName = (n: unknown) =>
   String(n ?? '')
     .replace(/[^A-Za-z0-9 _.-]/g, '')
@@ -56,40 +44,6 @@ const cleanBody = (b: unknown) =>
     .replace(/\n{3,}/g, '\n\n')
     .trim()
     .slice(0, 280);
-
-/* ---------------- the pass ---------------- */
-const enc = new TextEncoder();
-const b64url = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-const fromB64url = (s: string) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)), (c) => c.charCodeAt(0));
-let hmacKey: CryptoKey | null = null;
-async function mac(data: string) {
-  hmacKey ??= await crypto.subtle.importKey('raw', enc.encode(SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-  return new Uint8Array(await crypto.subtle.sign('HMAC', hmacKey, enc.encode(data)));
-}
-async function makePass(wallet: string) {
-  const exp = Date.now() + PASS_DAYS * 86_400_000;
-  const head = b64url(enc.encode(JSON.stringify({ w: wallet, e: exp })));
-  return { pass: `${head}.${b64url(await mac(head))}`, exp };
-}
-async function readPass(pass: unknown): Promise<string | null> {
-  if (typeof pass !== 'string' || pass.length > 400) return null;
-  const [head, sig] = pass.split('.');
-  if (!head || !sig) return null;
-  const want = b64url(await mac(head));
-  // compare in constant time
-  if (want.length !== sig.length) return null;
-  let diff = 0;
-  for (let i = 0; i < want.length; i++) diff |= want.charCodeAt(i) ^ sig.charCodeAt(i);
-  if (diff) return null;
-  try {
-    const { w, e } = JSON.parse(new TextDecoder().decode(fromB64url(head)));
-    return isWallet(w) && Number(e) > Date.now() ? w : null;
-  } catch {
-    return null;
-  }
-}
-/** What the wallet signs to sign in. The app builds the same text. */
-const loginText = (wallet: string, ts: number) => `Gali: sign in to your messages\nWallet: ${wallet}\nTime: ${ts}\nThis costs nothing and sends no transaction.`;
 
 /* ---------------- chain check for tips ---------------- */
 async function rpc(method: string, params: unknown[]) {
@@ -121,7 +75,7 @@ async function tipIsReal(sig: string, from: string, to: string, token: string, a
 }
 
 /* ---------------- limits ---------------- */
-async function tooFast(wallet: string) {
+async function tooFast(wallet: string, to: string) {
   const since = (ms: number) => new Date(Date.now() - ms).toISOString();
   const { count: minute } = await db.from('dms').select('id', { count: 'exact', head: true }).eq('sender', wallet).gt('at', since(60_000));
   if ((minute ?? 0) >= 30) return 'Slow down: 30 messages a minute at most';
@@ -129,11 +83,23 @@ async function tooFast(wallet: string) {
   if ((day ?? 0) >= 500) return 'That is 500 messages today: try again tomorrow';
   const { data: last } = await db.from('dms').select('at').eq('sender', wallet).order('id', { ascending: false }).limit(1);
   if (last?.[0] && Date.now() - new Date(last[0].at).getTime() < 800) return 'Slow down';
+  // starting conversations: at most 15 new people a day, unless they have written to you before
+  const { data: known } = await db.from('dms').select('id').eq('sender', to).eq('recipient', wallet).limit(1);
+  const { data: sent } = await db.from('dms').select('id').eq('sender', wallet).eq('recipient', to).limit(1);
+  if (!known?.length && !sent?.length) {
+    const { data: today } = await db.from('dms').select('recipient').eq('sender', wallet).gt('at', since(86_400_000)).limit(2000);
+    if (new Set((today ?? []).map((r) => r.recipient)).size >= 15) return 'You can start 15 new conversations a day';
+  }
   return null;
 }
 async function isBlocked(by: string, who: string) {
   const { data } = await db.from('dm_blocks').select('wallet').eq('wallet', by).eq('blocked', who).maybeSingle();
   return Boolean(data);
+}
+/** Logs the real error and tells the caller only that something went wrong. */
+function fail(e: unknown) {
+  console.error('dm', (e as Error)?.message ?? e);
+  return reply(500, { error: 'Something went wrong. Try again.' });
 }
 const COLS = 'id, at, sender, recipient, sender_name, kind, body, tip_token, tip_amount, tip_sig, read_at';
 
@@ -146,26 +112,16 @@ Deno.serve(async (req) => {
     const a = String(q?.a ?? '');
 
     if (a === 'login') {
-      const wallet = q.wallet;
-      const ts = Number(q.ts);
-      if (!isWallet(wallet) || !Number.isFinite(ts) || typeof q.sig !== 'string') return reply(400, { error: 'missing fields' });
-      if (Math.abs(Date.now() - ts) > 10 * 60_000) return reply(400, { error: 'The sign-in is too old: try again' });
-      let ok = false;
-      try {
-        ok = ed25519.verify(Uint8Array.from(atob(q.sig), (c) => c.charCodeAt(0)), enc.encode(loginText(wallet, ts)), bs58.decode(wallet));
-      } catch {
-        ok = false;
-      }
-      if (!ok) return reply(401, { error: 'The signature does not match this wallet' });
-      return reply(200, { wallet, ...(await makePass(wallet)) });
+      if (!checkSignIn(q.wallet, q.ts, q.sig)) return reply(401, { error: 'The sign-in did not check out: try again' });
+      return reply(200, { wallet: q.wallet, ...(await makePass(q.wallet)) });
     }
 
     const me = await readPass(q.pass);
-    if (!me) return reply(401, { error: 'Sign in to your messages again' });
+    if (!me) return reply(401, { error: 'Sign in again' });
 
     if (a === 'inbox') {
       const { data, error } = await db.from('dms').select(COLS).or(`sender.eq.${me},recipient.eq.${me}`).order('id', { ascending: false }).limit(400);
-      if (error) return reply(500, { error: error.message });
+      if (error) return fail(error);
       const threads = new Map<string, { wallet: string; name: string; last: string; at: string; unread: number; kind: string; mine: boolean }>();
       for (const m of data ?? []) {
         const other = m.sender === me ? m.recipient : m.sender;
@@ -189,7 +145,7 @@ Deno.serve(async (req) => {
         .or(`and(sender.eq.${me},recipient.eq.${other}),and(sender.eq.${other},recipient.eq.${me})`)
         .order('id', { ascending: false })
         .limit(120);
-      if (error) return reply(500, { error: error.message });
+      if (error) return fail(error);
       if ((data ?? []).some((m) => m.recipient === me && !m.read_at)) {
         await db.from('dms').update({ read_at: new Date().toISOString() }).eq('recipient', me).eq('sender', other).is('read_at', null);
       }
@@ -204,10 +160,10 @@ Deno.serve(async (req) => {
       if (a === 'send') {
         const body = cleanBody(q.body);
         if (!body) return reply(400, { error: 'Write something first' });
-        const slow = await tooFast(me);
+        const slow = await tooFast(me, to);
         if (slow) return reply(429, { error: slow });
         const { data, error } = await db.from('dms').insert({ sender: me, recipient: to, sender_name: name, kind: 'msg', body }).select(COLS).single();
-        if (error) return reply(400, { error: error.message });
+        if (error) return fail(error);
         return reply(200, { msg: data });
       }
       const token = String(q.token);
@@ -220,7 +176,7 @@ Deno.serve(async (req) => {
         .insert({ sender: me, recipient: to, sender_name: name, kind: 'tip', body: `Sent ${amount} ${token}`, tip_token: token, tip_amount: amount, tip_sig: sig })
         .select(COLS)
         .single();
-      if (error) return reply(400, { error: /duplicate|unique/i.test(error.message) ? 'That transfer is already in the chat' : error.message });
+      if (error) return /duplicate|unique/i.test(error.message) ? reply(400, { error: 'That transfer is already in the chat' }) : fail(error);
       return reply(200, { msg: data });
     }
 
@@ -234,6 +190,6 @@ Deno.serve(async (req) => {
 
     return reply(400, { error: 'unknown action' });
   } catch (e) {
-    return reply(500, { error: String((e as Error).message ?? e) });
+    return fail(e);
   }
 });

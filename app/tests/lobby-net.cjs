@@ -10,7 +10,10 @@ const out = path.join(os.tmpdir(), 'gali-lobby-net.cjs');
 const S = (f) => path.join(__dirname, 'stubs', f);
 // swap the app's world, storage and name modules for the stubs
 const plugin = `{name:'stub',setup(b){b.onResolve({filter:/\\.\\/(world|storage|username)$/},a=>({path:{world:${JSON.stringify(S('world.ts'))},storage:${JSON.stringify(S('storage.ts'))},username:${JSON.stringify(S('username.ts'))}}[a.path.slice(2)]}))}}`;
-const script = `require(${JSON.stringify(require.resolve('esbuild', { paths: [path.join(__dirname, '..')] }))}).buildSync({entryPoints:[${JSON.stringify(path.join(__dirname, '../src/game/lobby.ts'))}],bundle:true,platform:'node',format:'cjs',outfile:${JSON.stringify(out)},nodePaths:[${JSON.stringify(path.join(__dirname, '../node_modules'))}],logLevel:'error',plugins:[${plugin}]})`;
+// the lobby plus the pass setter from game/play.ts (chat lines are saved through the signed play function)
+const entry = path.join(os.tmpdir(), 'gali-lobby-net-entry.ts');
+fs.writeFileSync(entry, `export * from ${JSON.stringify(path.join(__dirname, '../src/game/lobby.ts'))};\nexport { setPlayPass } from ${JSON.stringify(path.join(__dirname, '../src/game/play.ts'))};\n`);
+const script = `require(${JSON.stringify(require.resolve('esbuild', { paths: [path.join(__dirname, '..')] }))}).buildSync({entryPoints:[${JSON.stringify(entry)}],bundle:true,platform:'node',format:'cjs',outfile:${JSON.stringify(out)},nodePaths:[${JSON.stringify(path.join(__dirname, '../node_modules'))}],logLevel:'error',plugins:[${plugin}]})`;
 // buildSync does not take plugins; use build() in a child instead
 fs.writeFileSync(out + '.build.cjs', script.replace('buildSync', 'build').replace(/^require/, 'require'));
 execFileSync(process.execPath, [out + '.build.cjs'], { stdio: 'inherit' });
@@ -86,22 +89,47 @@ const look = (hat) => ({ hat, fit: '#2f5fd0', pick: '#c9c9c9', handle: '#9b6b43'
   await wait(20);
   assert.equal(B.useLobby.getState().peers[A.useLobby.getState().me].look.hat, 'hat-red', 'look kept');
 
+  // a wallet is only believed with the id made from it: reusing Alice's id cannot put another wallet on her
+  const W_A = '9ma7yr5cMEWjZCWFHnQ1SGzYe7qQMumiRb7H6mfavPMz';
+  const W_M = 'HDa2MTDdZXnrjTs6RRUUzEqCcrWMWu1fM673Cg7pzQMw';
+  await wait(600);
+  A.publishLobbyMe({ x: 400, y: 100, tx: 460, ty: 100, facing: 1, pose: 'walk', look: look('hat-red'), lvl: 3, wallet: W_A });
+  await wait(600);
+  A.publishLobbyMe({ x: 400, y: 100, tx: 470, ty: 100, facing: 1, pose: 'walk', look: look('hat-red'), lvl: 3, wallet: W_A });
+  await wait(30);
+  const aid = A.useLobby.getState().me;
+  assert.ok(aid.startsWith(W_A.slice(0, 8)), 'Alice plays under an id made from her wallet');
+  assert.equal(B.useLobby.getState().peers[aid]?.wallet, W_A, 'Bob sees her wallet');
+  bus.send('gali-lobby', null, 'state', { id: aid, nm: 'Alice', x: 400, y: 100, tx: 470, ty: 100, f: 1, p: 'walk', h: 'hat-red', c: '#2f5fd0', k: '#c9c9c9', hd: '#9b6b43', g: 'none', sx: 'm', lvl: 3, w: W_M });
+  await wait(20);
+  assert.equal(B.useLobby.getState().peers[aid].wallet, W_A, 'a copied id cannot carry another wallet');
+  bus.send('gali-lobby', null, 'state', { id: 'abcdefgh', nm: 'Mallory', x: 1, y: 1, tx: 1, ty: 1, f: 1, p: 'idle', h: 'hat-red', c: '#2f5fd0', k: '#c9c9c9', hd: '#9b6b43', g: 'none', sx: 'm', lvl: 1, w: W_M });
+  await wait(20);
+  assert.equal(B.useLobby.getState().peers.abcdefgh.wallet, null, 'a wallet that does not match its id is dropped');
+
   // the saved table: a line said with nobody online still reaches the next player who opens the app
   const table = [];
   let nextId = 1;
   globalThis.__rest = 'https://db.test';
+  const WALLET = 'So11111111111111111111111111111111111111112';
   globalThis.fetch = async (url, opts = {}) => {
-    assert.ok(String(url).startsWith('https://db.test/rest/v1/lobby_chat'), 'only the chat table');
     assert.equal(opts.headers.apikey, 'anon-test');
     if (opts.method === 'POST') {
-      table.push({ id: nextId++, at: new Date().toISOString(), ...JSON.parse(opts.body) });
-      return { ok: true, status: 201, json: async () => null };
+      // lines are saved only through the play function, signed in; the server names the wallet from the pass
+      assert.equal(String(url), 'https://db.test/functions/v1/play', 'only through the play function');
+      const b = JSON.parse(opts.body);
+      assert.equal(b.a, 'chat');
+      assert.equal(b.pass, 'test-pass');
+      table.push({ id: nextId++, at: new Date().toISOString(), mid: b.mid, sender: b.sender, name: b.name, body: b.body, wallet: WALLET });
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
     }
+    assert.ok(String(url).startsWith('https://db.test/rest/v1/lobby_chat'), 'reads only the chat table');
     const lim = Number(/limit=(\d+)/.exec(url)[1]);
     return { ok: true, status: 200, json: async () => table.slice().sort((a, b) => b.id - a.id).slice(0, lim).map(({ mid, sender, name, body, at }) => ({ mid, sender, name, body, at })) };
   };
   bus.rooms = {};
   const C = player('CAROL');
+  C.setPlayPass('test-pass', WALLET);
   C.joinChat();
   await wait(30);
   C.publishLobbyMe({ x: 1, y: 1, tx: 1, ty: 1, facing: 1, pose: 'idle', look: look('hat-red'), lvl: 1, wallet: 'So11111111111111111111111111111111111111112' });
@@ -111,6 +139,7 @@ const look = (hat) => ({ hat, fit: '#2f5fd0', pick: '#c9c9c9', handle: '#9b6b43'
   assert.equal(table[0].body, 'anyone here?');
   assert.equal(table[0].wallet, 'So11111111111111111111111111111111111111112', 'wallet saved for muting');
   assert.equal(table[0].sender, C.useLobby.getState().me);
+  assert.ok(C.useLobby.getState().me.startsWith(WALLET.slice(0, 8)), 'a player with a wallet plays under an id made from it');
   table.push({ id: nextId++, at: new Date(Date.now() - 8 * 24 * 3600_000).toISOString(), mid: 'old-line-1', sender: 'x', name: 'Old', body: 'too old' });
   table.push({ id: nextId++, at: new Date().toISOString(), mid: 'BAD MID', sender: 'x', name: 'Bad', body: 'bad mid' });
   bus.rooms = {}; // Carol closes the app: nobody online

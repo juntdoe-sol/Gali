@@ -3,7 +3,7 @@ import { FEATURE_GALI_PROGRAM } from '../config/features';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Modal, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CLUSTER, LIVE_AUTOPILOT_MAX_SOL, LIVE_MAX_ROUND_SOL, REFINING_FEE } from '../chain/light';
+import { CLUSTER, LIVE_AUTOPILOT_MAX_SOL, LIVE_MAX_ROUND_SOL, PLATFORM_FEE_BPS, REFINING_FEE } from '../chain/light';
 import { BLOCKS, boostFor, COLORS, pointsFor } from '../game/constants';
 import { watchMotion } from '../game/motion';
 import { DEFAULT_SMART, fmtSol, liveReturn, maskOf, randomPick, MIN_SOL_PER_BLOCK, SMART_COUNTS } from '../game/pot';
@@ -24,6 +24,20 @@ const TABS: { id: DockTab; label: string }[] = [
   { id: 'lite', label: 'LITE' },
   { id: 'pro', label: 'PRO' },
 ];
+
+const FEE_PCT = `${Number(PLATFORM_FEE_BPS) / 100}%`;
+/** The Gali fee, shown before anyone signs a live deploy. */
+function FeeRow({ live }: { live: boolean }) {
+  if (!live) return null;
+  return (
+    <Row
+      icon="sol"
+      label="Gali fee"
+      info={`Gali adds ${FEE_PCT} of the SOL you deploy, paid to Gali in the same transaction. Autopilot pays it for every funded round when it starts, and it is not refunded if you stop early.`}
+      right={<T v="black" style={{ fontSize: 15, color: COLORS.text }}>{FEE_PCT}</T>}
+    />
+  );
+}
 
 export function Dock({ embedded }: { embedded?: boolean } = {}) {
   const insets = useSafeAreaInsets();
@@ -460,13 +474,14 @@ function DeskLite() {
           <Row
             icon="hourglass"
             label="Rounds"
-            info={`LITE splits your SOL into ${LITE_PER_ROUND} SOL rounds on all 25 spots, so you hit the gold spot every round. More than 1 round runs on autopilot: one wallet approval, then rounds deploy by themselves. Stop any time to get the unused SOL back.`}
+            info={`LITE splits your SOL into ${LITE_PER_ROUND} SOL rounds on all 25 spots, so you hit the gold spot every round. More than 1 round runs on autopilot: one wallet approval, then rounds deploy by themselves. Stop any time to get the unused SOL back (the Gali fee is paid up front and not refunded).`}
             right={
               <T v="black" style={{ fontSize: 15, color: rounds ? COLORS.text : COLORS.muted }}>
                 {rounds}
               </T>
             }
           />
+          <FeeRow live={live} />
           <Row
             icon="sol"
             label="Per round"
@@ -594,9 +609,10 @@ function DeskPro() {
           <Row
             icon="hourglass"
             label="Rounds"
-            info={live ? `1 = this round only (you approve in your wallet). More = autopilot: one wallet approval funds ORE's automation for every round, then rounds deploy with no pop-up. Up to ${LIVE_AUTOPILOT_MAX_SOL} SOL in total. Stop it any time to get the unused SOL back.` : '1 = this round only. More = autopilot repeats the same setup each round.'}
+            info={live ? `1 = this round only (you approve in your wallet). More = autopilot: one wallet approval funds ORE's automation for every round, then rounds deploy with no pop-up. Up to ${LIVE_AUTOPILOT_MAX_SOL} SOL in total. Stop it any time to get the unused SOL back (the Gali fee is paid up front and not refunded).` : '1 = this round only. More = autopilot repeats the same setup each round.'}
             right={<Stepper value={rounds} label="rounds" onMinus={() => editPreset({ rounds: Math.max(1, rounds - 1) })} onPlus={() => editPreset({ rounds: Math.min(100, rounds + 1) })} disabled={lock} />}
           />
+          <FeeRow live={live} />
           <Row
             icon="sol"
             label="Per round"
@@ -875,7 +891,7 @@ function ProPanel({ compact }: { compact: boolean }) {
           <Row
             icon="hourglass"
             label="Rounds"
-            info={live ? `1 = this round only (you approve in your wallet). More = autopilot: one wallet approval funds ORE's automation with SOL for every round, then rounds deploy with no pop-up while the app stays open. Smart re-picks every round. Up to ${LIVE_AUTOPILOT_MAX_SOL} SOL in total. Stop it any time to get the unused SOL back.` : '1 = this round only. More = autopilot repeats the same setup each round (Smart re-picks every round).'}
+            info={live ? `1 = this round only (you approve in your wallet). More = autopilot: one wallet approval funds ORE's automation with SOL for every round, then rounds deploy with no pop-up while the app stays open. Smart re-picks every round. Up to ${LIVE_AUTOPILOT_MAX_SOL} SOL in total. Stop it any time to get the unused SOL back (the Gali fee is paid up front and not refunded).` : '1 = this round only. More = autopilot repeats the same setup each round (Smart re-picks every round).'}
             right={
               <>
                 <View style={[styles.tag, p.rounds > 1 && { borderColor: COLORS.teal }]}>
@@ -901,6 +917,7 @@ function ProPanel({ compact }: { compact: boolean }) {
               right={<Chip label="SCAN TV" onPress={openScanTv} disabled={Boolean(busy)} />}
             />
           ) : null}
+          <FeeRow live={live} />
           <Row
             icon="trophy"
             label="If it strikes"

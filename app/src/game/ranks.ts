@@ -3,12 +3,13 @@
  * shared through the Supabase project the lobby already uses (a small table, see
  * supabase/sql/brawl-ranks.sql).
  *
- * A knockout is reported by the player who got knocked out, never by the winner: nobody gains rank by
- * claiming a KO. Arena wins are reported by the match host. The database caps how often one pair can
- * count (once per 2 minutes) and the ranking counts each victim at most 3 times a day per winner, so
- * farming a friend is slow and shows. Names are what players typed; this is for fun, not for prizes.
+ * Every report goes through the `play` function with the sign-in pass (game/play.ts), so a wallet only ever
+ * reports for itself. A knockout is reported by the player who got knocked out, naming the wallet that did it;
+ * a win by the winner. The database caps how often one pair can count (once per 2 minutes), how many KOs and
+ * wins one wallet earns a day (60 each) and counts each victim at most 3 times a day per winner.
  */
 import { create } from 'zustand';
+import { playReport, playWallet } from './play';
 import { publicKey, restBase } from './world';
 
 /** Which stretch of time a board counts: today, this month, this year, or everything. Days start at midnight Malaysia time. */
@@ -76,18 +77,16 @@ export const useRanks = create<RanksState>((set, get) => ({
   },
 }));
 
-/** We were knocked out by `killer`. The victim's word is what counts. */
-export function reportKo(o: { killer: string; victim: string; scope: string }) {
-  const base = restBase();
-  if (!base || !o.killer || !o.victim || o.killer === o.victim) return;
-  void fetch(`${base}/rest/v1/brawl_kos`, { method: 'POST', headers: { ...headers(), prefer: 'return=minimal' }, body: JSON.stringify({ killer: clean(o.killer), victim: clean(o.victim), scope: o.scope }) }).catch(() => undefined);
+/** We were knocked out by the player with wallet `killer`. The victim's word is what counts. */
+export function reportKo(o: { killer: string | null; scope: string }) {
+  if (!o.killer) return;
+  playReport('ko', { killer: o.killer, scope: o.scope }, true);
 }
 
-/** The arena host reports a match winner. */
-export function reportWin(o: { winner: string; host: string; mode: string; players: number }) {
-  const base = restBase();
-  if (!base || !o.winner || o.players < (o.mode === 'boss' ? 1 : 2)) return;
-  void fetch(`${base}/rest/v1/brawl_wins`, { method: 'POST', headers: { ...headers(), prefer: 'return=minimal' }, body: JSON.stringify({ winner: clean(o.winner), host: clean(o.host), mode: o.mode, players: Math.min(12, o.players) }) }).catch(() => undefined);
+/** We won a match or a raid. */
+export function reportWin(o: { mode: string; players: number }) {
+  if (o.players < (o.mode === 'boss' || o.mode === 'waves' ? 1 : 2)) return;
+  playReport('win', { mode: o.mode, players: Math.min(12, o.players) }, true);
 }
 
 /* ---------------- miner ranks: every Gali wallet, with lifetime ORE read from chain ---------------- */
@@ -121,15 +120,16 @@ interface MinersState {
 }
 
 const oreMarked = new Map<string, string>();
-/** Write down each wallet's ORE total once a day, so the day, month and year boards have a starting mark. */
-function markOre(base: string, life: Record<string, { ore: number }>) {
+/** Once a day, have the server write down this wallet's ORE total (it reads ORE's Miner account itself). */
+function markOre(life: Record<string, { ore: number }>) {
+  const me = playWallet();
+  const v = me ? life[me] : undefined;
+  if (!me || !v || !(v.ore >= 0)) return;
   const day = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 10);
-  for (const [w, v] of Object.entries(life)) {
-    const key = `${day}:${v.ore.toFixed(6)}`;
-    if (oreMarked.get(w) === key || !(v.ore >= 0)) continue;
-    oreMarked.set(w, key);
-    void rpc(base, 'gali_ore_seen', { p_wallet: w, p_ore: Math.round(v.ore * 1e6) / 1e6 }).catch(() => undefined);
-  }
+  const key = `${day}:${v.ore.toFixed(6)}`;
+  if (oreMarked.get(me) === key) return;
+  oreMarked.set(me, key);
+  playReport('ore', {});
 }
 
 export const useMinerRanks = create<MinersState>((set, get) => ({
@@ -163,7 +163,7 @@ export const useMinerRanks = create<MinersState>((set, get) => ({
       set({ rows, everyone, allOnly, at: Date.now(), status: 'ok' });
       if (lifetimes && everyone.length) {
         const life = await lifetimes(everyone.map((x) => x.wallet)).catch(() => ({}) as Record<string, { ore: number; deployed: number }>);
-        markOre(base, life);
+        markOre(life);
         let marks: Record<string, number> = {};
         if (p !== 'all' && !allOnly) {
           const b = await rpc(base, 'gali_ore_base', { p_period: p }).catch(() => null);
@@ -186,19 +186,18 @@ export const useMinerRanks = create<MinersState>((set, get) => ({
 }));
 
 let lastSeen = { key: '', at: 0 };
-/** Check in this wallet's name, level, XP and points. Throttled; the database also keeps only rises. */
+/** Check in this wallet's name. Throttled. */
 export function reportMiner(o: { wallet: string; name: string; level: number; xp: number; points: number }) {
   const base = restBase();
   if (!base || !o.wallet) return;
-  const key = `${o.wallet}|${o.name}|${o.level}|${Math.floor(o.xp / 25)}|${o.points}`;
+  const key = `${o.wallet}|${o.name}`;
   const now = Date.now();
-  if (key === lastSeen.key || now - lastSeen.at < 15_000) return;
+  if (key === lastSeen.key && now - lastSeen.at < 10 * 60_000) return;
+  if (now - lastSeen.at < 15_000) return;
   lastSeen = { key, at: now };
-  void fetch(`${base}/rest/v1/rpc/gali_seen`, {
-    method: 'POST',
-    headers: headers(),
-    body: JSON.stringify({ p_wallet: o.wallet, p_name: clean(o.name), p_level: Math.round(o.level), p_xp: Math.round(o.xp), p_points: Math.round(o.points) }),
-  }).catch(() => undefined);
+  if (playWallet() && playWallet() !== o.wallet) return;
+  // only the name: the server works out level, XP and points itself (supabase/sql/verified-scores.sql)
+  playReport('seen', { name: clean(o.name) }, true);
 }
 
 /** This wallet's saved level, XP and points, so a second device (web and app) picks up where the first left off. */

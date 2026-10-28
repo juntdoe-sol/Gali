@@ -16,6 +16,8 @@
  * host leaves, the next smallest id takes over within a few seconds. Hits work as everywhere else in
  * Brawl (game/brawl.ts): each player is the judge of their own HP.
  */
+import { boundWallet, idFor } from './peerId';
+import { hostRank, myTicket, ticketOk, ticketsOn } from './ticket';
 import type { RealtimeChannel } from '@supabase/realtime-js';
 import { create } from 'zustand';
 import type { Look } from '../engine/types';
@@ -148,6 +150,8 @@ export interface ArenaPeer {
   look: Look;
   lvl: number;
   wallet: string | null;
+  /** until when this player holds a valid arena ticket from Gali's server (game/ticket.ts); 0 for none */
+  ticketExp: number;
   spectator: boolean;
   /** cosmetics: swing trail and KO effect ids */
   trail: string;
@@ -314,7 +318,8 @@ function join() {
     });
     return;
   }
-  useArena.setState({ status: 'joining' });
+  // with a wallet, fight under an id made from it (game/peerId.ts), so nobody can put their wallet on us
+  useArena.setState({ status: 'joining', me: idFor(wallet(), useArena.getState().me) });
   // the side-view hall is a new room: older apps (top-down arena) keep to their own
   const ch = client.channel('gali-arena2', { config: { broadcast: { self: false, ack: false } } });
   ch.on('broadcast', { event: 'st' }, ({ payload }) => onState(payload))
@@ -399,6 +404,7 @@ function onState(p: any) {
     sex: p.sx === 'f' ? 'f' : 'm',
   };
   const jumped = !prev || Math.hypot(prev.x - x, prev.y - y) > 40;
+  const pw = boundWallet(p.id, p.w) ?? prev?.wallet ?? null;
   const peer: ArenaPeer = {
     id: p.id,
     name,
@@ -410,7 +416,8 @@ function onState(p: any) {
     pose: typeof p.p === 'string' && /^(idle|walk|swing|cheer|carry|held|dance[123])$/.test(p.p) ? p.p : 'idle',
     look: lk,
     lvl: Math.floor(num(p.lvl, 1, 999)),
-    wallet: typeof p.w === 'string' && B58.test(p.w) ? p.w : prev?.wallet ?? null,
+    wallet: pw,
+    ticketExp: ticketOk(pw, p.id, p.tk) ? (p.tk as { exp: number }).exp : prev && prev.wallet === pw ? prev.ticketExp : 0,
     spectator: p.sp === 1,
     trail: typeof p.tr === 'string' && KEY.test(p.tr) ? p.tr : prev?.trail ?? 'plain',
     fx: prev?.fx ?? null,
@@ -446,21 +453,34 @@ export function publishArenaMe(m: { x: number; y: number; tx: number; ty: number
   lastSent = now;
   lastKey = key;
   const w = wallet();
+  const tk = w && ticketsOn() ? myTicket(s.me) : null;
   void channel.send({
     type: 'broadcast',
     event: 'st',
-    payload: { ...move, v: 2, h: lk.hat, c: lk.fit, k: lk.pick, hd: lk.handle, pt: lk.pet, g: lk.glow, sx: lk.sex === 'f' ? 'f' : 'm', lvl: level(), tr: s.loadout.trail, ...(w ? { w } : {}) },
+    payload: { ...move, v: 2, h: lk.hat, c: lk.fit, k: lk.pick, hd: lk.handle, pt: lk.pet, g: lk.glow, sx: lk.sex === 'f' ? 'f' : 'm', lvl: level(), tr: s.loadout.trail, ...(w ? { w } : {}), ...(tk ? { tk } : {}) },
   });
 }
 export const arenaPos = () => myPos;
 
 /* ---------------- host ---------------- */
-/** The host: the smallest id among the players still here (and us). */
+/**
+ * The host runs the match clock, the scores and the boss, so it must not be a seat anyone can take. With tickets on
+ * (game/ticket.ts), only players holding a ticket from Gali's server can host, and among them the seat goes by a hash
+ * of each wallet with the current half hour, which nobody can choose. A made-up id never beats a real ORE miner.
+ * With no ticketed player in the hall (or tickets off in this build) it falls back to the smallest id, as before.
+ */
 export function hostId(): string | null {
   const s = useArena.getState();
   if (!s.open) return null;
   const now = Date.now();
-  const ids = [s.me, ...Object.values(s.peers).filter((p) => now - p.seen < 6000).map((p) => p.id)];
+  const present = Object.values(s.peers).filter((p) => now - p.seen < 6000);
+  if (ticketsOn()) {
+    const mineW = wallet();
+    const candidates: { id: string; rank: string }[] = present.filter((p) => p.wallet && p.ticketExp > now).map((p) => ({ id: p.id, rank: hostRank(p.wallet!, now) }));
+    if (mineW && myTicket(s.me)) candidates.push({ id: s.me, rank: hostRank(mineW, now) });
+    if (candidates.length) return candidates.sort((a, b) => (a.rank < b.rank ? -1 : a.rank > b.rank ? 1 : a.id < b.id ? -1 : 1))[0].id;
+  }
+  const ids = [s.me, ...present.map((p) => p.id)];
   return ids.sort()[0] ?? null;
 }
 export const isHost = () => hostId() === useArena.getState().me;
@@ -1067,16 +1087,24 @@ function onMatch(p: any) {
       : null;
   const prevBoss = useArena.getState().match.boss;
   if (boss && prevBoss && boss.hp < prevBoss.hp) boss.hitAt = now;
+  // the host's word is still checked: only players in the hall fight, only fighters go out or win
+  const here = new Set([useArena.getState().me, ...Object.keys(useArena.getState().peers)]);
+  const fighters = ids(p.fi);
+  if (fighters.some((id) => !here.has(id))) return;
+  const out = ids(p.out);
+  if (out.some((id) => !fighters.includes(id))) return;
+  const win = typeof p.win === 'string' ? p.win : null;
+  if (win !== null && win !== 'boss-down' && win !== 'waves-won' && !fighters.includes(win)) return;
   const m: Match = {
     host: p.h,
     n: Math.floor(num(p.n, 0, 1e9)),
     mode: p.mode,
     phase: ['wait', 'count', 'fight', 'end'].includes(p.ph) ? p.ph : 'wait',
     endsAt: now + num(p.left, 0, 600_000),
-    fighters: ids(p.fi),
-    out: ids(p.out),
+    fighters,
+    out,
     score,
-    winner: typeof p.win === 'string' ? p.win : null,
+    winner: win,
     winnerName: typeof p.wn === 'string' ? cleanName(p.wn) || (p.wn === 'THE MINERS' ? p.wn : null) : null,
     boss,
     mobs: parseMobs(p.mb),

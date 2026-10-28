@@ -29,7 +29,7 @@ const toBase64 = (b: Uint8Array) => btoa(String.fromCharCode(...b));
 /** Every moderation call is signed by the admin wallet; the server checks it is the program's authority. */
 export async function chatAdmin<T = { ok: true }>(admin: string, signMessage: SignMessage, action: Action, target = '', reason = ''): Promise<T> {
   const ts = Date.now();
-  const sig = await signMessage(new TextEncoder().encode(`gali-admin:${action}:${target}:${ts}`));
+  const sig = await signMessage(new TextEncoder().encode(`gali-admin:${action}:${target}:${reason.slice(0, 200)}:${ts}`));
   const r = await fetch(`${chatCfg.url}/functions/v1/chat-admin`, {
     method: 'POST',
     headers: { apikey: chatCfg.anonKey, Authorization: `Bearer ${chatCfg.anonKey}`, 'Content-Type': 'application/json' },

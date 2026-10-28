@@ -13,8 +13,11 @@
 //!   a no-op on a round already recorded.
 //! * `claim_jackpot` pays Gali's SKR pool when ORE's motherlode hits, to the
 //!   same winners, split by the same share of the winning square ORE used for the
-//!   ORE. The first claim snapshots the pool so late claimers are not short-changed
-//!   by a pool that grew while they waited.
+//!   ORE. The first claim snapshots the part of each pool no other jackpot has
+//!   already promised, and reserves it, so late claimers are not short-changed by
+//!   a pool that grew while they waited or by a second hit claiming the same tokens.
+//!   `release_jackpot` returns what nobody claimed to the pool once the claim
+//!   window has long closed.
 //! * Gear (`buy_gear`, `buy_gear_ore`): cosmetics bought with SKR or ORE. Sales
 //!   feed the Motherlode Pool and the treasury, so players fund the jackpot they
 //!   are chasing.
@@ -47,6 +50,13 @@ pub const BPS: u64 = 10_000;
 pub const MAX_SESSION_SECS: i64 = 7 * SECONDS_PER_DAY;
 pub const MAX_SESSION_FUND: u64 = 1_000_000_000; // 1 SOL
 pub const MAX_GEAR: usize = 32;
+/// How many ORE rounds after a motherlode round its unclaimed jackpot stays
+/// reserved. ORE closes a round account about a day (~1,440 rounds) after it ends,
+/// so nobody can still claim this long after; `release_jackpot` then hands the
+/// unpaid remainder back to the pool, and claims for that round are refused.
+pub const RELEASE_AFTER_ROUNDS: u64 = 10_000;
+/// The most `set_token_prices` may move either rate in one call: 50%, up or down.
+pub const MAX_PRICE_MOVE_BPS: u64 = 5_000;
 
 fn check_config(cfg: &Config) -> Result<()> {
     require!(cfg.gear_prices_usd.len() <= MAX_GEAR, GaliError::BadConfig);
@@ -59,6 +69,30 @@ fn check_config(cfg: &Config) -> Result<()> {
     require!(
         cfg.ore_boost_tier2 == 0 || cfg.ore_boost_tier2 >= cfg.ore_boost_tier1,
         GaliError::BadConfig
+    );
+    // A rate that never goes stale lets a forgotten price sell gear for pennies.
+    require!(cfg.price_max_age_secs > 0, GaliError::BadConfig);
+    Ok(())
+}
+
+/// `amount * num / den` in u128, floored. `den` must be non-zero and `num <= den`
+/// for the result to fit, which every caller guarantees.
+fn mul_div(amount: u64, num: u64, den: u64) -> u64 {
+    if den == 0 {
+        return 0;
+    }
+    let v = (amount as u128 * num as u128) / den as u128;
+    u64::try_from(v).unwrap_or(u64::MAX)
+}
+
+/// Refuses a rate that moves more than `MAX_PRICE_MOVE_BPS` from the current one.
+fn check_price_move(old: u64, new: u64) -> Result<()> {
+    let (old, new) = (old as u128, new as u128);
+    let bps = BPS as u128;
+    let move_bps = MAX_PRICE_MOVE_BPS as u128;
+    require!(
+        new * bps <= old * (bps + move_bps) && new * bps >= old * (bps - move_bps),
+        GaliError::PriceMoveTooLarge
     );
     Ok(())
 }
@@ -83,9 +117,6 @@ fn token_units(usd_micro: u64, rate_micro: u64, decimals: u8) -> Result<u64> {
 
 /// Refuses a sale priced off a rate nobody has touched in too long.
 fn fresh_prices(cfg: &Config) -> Result<()> {
-    if cfg.price_max_age_secs == 0 {
-        return Ok(());
-    }
     let age = Clock::get()?
         .unix_timestamp
         .saturating_sub(cfg.price_updated_at);
@@ -122,6 +153,8 @@ pub mod gali {
         c.ore_motherlode_bps = args.ore_motherlode_bps;
         c.paused = false;
         c.pending_authority = Pubkey::default();
+        c.skr_reserved = 0;
+        c.ore_reserved = 0;
         c.bump = ctx.bumps.config;
         check_config(c)
     }
@@ -132,6 +165,10 @@ pub mod gali {
     /// tokens an item costs. It is admin-only and stamped with the time, and
     /// `price_max_age_secs` is what stops a forgotten rate from selling a $270 item
     /// for pennies after the token moves.
+    ///
+    /// Each rate may move at most 50% up or down per call, so a fat-fingered or
+    /// compromised update cannot reprice the shop by orders of magnitude in one
+    /// transaction. Buyers are protected separately by `max_price` on each buy.
     pub fn set_token_prices(
         ctx: Context<AdminConfig>,
         skr_price_micro: u64,
@@ -142,6 +179,8 @@ pub mod gali {
             GaliError::BadAmount
         );
         let c = &mut ctx.accounts.config;
+        check_price_move(c.skr_price_micro, skr_price_micro)?;
+        check_price_move(c.ore_price_micro, ore_price_micro)?;
         c.skr_price_micro = skr_price_micro;
         c.ore_price_micro = ore_price_micro;
         c.price_updated_at = Clock::get()?.unix_timestamp;
@@ -403,10 +442,14 @@ pub mod gali {
         let p = &mut ctx.accounts.player;
         require!(round_id > p.last_ore_round, GaliError::OreRoundAlreadyRecorded);
 
-        let square = round.winning_square.unwrap_or(0);
         let covered = miner.deployed.iter().filter(|v| **v > 0).count() as u64;
         require!(covered > 0, GaliError::NothingToClaim);
-        let won = miner.deployed[square] > 0;
+        // A refunded round (ORE's all-0xFF entropy) has no winning square: it is
+        // recorded as played, and wins nothing.
+        let won = match round.winning_square {
+            Some(sq) => miner.deployed[sq] > 0,
+            None => false,
+        };
 
         // A boost has to predate the round it boosts. Without this, the same tokens
         // could be staked after a round finished, used to inflate its points, then
@@ -449,7 +492,8 @@ pub mod gali {
         emit!(OreRoundRecorded {
             owner: player_key,
             round_id,
-            winning_square: square as u8,
+            // u8::MAX when ORE refunded the round and no square won.
+            winning_square: round.winning_square.map(|sq| sq as u8).unwrap_or(u8::MAX),
             won,
             split: round.split,
             motherlode: round.motherlode > 0,
@@ -482,6 +526,12 @@ pub mod gali {
 
         let current = ore::board_round_id(&ctx.accounts.ore_board)?;
         require!(round_id < current, GaliError::OreRoundStillLive);
+        // Once the release delay has passed the remainder may be (or have been)
+        // handed back to the pool, so the claim window is closed for good.
+        require!(
+            current < round_id.saturating_add(RELEASE_AFTER_ROUNDS),
+            GaliError::ClaimWindowClosed
+        );
 
         let owner = ctx.accounts.player.owner;
         let round = ore::OreRound::load(&ctx.accounts.ore_round, round_id)?;
@@ -490,8 +540,8 @@ pub mod gali {
         // Only rounds where ORE's own motherlode paid out carry a Gali jackpot.
         require!(round.motherlode > 0, GaliError::NothingToClaim);
 
-        let bps = ore::winning_share_bps(&round, &miner);
-        require!(bps > 0, GaliError::NotOnWinningSquare);
+        let (stake, square_total) =
+            ore::winning_stake(&round, &miner).ok_or(GaliError::NotOnWinningSquare)?;
 
         {
             let p = &mut ctx.accounts.player;
@@ -501,25 +551,41 @@ pub mod gali {
 
         let skr_pool = ctx.accounts.motherlode.amount;
         let ore_pool = ctx.accounts.ore_motherlode.amount;
+        let cfg = &mut ctx.accounts.config;
         let jackpot = &mut ctx.accounts.jackpot;
-        if jackpot.bump == 0 {
+        if !jackpot.snapshotted {
+            // Snapshot only what no earlier jackpot has already promised, and promise
+            // it to this one. Two hits close together then split the pool between
+            // them instead of both being paid out of the same tokens.
+            jackpot.snapshotted = true;
             jackpot.bump = ctx.bumps.jackpot;
             jackpot.round_id = round_id;
-            jackpot.skr_snapshot = skr_pool;
-            jackpot.ore_snapshot = ore_pool;
+            jackpot.skr_snapshot = skr_pool.saturating_sub(cfg.skr_reserved);
+            jackpot.ore_snapshot = ore_pool.saturating_sub(cfg.ore_reserved);
+            cfg.skr_reserved = cfg.skr_reserved.saturating_add(jackpot.skr_snapshot);
+            cfg.ore_reserved = cfg.ore_reserved.saturating_add(jackpot.ore_snapshot);
         }
         require!(jackpot.round_id == round_id, GaliError::WrongRound);
+        require!(!jackpot.released, GaliError::ClaimWindowClosed);
 
-        // Rounding always favours the pools, so the last claimer cannot overdraw them.
-        let remaining_bps = BPS.saturating_sub(jackpot.bps_paid);
-        let pay_bps = bps.min(remaining_bps);
-        let share = |snapshot: u64, pool: u64| -> u64 {
-            (((snapshot as u128 * pay_bps as u128) / BPS as u128) as u64).min(pool)
+        // The exact fraction stake / square_total of each snapshot, floored. Floors
+        // across every miner on the square sum to at most the snapshot; the clamps
+        // to what is left of it, to the reservation and to the pool make that hold
+        // even against a malformed account, so reserved can never underflow and no
+        // payout can exceed the pool.
+        let share = |snapshot: u64, paid: u64, reserved: u64, pool: u64| -> u64 {
+            mul_div(snapshot, stake, square_total)
+                .min(snapshot.saturating_sub(paid))
+                .min(reserved)
+                .min(pool)
         };
-        let skr = share(jackpot.skr_snapshot, skr_pool);
-        let ore_amount = share(jackpot.ore_snapshot, ore_pool);
+        let skr = share(jackpot.skr_snapshot, jackpot.skr_paid, cfg.skr_reserved, skr_pool);
+        let ore_amount = share(jackpot.ore_snapshot, jackpot.ore_paid, cfg.ore_reserved, ore_pool);
         require!(skr > 0 || ore_amount > 0, GaliError::NothingToClaim);
-        jackpot.bps_paid = jackpot.bps_paid.saturating_add(pay_bps);
+        jackpot.skr_paid += skr;
+        jackpot.ore_paid += ore_amount;
+        cfg.skr_reserved -= skr;
+        cfg.ore_reserved -= ore_amount;
 
         let bump = ctx.accounts.config.bump;
         let cfg_signer: &[&[&[u8]]] = &[&[b"config", &[bump]]];
@@ -565,7 +631,46 @@ pub mod gali {
         emit!(JackpotClaimed {
             owner,
             round_id,
-            share_bps: pay_bps,
+            stake,
+            square_total,
+            skr,
+            ore: ore_amount,
+        });
+        Ok(())
+    }
+
+    /// Hand a jackpot's unclaimed remainder back to the pools.
+    ///
+    /// Permissionless: once ORE's board is `RELEASE_AFTER_ROUNDS` past `round_id`,
+    /// nobody can claim that round any more, so what its winners left unclaimed
+    /// (including rounding dust) stops being reserved and is available to the next
+    /// hit. Moves no tokens, since the reservation is only bookkeeping on top of
+    /// the pool balance. Runs once per jackpot.
+    pub fn release_jackpot(ctx: Context<ReleaseJackpot>, round_id: u64) -> Result<()> {
+        let current = ore::board_round_id(&ctx.accounts.ore_board)?;
+        require!(
+            current >= round_id.saturating_add(RELEASE_AFTER_ROUNDS),
+            GaliError::ReleaseTooEarly
+        );
+        let cfg = &mut ctx.accounts.config;
+        let jackpot = &mut ctx.accounts.jackpot;
+        require!(jackpot.round_id == round_id, GaliError::WrongRound);
+        require!(!jackpot.released, GaliError::AlreadyReleased);
+        jackpot.released = true;
+
+        let skr = jackpot
+            .skr_snapshot
+            .saturating_sub(jackpot.skr_paid)
+            .min(cfg.skr_reserved);
+        let ore_amount = jackpot
+            .ore_snapshot
+            .saturating_sub(jackpot.ore_paid)
+            .min(cfg.ore_reserved);
+        cfg.skr_reserved -= skr;
+        cfg.ore_reserved -= ore_amount;
+
+        emit!(JackpotReleased {
+            round_id,
             skr,
             ore: ore_amount,
         });
@@ -598,7 +703,11 @@ pub mod gali {
     /// Buy a gear item with $ORE instead of SKR. Same items, same USD prices, same
     /// one-per-player rule. `ore_motherlode_bps` of the ORE goes to Gali's ORE jackpot
     /// pool and the rest to the treasury, so ORE spent on cosmetics comes back to winners.
-    pub fn buy_gear_ore(ctx: Context<BuyGearOre>, item: u8) -> Result<()> {
+    ///
+    /// `max_price` is the most raw ORE the buyer accepts. A rate change landing
+    /// between the buyer seeing a price and their transaction executing makes the
+    /// sale fail with `PriceAboveMax` instead of charging more.
+    pub fn buy_gear_ore(ctx: Context<BuyGearOre>, item: u8, max_price: u64) -> Result<()> {
         let cfg = &ctx.accounts.config;
         require!(!cfg.paused, GaliError::Paused);
         require!((item as usize) < MAX_GEAR, GaliError::UnknownItem);
@@ -611,11 +720,12 @@ pub mod gali {
         let decimals = ctx.accounts.ore_mint.decimals;
         let price = token_units(usd, cfg.ore_price_micro, decimals)?;
         require!(price > 0, GaliError::BadAmount);
+        require!(price <= max_price, GaliError::PriceAboveMax);
 
         let p = &mut ctx.accounts.player;
         require!(p.gear_mask & (1u32 << item) == 0, GaliError::AlreadyOwned);
 
-        let to_motherlode = price.saturating_mul(cfg.ore_motherlode_bps as u64) / BPS;
+        let to_motherlode = mul_div(price, cfg.ore_motherlode_bps as u64, BPS);
         let to_treasury = price - to_motherlode;
         for (amount, dest) in [
             (to_motherlode, ctx.accounts.ore_motherlode.to_account_info()),
@@ -678,8 +788,11 @@ pub mod gali {
         Ok(())
     }
 
-    /// Take staked $ORE back. Locked for the round it is boosting, same rule as SKR,
-    /// so the same ORE can't boost two wallets in one round.
+    /// Take staked $ORE back, at any time; there is no lock. The same ORE still
+    /// cannot boost two wallets for one round: `record_ore_round` reads the stake
+    /// at record time and only honours it if `stake_slot` predates the round's end,
+    /// so tokens moved to another wallet after a round cannot boost that round
+    /// there, and the wallet they left no longer holds them when it is recorded.
     pub fn unstake_ore(ctx: Context<UnstakeOre>, amount: u64) -> Result<()> {
         let p = &mut ctx.accounts.player;
         require!(amount > 0 && amount <= p.staked_ore, GaliError::BadAmount);
@@ -765,7 +878,9 @@ pub mod gali {
         Ok(())
     }
 
-    pub fn buy_gear(ctx: Context<BuyGear>, item: u8) -> Result<()> {
+    /// Buy a gear item with SKR. `max_price` is the most raw SKR the buyer accepts;
+    /// see `buy_gear_ore`.
+    pub fn buy_gear(ctx: Context<BuyGear>, item: u8, max_price: u64) -> Result<()> {
         let cfg = &ctx.accounts.config;
         require!(!cfg.paused, GaliError::Paused);
         require!((item as usize) < MAX_GEAR, GaliError::UnknownItem);
@@ -778,12 +893,13 @@ pub mod gali {
         let decimals = ctx.accounts.skr_mint.decimals;
         let price = token_units(usd, cfg.skr_price_micro, decimals)?;
         require!(price > 0, GaliError::BadAmount);
+        require!(price <= max_price, GaliError::PriceAboveMax);
 
         let p = &mut ctx.accounts.player;
         require!(p.gear_mask & (1u32 << item) == 0, GaliError::AlreadyOwned);
 
         // Most of a sale goes back into the jackpot players are chasing.
-        let to_motherlode = price.saturating_mul(cfg.motherlode_pool_bps as u64) / BPS;
+        let to_motherlode = mul_div(price, cfg.motherlode_pool_bps as u64, BPS);
         let to_treasury = price - to_motherlode;
         for (amount, dest) in [
             (to_motherlode, ctx.accounts.motherlode.to_account_info()),
@@ -870,8 +986,7 @@ pub struct Config {
     pub ore_price_micro: u64,
     /// when the rates above were last set
     pub price_updated_at: i64,
-    /// how stale a rate may be before gear sales are refused. 0 disables the check,
-    /// which is only reasonable on a test validator.
+    /// how stale a rate may be before gear sales are refused. Must be non-zero.
     pub price_max_age_secs: u32,
 
     /// share of every SKR gear sale routed to the SKR jackpot, in bps; the rest is treasury
@@ -880,6 +995,13 @@ pub struct Config {
     /// interchangeable to us: one is the jackpot players chase, the other is what
     /// the platform can actually spend.
     pub ore_motherlode_bps: u16,
+
+    /// Raw SKR and ORE in the pools already promised to snapshotted jackpots and
+    /// not yet paid or released. A new jackpot snapshots only `pool - reserved`.
+    /// Never exceeds the pool balance: it grows by at most the unreserved balance
+    /// and shrinks by every payout (which also leaves the pool) and every release.
+    pub skr_reserved: u64,
+    pub ore_reserved: u64,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Default)]
@@ -956,16 +1078,23 @@ pub struct Player {
 /// The snapshots are the point. Winners claim over minutes, and both pools keep
 /// growing from gear sales the whole time. Paying a share of the live balance would
 /// hand the first claimer more than the last for the same slice of the square. The
-/// first claim freezes the numbers everyone is then paid out of.
+/// first claim freezes the numbers everyone is then paid out of, and reserves them
+/// in `Config` so a later hit cannot snapshot the same tokens.
 #[account]
 #[derive(InitSpace)]
 pub struct Jackpot {
     pub round_id: u64,
-    /// raw SKR and raw ORE in the pools when the first winner claimed
+    /// raw SKR and raw ORE promised to this round's winners: the unreserved part of
+    /// each pool when the first winner claimed
     pub skr_snapshot: u64,
     pub ore_snapshot: u64,
-    /// basis points of the winning square already paid; never exceeds 10,000
-    pub bps_paid: u64,
+    /// raw SKR and raw ORE already paid out of the snapshots; never exceed them
+    pub skr_paid: u64,
+    pub ore_paid: u64,
+    /// set on the first claim, when the snapshots are taken
+    pub snapshotted: bool,
+    /// set by `release_jackpot`; the unpaid remainder is no longer reserved
+    pub released: bool,
     pub bump: u8,
     pub reserved: [u8; 32],
 }
@@ -1132,7 +1261,7 @@ pub struct BuyGearOre<'info> {
 pub struct ClaimJackpot<'info> {
     #[account(mut)]
     pub owner: Signer<'info>,
-    #[account(seeds = [b"config"], bump = config.bump)]
+    #[account(mut, seeds = [b"config"], bump = config.bump)]
     pub config: Box<Account<'info, Config>>,
     #[account(mut, seeds = [b"player", owner.key().as_ref()], bump = player.bump,
         constraint = player.owner == owner.key() @ GaliError::NotAuthorised)]
@@ -1178,6 +1307,18 @@ pub struct ClaimJackpot<'info> {
 
 #[derive(Accounts)]
 #[instruction(round_id: u64)]
+pub struct ReleaseJackpot<'info> {
+    #[account(mut, seeds = [b"config"], bump = config.bump)]
+    pub config: Box<Account<'info, Config>>,
+    #[account(mut, seeds = [b"jackpot", round_id.to_le_bytes().as_ref()], bump = jackpot.bump)]
+    pub jackpot: Box<Account<'info, Jackpot>>,
+    /// ORE's board, checked by address and owner inside `ore::board_round_id`.
+    /// CHECK: validated as an ORE-owned account of the right size and address.
+    pub ore_board: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+#[instruction(round_id: u64)]
 pub struct RecordOreRound<'info> {
     /// Anyone. Cranking for another player is allowed and moves no value.
     #[account(mut)]
@@ -1214,7 +1355,7 @@ pub struct StakeOre<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(round_id: u64)]
+#[instruction(amount: u64)]
 pub struct UnstakeOre<'info> {
     #[account(mut)]
     pub owner: Signer<'info>,
@@ -1253,7 +1394,7 @@ pub struct StakeSkr<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(round_id: u64)]
+#[instruction(amount: u64)]
 pub struct UnstakeSkr<'info> {
     #[account(mut)]
     pub owner: Signer<'info>,
@@ -1383,11 +1524,21 @@ pub struct GearBoughtOre {
     pub price: u64,
 }
 
+/// `stake / square_total` is the exact share of the snapshots this claim was paid.
 #[event]
 pub struct JackpotClaimed {
     pub owner: Pubkey,
     pub round_id: u64,
-    pub share_bps: u64,
+    pub stake: u64,
+    pub square_total: u64,
+    pub skr: u64,
+    pub ore: u64,
+}
+
+/// The unclaimed remainder of a jackpot, no longer reserved and back in play.
+#[event]
+pub struct JackpotReleased {
+    pub round_id: u64,
     pub skr: u64,
     pub ore: u64,
 }
@@ -1461,4 +1612,53 @@ pub enum GaliError {
     PriceUnset,
     #[msg("The exchange rate is stale; gear sales are paused until it is refreshed")]
     PriceStale,
+    #[msg("The price is above the most you said you would pay")]
+    PriceAboveMax,
+    #[msg("A rate may move at most 50% up or down in one update")]
+    PriceMoveTooLarge,
+    #[msg("The claim window for that jackpot has closed")]
+    ClaimWindowClosed,
+    #[msg("That jackpot cannot be released yet")]
+    ReleaseTooEarly,
+    #[msg("That jackpot has already been released")]
+    AlreadyReleased,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mul_div_is_exact_and_floors() {
+        assert_eq!(mul_div(2_000_000_000, 7_000, BPS), 1_400_000_000);
+        assert_eq!(mul_div(u64::MAX, 10_000, BPS), u64::MAX);
+        assert_eq!(mul_div(u64::MAX, 5_000, BPS), u64::MAX / 2);
+        assert_eq!(mul_div(10, 1, 3), 3);
+        assert_eq!(mul_div(10, 1, 0), 0);
+    }
+
+    #[test]
+    fn dust_stake_gets_its_share() {
+        // 1 lamport on a 7 SOL square, from a large snapshot: bps would round to 0.
+        let snap = 1_000_000_000_000u64;
+        assert!(mul_div(snap, 1, 7_000_000_000) > 0);
+    }
+
+    #[test]
+    fn floored_shares_never_exceed_snapshot() {
+        let snap = 10_007_000_000u64;
+        let stakes = [1u64, 2, 4, 3, 999_999_937];
+        let total: u64 = stakes.iter().sum();
+        let paid: u64 = stakes.iter().map(|s| mul_div(snap, *s, total)).sum();
+        assert!(paid <= snap);
+    }
+
+    #[test]
+    fn price_move_cap() {
+        assert!(check_price_move(18_000, 27_000).is_ok()); // +50%
+        assert!(check_price_move(18_000, 9_000).is_ok()); // -50%
+        assert!(check_price_move(18_000, 27_001).is_err());
+        assert!(check_price_move(18_000, 8_999).is_err());
+        assert!(check_price_move(u64::MAX, u64::MAX).is_ok());
+    }
 }
