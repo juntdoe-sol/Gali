@@ -149,5 +149,16 @@ export const optimalPerSpot = (amount: number) =>
   Math.max(MIN_SOL_PER_BLOCK, Math.floor((amount / OPTIMAL_ROUNDS / BLOCKS) * 1e5) / 1e5);
 
 /** SOL for display. Amounts under 0.01 keep 6 decimals, so 0.000356 does not round up to look like 0.0004. */
+/**
+ * ORE amounts, so a small win never reads as 0: 1.25, 0.0412, 0.000731. Below a millionth it says so
+ * instead of rounding to nothing. Trailing zeros are dropped.
+ */
+export const fmtOreAmt = (v: number): string => {
+  if (!(v > 0)) return '0';
+  if (v < 0.000001) return '<0.000001';
+  const dp = v >= 100 ? 1 : v >= 1 ? 2 : v >= 0.01 ? 4 : 6;
+  return v.toFixed(dp).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+};
+
 export const fmtSol = (v: number, dp = v > 0 && v < 0.01 ? 6 : 4) =>
   v >= 100 ? v.toFixed(1) : v.toFixed(v > 0 && v < 0.01 ? Math.max(dp, 6) : dp).replace(/0+$/, '').replace(/\.$/, '.0');

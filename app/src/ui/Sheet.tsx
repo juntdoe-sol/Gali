@@ -12,7 +12,7 @@ import { chainReady, CLUSTER, oreLive, PROGRAM_ID_STR, short, SKR_MINT_STR, type
 import { PERIOD_WORDS, useMinerRanks, useRanks, type Period } from '../game/ranks';
 import { ClansSoon, ComingSoon, PeriodPicker } from './Clans';
 import { loadBoard, loadChain } from '../chain/lazy';
-import { ADMIN_FEE, fmtSol, POT_FEE, practiceMotherlode, practiceOreMotherlode, simPot, soloMask } from '../game/pot';
+import { ADMIN_FEE, fmtOreAmt, fmtSol, POT_FEE, practiceMotherlode, practiceOreMotherlode, simPot, soloMask } from '../game/pot';
 import { UnclaimedRow } from './Dock';
 import { Bar, Btn, Card, Choice, FocusRing, Frame, IconBtn, INPUT, Kbd, PixelBox, Pill, T, U } from './kit';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -600,7 +600,7 @@ function Me() {
         {w.owner ? (
           <>
             <T v="bold" style={{ marginTop: 4 }}>
-              {short(w.owner)} · {w.sol.toFixed(3)} SOL · {live ? `${w.ore.toFixed(4)} ORE` : `${w.skr.toLocaleString()} SKR`}
+              {short(w.owner)} · {w.sol.toFixed(3)} SOL · {live ? `${fmtOreAmt(w.ore)} ORE` : `${w.skr.toLocaleString()} SKR`}
             </T>
             {chainReady ? (
               <T v="muted" style={{ marginTop: 4 }}>

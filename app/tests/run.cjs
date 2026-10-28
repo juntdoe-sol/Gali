@@ -11,6 +11,8 @@ const suites = [
   'tests/lobby.cjs',
   'tests/lobby-net.cjs',
   'tests/brawl.cjs',
+  'tests/rides.cjs',
+  'tests/ore-format.cjs',
   'tests/autopilot.cjs',
   'tests/arena.cjs',
   'tests/arena-play.cjs',

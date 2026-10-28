@@ -15,6 +15,9 @@ import { useCave } from '../game/caveStore';
 import { loadChain } from '../chain/lazy';
 import { TIP_LIMITS, TIP_SKR_MINT, short } from '../chain/light';
 import { announce, joinChat, joinLobby, leaveLobby, LOBBY_EMOTES, publishLobbyMe, useLobby, type LobbyMsg } from '../game/lobby';
+import { onRideBumped, parkAtDoor, rideMoved, startRides, stopRides, useRides } from '../game/rides';
+import { visible as visibleRides } from '../game/rideRules';
+import type { RideView } from '../engine/types';
 import { chatWords, cleanName, LOBBY_CAP, STICKERS, stickerOf, type DoorId } from '../game/lobbyMap';
 import { isOnChain, useGame, useLevelXp } from '../game/store';
 import { play } from '../game/sfx';
@@ -84,6 +87,8 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
   const [navOpen, setNavOpen] = useState(false);
   const [danceOpen, setDanceOpen] = useState(false);
   const brawlOn = useBrawl((b) => !b.off);
+  const riding = useRides((r) => r.mine !== null);
+  const nearRide = useRides((r) => r.near !== null);
   const myDance = useLobby((s) => s.myDance);
   const [howTo, setHowTo] = useState(false);
   const [tipTo, setTipTo] = useState<{ id: string; name: string; wallet: string } | null>(null);
@@ -115,7 +120,13 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
   // join the room while the lobby is on screen; leave it when you go to the island
   useEffect(() => {
     joinLobby();
-    return () => leaveLobby();
+    startRides();
+    onRideBumped(() => useGame.getState().toast('Someone hopped on that ride first', 'info'));
+    return () => {
+      onRideBumped(null);
+      stopRides();
+      leaveLobby();
+    };
   }, []);
 
   // push the crowd to the canvas ten times a second, only when something changed
@@ -136,7 +147,10 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
         look: p.look,
         say: p.say && now - p.say.at < 6000 ? chatWords(p.say.t) : null,
         emoji: p.emoji && now - p.emojiAt < 3000 ? p.emoji : null,
+        rd: p.rd,
       }));
+      const R = useRides.getState();
+      const rides: RideView[] = visibleRides(R.rides, peers.length + 1).map((r) => ({ id: r.id, k: r.kind, x: Math.round(r.x), y: Math.round(r.y), f: r.f, rider: r.rider === s.me ? 'me' : r.rider }));
       const snap: LobbySnap = {
         peers,
         say: s.mySay && now - s.mySay.at < 6000 ? chatWords(s.mySay.t) : null,
@@ -144,6 +158,9 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
         dance: s.myDance,
         brawl: brawlSnap(now),
         potw: usePotw.getState().potw,
+        rides,
+        myRide: R.mine,
+        nearRide: R.near,
       };
       void loadPotw();
       const json = JSON.stringify(snap);
@@ -267,7 +284,16 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
       case 'xp':
         useGame.getState().gainXp(e.n);
         break;
+      case 'ride': {
+        const was = useRides.getState().mine;
+        useRides.getState().toggle();
+        const now = useRides.getState().mine;
+        if (now !== was) play(now !== null ? 'jump' : 'step');
+        else if (was === null) useGame.getState().toast('Walk up to a cart or scooter to ride it', 'info');
+        break;
+      }
       case 'me':
+        rideMoved(e.x, e.y, e.facing);
         setMyPos('lobby', e.x, e.y);
         publishLobbyMe({ x: e.x, y: e.y, tx: e.tx, ty: e.ty, facing: e.facing, pose: e.pose, look, lvl: lvlRef.current, wallet: useGame.getState().wallet.owner });
         break;
@@ -288,6 +314,7 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
         else if (e.name === 'pop') play('bonk');
         break;
       case 'door':
+        parkAtDoor(e.id);
         enter(e.id);
         break;
       case 'dance-off':
@@ -443,7 +470,12 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
             <TouchZone group="lobby" onPress={() => ref.current?.jump?.()}>
               {() => <MapButton instant label="JUMP" icon={<PixIcon name="jump" size={20} />} accessibilityLabel="Jump" onPress={() => ref.current?.jump?.()} />}
             </TouchZone>
-            {brawlOn ? (
+            {riding || nearRide ? (
+              <TouchZone group="lobby" onPress={() => ref.current?.ride?.()}>
+                {() => <MapButton instant tone={riding ? 'gold' : 'dark'} label={riding ? 'GET OFF' : 'RIDE'} icon={<PixIcon name="cart" size={20} />} accessibilityLabel={riding ? 'Get off the ride' : 'Ride the cart or scooter'} onPress={() => ref.current?.ride?.()} />}
+              </TouchZone>
+            ) : null}
+            {brawlOn && !riding ? (
               <TouchZone group="lobby" onPress={() => ref.current?.attack?.()}>
                 {() => <MapButton instant label="HIT" icon={<PixIcon name="fist" size={20} />} accessibilityLabel="Hit: swing your pickaxe" onPress={() => ref.current?.attack?.()} />}
               </TouchZone>
@@ -456,13 +488,14 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
             <>
               <View style={styles.emoteSep} />
               <EmoteKey icon="jump" label="Jump" kbd="SPC" onPress={() => ref.current?.jump?.()} />
-              {brawlOn ? <EmoteKey icon="fist" label="Hit: left click or F" kbd="LMB" onPress={() => ref.current?.attack?.()} /> : null}
+              {brawlOn && !riding ? <EmoteKey icon="fist" label="Hit: left click or F" kbd="LMB" onPress={() => ref.current?.attack?.()} /> : null}
+              {riding || nearRide ? <EmoteKey icon="cart" label={riding ? 'Get off (E)' : 'Ride (E)'} kbd="E" onPress={() => ref.current?.ride?.()} /> : null}
             </>
           ) : null}
         </PixelBox>
       </View>
 
-      {LANDSCAPE_APP ? <FightPad zone="lobby" right={right + 14} bottom={GUTTER + 70} hit={brawlOn} onHit={() => ref.current?.attack?.()} onJump={() => ref.current?.jump?.()} /> : null}
+      {LANDSCAPE_APP ? <FightPad zone="lobby" right={right + 14} bottom={GUTTER + 70} hit={brawlOn && !riding} onHit={() => ref.current?.attack?.()} onJump={() => ref.current?.jump?.()} ride={riding || nearRide ? { label: riding ? 'GET OFF' : 'RIDE', on: riding, onPress: () => ref.current?.ride?.() } : null} /> : null}
 
       {navOpen ? (
         <>
@@ -634,6 +667,7 @@ const HOWTO: { icon: PixName; title: string; body: string }[] = [
   { icon: 'pick', title: 'Cave Run', body: 'Walk into the cave in the north west. Dig down, dodge the rocks, and earn XP. It never spends SOL.' },
   { icon: 'cart', title: 'Mini games', body: 'Three pavilions south of the plaza: Tunnel Collapse, Gold Rush Pot and Crash Cart. Stake ORE or SKR, with a new round every 40 seconds. 5% house fee. 18+ only, stake only what you can afford to lose.' },
   { icon: 'quest', title: 'Quests and ranks', body: 'QUEST has nine daily quests across the whole game, plus achievements. Claim each one for XP. RANKS shows miners by level, ORE mined on chain and Brawl points, for today, this month, this year or all time. Clans will be available soon.' },
+  { icon: 'cart', title: 'Carts and scooters', body: 'Mine carts and scooters stand all over the lobby, and anyone can take one. Walk up and press E, or tap RIDE. You roll about twice as fast. Press E again to get off: it stays where you left it for everyone. A hit knocks you off, and you cannot swing while riding.' },
   { icon: 'user', title: 'Profile and wallet', body: 'PROFILE holds your wallet, gear and settings. The power button next to it disconnects your wallet from any screen.' },
   { icon: 'wave', title: 'Back to the lobby', body: 'Every place has a LOBBY button. GO jumps straight to the island, cave, arena or games.' },
 ];

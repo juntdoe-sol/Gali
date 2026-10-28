@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { FEATURE_GALI_PROGRAM } from '../config/features';
 import { Animated, Easing, Image, Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { COLORS, gearByKey, RARITY_COLOR } from '../game/constants';
-import { fmtSol } from '../game/pot';
+import { fmtOreAmt, fmtSol } from '../game/pot';
 import { GEAR_ICON as PIXEL_ICON } from './gearIcons';
 import { GEAR_ICON } from './icons';
 import { announce, bark, play } from '../game/sfx';
@@ -96,7 +96,7 @@ export function ResultPop() {
                   <PixIcon name="ore" size={32} />
                 </View>
                 <T v="display" style={{ fontSize: 34, color: '#eaffc4' }}>
-                  +{(res.oreMotherlode ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} ORE
+                  +{fmtOreAmt(res.oreMotherlode ?? 0)} ORE
                 </T>
                 {oreLive && !chainReady && res.onChain ? null : (
                   <T v="display" style={{ fontSize: 24, color: '#fff3c0' }}>
@@ -163,7 +163,7 @@ function SolLine({ res, dark, big }: { res: RoundResult; dark: boolean; big?: bo
       </T>
       {res.oreMined ? (
         <T v="display" style={{ fontSize: big ? 26 : 20, color: dark ? '#3d5a00' : '#eaffc4' }}>
-          +{res.oreMined.toLocaleString(undefined, { maximumFractionDigits: 2 })} ORE {res.lucky ? 'SOLO WINNER!' : 'MINED'}
+          +{fmtOreAmt(res.oreMined)} ORE {res.lucky ? 'SOLO WINNER!' : 'MINED'}
         </T>
       ) : res.won && res.split === false ? (
         <T v="bold" style={{ fontSize: 13, color: dark ? '#3d5a00' : '#eaffc4' }}>
