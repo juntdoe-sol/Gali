@@ -415,7 +415,7 @@ export function sceneTown(t: number) {
   tagCard('star', 'WALK ANYWHERE', 'TAP, DRAG OR USE THE STICK · EVERY DOOR IS A PLACE', t, T.tour, T.tourOut, PORTRAIT ? undefined : W * 0.42);
   if (t >= T.tour && t < T.cave + 0.3) {
     const STOPS: [string, string][] = [
-      ['GEAR MARKET', 'PICKS · HATS · OUTFITS · PETS'],
+      ['THE TOWN SQUARE', 'CHAT, EMOTE AND TIP OTHER MINERS'],
       ['THE PIER', 'WALK ON BOARD TO GALI ISLAND AND MINE ORE'],
       ['THE GAMES ROW', 'THREE MINI GAMES, COMING UP'],
       ['THE CAVE', 'CAVE RUN: A MINI GAME FOR XP'],

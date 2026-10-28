@@ -150,7 +150,7 @@ export const ACHIEVEMENTS: AchDef[] = [
   { id: 'autopilot', label: 'Autopilot', desc: 'Start an autopilot run' },
   { id: 'generous', label: 'Generous', desc: 'Tip another miner' },
   { id: 'chatty', label: 'Sticker Pro', desc: 'Send 10 stickers' },
-  { id: 'explorer', label: 'Explorer', desc: 'Visit the island, cave, arena, games and market' },
+  { id: 'explorer', label: 'Explorer', desc: 'Visit the island, cave, arena and games' },
 ];
 
 export const levelFromXp = (xp: number) => {

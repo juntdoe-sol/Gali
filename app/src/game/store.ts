@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { FEATURE_GALI_PROGRAM } from '../config/features';
 import type { Keypair, PublicKey } from '@solana/web3.js';
 import { loadBoard, loadChain, loadOreTx } from '../chain/lazy';
 import { announce, announceXp } from './lobby';
@@ -375,7 +376,7 @@ function checkAchievements(s: Save, extra: { staked: number; wins: number; xp: n
     autopilot: (s.counts?.autopilot ?? 0) >= 1,
     generous: (s.counts?.tip ?? 0) >= 1,
     chatty: (s.counts?.sticker ?? 0) >= 10,
-    explorer: ['island', 'cave', 'arena', 'games', 'market'].every((k) => (s.counts?.[`visit-${k}`] ?? 0) > 0),
+    explorer: ['island', 'cave', 'arena', 'games'].every((k) => (s.counts?.[`visit-${k}`] ?? 0) > 0),
   };
   const add = ACHIEVEMENTS.filter((a) => checks[a.id] && !has.has(a.id));
   if (!add.length) return s;
@@ -1077,6 +1078,7 @@ export const useGame = create<GameState>((set, get) => {
     },
 
     buyGear: async (key, pay = 'skr') => {
+      if (!FEATURE_GALI_PROGRAM) return; // the Gali program is not deployed: never send its instructions
       const g = GEAR.find((x) => x.key === key);
       const st = get();
       if (!g) return;
@@ -1106,6 +1108,7 @@ export const useGame = create<GameState>((set, get) => {
     },
 
     stake: async (amount) => {
+      if (!FEATURE_GALI_PROGRAM) return; // the Gali program is not deployed: never send its instructions
       const st = get();
       if (!st.wallet.player) return st.toast('Play one round first to create your miner', 'bad');
       if (amount <= 0 || amount > st.wallet.skr) return st.toast('Not enough SKR', 'bad');
@@ -1125,6 +1128,7 @@ export const useGame = create<GameState>((set, get) => {
     },
 
     unstake: async (amount) => {
+      if (!FEATURE_GALI_PROGRAM) return; // the Gali program is not deployed: never send its instructions
       const st = get();
       if (amount <= 0 || amount > staked()) return st.toast('Nothing to unstake', 'bad');
       try {

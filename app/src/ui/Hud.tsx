@@ -1,4 +1,5 @@
 import { type ReactNode } from 'react';
+import { FEATURE_GALI_PROGRAM } from '../config/features';
 import { Image, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CAVE_IN_EVERY, COLORS, LOCK_MS, levelFromXp, MOTHERLODE_ODDS, xpForLevel } from '../game/constants';
@@ -155,10 +156,10 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
         ) : null}
         <HollowBadge compact={w < 1300} />
         <View style={[styles.chipRow, { flex: 1, maxWidth: 560 }]}>
-          <Stat icon="star" color={COLORS.gold} value={points.toLocaleString()} label="PTS" tip="Points from rounds you mined. They rank you on the season board." />
+          {FEATURE_GALI_PROGRAM ? <Stat icon="star" color={COLORS.gold} value={points.toLocaleString()} label="PTS" tip="Points from rounds you mined. They rank you on the season board." /> : null}
           <LevelStat lvl={lvl} pct={pct} xp={xp} />
           <Stat icon="sol" value={sol.toFixed(sol >= 100 ? 1 : 3)} label="SOL" tip="SOL in your wallet." />
-          {streak >= 2 ? <Stat icon="fire" color={COLORS.red} value={`x${streak}`} tip={`${streak} rounds in a row on the gold spot.`} /> : null}
+          {FEATURE_GALI_PROGRAM && streak >= 2 ? <Stat icon="fire" color={COLORS.red} value={`x${streak}`} tip={`${streak} rounds in a row on the gold spot.`} /> : null}
         </View>
         <InboxBtn />
         <WalletChip onMenu={onMenu} />
@@ -185,10 +186,10 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
         </View>
       </View>
       <View style={[styles.row, { marginTop: 8, gap: 6 }, short && { display: 'none' }]}>
-        <Stat icon="star" color={COLORS.gold} value={points.toLocaleString()} label="PTS" />
+        {FEATURE_GALI_PROGRAM ? <Stat icon="star" color={COLORS.gold} value={points.toLocaleString()} label="PTS" /> : null}
         <LevelStat lvl={lvl} pct={pct} xp={xp} />
         <Stat icon="sol" value={sol.toFixed(sol >= 100 ? 1 : 3)} label="SOL" />
-        {streak >= 2 ? <Stat icon="fire" color={COLORS.red} value={`x${streak}`} /> : null}
+        {FEATURE_GALI_PROGRAM && streak >= 2 ? <Stat icon="fire" color={COLORS.red} value={`x${streak}`} /> : null}
       </View>
     </View>
   );
@@ -350,9 +351,9 @@ export function RoundCard({ embedded }: { embedded?: boolean }) {
       {run && run.total > 1 ? (
         <T v="bold" style={{ fontSize: 13, textAlign: 'center', marginTop: 4, color: COLORS.teal }} numberOfLines={1}>
           Autopilot {run.total - run.left}/{run.total}
-          {pending && boost > 10_000 ? ` · ${boost / 10_000}x points` : ''}
+          {FEATURE_GALI_PROGRAM && pending && boost > 10_000 ? ` · ${boost / 10_000}x points` : ''}
         </T>
-      ) : pending && boost > 10_000 ? (
+      ) : FEATURE_GALI_PROGRAM && pending && boost > 10_000 ? (
         <T v="bold" style={{ fontSize: 13, textAlign: 'center', marginTop: 4, color: COLORS.skr }}>
           {boost / 10_000}x points
         </T>

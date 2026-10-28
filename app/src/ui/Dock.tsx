@@ -1,4 +1,5 @@
 import { layoutNow } from './layout';
+import { FEATURE_GALI_PROGRAM } from '../config/features';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Modal, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -907,7 +908,7 @@ function ProPanel({ compact }: { compact: boolean }) {
             last
             right={
               <T v="black" style={{ fontSize: 13, color: COLORS.gold }}>
-                {!blocks ? '—' : live ? `+${pointsFor(blocks, false, 10_000)} pts · ${Math.round((blocks / BLOCKS) * 100)}% odds · ${soloCount} ★` : `+${pointsFor(blocks, false, boostFor(staked))} pts · ${Math.round((blocks / BLOCKS) * 100)}% odds · ${soloCount} ★`}
+                {!blocks ? '—' : live ? `${FEATURE_GALI_PROGRAM ? `+${pointsFor(blocks, false, 10_000)} pts · ` : ''}${Math.round((blocks / BLOCKS) * 100)}% odds · ${soloCount} ★` : `+${pointsFor(blocks, false, boostFor(staked))} pts · ${Math.round((blocks / BLOCKS) * 100)}% odds · ${soloCount} ★`}
               </T>
             }
           />

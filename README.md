@@ -1,91 +1,78 @@
 # Gali
 
-**A mini open-world pixel game on Seeker. Mine ORE, play to earn, trade gear.**
+**A mini open-world pixel game on Seeker. Mine ORE, play the arcade, brawl with other miners.**
 
-Players meet in a shared pixel town, then walk to different zones: ORE Island to mine on [ORE](https://ore.supply)'s own board, the arcade, Cave Run, the Arena and the Gear Market.
+Players meet in a shared pixel town, then walk to ORE Island to mine on [ORE](https://ore.supply)'s own board, the arcade, Cave Run and the Arena.
 
-ORE runs a 25-square mining round every 200 slots (about 80 seconds). Gali draws those 25 squares as spots on a pixel island. Players put SOL on the spots they want. When their spot strikes gold they mine $ORE. ORE keeps a small fee each round and returns the rest of the SOL. 1 round in 500, ORE's motherlode hits. The Gali program adds an SKR jackpot for the same winners.
+ORE runs a 25-square mining round every 200 slots (about 80 seconds). Gali draws those 25 squares as spots on a pixel island. Players put SOL on the spots they want. When their spot strikes gold they mine $ORE. ORE keeps a small fee each round and returns the rest of the SOL. 1 round in 500, ORE's motherlode hits.
 
 Submitted to **CLOCK IN** (Solana Mobile) and the **Colosseum Crypto World's Fair**.
 
 ![Gali lobby on Android, Hollow Night season](docs/gali-lobby.jpg)
 
+![Mining on ORE Island: live ORE round, Lite mode on the right](docs/gali-island-mining.jpg)
+
 - **Official website:** [gali.lol](https://gali.lol)
 - **Play live (mainnet BETA):** [galiisland.bounded.page](https://galiisland.bounded.page)
 - **Android APK (1.6.0, landscape):** [download from Expo](https://expo.dev/accounts/gali-app/projects/gali/builds/3cd0a6d6-2aaf-41f0-9bf5-3cedeab7c386)
 - **Docs:** [galidocs.bounded.page](https://galidocs.bounded.page)
-- **Demo video:** [YouTube](https://www.youtube.com/watch?v=PCXDZZQpGm8)
+- **Demo video:** [YouTube](https://www.youtube.com/watch?v=PCXDZZQpGm8) (recorded on an earlier build)
 - **Founder speech:** [YouTube](https://youtu.be/Fl21Yzhqt_k)
 - **Follow Gali on X:** [@Gali_Game](https://x.com/Gali_Game)
 - **Team:** [@juntdoe](https://x.com/juntdoe) (technical lead), [@smsonx](https://x.com/smsonx) (BD and spokesperson), [@itsnotajay01](https://x.com/itsnotajay01) (community), [@OO_RAX](https://x.com/OO_RAX) (pixel art and creative)
 
-## Status
+## Live on mainnet
 
-- **Gali is live on Solana mainnet.** Connect a wallet at galiisland.bounded.page or in the APK and you play ORE's real board. Each deploy and claim is a plain ORE instruction signed by your own wallet. A round is capped at 0.5 SOL, and an 18+ real-money notice comes before the wallet opens. Deploys and claims have been run with real SOL.
-- **Autopilot runs on ORE's own automation.** In PRO, set more than one round and approve once. The wallet funds an ORE `Automation` account and registers a key kept on the device (encrypted with `expo-secure-store`) as its executor. That key can deploy from the automation and nothing else: ORE holds the SOL and pays winnings to the player's miner account. Each round deploys with no pop-up while the app is open. A server runner (`supabase/functions/autopilot`) can keep it going with the app closed; any runner can execute, but none can pick spots, change amounts or move SOL. Autopilot is capped at 1 SOL in total, pays ORE's executor fee at cost (0.00001 SOL per round, the network fee), and STOP returns the unused SOL in one approval.
-- **The lobby** is the start screen: a shared pixel town where players walk, chat, emote, dance and tip each other in SOL, ORE or SKR. Doors lead to ORE Island, the arcade, Cave Run and the Gear Market. Realtime runs on Supabase.
-- **The arcade** has three tables (Tunnel Collapse, Gold Rush Pot, Crash Cart) played in ORE or SKR against a house wallet. Each 40-second round uses a commit-reveal check players can verify, and the house keeps a 5% fee. Tables show "not funded" until the house wallet holds SOL, ORE and SKR.
-- **Brawl and the Arena.** Every miner has an HP bar and can hit and jump in the lobby and on the island. The Arena holds up to 12 players in Last Miner Standing, King of the Hill or a co-op Mole King boss. Levels unlock six active powers and two passives, used in the Arena only. Knockouts and wins pay XP and feed weekly ranks on Supabase. Brawl is free and never touches SOL, ORE or odds.
-- **The Android app plays in landscape**, with a joystick on the left and action buttons on the right. The web game is for desktop browsers, and phones use the Android app. On a computer, WASD walks, left click hits, right click throws and Q E R C V X fire powers.
-- **Cave Run** is a mini-game you play after connecting a wallet. You walk your miner through a lantern-lit cave, break rocks, dodge bats and climb deeper. It pays miner XP only: no wager, no token rewards, no effect on ORE odds or payouts.
-- **Chain reads go through a read-only proxy** (`app/rpc-backend`) that allows eight RPC methods. If the proxy is rate-limited or down, the app reads from the direct endpoint instead.
-- **The Gali program** (`programs/gali`) adds points, streaks, the SKR jackpot, gear and staking. It is written for ORE's board and tested against a mock of ORE's accounts. It is the next on-chain step and goes live in a later release.
-- **The Gear Market** is a design preview. It shows gear as tradeable NFTs with sample listings. Nothing in it is on chain.
+- **ORE mining.** Connect a wallet at galiisland.bounded.page or in the APK and you play ORE's real board. Each deploy and claim is a plain ORE instruction signed by your own wallet. A round is capped at 0.5 SOL, and an 18+ real-money notice comes before the wallet opens. Deploys and claims have been run with real SOL.
+- **Autopilot on ORE's own automation.** Set more than one round and approve once. The wallet funds an ORE `Automation` account and registers a key kept on the device (encrypted with `expo-secure-store`) as its executor. That key can deploy from the automation and nothing else: ORE holds the SOL and pays winnings to the player's miner account. Each round deploys with no pop-up while the app is open. A server runner (`supabase/functions/autopilot`) can keep it going with the app closed; any runner can execute, but none can pick spots, change amounts or move SOL. Autopilot is capped at 1 SOL in total, pays ORE's executor fee at cost (0.00001 SOL per round, the network fee), and STOP returns the unused SOL in one approval.
+- **The lobby** is the start screen: a shared pixel town where players walk, chat, emote, dance and tip each other in SOL, ORE or SKR. Doors lead to ORE Island, the arcade, Cave Run and the Arena. Realtime runs on Supabase.
+- **The arcade** has three tables (Tunnel Collapse, Gold Rush Pot, Crash Cart) played in ORE or SKR against a funded house wallet. Each 40-second round uses a commit-reveal check players can verify, and the house keeps a 5% fee. 18+ only.
 
 On ORE Island, Gali mints nothing and never holds a player's ORE position, autopilot included. During the beta Gali takes a 0.25% platform fee on SOL deployed, as stated in the docs. The arcade is separate and takes its 5% fee from the tables. ORE is credited here as the board Gali plays on; Gali is not affiliated with or endorsed by ORE.
+
+## Playable, no wager
+
+These are free. They pay miner XP only and never touch SOL, ORE, SKR or mining odds.
+
+- **Cave Run.** Playable, XP only, no wager. Walk your miner through a lantern-lit cave, break rocks, dodge bats and climb deeper.
+- **Brawl and the Arena.** Playable, XP only, no wager. Every miner has an HP bar and can hit and jump in the lobby and on the island. The Arena holds up to 12 players in Last Miner Standing, King of the Hill or a co-op Mole King boss. Levels unlock six active powers and two passives, used in the Arena only. Knockouts and wins feed weekly ranks on Supabase.
+
+How it plays: the Android app is landscape, with a joystick on the left and action buttons on the right. The web game is for desktop browsers; phones use the Android app. On a computer, WASD walks, left click hits, right click throws and Q E R C V X fire powers. Chain reads go through a read-only proxy (`app/rpc-backend`) that allows eight RPC methods, with the direct endpoint as a fallback.
+
+## In development (not in this build)
+
+- **The Gali program** (`programs/gali`): points, streaks, an SKR jackpot on ORE's motherlode, gear bought in SKR or ORE, and SKR or ORE staking. It is tested against a mock of ORE's accounts (27 tests) and is not deployed. Its screens (points, streaks, BOOST staking) are hidden in release builds behind `EXPO_PUBLIC_FEATURE_GALI_PROGRAM`, and the app never calls `record_ore_round`. Design and instructions: [ROADMAP.md](ROADMAP.md).
+- **Gear as NFTs** and a player Market: planned, not in the app. See [ROADMAP.md](ROADMAP.md).
 
 ## Repo layout
 
 | Path | What it is |
 | --- | --- |
-| `programs/gali` | Anchor program: points and streaks read from ORE's rounds, the SKR jackpot, gear in SKR or ORE, staking, session keys, admin |
+| `programs/gali` | Anchor program, in development and not deployed: points and streaks read from ORE's rounds, the SKR jackpot, gear in SKR or ORE, staking, session keys, admin |
 | `programs/ore-mock` | Test-only stand-in for ORE's program, loaded at ORE's address on a local validator |
 | `tests/gali.ts` | Program tests against the mock (27 cases) |
 | `app/` | Expo (React Native) app for Android and web. The island is a canvas engine in `app/src/engine` |
 | `admin/` | Admin page (Vite + React): balances, token prices, settings, pools, pause, admin hand-over, players, chat moderation |
 | `supabase/` | Chat server: tables plus the `chat-post` and `chat-admin` edge functions |
 | `scripts/` | Pixel-art generator, devnet deploy and setup, SKR faucet, ORE layout probe, IDL generator, local test runner |
-| `video/` | The 89-second intro video (9:16 and 16:9), rendered from the real game engine |
+| `video/` | The intro video (9:16 and 16:9), rendered from the real game engine |
 | `target/deploy/*.so` | Pre-built programs, so a deploy needs no Rust toolchain. The program keypair is not in git |
 | `target/idl/` | Program IDLs (copied to `app/src/chain/idl.json` by `scripts/gen-idl.py`) |
 
 ## How a round works
 
-1. **Pick.** Tap a spot on the map to pick it, or tap MINE and take All 25 or Smart (4, 8, 15 or 20 spots at random). LITE and PRO both play one round at a time on mainnet; PRO adds presets. Double tap or hold a spot to dive into its mine. Shake the phone to Smart-pick.
+1. **Pick.** LITE: type an amount and Gali spreads it over all 25 spots, 0.01 SOL a spot per round. PRO: pick spots on the map, or take All 25 or Smart (4, 8, 15 or 20 spots at random), and set SOL per round and rounds. Double tap or hold a spot to dive into its mine. Shake the phone to Smart-pick.
 2. **Deploy.** One transaction into ORE's board, signed by your wallet. For more than one round, autopilot funds ORE's automation once and a device key deploys each round after that with no pop-up. The key is ORE's executor for that automation: it can deploy, never withdraw.
 3. **Strike.** ORE draws one winning square. ORE keeps 1% of every square and 10% of the rest on squares that miss, and returns everything else to the miner who deployed it. Nothing moves from the losing squares to the winners. The winning square mines the round's 1 ORE, split by SOL there. Ten squares a round are solo squares (★): on those, one miner takes the whole ORE, with odds equal to their share.
-4. **Motherlode.** ORE adds 0.2 ORE to its motherlode every round and pays the whole pool 1 round in 500, split by SOL on the winning square. When it hits, Gali pays its own jackpot to the same winners, split the same way, plus 10,000 points. That jackpot is Gali's SKR pool and its ORE pool, both filled by gear sales.
-5. **Record.** `record_ore_round` reads ORE's finished round and the player's miner account and awards points, wins, streaks and XP. It is permissionless, so a player who closed the app still gets credited.
+4. **Motherlode.** ORE adds 0.2 ORE to its motherlode every round and pays the whole pool 1 round in 500, split by SOL on the winning square.
 
-### Rounds go in order
+## ORE's account layout
 
-ORE's miner account only holds the last round a player deployed in, and Gali keeps one `last_ore_round` per player. Three rules follow:
-
-- **Record before the next deploy.** A round has to be recorded after ORE checkpoints the miner and before the player deploys again. A round missed in that window is forfeit for good: its points can never be credited.
-- **Earlier rounds are refused.** Once round N is recorded, any round before N fails with `OreRoundAlreadyRecorded`.
-- **Claim jackpots oldest first.** `claim_jackpot` keeps its own `jackpot_round` the same way, so claiming a later motherlode first forfeits an earlier one. Claims also need the miner account to still hold that round, so claim before deploying again.
-
-The tests pin all three as intended behaviour.
-
-Points: `40 x 25 / spots covered` for a win, times 1.25 or 1.5 with staked SKR or ORE (the better boost applies).
-
-## The Gali program
-
-Instructions, all in `programs/gali/src/lib.rs`:
-
-- **Game:** `init_player`, `set_session`, `record_ore_round`, `claim_jackpot`
-- **Gear:** `buy_gear` (SKR), `buy_gear_ore` (ORE). Priced in USD, converted at an admin-set rate. `motherlode_pool_bps` of an SKR sale (70% at setup) goes to the SKR jackpot pool and `ore_motherlode_bps` of an ORE sale (50% at setup) to the ORE jackpot pool; the rest goes to the treasury
-- **Staking:** `stake_skr`, `unstake_skr`, `stake_ore`, `unstake_ore`
-- **Pools:** `fund_motherlode` (SKR), `fund_ore` (ORE). Anyone may top up; pools have no withdraw path
-- **Admin:** `init_config` (upgrade authority only), `update_config`, `set_token_prices`, `set_paused`, `withdraw_treasury`, `withdraw_treasury_ore`, `propose_authority`, `accept_authority`
-
-ORE is built with Steel, so there is no IDL or generated client. `programs/gali/src/ore.rs` and `app/src/chain/ore/` decode ORE's accounts at offsets checked against live mainnet accounts, and refuse anything with the wrong owner, length or address. Re-run the check after ORE redeploys:
+ORE is built with Steel, so there is no IDL or generated client. `app/src/chain/ore/` (and `programs/gali/src/ore.rs`) decode ORE's accounts at offsets checked against live mainnet accounts, and refuse anything with the wrong owner, length or address. Re-run the check after ORE redeploys:
 
 ```bash
 npx ts-node scripts/ore-probe.ts
 ```
-
-Neither SKR nor ORE has a Pyth feed. The admin sets both rates on chain (`set_token_prices`), gear sales refuse a rate older than `price_max_age_secs`, and the app shows a live Jupiter quote beside it.
 
 ## Run it
 
@@ -99,7 +86,9 @@ npm install --legacy-peer-deps
 EXPO_PUBLIC_NETWORK=mainnet npx expo start --web
 ```
 
-Tests: `npm test` runs the app's node suites (wallet safety, live clock, poll budget, lobby, lobby networking, Cave Run). No wallet or network needed.
+Tests: `npm test` runs the app's node suites (wallet safety, live clock, poll budget, lobby, lobby networking, Cave Run, Brawl, the Arena, the arcade server, the read proxy). No wallet or network needed.
+
+Feature flags (see `app/.env.example`): `EXPO_PUBLIC_FEATURE_GALI_PROGRAM=1` shows the Gali program's screens (points, streaks, BOOST staking) for a local or test build. It is off by default and must stay off in release builds until the program is deployed.
 
 Release APK: `npx eas-cli build -p android --profile apk-live`. Web build: `EXPO_PUBLIC_NETWORK=mainnet npm run build:web` writes `app/dist`, a static site.
 
@@ -159,8 +148,7 @@ Every sprite is original and drawn in code. `python3 scripts/pixel-art.py` rebui
 ## Known limitations
 
 - The Gali program has run against `ore-mock` only, not ORE's live program yet. The app's ORE client runs live on mainnet.
-- Points, the SKR jackpot and on-chain gear arrive with the Gali program release. Autopilot does not need it: it runs on ORE's automation.
-- The Gear Market is a preview with sample listings. Gear is not minted as NFTs yet.
+- Points, the SKR jackpot, staking and on-chain gear arrive with the Gali program. Mining and autopilot do not need it.
 - Token rates are set by the admin, not an oracle. Use a multisig as admin and a published change policy before real money.
 - `init_player` grants the starter pickaxe only. The free starter helmet and outfit exist in the app but cannot be claimed on chain yet.
 - It is a game of chance with real SOL. A real-money launch needs age gating and a legal review per market.
