@@ -55,11 +55,11 @@ export class OreFeed {
 
   /** How long to wait before the next read: quicker while a round is running. */
   interval(): number {
-    if (!this.last) return 3000;
+    if (this.errors > 0) return Math.min(30_000, 4000 * 2 ** Math.min(this.errors, 3));
+    if (!this.last) return 4000;
     const end = u64At(this.last.b, BOARD_END_SLOT_OFFSET);
-    if (end === NOT_STARTED) return 5000; // nobody has deployed yet; the clock has not started
-    if (this.errors > 0) return Math.min(15_000, 3000 * 2 ** Math.min(this.errors, 3));
-    return 3000;
+    if (end === NOT_STARTED) return 6000; // nobody has deployed yet; the clock has not started
+    return 4000;
   }
 
   due() {
@@ -101,8 +101,8 @@ export class OreFeed {
   }
 
   private async done(slot: number, b: string, r: string | null): Promise<FeedFrame> {
-    // the chain's wall clock, for the countdown's offset: refreshed every 30 s
-    if (this.now() - this.blockTimeAt > 30_000) {
+    // the chain's wall clock, for the countdown's offset: refreshed every 60 s
+    if (this.now() - this.blockTimeAt > 60_000) {
       this.blockTimeAt = this.now();
       try {
         const t = (await this.rpc('getBlockTime', [slot])) as number | null;
@@ -118,11 +118,15 @@ export class OreFeed {
   }
 }
 
-/** JSON-RPC over fetch, trying each upstream in turn. Each attempt gets 6 s. */
+/**
+ * JSON-RPC over fetch. With two upstreams the calls take turns (halving each one's credit use), and a
+ * failed call is retried on the other. Each attempt gets 6 s.
+ */
 export function makeRpc(urls: string[]): Rpc {
-  let first = 0;
+  let turn = 0;
   return async (method, params) => {
     let err: unknown = new Error('no RPC configured');
+    const first = turn++ % Math.max(1, urls.length);
     for (let k = 0; k < urls.length; k++) {
       const i = (first + k) % urls.length;
       try {
@@ -135,7 +139,6 @@ export function makeRpc(urls: string[]): Rpc {
         if (!res.ok) throw new Error(`${res.status}`);
         const j = (await res.json()) as { result?: unknown; error?: { message: string } };
         if (j.error) throw new Error(j.error.message);
-        first = i; // stick with the one that works
         return j.result;
       } catch (e) {
         err = e;

@@ -13,8 +13,8 @@ monthly messages are gone in about 12 minutes.
 Cloudflare bills only incoming WebSocket messages, at 20 messages per request, and not outgoing ones.
 Fanning a message out to 100 players costs the same as sending it to one.
 
-The relay also reads ORE's board and current round once every 3 s and pushes them to everyone, so
-players stop polling the RPC. RPC use stays at about one call every 3 s however many are online.
+The relay also reads ORE's board and current round once every 4 s and pushes them to everyone, so
+players stop polling the RPC. RPC use stays at about one call every 4 s however many are online.
 
 ## Measured (test/relay.test.ts, 100 simulated miners for 60 s)
 
