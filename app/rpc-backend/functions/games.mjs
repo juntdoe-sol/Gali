@@ -194,7 +194,10 @@ export async function call(env, method, params = [], ms = 4500) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), list.length > 1 && i === 0 ? ms : ms + 2500);
     try {
-      const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: controller.signal });
+      const send = () => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: controller.signal });
+      let res = await send();
+      // a rate limit is usually gone a moment later: one short retry before falling to the backup
+      if (res.status === 429) { await new Promise((r) => setTimeout(r, 300 + Math.floor(Math.random() * 300))); res = await send(); }
       if (!res.ok) { why.push(`${i ? 'backup' : 'main'} ${res.status}`); last = new Error(`RPC unavailable (${why.join('; ')})`); continue; }
       const json = await res.json();
       if (json.error) {
@@ -247,7 +250,9 @@ export function ledgerOf(env) {
 }
 
 // ---------- tables ----------
-const mintInfo = new Map();
+// Both mints are classic SPL Token mints (no extensions possible, decimals fixed for life), so their facts are
+// pinned here: a table opens without spending RPC reads that the shared Helius key may be rate limited on.
+const mintInfo = new Map([['o', { program: TOKEN_PROGRAM, decimals: 11 }], ['s', { program: TOKEN_PROGRAM, decimals: 6 }]]);
 // Token-2022 extensions that would let a mint take fees, run code on transfer, move the house's tokens or freeze them.
 const BAD_EXTENSIONS = new Set([1, 9, 12, 14, 26]); // TransferFeeConfig, NonTransferable, PermanentDelegate, TransferHook, Pausable
 export function mintProblem(owner, data) {
