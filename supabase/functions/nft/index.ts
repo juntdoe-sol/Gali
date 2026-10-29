@@ -114,10 +114,11 @@ async function scan(wallet: string) {
     }
     const want = page.filter((s) => !s.err && s.blockTime && s.blockTime * 1000 >= BETA_START && s.blockTime * 1000 <= BETA_END);
     await pool(want, SCAN_CONCURRENCY, async (sg) => {
-      const tx = await rpc<Tx>('getTransaction', [sg.signature, { encoding: 'json', maxSupportedTransactionVersion: 0, commitment: 'confirmed' }]);
-      if (!tx) return;
-      const m = tx.transaction.message;
-      const all = [...m.accountKeys, ...(tx.meta?.loadedAddresses?.writable ?? []), ...(tx.meta?.loadedAddresses?.readonly ?? [])];
+      // newer transaction versions are fine: we only read keys and instructions. One unreadable transaction is skipped.
+      const tx = await rpc<Tx>('getTransaction', [sg.signature, { encoding: 'json', maxSupportedTransactionVersion: 1, commitment: 'confirmed' }]).catch(() => null);
+      const m = tx?.transaction?.message;
+      if (!m?.accountKeys || !m.instructions) return;
+      const all = [...m.accountKeys, ...(tx?.meta?.loadedAddresses?.writable ?? []), ...(tx?.meta?.loadedAddresses?.readonly ?? [])];
       for (const ix of m.instructions) {
         if (all[ix.programIdIndex] !== ORE_PROGRAM) continue;
         const data = bs58.decode(ix.data);

@@ -100,12 +100,19 @@ export const useNft = create<NftState>((set, get) => ({
     lastAt = Date.now();
     set({ wallet, loading: true, error: null });
     try {
-      const [cert, inv] = await Promise.all([
-        call<CertStatus>({ a: 'status', wallet }),
-        call<{ items: InvItem[] }>({ a: 'inventory', wallet }).catch(() => ({ items: [] as InvItem[] })),
+      // the two answers stand alone: a slow Founding Miner check never hides the NFTs the wallet holds
+      const [st, inv] = await Promise.all([
+        call<CertStatus>({ a: 'status', wallet }).then((c) => ({ c, e: null as string | null }), (e) => ({ c: null, e: (e as Error).message })),
+        call<{ items: InvItem[] }>({ a: 'inventory', wallet }).then((r) => ({ items: r.items, e: null as string | null }), (e) => ({ items: [] as InvItem[], e: (e as Error).message })),
       ]);
       if (get().wallet !== wallet) return;
-      set({ cert, items: inv.items, loading: false });
+      set({ cert: st.c ?? get().cert, items: inv.items, loading: false, error: inv.e ? `Couldn't read your NFTs (${inv.e})` : null });
+      // the server was busy: try the Founding Miner check again shortly
+      if (!st.c) {
+        setTimeout(() => void get().refresh(wallet, true), 30_000);
+        return;
+      }
+      const cert = st.c;
       // a long mining history is read over several calls: ask again shortly
       if (cert.counting) setTimeout(() => void get().refresh(wallet, true), 25_000);
       // the popup: a Founding Miner who has not claimed yet, at most once a day

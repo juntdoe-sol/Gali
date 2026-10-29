@@ -179,7 +179,7 @@ export function Inventory() {
         </Card>
       ) : (
         <Card>
-          <T v="muted">{loading ? 'Checking your wallet...' : 'No Gali NFTs yet. Founding Miner certificates go to wallets that mined a live ORE round during the closed beta; Gear 555 comes with the market.'}</T>
+          <T v="muted">{loading || !cert ? 'Checking your wallet...' : 'No Gali NFTs yet. Founding Miner certificates go to wallets that mined a live ORE round during the closed beta; Gear 555 comes with the market.'}</T>
         </Card>
       )}
       {gear.length ? (
@@ -196,7 +196,7 @@ export function Inventory() {
       ) : null}
       {error && owner ? (
         <T v="muted" style={{ fontSize: 12, color: COLORS.red }}>
-          Couldn't read your NFTs: {error}
+          {error}
         </T>
       ) : null}
     </View>
