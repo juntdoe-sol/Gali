@@ -7,6 +7,7 @@
  * It also holds the "back to lobby" pills the other screens use.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useMarket } from '../game/market';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -54,6 +55,7 @@ const GAME_SHORT: Record<GameId, string> = { tunnel: 'TUNNEL', pot: 'GOLD RUSH',
 const DOOR_UI: { id: DoorId; label: string; sub: string; color: string }[] = [
   { id: 'island', label: 'ISLAND', sub: 'Mine ORE', color: '#3de0c8' },
   { id: 'cave', label: 'CAVE', sub: 'Dig for XP', color: '#ff9a3d' },
+  { id: 'market', label: 'MARKET', sub: 'Gear 555', color: '#b86bff' },
   { id: 'arena', label: 'ARENA', sub: 'Brawl', color: '#ff4f5e' },
 ];
 const EMOTE_NAME: Record<string, string> = { wave: 'Wave', laugh: 'Laugh', heart: 'Love', fire: 'Fire', pick: 'Pickaxe', gem: 'Gem' };
@@ -190,7 +192,8 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
   const arenaOpen = useArena((s) => s.open);
   const caveOpen = useCave((s) => s.open);
   const arcadeOpen = useArcade((s) => !!s.game);
-  const away = arenaOpen || caveOpen || arcadeOpen;
+  const marketOpen = useMarket((s) => s.open);
+  const away = arenaOpen || caveOpen || arcadeOpen || marketOpen;
   const awayRef = useRef(away);
   awayRef.current = away;
   useEffect(() => {
@@ -241,6 +244,11 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
       } else if (id === 'cave') {
         useLobby.setState({ spawn: 'cave' });
         useCave.getState().show(homeSpot());
+      } else if (id === 'market') {
+        // the vending machine: the miner steps back to the square and the Market opens over the lobby
+        useLobby.setState({ spawn: 'market' });
+        play('door');
+        useMarket.getState().show();
       } else if (id === 'arena') {
         useLobby.setState({ spawn: 'arena' });
         if (!useName.getState().name) useGame.getState().toast('Pick a name to fight in the arena', 'info');
@@ -671,9 +679,10 @@ const HOWTO: { icon: PixName; title: string; body: string }[] = [
   { icon: 'pick', title: 'Cave Run', body: 'Walk into the cave in the north west. Dig down, dodge the rocks, and earn XP. It never spends SOL.' },
   { icon: 'cart', title: 'Mini games', body: 'Three pavilions south of the plaza: Tunnel Collapse, Gold Rush Pot and Crash Cart. Stake ORE or SKR, with a new round every 40 seconds. 5% house fee. 18+ only, stake only what you can afford to lose.' },
   { icon: 'quest', title: 'Quests and ranks', body: 'QUEST has nine daily quests across the whole game, plus achievements. Claim each one for XP. RANKS shows miners by level, ORE mined on chain and Brawl points, for today, this month, this year or all time. Clans will be available soon.' },
+  { icon: 'bag', title: 'Gear Market', body: 'The vending machine in front of the market hall, north east of the plaza. Browse all 555 pieces of gear coming in the first drop. BAG shows the Gali NFTs your wallet holds.' },
   { icon: 'cart', title: 'Carts and scooters', body: 'Mine carts and scooters stand all over the lobby, and anyone can take one. Walk up and press E, or tap RIDE. You roll about twice as fast. Press E again to get off: it stays where you left it for everyone. A hit knocks you off, and you cannot swing while riding.' },
   { icon: 'user', title: 'Profile and wallet', body: 'PROFILE holds your wallet, gear and settings. The power button next to it disconnects your wallet from any screen.' },
-  { icon: 'wave', title: 'Back to the lobby', body: 'Every place has a LOBBY button. GO jumps straight to the island, cave, arena or games.' },
+  { icon: 'wave', title: 'Back to the lobby', body: 'Every place has a LOBBY button. GO jumps straight to the island, cave, market, arena or games.' },
 ];
 
 /** A short guide for new players, shown once and always one tap away from the lobby header. */

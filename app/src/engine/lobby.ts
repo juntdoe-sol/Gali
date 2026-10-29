@@ -23,6 +23,7 @@ import { drawPumpkin, flicker, PUMPKIN_LIGHT } from './hollow';
 import { IS_HOLLOW } from '../game/season';
 import type { BrawlSnap, Look, Pose, RideKindView, RideView } from './types';
 import { drawRide, RIDE_LIFT } from './rideArt';
+import { drawBillboard, drawVending } from './marketArt';
 import { drawHp, drawKo, drawShield, FightFx, hitFlash, jumpLift, koAge, pickTarget, swingTilt } from './brawlfx';
 import { FLAG_H, FLAG_W, paintFlag, ARENA_FLAGS, ARENA_TORCHES, paintColosseum, paintPotw, paintSign, paintSmash, POTW_H, POTW_W, paintSolBase, paintSolLogo, SIGN_H, SIGN_W, SMASH_COLORS, SMASH_DIM, SOL_BASE, SOL_LOGO } from './lobbyArt';
 import { CLIFF, DOORS, PAVILIONS, SMASH_HEAL, SMASHABLES, STRUCTURES, doorAt, GRASS, HALL, LCOLS, LH, LROWS, LT, LW, lidx, lobbyMap, lobbyPath, PLANK, PLAZA, ROAD, SAND, SPAWNS, standable, tileCentre, tileOf, WATER, type DoorId } from '../game/lobbyMap';
@@ -777,7 +778,7 @@ export class LobbyEngine {
       const y = 13 * LT + Math.floor(seeded(k * 7.7) * 7 * LT);
       px(x, y, 3, 2, k % 2 ? '#b38f5e' : '#c9a572');
     }
-    // bunting across the square in front of the old hall
+    // bunting across the square in front of the old hall (the vending machine carries the MARKET name)
     const bx0 = 45 * LT;
     const bx1 = 60 * LT;
     const by = 9 * LT + 2;
@@ -1490,7 +1491,7 @@ export class LobbyEngine {
     for (const st of STRUCTURES) {
       const wx = (st.at[0] + st.at[2] / 2) * LT;
       const wy = (st.at[1] + st.at[3]) * LT - 1;
-      if (!inView(wx, wy, st.kind === 'arena' ? 110 : 40)) continue;
+      if (!inView(wx, wy, st.kind === 'arena' ? 110 : st.kind === 'billboard' ? 100 : 40)) continue;
       if (st.kind === 'flag' && st.v) {
         const v = st.v;
         items.push({ y: wy, draw: () => this.drawFlagPole(c, v, sx(wx), sy(wy), z, now) });
@@ -1499,6 +1500,14 @@ export class LobbyEngine {
       if (st.kind === 'potw') {
         const sp = this.potwSprite();
         items.push({ y: wy, draw: () => c.drawImage(sp, 0, 0, sp.width, sp.height, Math.round((sx(wx) - (sp.width / 2) * z) * dpr) / dpr, Math.round((sy(wy) - sp.height * z) * dpr) / dpr, sp.width * z, sp.height * z) });
+        continue;
+      }
+      if (st.kind === 'vending') {
+        items.push({ y: wy, draw: () => drawVending(c, sx(wx), sy(wy), z, now, lights, dpr) });
+        continue;
+      }
+      if (st.kind === 'billboard') {
+        items.push({ y: wy, draw: () => drawBillboard(c, sx(wx), sy(wy), z, now, lights, dpr) });
         continue;
       }
       if (st.kind === 'sign') {
@@ -2319,6 +2328,7 @@ export class LobbyEngine {
     // landmarks: a pixel icon and a name for every place worth walking to
     const marks: [number, number, string, string, string][] = [
       [15.5, 8.2, 'ui-pick', 'CAVE', DOOR_COLOR.cave],
+      [52.5, 7.4, 'ui-gift', 'MARKET', DOOR_COLOR.market],
       [64, 26.5, 'ui-gem', 'ISLAND', DOOR_COLOR.island],
       [36.5, 39.6, 'ui-cart', 'GAMES', DOOR_COLOR.pot],
       [36.5, 25.2, 'ui-star', 'PLAZA', '#ffe27a'],
