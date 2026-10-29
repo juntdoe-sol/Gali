@@ -134,6 +134,12 @@ const mintOpen = () => Boolean(Deno.env.get('CERT_AUTHORITY') && Deno.env.get('C
 const pad = (n: number) => String(n).padStart(4, '0');
 const day = (iso: string | null) => (iso ? new Date(iso).toISOString().slice(0, 10) : '');
 
+/** Storage auth: a legacy service_role JWT goes as apikey and Bearer, a new sb_secret_ key as apikey only. */
+function storageAuth(): Record<string, string> {
+  const k = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  return k.startsWith('eyJ') ? { apikey: k, authorization: `Bearer ${k}` } : { apikey: k };
+}
+
 /** Write the certificate's metadata JSON to the public bucket and return its URL. */
 async function uploadMeta(serial: number, name: string | null, rounds: number, firstAt: string | null) {
   const base = `${Deno.env.get('SUPABASE_URL')}/storage/v1/object/public/gali-nft`;
@@ -157,7 +163,7 @@ async function uploadMeta(serial: number, name: string | null, rounds: number, f
   const path = `cert/${pad(serial)}.json`;
   const r = await fetch(`${Deno.env.get('SUPABASE_URL')}/storage/v1/object/gali-nft/${path}`, {
     method: 'POST',
-    headers: { authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'content-type': 'application/json', 'x-upsert': 'true' },
+    headers: { ...storageAuth(), 'content-type': 'application/json', 'x-upsert': 'true' },
     body: JSON.stringify(meta),
   });
   if (!r.ok) throw new Error(`metadata upload ${r.status}`);
