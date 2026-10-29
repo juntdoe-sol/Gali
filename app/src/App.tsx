@@ -29,6 +29,7 @@ import { DmSheet } from './ui/Dm';
 import { Busy, GearReveal, LevelUp, LiveNotice, Onboarding, ResultPop, WalletGate, WalletPicker } from './ui/Modals';
 import { Sheet } from './ui/Sheet';
 import { MarketWindow } from './ui/Market';
+import { MineAnywhere } from './ui/MineAnywhere';
 import { CertClaimPopup } from './ui/CertClaim';
 import { useNft } from './game/nft';
 import { useMarket } from './game/market';
@@ -257,6 +258,16 @@ function Edges({ children }: { children: ReactNode }) {
   return <View style={{ flex: 1, marginLeft: i.left, marginRight: i.right }}>{children}</View>;
 }
 
+/** Off the island (the lobby) the round and DEPLOY panel ride along as a chip and a drawer. */
+function MineOffIsland() {
+  const where = useLobby((s) => s.where);
+  // the cave and the arena carry their own (they open over the lobby)
+  const caveOpen = useCave((s) => s.open);
+  const arenaOpen = useArena((s) => s.open);
+  const covered = caveOpen || arenaOpen;
+  return where === 'lobby' && !covered ? <MineAnywhere at="lobby" /> : null;
+}
+
 function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTab | null) => void }) {
   const guest = useGame((s) => oreLive && !s.wallet.owner);
   const owner = useGame((s) => s.wallet.owner);
@@ -286,6 +297,7 @@ function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTa
         <GearReveal />
         <SharedChat />
         <LobbyScreen sheet={sheet} onTab={setSheet} />
+        <MineOffIsland />
         <HollowSplash />
         <Sheet tab={sheet} onTab={setSheet} />
         <MarketWindow />

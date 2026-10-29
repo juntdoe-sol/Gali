@@ -5,6 +5,7 @@
  * The rules live in game/arena.ts and game/brawl.ts. This file passes what the canvas reports to them,
  * and shows what they say.
  */
+import { MineAnywhere } from './MineAnywhere';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, View, type ViewStyle } from 'react-native';
 import { loadJson, saveJson } from '../game/storage';
@@ -274,6 +275,7 @@ export function ArenaScreen() {
           />
         ) : null}
         {tipTo ? <TipSheet to={tipTo} onClose={() => setTipTo(null)} /> : null}
+        <MineAnywhere at="arena" />
       </View>
     </Modal>
   );

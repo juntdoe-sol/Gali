@@ -5,6 +5,7 @@
  * your miner's look and today's runs, and passes what it reports to the store.
  * Wallet-only: it is mounted with the rest of the connected UI.
  */
+import { MineAnywhere } from './MineAnywhere';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Image, Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -135,6 +136,7 @@ export function CaveScreen() {
           <BackPill door="cave" onBefore={() => useCave.getState().close()} />
           <DisconnectBtn />
         </View>
+        <MineAnywhere at="cave" />
       </View>
     </Modal>
   );
