@@ -103,8 +103,8 @@ const ride = (P, k) => P.useRides.getState().rides[k];
   await wait(30);
   assert.equal(ride(B, 0).rider, id(A), 'B sees A on ride 0');
   assert.equal(B.getOn(0), false, 'a ridden ride is taken');
-  // A rides off: the ride follows A on B's screen (position updates go out twice a second at most)
-  await wait(550);
+  // A rides off: the ride follows A on B's screen (position updates go out once a second at most)
+  await wait(1050);
   A.at(h0x + 60, h0y + 30);
   await wait(30);
   assert.equal(Math.round(ride(B, 0).x), h0x + 60, 'ride follows its rider');
@@ -150,7 +150,7 @@ const ride = (P, k) => P.useRides.getState().rides[k];
 
   // ---- a rider who walks out: the ride stays where they were last seen ----
   const winner = rA === id(A) ? A : B;
-  await wait(550);
+  await wait(1050);
   winner.at(h1x + 40, h1y);
   await wait(30);
   winner.stopRides();

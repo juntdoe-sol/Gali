@@ -139,7 +139,7 @@ function store(board = {}, chainOverride = {}) {
   const c = { ...client().c, ...chainOverride };
   const s = load('../game/store.ts', {
     '../config/features': { FEATURE_GALI_PROGRAM: false },
-    './lobby': { announce() {}, announceXp() {} }, '../chain/lazy': { loadChain: async () => c, loadBoard: async () => board, loadOreTx: async () => ({}) },
+    './lobby': { announce() {}, announceXp() {} }, './oreFeed': { followOreFeed() {}, unfollowOreFeed() {}, freshOre: () => null }, '../chain/lazy': { loadChain: async () => c, loadBoard: async () => board, loadOreTx: async () => ({}) },
     '../chain/light': { oreLive: true, chainReady: false, onChainMode: true, NOTHING_CLAIMABLE: { sol: 0, unrefined: 0, refined: 0, fee: 0 }, short: x => x, isRateLimited: () => false },
     './constants': constants, './pot': pot,
     './sfx': { play: x => sounds.push(x), announce() {}, setMuted() {}, haptic: { win() {}, thud() {}, tap() {}, heavy() {} } },
