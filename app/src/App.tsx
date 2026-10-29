@@ -28,6 +28,10 @@ import { RoundCard, Toasts, TopBar } from './ui/Hud';
 import { DmSheet } from './ui/Dm';
 import { Busy, GearReveal, LevelUp, LiveNotice, Onboarding, ResultPop, WalletGate, WalletPicker } from './ui/Modals';
 import { Sheet } from './ui/Sheet';
+import { MarketWindow } from './ui/Market';
+import { CertClaimPopup } from './ui/CertClaim';
+import { useNft } from './game/nft';
+import { useMarket } from './game/market';
 import { ClaimPanel } from './ui/ClaimPanel';
 import { MapHint } from './ui/MapHint';
 import { MineTutorial } from './ui/MineTutorial';
@@ -44,7 +48,7 @@ import { HollowSplash } from './ui/Season';
 
 
 // lets browser tests watch the game state
-if (Platform.OS === 'web') Object.assign(globalThis, { __gali: useGame, __galiWorld: useWorld, __galiLobbyStore: useLobby, __galiCaveStore: useCave, __galiArcadeStore: useArcade, __galiBrawl: useBrawl, __galiBrawlTest: _test, __galiArenaStore: useArena });
+if (Platform.OS === 'web') Object.assign(globalThis, { __gali: useGame, __galiWorld: useWorld, __galiLobbyStore: useLobby, __galiCaveStore: useCave, __galiArcadeStore: useArcade, __galiBrawl: useBrawl, __galiBrawlTest: _test, __galiArenaStore: useArena, __galiMarket: useMarket, __galiNft: useNft, __galiName: useName });
 // pixel art in the interface (gear icons) stays crisp when the browser scales it
 if (Platform.OS === 'web' && typeof document !== 'undefined' && !document.getElementById('gali-pixel-css')) {
   const el = document.createElement('style');
@@ -255,8 +259,15 @@ function Edges({ children }: { children: ReactNode }) {
 
 function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTab | null) => void }) {
   const guest = useGame((s) => oreLive && !s.wallet.owner);
+  const owner = useGame((s) => s.wallet.owner);
   const { desktop } = useLayout();
   useHotkeys(sheet, setSheet, desktop && !guest);
+  // Founding Miner status and the NFT inventory follow the connected wallet
+  useEffect(() => {
+    if (!oreLive) return;
+    const t = setTimeout(() => void useNft.getState().refresh(owner), 4000);
+    return () => clearTimeout(t);
+  }, [owner]);
   return (
     <>
       {!guest && <>
@@ -277,6 +288,8 @@ function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTa
         <LobbyScreen sheet={sheet} onTab={setSheet} />
         <HollowSplash />
         <Sheet tab={sheet} onTab={setSheet} />
+        <MarketWindow />
+        <CertClaimPopup />
       </>}
         <Toasts />
         <Busy />

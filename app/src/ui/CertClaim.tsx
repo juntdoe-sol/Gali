@@ -1,0 +1,98 @@
+/**
+ * The Founding Miner certificate: the popup that tells a closed-beta miner they qualify and mints the NFT,
+ * and the card the inventory shows once it is theirs.
+ */
+import { Image, Linking, Modal, Platform, StyleSheet, View } from 'react-native';
+import { COLORS } from '../game/constants';
+import { fmtDay, useNft, type CertStatus } from '../game/nft';
+import { Btn, Frame, PixelBox, Scrim, T } from './kit';
+
+const CARD = Platform.OS === 'web' ? require('../../assets/market/founding-miner.gif') : require('../../assets/market/founding-miner.png');
+const STEP: Record<string, string> = {
+  'signing-in': 'Sign the free sign-in message in your wallet...',
+  building: 'Preparing your certificate...',
+  wallet: 'Approve the mint in your wallet...',
+  confirming: 'Waiting for Solana to confirm...',
+};
+
+/** The animated certificate card, 16:9. */
+export function CertCard({ width }: { width: number }) {
+  return <Image source={CARD} style={{ width, height: Math.round((width * 9) / 16), imageRendering: 'pixelated' } as never} fadeDuration={0} accessibilityLabel="Founding Miner certificate" />;
+}
+
+function Stats({ cert }: { cert: CertStatus }) {
+  const serial = cert.claim?.status === 'minted' ? `#${String(cert.claim.serial).padStart(4, '0')}` : 'on claim';
+  return (
+    <View style={styles.stats}>
+      {[
+        ['BETA ROUNDS', String(cert.rounds)],
+        ['FIRST DIG', fmtDay(cert.firstAt)],
+        ['SERIAL', serial],
+      ].map(([k, v]) => (
+        <View key={k} style={styles.stat}>
+          <T v="label" style={{ fontSize: 11 }}>
+            {k}
+          </T>
+          <T v="display" style={{ fontSize: 20, lineHeight: 22, color: COLORS.gold }}>
+            {v}
+          </T>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+export function CertClaimPopup() {
+  const { popup, cert, claiming, error, minted, claim, later } = useNft();
+  if (!popup || !cert?.eligible) return null;
+  const done = cert.claim?.status === 'minted';
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={later}>
+      <Scrim onPress={claiming ? undefined : later}>
+        <Frame tone="panel" glow={COLORS.gold} style={styles.box}>
+          <T v="display" style={{ fontSize: 30, lineHeight: 32, color: COLORS.gold, textAlign: 'center', letterSpacing: 1 }}>
+            {done ? 'FOUNDING MINER' : 'YOU ARE A FOUNDING MINER'}
+          </T>
+          <CertCard width={360} />
+          <Stats cert={cert} />
+          {done ? (
+            <>
+              <T style={{ textAlign: 'center' }}>Your certificate is in your wallet. It claims the Legendary Jarl Helmet when the Gali NFT market opens.</T>
+              <Btn kind="ghost" label="VIEW ON SOLSCAN" onPress={() => void Linking.openURL(`https://solscan.io/token/${minted ?? cert.claim?.asset}`)} />
+              <Btn kind="gold" label="NICE" onPress={later} />
+            </>
+          ) : (
+            <>
+              <T style={{ textAlign: 'center' }}>
+                You mined ORE on Gali Island during the closed beta. Claim your Founding Miner certificate NFT: it stays in your wallet for good and claims the Legendary Jarl Helmet when the NFT market opens.
+              </T>
+              <T v="muted" style={{ fontSize: 12, textAlign: 'center' }}>
+                You pay the mint: Solana rent and network fee, shown in your wallet before you approve. One per wallet.
+              </T>
+              {claiming ? (
+                <PixelBox fill="rgba(62,230,255,0.1)" hi={COLORS.teal} lo="#04060f" style={{ padding: 10 }}>
+                  <T v="bold" style={{ textAlign: 'center', color: COLORS.teal }}>
+                    {STEP[claiming]}
+                  </T>
+                </PixelBox>
+              ) : null}
+              {error ? (
+                <T v="bold" style={{ textAlign: 'center', color: COLORS.red }}>
+                  {error}
+                </T>
+              ) : null}
+              <Btn kind="gold" label={cert.open ? (claiming ? 'CLAIMING...' : 'CLAIM CERTIFICATE') : 'MINT OPENS SOON'} disabled={!cert.open || !!claiming} onPress={() => void claim()} />
+              <Btn kind="ghost" label="LATER" disabled={!!claiming} onPress={later} />
+            </>
+          )}
+        </Frame>
+      </Scrim>
+    </Modal>
+  );
+}
+
+const styles = StyleSheet.create({
+  box: { width: 400, maxWidth: '100%', padding: 18, gap: 10, alignItems: 'center' },
+  stats: { flexDirection: 'row', gap: 8, alignSelf: 'stretch' },
+  stat: { flex: 1, alignItems: 'center', backgroundColor: 'rgba(4,6,15,0.55)', paddingVertical: 6 },
+});

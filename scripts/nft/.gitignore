@@ -1,0 +1,4 @@
+node_modules/
+cert-authority.json
+.cert.env
+package-lock.json

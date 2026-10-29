@@ -22,6 +22,7 @@ import { PixIcon } from './PixIcon';
 import { GUTTER, RAIL_W, useLayout } from './layout';
 import { BAR_H, SHEET_TITLE, TAB_PIX, TabBar, type SheetTab } from './TabBar';
 import { BackPill } from './Lobby';
+import { Inventory } from './Inventory';
 
 const ORE_PROGRAM_STR = 'oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv';
 
@@ -45,6 +46,7 @@ export function Sheet({ tab, onTab }: { tab: SheetTab | null; onTab: (t: SheetTa
     <ScrollView contentContainerStyle={{ padding: 16, gap: 12 }} showsVerticalScrollIndicator>
       {tab === 'quests' && <Quests />}
       {tab === 'rounds' && <Rounds />}
+      {tab === 'bag' && <Inventory />}
       {tab === 'skr' && FEATURE_GALI_PROGRAM && <SkrTab />}
       {tab === 'ranks' && <Ranks />}
       {tab === 'clans' && <ClansSoon />}

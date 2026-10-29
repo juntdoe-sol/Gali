@@ -41,6 +41,8 @@ export interface Door {
 export const DOORS: Door[] = [
   { id: 'island', x: 66, y: 26, w: 3, h: 3, label: 'ORE ISLAND', sub: 'Mine ORE' },
   { id: 'cave', x: 14, y: 10, w: 3, h: 1, label: 'CAVE RUN', sub: 'Dig for XP' },
+  // the gear vending machine in front of the market hall: step up to its front and the Market opens
+  { id: 'market', x: 51, y: 10, w: 3, h: 1, label: 'MARKET', sub: 'Gear 555' },
   { id: 'tunnel', x: 26, y: 42, w: 3, h: 1, label: 'TUNNEL', sub: 'ORE and SKR' },
   { id: 'pot', x: 35, y: 42, w: 3, h: 1, label: 'GOLD RUSH', sub: 'ORE and SKR' },
   { id: 'crash', x: 44, y: 42, w: 3, h: 1, label: 'CRASH CART', sub: 'ORE and SKR' },
@@ -67,7 +69,7 @@ export const SPAWNS: Record<'start' | DoorId, [number, number]> = {
 
 /** Things with a shape of their own: a tent, a stall, the lighthouse. The engine draws each; the tiles under them block. */
 export interface Structure {
-  kind: 'tent' | 'fire' | 'cart' | 'crates' | 'barrel' | 'stall-red' | 'stall-teal' | 'lighthouse' | 'rack' | 'boulder' | 'sol-crystal' | 'ore-vein' | 'arena' | 'sign' | 'potw' | 'flag';
+  kind: 'tent' | 'fire' | 'cart' | 'crates' | 'barrel' | 'stall-red' | 'stall-teal' | 'lighthouse' | 'rack' | 'boulder' | 'sol-crystal' | 'ore-vein' | 'arena' | 'sign' | 'potw' | 'flag' | 'vending' | 'billboard';
   /** tiles that block: x, y, width, height */
   at: [number, number, number, number];
   /** which flag, for a flagpole */
@@ -85,6 +87,10 @@ export const STRUCTURES: Structure[] = [
   { kind: 'flag', at: [33, 8, 1, 1], v: 'my' },
   { kind: 'flag', at: [35, 8, 1, 1], v: 'id' },
   { kind: 'flag', at: [37, 8, 1, 1], v: 'ng' },
+  // a big digital signboard behind the flags, showing off the gear and the news
+  { kind: 'billboard', at: [30, 6, 9, 1] },
+  // the gear vending machine, right in front of the market hall's door
+  { kind: 'vending', at: [51, 9, 3, 1] },
   { kind: 'tent', at: [8, 14, 3, 2] },
   { kind: 'fire', at: [12, 15, 1, 1] },
   { kind: 'tent', at: [5, 17, 3, 2] },

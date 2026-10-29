@@ -273,6 +273,7 @@ export function paintSolLogo(g: G, shine: number) {
 
 const SIGN_DEST: { id: DoorId; label: string; c: string }[] = [
   { id: 'island', label: 'ISLAND', c: '#3de0c8' },
+  { id: 'market', label: 'MARKET', c: '#d29bff' },
   { id: 'cave', label: 'CAVE', c: '#ff9a3d' },
   { id: 'arena', label: 'ARENA', c: '#ff6a6a' },
   { id: 'pot', label: 'GAMES', c: '#ffcf4a' },

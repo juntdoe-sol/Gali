@@ -438,6 +438,48 @@ export async function sendWithWallet(build: (owner: PublicKey) => Promise<Transa
   } finally { sending = false; }
 }
 
+/**
+ * Sign and send a transaction someone else built and already part-signed (the Founding Miner mint: Gali's server
+ * signs for the new asset and the collection). The wallet only adds the fee payer's signature. The wallet may not
+ * change the message, and the fee payer must be the connected wallet.
+ */
+export async function sendPrebuilt(raw: Uint8Array, lastValidBlockHeight: number, expectedOwner?: PublicKey): Promise<string> {
+  if (sending) throw new Error('A transaction is already pending');
+  sending = true;
+  try {
+    const savedOwner = JSON.parse((await AsyncStorage.getItem('gali-owner')) ?? '{}').owner;
+    if (!expectedOwner && !savedOwner) throw new Error('Connect a wallet before signing');
+    const displayed = expectedOwner ?? new PublicKey(savedOwner);
+    await reconcilePendingTransaction();
+    const tx = Transaction.from(Buffer.from(raw));
+    if (!tx.feePayer?.equals(displayed)) throw new Error('This transaction is for another wallet');
+    const message = tx.serializeMessage();
+    if (IS_WEB) {
+      const owner = await webOwner();
+      if (!owner.equals(displayed)) throw new Error('Wallet changed; reconnect before signing');
+      const signed = await webSign(tx);
+      if (!message.equals(signed.serializeMessage())) throw new Error('Wallet changed the transaction');
+      return await broadcastSigned(signed, owner, lastValidBlockHeight);
+    }
+    let step = 'opening wallet';
+    const sent = await transact(async (wallet) => {
+      step = 'wallet authorization';
+      const owner = await authorize(wallet);
+      if (!owner.equals(displayed)) throw new Error('Wallet changed; reconnect before signing');
+      step = 'wallet approval';
+      const [signature] = await wallet.signAndSendTransactions({ transactions: [tx] });
+      if (!signature) throw new Error('Wallet returned no signature');
+      await AsyncStorage.setItem(pendingKey, JSON.stringify({ signature, owner: owner.toBase58(), lastValidBlockHeight } satisfies PendingTransaction));
+      return { signature, owner };
+    }).catch((e) => {
+      if (/Timed out waiting/i.test(String(e?.message ?? e))) throw new Error('Wallet did not respond. Check your wallet activity before trying again.');
+      if (e instanceof Error && !/\(at: /.test(e.message)) e.message = `${e.message} (at: ${step})`;
+      throw e;
+    });
+    return await trackAndConfirm(sent.signature, sent.owner, lastValidBlockHeight);
+  } finally { sending = false; }
+}
+
 export async function sendWithKey(signer: Keypair, ixs: TransactionInstruction[]): Promise<string> {
   if (sending) throw new Error('A transaction is already pending');
   sending = true;
