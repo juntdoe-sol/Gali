@@ -34,6 +34,8 @@ export interface CertStatus {
   claim: CertClaim | null;
   /** the mint is set up on the server (collection and authority) */
   open: boolean;
+  /** the server is still reading this wallet's history */
+  counting?: boolean;
 }
 export interface InvItem {
   id: string;
@@ -104,6 +106,8 @@ export const useNft = create<NftState>((set, get) => ({
       ]);
       if (get().wallet !== wallet) return;
       set({ cert, items: inv.items, loading: false });
+      // a long mining history is read over several calls: ask again shortly
+      if (cert.counting) setTimeout(() => void get().refresh(wallet, true), 25_000);
       // the popup: a Founding Miner who has not claimed yet, at most once a day
       if (cert.eligible && cert.claim?.status !== 'minted' && !get().popup) {
         const later = Number((await AsyncStorage.getItem(`${LATER_KEY}:${wallet}`)) ?? 0);
