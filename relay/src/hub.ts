@@ -26,8 +26,11 @@ export const LIMITS = {
   frameBytes: 16_384,
   sockets: 400,
   perIp: 30, // phones on one carrier or one venue Wi-Fi share an IP
-  ratePerSec: 12,
-  burst: 30,
+  ratePerSec: 12, // Arena fighters send up to 8 a second
+  burst: 24,
+  /** all sockets from one IP together: 30 walking players need about 30 a second */
+  ipRatePerSec: 60,
+  ipBurst: 120,
   dropsBeforeClose: 300,
 };
 
@@ -63,6 +66,7 @@ export class Hub {
   /** index of the newest LATEST_ONLY entry per (receiver, topic, sender id), to merge in place */
   private latest = new Map<Sock, Map<string, number>>();
   private buckets = new WeakMap<Sock, Bucket>();
+  private ipBuckets = new Map<string, Bucket>();
   private all = new Set<Sock>();
 
   private now: () => number;
@@ -123,8 +127,17 @@ export class Hub {
     if (!b) this.buckets.set(s, (b = { tokens: LIMITS.burst, at: now, drops: 0, dropsAt: now }));
     b.tokens = Math.min(LIMITS.burst, b.tokens + ((now - b.at) / 1000) * LIMITS.ratePerSec);
     b.at = now;
-    if (b.tokens >= 1) {
+    // one IP opening many sockets cannot multiply its allowance
+    let ib = this.ipBuckets.get(s.att.ip);
+    if (!ib) {
+      if (this.ipBuckets.size > 5000) this.ipBuckets.clear();
+      this.ipBuckets.set(s.att.ip, (ib = { tokens: LIMITS.ipBurst, at: now, drops: 0, dropsAt: now }));
+    }
+    ib.tokens = Math.min(LIMITS.ipBurst, ib.tokens + ((now - ib.at) / 1000) * LIMITS.ipRatePerSec);
+    ib.at = now;
+    if (b.tokens >= 1 && ib.tokens >= 1) {
       b.tokens -= 1;
+      ib.tokens -= 1;
       return true;
     }
     if (now - b.dropsAt > 60_000) {
@@ -185,7 +198,8 @@ export class Hub {
     const r = this.rooms.get(t);
     if (r?.delete(s)) {
       const id = s.att.ids[t];
-      if (id) this.queue(r, null, t, 'bye', { id });
+      // only when nobody else in the room is using that id: a copied id cannot be used to remove its owner
+      if (id && ![...r].some((o) => o.att.ids[t] === id)) this.queue(r, null, t, 'bye', { id });
     }
     if (save) {
       s.att.t = s.att.t.filter((x) => x !== t);

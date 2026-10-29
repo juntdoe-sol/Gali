@@ -121,6 +121,39 @@ test('oversized frames and junk are ignored', () => {
   assert.equal(msgs(b).length, 0);
 });
 
+test('a copied id does not get its owner removed when the copier leaves', () => {
+  const h = new Hub();
+  const [owner, copier, watcher] = [fakeSock(), fakeSock(), fakeSock()];
+  for (const s of [owner, copier, watcher]) {
+    h.add(s);
+    h.message(s, JSON.stringify({ j: 'gali-lobby' }));
+  }
+  h.message(owner, JSON.stringify({ t: 'gali-lobby', e: 'state', p: { id: 'Abc12345wxyz' } }));
+  h.message(copier, JSON.stringify({ t: 'gali-lobby', e: 'state', p: { id: 'Abc12345wxyz' } }));
+  h.flush();
+  h.drop(copier);
+  h.flush();
+  assert.ok(!msgs(watcher).some((m) => m[1] === 'bye'), 'no bye while the owner is still here');
+  h.drop(owner);
+  h.flush();
+  assert.deepEqual(msgs(watcher).at(-1), ['gali-lobby', 'bye', { id: 'Abc12345wxyz' }]);
+});
+
+test('one IP with many sockets shares one allowance', () => {
+  const t = 0;
+  const h = new Hub(() => t);
+  const socks = Array.from({ length: 20 }, () => fakeSock('7.7.7.7'));
+  const watcher = fakeSock('6.6.6.6');
+  for (const s of [...socks, watcher]) {
+    h.add(s);
+    h.message(s, JSON.stringify({ j: 'gali-chat' }));
+  }
+  for (const s of socks) for (let i = 0; i < 20; i++) h.message(s, JSON.stringify({ t: 'gali-chat', e: 'chat', p: { i } }));
+  h.flush();
+  // joins used 20 of the IP's tokens; the rest is all that gets through
+  assert.equal(msgs(watcher).length, LIMITS.ipBurst - 20);
+});
+
 test('per-IP and total socket caps', () => {
   const h = new Hub();
   for (let i = 0; i < LIMITS.perIp; i++) h.add(fakeSock('9.9.9.9'));
@@ -168,7 +201,7 @@ test('feed reads board + round in one call, and re-reads once on rollover', asyn
   const roll = await f.poll();
   assert.deepEqual(calls, ['getMultipleAccounts', 'getMultipleAccounts']);
   assert.ok(roll);
-  assert.equal(f.interval(), 3000);
+  assert.equal(f.interval(), 4000);
 });
 
 test('feed backs off on errors and waits longer before the first deploy', async () => {
@@ -184,7 +217,7 @@ test('feed backs off on errors and waits longer before the first deploy', async 
   fail = false;
   await f.poll();
   assert.equal(f.errors, 0);
-  assert.equal(f.interval(), 5000); // round not started
+  assert.equal(f.interval(), 6000); // round not started
 });
 
 /* ---------- app client <-> hub, end to end ---------- */
