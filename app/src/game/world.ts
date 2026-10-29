@@ -14,6 +14,8 @@ import cfg from '../chain/chat.json';
 import { useName } from './username';
 import { cleanName } from './lobbyMap';
 import { roomHooks } from './rx';
+import { RelayClient } from './relay';
+import { setOreSource } from './oreFeed';
 
 export type Pose = 'idle' | 'walk' | 'swing';
 export interface Avatar {
@@ -60,7 +62,12 @@ export const EMOTES = ['👋', '⛏️', '🎉', '💎', '🔥'] as const;
 
 const URL_ = process.env.EXPO_PUBLIC_WORLD_URL || (cfg.url ? `${cfg.url.replace(/^http/, 'ws')}/realtime/v1` : '');
 const KEY = process.env.EXPO_PUBLIC_WORLD_KEY || cfg.anonKey;
-export const worldReady = Boolean(URL_ && KEY);
+/** The Gali relay (relay/ at the repo root), e.g. wss://gali-relay.<account>.workers.dev/ws. Preferred when set. */
+const RELAY_URL = (process.env.EXPO_PUBLIC_RELAY_URL ?? '').trim();
+const supabaseReady = Boolean(URL_ && KEY);
+export const worldReady = Boolean(RELAY_URL || supabaseReady);
+/** How long the relay gets to answer before a build that also has Supabase falls back to it. */
+const RELAY_FALLBACK_MS = 8000;
 /** The same Supabase project over HTTPS (for the Brawl ranks table), and its public key. */
 export const restBase = () => (URL_ ? URL_.replace(/^ws/, 'http').replace(/\/realtime\/v1\/?$/, '') : '');
 export const publicKey = () => KEY || '';
@@ -73,11 +80,12 @@ const WIRE_X = 180;
 const WIRE_Y = 105;
 const WIRE_W = 360;
 const WIRE_H = 210;
-// Fewer messages keep the shared room under Realtime's per-second cap as the island fills up
-// (each broadcast counts once per listener). Updates carry the target, so walkers still glide.
-const STALE_MS = 15_000;
-const SEND_MS = 500;
-const BEAT_MS = 6000;
+// Fewer messages keep the shared room cheap as the island fills up (on Supabase each broadcast counts
+// once per listener; on the relay each one sent is billed). Updates carry the target, so walkers still
+// glide. The heartbeat stays under 15 s because older builds drop a miner silent for 15 s.
+const STALE_MS = 30_000;
+const SEND_MS = 1000;
+const BEAT_MS = 12_000;
 const CLAIM_MS = 20_000;
 
 const rid = () => Math.random().toString(36).slice(2, 10);
@@ -120,14 +128,50 @@ let starting = false;
 const MAX_PEERS = 60;
 const verified = new Map<string, string | null>(); // `${id}:${wallet}:${session}` -> wallet or null (pending/failed)
 
+let relay: RelayClient | null = null;
+let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+
 /** The shared realtime connection, so the lobby rides the same socket instead of opening a second one. */
 export const worldClient = () => client;
+/** The relay connection when this session runs on it (it also carries the ORE board feed), else null. */
+export const relayClient = () => relay;
 
 export function startWorld() {
   if (!worldReady || client || starting) return;
-  starting = true;
   const gen = ++startGen;
   useWorld.setState({ status: 'connecting' });
+  if (RELAY_URL) {
+    relay = new RelayClient(RELAY_URL);
+    // the relay speaks the part of Supabase's channel API the rooms use (see relay.ts)
+    client = relay as unknown as RealtimeClient;
+    setOreSource(relay);
+    wire();
+    if (supabaseReady) {
+      fallbackTimer = setTimeout(() => {
+        fallbackTimer = null;
+        if (gen !== startGen || !relay || relay.everOpened) return;
+        console.warn('[gali] relay unreachable, using Supabase Realtime');
+        relay.disconnect();
+        relay = null;
+        setOreSource(null);
+        client = null;
+        channel = null;
+        if (pruneTimer) clearInterval(pruneTimer);
+        pruneTimer = null;
+        startSupabase(gen);
+      }, RELAY_FALLBACK_MS);
+    }
+    return;
+  }
+  startSupabase(gen);
+}
+
+function startSupabase(gen: number) {
+  if (!supabaseReady) {
+    useWorld.setState({ status: 'off' });
+    return;
+  }
+  starting = true;
   import('@supabase/realtime-js').then(
     ({ RealtimeClient }) => {
       starting = false;
@@ -143,6 +187,12 @@ export function startWorld() {
 
 function connect(RealtimeClientCtor: typeof RealtimeClient) {
   client = new RealtimeClientCtor(URL_, { params: { apikey: KEY }, vsn: '1.0.0' } as ConstructorParameters<typeof RealtimeClient>[1]);
+  wire();
+}
+
+/** Join the island room on whichever connection `client` is (the relay or Supabase). */
+function wire() {
+  if (!client) return;
   channel = client.channel('gali-world', { config: { broadcast: { self: false, ack: false } } });
   channel
     .on('broadcast', { event: 'state' }, ({ payload }) => onState(payload))
@@ -190,9 +240,13 @@ export function stopWorld() {
   starting = false;
   sayBye();
   if (pruneTimer) clearInterval(pruneTimer);
+  if (fallbackTimer) clearTimeout(fallbackTimer);
+  fallbackTimer = null;
   void channel?.unsubscribe();
   client?.disconnect();
   client = null;
+  if (relay) setOreSource(null);
+  relay = null;
   channel = null;
   pruneTimer = null;
   useWorld.setState({ status: 'off' });

@@ -112,12 +112,13 @@ const GLOWS = ['none', 'rare', 'epic', 'legendary'];
 const num = (v: unknown, lo: number, hi: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : lo);
 const col = (v: unknown, d: string) => (typeof v === 'string' && HEX.test(v) ? v : d);
 
-// Realtime bills every broadcast once per listener, and the free plan cuts connections past 100 messages a
-// second. So a walker sends twice a second, not four times, and a player standing still every 8 seconds.
-// Each update carries where the player is heading, so others still walk smoothly in between.
-const STALE_MS = 20_000;
-const SEND_MS = 500;
-const BEAT_MS = 8_000;
+// Supabase Realtime bills every broadcast once per listener, and the relay bills every message sent.
+// So a walker sends once a second and a player standing still every 15 seconds (older builds drop a
+// miner after 20 s of silence). Each update carries where the player is heading, so others still walk
+// smoothly in between.
+const STALE_MS = 32_000;
+const SEND_MS = 1000;
+const BEAT_MS = 15_000;
 /** how often the full look rides along anyway (it is also sent at once when it changes or someone joins) */
 const LOOK_MS = 30_000;
 const CHAT_GAP_MS = 900;

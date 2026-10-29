@@ -2,7 +2,10 @@ import { addBonusXp, reportRound } from './play';
 import { create } from 'zustand';
 import { FEATURE_GALI_PROGRAM } from '../config/features';
 import type { Keypair, PublicKey } from '@solana/web3.js';
-import { loadBoard, loadChain, loadOreTx } from '../chain/lazy';
+import { loadBoard, loadChain, loadOreTx, type BoardMod } from '../chain/lazy';
+import type { OreClock } from '../chain/board';
+import { followOreFeed, freshOre } from './oreFeed';
+import type { OreFeedFrame } from './relay';
 import { announce, announceXp } from './lobby';
 import {
   chainReady, clockOffsetMs, isPickWalletError, isRateLimited, LIVE_MAX_ROUND_SOL, MAX_SESSION_FUND_SOL, NOTHING_CLAIMABLE,
@@ -749,7 +752,53 @@ export const useGame = create<GameState>((set, get) => {
     const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
     return hidden && !get().run ? 3 : 1;
   }
+  /** Commit ORE's clock (read by us or pushed by the relay's board feed). */
+  function applyClock(b: BoardMod, c: OreClock) {
+    if (!isLive(get())) return;
+    const roundId = Number(c.roundId);
+    const prev = get().liveClock;
+    // Commit the authoritative clock immediately. The display-only ★ mask is
+    // patched in asynchronously, so its crypto chunk can never discard the board.
+    const solo = prev?.roundId === roundId ? prev.solo : 0;
+    let endsAt = c.phase === 'mining' ? chainNow(get().offsetMs) + c.msLeft : 0;
+    // slots are 400 ms and reads arrive a little late: don't make the countdown twitch for that
+    if (prev && prev.roundId === roundId && prev.phase === c.phase && endsAt && Math.abs(prev.endsAt - endsAt) < 1200) endsAt = prev.endsAt;
+    const spanMs = c.phase === 'waiting' ? (prev?.spanMs ?? LIVE_SPAN_MS) : Math.max(1, Number(c.endSlot - c.startSlot)) * 400;
+    set({ liveClock: { roundId, phase: c.phase, endsAt, solo, spanMs }, liveClockError: null });
+    void loadChain().then((ch) => ch.warmBlockhash()).catch(() => {});
+    if (prev?.roundId !== roundId) void b.oreSoloMask(roundId).then((mask) => {
+      const live = get().liveClock;
+      if (live?.roundId === roundId) set({ liveClock: { ...live, solo: mask } });
+    }).catch(() => undefined);
+  }
+
+  /** A frame from the relay's board feed: the clock, the pot, and now and then the chain's wall clock. */
+  let feedBtAt = 0;
+  function onOreFeed(f: OreFeedFrame) {
+    if (!isLive(get())) return;
+    const got = Date.now();
+    void loadBoard()
+      .then((b) => {
+        if (typeof f.bt === 'number') {
+          feedBtAt = got;
+          lastClockSync = got;
+          set({ offsetMs: f.bt - got });
+        }
+        const c = b.clockFromFeed(f.b, f.s);
+        applyClock(b, c);
+        const rid = Number(c.roundId);
+        const st = get();
+        if (!f.r || st.phase !== 'mining' || st.roundId !== rid) return;
+        const p = b.boardRoundFromFeed(f.r);
+        if (p && p.roundId === rid) set({ pot: { roundId: rid, perBlock: p.perSquare, total: p.total, miners: p.miners }, potAt: Date.now() });
+      })
+      .catch(() => undefined);
+  }
+
   function pollLiveClock() {
+    // With the relay up, the board arrives on its own every few seconds; read the chain only without it.
+    followOreFeed(onOreFeed);
+    if (freshOre()) return;
     // Countdown advances locally from `endsAt`; chain reads only correct drift / round rollover.
     // With no clock yet, or after a failed read, try again every 3 s instead of every 10.
     const have = get().liveClock && !get().liveClockError;
@@ -764,20 +813,7 @@ export const useGame = create<GameState>((set, get) => {
       .then(async (b) => {
         const c = await b.fetchOreClock();
         if (started !== clockAt) return; // an abandoned read that answered late
-        if (!isLive(get())) return;
-        const roundId = Number(c.roundId);
-        const prev = get().liveClock;
-        // Commit the authoritative clock immediately. The display-only ★ mask is
-        // patched in asynchronously, so its crypto chunk can never discard the board.
-        const solo = prev?.roundId === roundId ? prev.solo : 0;
-        const endsAt = c.phase === 'mining' ? chainNow(get().offsetMs) + c.msLeft : 0;
-        const spanMs = c.phase === 'waiting' ? (prev?.spanMs ?? LIVE_SPAN_MS) : Math.max(1, Number(c.endSlot - c.startSlot)) * 400;
-        set({ liveClock: { roundId, phase: c.phase, endsAt, solo, spanMs }, liveClockError: null });
-        void loadChain().then((ch) => ch.warmBlockhash()).catch(() => {});
-        if (prev?.roundId !== roundId) void b.oreSoloMask(roundId).then((mask) => {
-          const live = get().liveClock;
-          if (live?.roundId === roundId) set({ liveClock: { ...live, solo: mask } });
-        }).catch(() => undefined);
+        applyClock(b, c);
       })
       .catch((e) => {
         if (started === clockAt && isLive(get())) set({ liveClockError: errMsg(e) });
@@ -820,7 +856,8 @@ export const useGame = create<GameState>((set, get) => {
 
   function liveTick() {
     const st = get();
-    if (Date.now() - lastClockSync > 30_000) {
+    // the board feed carries the chain's clock every 30 s; read it ourselves only when that stops
+    if (Date.now() - lastClockSync > 30_000 && Date.now() - feedBtAt > 120_000) {
       lastClockSync = Date.now();
       clockOffsetMs()
         .then((o) => set({ offsetMs: o }))

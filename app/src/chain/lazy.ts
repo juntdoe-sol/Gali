@@ -11,7 +11,7 @@
  */
 type HeavyMod = typeof import('./heavy');
 type ChainMod = HeavyMod['client'];
-type BoardMod = HeavyMod['board'];
+export type BoardMod = HeavyMod['board'];
 type OreTxMod = HeavyMod['oreTx'];
 
 let chainMod: ChainMod | null = null;

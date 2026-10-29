@@ -11,12 +11,14 @@
  * ORE owns, and the ones ORE does not track are absent rather than faked.
  */
 import './polyfill-web';
+import { Buffer } from 'buffer';
 import { Keypair, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
 import { connection, fetchOreBalance, fetchSolBalance } from './client';
 import { NOTHING_CLAIMABLE, REFINING_FEE, REFINING_FEE_BPS } from './light';
 import { ORE_MINT, ORE_SPLIT_ADDRESS_B58, TREASURY_ADDRESS } from './ore/consts';
 import {
   fetchClock,
+  readClock,
   fetchOreMiner,
   fetchOreRound,
   fetchOreRounds,
@@ -26,7 +28,7 @@ import {
   readRewards,
 } from './ore/read';
 import { closeLiveAutomation, deployFromAutomation, oreCheckpoint, oreClaimOre, oreClaimSol, oreDeploy, oreDeployWithWallet, readAutomation, startLiveAutomation, toOre, toSol } from './ore/tx';
-import { decodeMiner, decodeTreasury, distributionMask, type OreMiner, type OreRound } from './ore/accounts';
+import { decodeBoard, decodeMiner, decodeRound, decodeTreasury, distributionMask, type OreMiner, type OreRound } from './ore/accounts';
 import { minerPda } from './ore/consts';
 
 export type { OreClock } from './ore/read';
@@ -372,6 +374,19 @@ export async function isRoundDrawn(roundId: number): Promise<boolean> {
 
 /** ORE's board clock, for the live round timer. */
 export const fetchOreClock = () => fetchClock(connection);
+
+/**
+ * The same answers from the relay's board feed (app/src/game/relay.ts), which reads ORE's accounts once
+ * for everyone. Inputs are the raw account data in base64 and the slot they were read at.
+ */
+export const clockFromFeed = (boardB64: string, slot: number) => readClock(decodeBoard(Buffer.from(boardB64, 'base64')), slot);
+export const boardRoundFromFeed = (roundB64: string): BoardRound | null => {
+  try {
+    return boardRoundOf(decodeRound(Buffer.from(roundB64, 'base64')));
+  } catch {
+    return null;
+  }
+};
 
 /**
  * The round's ten solo squares as a bitmask (a set bit pays one miner the whole

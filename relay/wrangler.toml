@@ -1,0 +1,20 @@
+name = "gali-relay"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+# relay.gali.lol (gali.lol is already on this Cloudflare account). Custom domains on Workers are free.
+routes = [{ pattern = "relay.gali.lol", custom_domain = true }]
+
+# Free plan: Durable Objects must use the SQLite storage backend (new_sqlite_classes).
+[[durable_objects.bindings]]
+name = "HUB"
+class_name = "GaliHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GaliHub"]
+
+# Secrets (not in this file):
+#   npx wrangler secret put HELIUS_RPC_URL     full Helius URL with the key
+#   npx wrangler secret put ALCHEMY_RPC_URL    optional second upstream
+# Optional var: ALLOWED_ORIGINS (comma-separated web origins). Default list is in src/index.ts.
