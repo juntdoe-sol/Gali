@@ -32,7 +32,7 @@ function postText(cert: CertStatus) {
 }
 
 /** Save the certificate image: a real download in the browser, the share sheet on a phone app. */
-async function saveCert(ext: 'gif' | 'png', cert: CertStatus) {
+export async function saveCert(ext: 'gif' | 'png', cert: CertStatus) {
   const url = certUrl(ext);
   const name = `gali-founding-miner${cert.claim ? '-' + pad4(cert.claim.serial) : ''}.${ext}`;
   try {
@@ -54,7 +54,7 @@ async function saveCert(ext: 'gif' | 'png', cert: CertStatus) {
 }
 
 /** Post on X. A phone browser that can share files attaches the GIF; otherwise X opens with the text and link. */
-async function postOnX(cert: CertStatus) {
+export async function postOnX(cert: CertStatus) {
   const text = postText(cert);
   const link = 'https://gali.lol';
   if (Platform.OS === 'web') {
