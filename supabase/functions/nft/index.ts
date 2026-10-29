@@ -25,6 +25,7 @@ import { createUmi } from 'npm:@metaplex-foundation/umi-bundle-defaults@1.6.0';
 import { createNoopSigner, createSignerFromKeypair, generateSigner, publicKey, signerIdentity } from 'npm:@metaplex-foundation/umi@1.6.0';
 import { create, mplCore } from 'npm:@metaplex-foundation/mpl-core@1.10.0';
 import { isWallet, readPass } from '../_shared/pass.ts';
+import { minerAddress } from '../_shared/ore.ts';
 
 const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 const cors = {
@@ -45,57 +46,75 @@ const BETA_START = Date.parse(Deno.env.get('CERT_BETA_START') ?? '2026-10-01T00:
 const BETA_END = Deno.env.get('CERT_BETA_END') ? Date.parse(Deno.env.get('CERT_BETA_END')!) : Infinity;
 const RESCAN_MS = 5 * 60_000;
 const RESERVE_MS = 3 * 60_000;
-const MAX_SIGS = 2000;
+/** Time one call may spend reading history; a long history carries on in the next call. */
+const SCAN_BUDGET_MS = 20_000;
+const SCAN_CONCURRENCY = 4;
 
 const rpcUrl = () => {
   const u = Deno.env.get('SOLANA_RPC');
   if (!u) throw new Error('SOLANA_RPC is not set');
   return u;
 };
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** One RPC call. A busy provider (429, or a non-JSON reply) is retried with a growing wait. */
 async function rpc<T>(method: string, params: unknown): Promise<T> {
-  const r = await fetch(rpcUrl(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
-  const j = await r.json();
-  if (j.error) throw new Error(j.error.message);
-  return j.result as T;
+  for (let attempt = 0; ; attempt++) {
+    const r = await fetch(rpcUrl(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
+    const text = await r.text();
+    let j: { error?: { message?: string; code?: number }; result?: T } | null = null;
+    try {
+      j = JSON.parse(text);
+    } catch {
+      j = null;
+    }
+    const busy = r.status === 429 || !j || j.error?.code === 429 || /rate limit|too many/i.test(j?.error?.message ?? '');
+    if (busy && attempt < 5) {
+      await sleep(600 * (attempt + 1) + Math.random() * 300);
+      continue;
+    }
+    if (!j) throw new Error(`RPC ${method}: ${r.status} ${text.slice(0, 60)}`);
+    if (j.error) throw new Error(j.error.message ?? 'RPC error');
+    return j.result as T;
+  }
 }
-/** Many calls in one request (Helius takes JSON-RPC batches). */
-async function rpcBatch<T>(calls: { method: string; params: unknown }[]): Promise<(T | null)[]> {
-  if (!calls.length) return [];
-  const r = await fetch(rpcUrl(), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(calls.map((c, i) => ({ jsonrpc: '2.0', id: i, method: c.method, params: c.params }))),
-  });
-  const j = (await r.json()) as { id: number; result?: T }[];
-  const out: (T | null)[] = calls.map(() => null);
-  for (const e of j) out[e.id] = e.result ?? null;
-  return out;
+/** Run `fn` over `items`, a few at a time. */
+async function pool<I>(items: I[], n: number, fn: (it: I) => Promise<void>) {
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (i < items.length) await fn(items[i++]);
+  }));
 }
 
 type Sig = { signature: string; blockTime: number | null; err: unknown };
 type Tx = { transaction: { message: { accountKeys: string[]; instructions: { programIdIndex: number; accounts: number[]; data: string }[] } }; meta: { loadedAddresses?: { writable: string[]; readonly: string[] } } | null } | null;
 
-/** Scan the wallet's history for ORE deploys in the beta window. Incremental: only new signatures after the last scan. */
+/**
+ * Count the wallet's ORE rounds in the beta window. Reads the history of the wallet's ORE Miner account (only ORE
+ * touches it, so it is far shorter than the wallet's own history) and keeps every Deploy that names the wallet as
+ * authority. A long history is read over several calls: `scan_cursor` marks where the last call stopped, `pass_top` the
+ * newest signature of the pass in progress, `last_sig` the newest one a finished pass has covered.
+ */
 async function scan(wallet: string) {
   const { data: row } = await db.from('founding_miners').select('*').eq('wallet', wallet).maybeSingle();
-  if (row && Date.now() - Date.parse(row.scanned_at) < RESCAN_MS) return row;
+  if (row?.done && Date.now() - Date.parse(row.scanned_at) < RESCAN_MS) return row;
+  const started = Date.now();
+  const miner = await minerAddress(wallet);
   const keys = new Set<string>(row?.round_keys ?? []);
   let first = row?.first_at ? Date.parse(row.first_at) : Infinity;
-  const sigs: Sig[] = [];
-  let before: string | undefined;
-  while (sigs.length < MAX_SIGS) {
-    const page = await rpc<Sig[]>('getSignaturesForAddress', [wallet, { limit: 1000, before, until: row?.last_sig ?? undefined }]);
-    if (!page.length) break;
-    sigs.push(...page);
-    const oldest = page[page.length - 1];
-    if (page.length < 1000 || (oldest.blockTime ?? 0) * 1000 < BETA_START) break;
-    before = oldest.signature;
-  }
-  const want = sigs.filter((s) => !s.err && s.blockTime && s.blockTime * 1000 >= BETA_START && s.blockTime * 1000 <= BETA_END);
-  for (let i = 0; i < want.length; i += 50) {
-    const chunk = want.slice(i, i + 50);
-    const txs = await rpcBatch<Tx>(chunk.map((s) => ({ method: 'getTransaction', params: [s.signature, { encoding: 'json', maxSupportedTransactionVersion: 0, commitment: 'confirmed' }] })));
-    txs.forEach((tx, k) => {
+  let cursor: string | null = row && !row.done ? row.scan_cursor ?? null : null;
+  let top: string | null = row && !row.done ? row.pass_top ?? null : null;
+  const until = row?.last_sig ?? undefined;
+  let done = false;
+  while (Date.now() - started < SCAN_BUDGET_MS) {
+    const page = await rpc<Sig[]>('getSignaturesForAddress', [miner, { limit: 200, before: cursor ?? undefined, until }]);
+    if (!top) top = page[0]?.signature ?? until ?? null;
+    if (!page.length) {
+      done = true;
+      break;
+    }
+    const want = page.filter((s) => !s.err && s.blockTime && s.blockTime * 1000 >= BETA_START && s.blockTime * 1000 <= BETA_END);
+    await pool(want, SCAN_CONCURRENCY, async (sg) => {
+      const tx = await rpc<Tx>('getTransaction', [sg.signature, { encoding: 'json', maxSupportedTransactionVersion: 0, commitment: 'confirmed' }]);
       if (!tx) return;
       const m = tx.transaction.message;
       const all = [...m.accountKeys, ...(tx.meta?.loadedAddresses?.writable ?? []), ...(tx.meta?.loadedAddresses?.readonly ?? [])];
@@ -105,16 +124,25 @@ async function scan(wallet: string) {
         // Deploy: [signer, authority, automation, board, config, miner, round, ...]
         if (data[0] !== DEPLOY || all[ix.accounts[1]] !== wallet) continue;
         keys.add(all[ix.accounts[6]]);
-        first = Math.min(first, chunk[k].blockTime! * 1000);
+        first = Math.min(first, sg.blockTime! * 1000);
       }
     });
+    cursor = page[page.length - 1].signature;
+    const oldest = (page[page.length - 1].blockTime ?? 0) * 1000;
+    if (page.length < 200 || oldest < BETA_START) {
+      done = true;
+      break;
+    }
   }
   const next = {
     wallet,
     rounds: keys.size,
-    round_keys: [...keys].slice(-5000),
+    round_keys: [...keys].slice(-20000),
     first_at: Number.isFinite(first) ? new Date(first).toISOString() : null,
-    last_sig: sigs[0]?.signature ?? row?.last_sig ?? null,
+    last_sig: done ? top ?? row?.last_sig ?? null : row?.last_sig ?? null,
+    pass_top: done ? null : top,
+    scan_cursor: done ? null : cursor,
+    done,
     scanned_at: new Date().toISOString(),
   };
   await db.from('founding_miners').upsert(next);
@@ -127,7 +155,7 @@ async function status(wallet: string) {
   if (claim?.status === 'minted') return { eligible: true, rounds: claim.rounds, firstAt: claim.first_at, name: miner?.name ?? null, claim, open: mintOpen() };
   if (!miner) return { eligible: false, reason: 'not-a-gali-miner', rounds: 0, firstAt: null, claim: null, open: mintOpen() };
   const s = await scan(wallet);
-  return { eligible: s.rounds > 0, reason: s.rounds > 0 ? null : 'no-beta-rounds', rounds: s.rounds, firstAt: s.first_at, name: miner.name, claim: claim ?? null, open: mintOpen() };
+  return { eligible: s.rounds > 0, reason: s.rounds > 0 ? null : s.done ? 'no-beta-rounds' : 'counting', counting: !s.done, rounds: s.rounds, firstAt: s.first_at, name: miner.name, claim: claim ?? null, open: mintOpen() };
 }
 
 const mintOpen = () => Boolean(Deno.env.get('CERT_AUTHORITY') && Deno.env.get('CERT_COLLECTION')) && Date.now() <= BETA_END + 30 * 86_400_000;
@@ -173,6 +201,7 @@ async function uploadMeta(serial: number, name: string | null, rounds: number, f
 async function build(wallet: string) {
   if (!mintOpen()) return reply(409, { error: 'The certificate mint is not open yet.' });
   const st = await status(wallet);
+  if ((st as { counting?: boolean }).counting) return reply(409, { error: 'Still counting your beta rounds. Try again in a minute.' });
   if (!st.eligible) return reply(403, { error: 'This wallet did not mine a live round in the closed beta.' });
   if (st.claim?.status === 'minted') return reply(409, { error: 'Already claimed', claim: st.claim });
 

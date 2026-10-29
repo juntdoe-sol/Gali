@@ -15,6 +15,10 @@ create table if not exists public.founding_miners (
   last_sig text,
   scanned_at timestamptz not null default now()
 );
+-- a long history is read over several calls (see supabase/functions/nft scan())
+alter table public.founding_miners add column if not exists pass_top text;
+alter table public.founding_miners add column if not exists scan_cursor text;
+alter table public.founding_miners add column if not exists done boolean not null default false;
 
 create table if not exists public.cert_claims (
   serial int generated always as identity primary key,
