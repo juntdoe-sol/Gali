@@ -22,7 +22,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import bs58 from 'npm:bs58@6';
 import { createUmi } from 'npm:@metaplex-foundation/umi-bundle-defaults@1.6.0';
-import { createNoopSigner, createSignerFromKeypair, generateSigner, publicKey, signerIdentity } from 'npm:@metaplex-foundation/umi@1.6.0';
+import { createNoopSigner, createSignerFromKeypair, generateSigner, publicKey, signerIdentity, transactionBuilder } from 'npm:@metaplex-foundation/umi@1.6.0';
 import { create, mplCore } from 'npm:@metaplex-foundation/mpl-core@1.10.0';
 import { isWallet, readPass } from '../_shared/pass.ts';
 import { minerAddress } from '../_shared/ore.ts';
@@ -160,6 +160,25 @@ async function status(wallet: string) {
 }
 
 const mintOpen = () => Boolean(Deno.env.get('CERT_AUTHORITY') && Deno.env.get('CERT_COLLECTION')) && Date.now() <= BETA_END + 30 * 86_400_000;
+/**
+ * A priority fee, so the mint lands when mainnet is busy (the game's own transactions carry one too; without it the
+ * network dropped the first claims). Compute budget: price per compute unit, and a unit limit sized for a Core create.
+ */
+const PRIORITY_MICROLAMPORTS = Number(Deno.env.get('CERT_PRIORITY_MICROLAMPORTS') ?? 200_000);
+const CU_LIMIT = 200_000;
+const COMPUTE_BUDGET = publicKey('ComputeBudget111111111111111111111111111111');
+function computeBudget() {
+  const price = new Uint8Array(9);
+  price[0] = 3;
+  new DataView(price.buffer).setBigUint64(1, BigInt(PRIORITY_MICROLAMPORTS), true);
+  const limit = new Uint8Array(5);
+  limit[0] = 2;
+  new DataView(limit.buffer).setUint32(1, CU_LIMIT, true);
+  return transactionBuilder()
+    .add({ instruction: { programId: COMPUTE_BUDGET, keys: [], data: limit }, signers: [], bytesCreatedOnChain: 0 })
+    .add({ instruction: { programId: COMPUTE_BUDGET, keys: [], data: price }, signers: [], bytesCreatedOnChain: 0 });
+}
+
 const pad = (n: number) => String(n).padStart(4, '0');
 const day = (iso: string | null) => (iso ? new Date(iso).toISOString().slice(0, 10) : '');
 
@@ -227,7 +246,7 @@ async function build(wallet: string) {
   const miner = createNoopSigner(publicKey(wallet));
   const collection = { publicKey: publicKey(Deno.env.get('CERT_COLLECTION')!), updateAuthority: auth.publicKey };
   const bh = await umi.rpc.getLatestBlockhash({ commitment: 'confirmed' });
-  const tx = await create(umi, {
+  const tx = await computeBudget().add(create(umi, {
     asset,
     collection,
     owner: miner.publicKey,
@@ -248,7 +267,7 @@ async function build(wallet: string) {
         ],
       },
     ],
-  })
+  }))
     .setFeePayer(miner)
     .setVersion('legacy')
     .setBlockhash(bh)
