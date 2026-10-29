@@ -11,7 +11,7 @@ import { useName } from '../game/username';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { BLOCKS, CAVE_IN_EVERY, GEAR, LOCK_MS, gearByKey, levelFromXp, type Gear } from '../game/constants';
-import { play, type Sound } from '../game/sfx';
+import { play, playDirt, type Sound } from '../game/sfx';
 import { oreLive } from '../chain/light';
 import { isLive, isOnChain, LIVE_LOCK_MS, roundEndsAt, soloOf, useGame } from '../game/store';
 import { clearBots, ensureBots, EMOTES, publishMe, startWorld, stopWorld, thinkBots, useWorld, type Avatar } from '../game/world';
@@ -286,7 +286,8 @@ export default function PixelMine() {
         st.bonkMole();
         break;
       case 'sfx':
-        if (SFX[e.name]) play(SFX[e.name]);
+        if (e.name === 'soil') playDirt();
+        else if (SFX[e.name]) play(SFX[e.name]);
         break;
       case 'peer':
         useWorld.getState().setFocus(e.id);

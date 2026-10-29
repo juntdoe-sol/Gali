@@ -451,7 +451,7 @@ export function newVisit(now: number): Visit {
  * Draw the scene into screen space: `ox, oy` is the scene origin in device px,
  * `s` device px per art pixel. Returns the lights for the lightmap.
  */
-export function drawScene(c: Ctx, sc: Scene, v: Visit, st: CloseupState, ox: number, oy: number, s: number, parts: Particles, sfx: (n: 'hit' | 'crack') => void) {
+export function drawScene(c: Ctx, sc: Scene, v: Visit, st: CloseupState, ox: number, oy: number, s: number, parts: Particles, sfx: (n: 'hit' | 'crack' | 'soil') => void) {
   const lights: { x: number; y: number; r: number; c: string; k: number }[] = [];
   const now = st.now;
   const P = (x: number) => Math.round(ox + x * s);
@@ -651,7 +651,7 @@ export function drawScene(c: Ctx, sc: Scene, v: Visit, st: CloseupState, ox: num
     if (f >= HIT_FRAME && sc.lastHit !== cycle) {
       sc.lastHit = cycle;
       onHit(me.x + 6, GAL_BOT - 2, st.look);
-      sfx('hit');
+      sfx('soil');
     }
   } else {
     if (me.pose !== 'idle' && me.pose !== 'cheer') {

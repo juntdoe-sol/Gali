@@ -111,7 +111,7 @@ export type EngineEvent =
   | { t: 'focus'; claim: number }
   | { t: 'toggle'; claim: number }
   | { t: 'bonk' }
-  | { t: 'sfx'; name: 'hit' | 'pop' | 'crack' | 'select' | 'deselect' | 'whoosh' | 'bonk' }
+  | { t: 'sfx'; name: 'hit' | 'pop' | 'crack' | 'select' | 'deselect' | 'whoosh' | 'bonk' | 'soil' }
   | { t: 'me'; x: number; y: number; tx: number; ty: number; facing: 1 | -1; pose: Pose }
   | { t: 'peer'; id: string }
   | { t: 'emote' }

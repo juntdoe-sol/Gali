@@ -11,7 +11,8 @@ import { CATS, loadGear, RARITIES, RARITY_HUE, type GearBook, type GearItem } fr
 import { useMarket } from '../game/market';
 import { useNft } from '../game/nft';
 import { play } from '../game/sfx';
-import { GearSprite } from './GearSprite';
+import { GearSprite, TryOnSprite } from './GearSprite';
+import { useName } from '../game/username';
 import { Btn, Choice, Frame, IconBtn, PixelBox, T } from './kit';
 import { useLayout } from './layout';
 import { PixIcon } from './PixIcon';
@@ -129,11 +130,28 @@ function Detail({ it, wide, onClose }: { it: GearItem; wide: boolean; onClose: (
   const cert = useNft((s) => s.cert);
   const openClaim = useNft((s) => s.openPopup);
   const jarl = it.supply === 'claim';
+  const sex = useName((s) => s.sex) === 'f' ? 'f' : 'm';
+  const [tryOn, setTryOn] = useState(true);
   return (
-    <PixelBox fill="rgba(7,13,32,0.96)" hi={hue} lo="#04060f" style={[styles.detail, wide ? { width: 300 } : { maxHeight: 330 }]}>
+    <PixelBox fill="rgba(7,13,32,0.96)" hi={hue} lo="#04060f" style={[styles.detail, wide ? { width: 300 } : { maxHeight: 360 }]}>
       <ScrollView contentContainerStyle={{ padding: 14, gap: 8, alignItems: 'center' }}>
         <View style={[styles.stageBig, { borderColor: hue }]}>
-          <GearSprite item={it} scale={4} animate />
+          {tryOn ? (
+            <View style={{ marginTop: -60 }}>
+              <TryOnSprite item={it} sex={sex} scale={4} />
+            </View>
+          ) : (
+            <GearSprite item={it} scale={4} animate />
+          )}
+          <View style={styles.tryTag}>
+            <T v="display" style={{ fontSize: 11, lineHeight: 12, color: '#070d20', letterSpacing: 0.6 }}>
+              {tryOn ? 'ON YOUR MINER' : 'ITEM'}
+            </T>
+          </View>
+        </View>
+        <View style={{ flexDirection: 'row', gap: 6 }}>
+          <Choice grow={false} label="TRY ON" on={tryOn} onPress={() => setTryOn(true)} />
+          <Choice grow={false} label="ITEM" on={!tryOn} onPress={() => setTryOn(false)} />
         </View>
         <T v="display" style={{ fontSize: 24, lineHeight: 26, textAlign: 'center' }}>
           {it.name}
@@ -177,7 +195,8 @@ const styles = StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, padding: 16, justifyContent: 'flex-start' },
   card: { width: 112, padding: 8, gap: 4, alignItems: 'center' },
   stage: { width: 84, height: 84, alignItems: 'center', justifyContent: 'center' },
-  stageBig: { width: 172, height: 172, alignItems: 'center', justifyContent: 'center', backgroundColor: '#120c1e', borderWidth: 2 },
+  stageBig: { width: 172, height: 172, alignItems: 'center', justifyContent: 'center', backgroundColor: '#120c1e', borderWidth: 2, overflow: 'hidden' },
+  tryTag: { position: 'absolute', left: 4, top: 4, backgroundColor: COLORS.teal, paddingHorizontal: 5, paddingVertical: 2 },
   name: { fontSize: 13, lineHeight: 15, textAlign: 'center', minHeight: 30 },
   detail: { margin: 10 },
   soon: { backgroundColor: COLORS.gold, paddingHorizontal: 10, paddingVertical: 4 },

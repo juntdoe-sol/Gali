@@ -2,9 +2,11 @@
  * The Founding Miner certificate: the popup that tells a closed-beta miner they qualify and mints the NFT,
  * and the card the inventory shows once it is theirs.
  */
-import { Image, Linking, Modal, Platform, StyleSheet, View } from 'react-native';
+import { Image, Linking, Modal, Platform, Share, StyleSheet, View } from 'react-native';
 import { COLORS } from '../game/constants';
 import { fmtDay, useNft, type CertStatus } from '../game/nft';
+import { useGame } from '../game/store';
+import { restBase } from '../game/world';
 import { Btn, Frame, PixelBox, Scrim, T } from './kit';
 
 const CARD = Platform.OS === 'web' ? require('../../assets/market/founding-miner.gif') : require('../../assets/market/founding-miner.png');
@@ -18,6 +20,69 @@ const STEP: Record<string, string> = {
 /** The animated certificate card, 16:9. */
 export function CertCard({ width }: { width: number }) {
   return <Image source={CARD} style={{ width, height: Math.round((width * 9) / 16), imageRendering: 'pixelated' } as never} fadeDuration={0} accessibilityLabel="Founding Miner certificate" />;
+}
+
+/** The certificate images, as the Founding Miner collection serves them. */
+const certUrl = (ext: 'gif' | 'png') => `${restBase()}/storage/v1/object/public/gali-nft/cert/founding-miner.${ext}`;
+const pad4 = (n: number) => String(n).padStart(4, '0');
+
+function postText(cert: CertStatus) {
+  const serial = cert.claim ? ` #${pad4(cert.claim.serial)}` : '';
+  return `I'm Gali Founding Miner${serial}. I mined ${cert.rounds} ORE rounds on Gali Island in the closed beta, and my Legendary Jarl Helmet unlocks when the Gali NFT market opens. @Gali_Game`;
+}
+
+/** Save the certificate image: a real download in the browser, the share sheet on a phone app. */
+async function saveCert(ext: 'gif' | 'png', cert: CertStatus) {
+  const url = certUrl(ext);
+  const name = `gali-founding-miner${cert.claim ? '-' + pad4(cert.claim.serial) : ''}.${ext}`;
+  try {
+    if (Platform.OS === 'web') {
+      const blob = await (await fetch(url)).blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    } else {
+      await Share.share({ url, message: url, title: name });
+    }
+  } catch {
+    useGame.getState().toast("Couldn't save the image. Try again", 'bad');
+  }
+}
+
+/** Post on X. A phone browser that can share files attaches the GIF; otherwise X opens with the text and link. */
+async function postOnX(cert: CertStatus) {
+  const text = postText(cert);
+  const link = 'https://gali.lol';
+  if (Platform.OS === 'web') {
+    try {
+      const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
+      const blob = await (await fetch(certUrl('gif'))).blob();
+      const file = new File([blob], 'gali-founding-miner.gif', { type: 'image/gif' });
+      if (nav.canShare?.({ files: [file] }) && /Android|iPhone|iPad/i.test(navigator.userAgent)) {
+        await nav.share({ files: [file], text: `${text} ${link}` });
+        return;
+      }
+    } catch {
+      /* fall through to the intent */
+    }
+    useGame.getState().toast('Tip: save the GIF first, then attach it to your post', 'info');
+  }
+  void Linking.openURL(`https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(link)}`);
+}
+
+/** Save GIF, Save PNG and Post on X, for a minted certificate. */
+export function CertShare({ cert }: { cert: CertStatus }) {
+  return (
+    <View style={styles.share}>
+      <Btn kind="plain" small label="SAVE GIF" onPress={() => void saveCert('gif', cert)} style={{ flex: 1 }} />
+      <Btn kind="plain" small label="SAVE PNG" onPress={() => void saveCert('png', cert)} style={{ flex: 1 }} />
+      <Btn kind="teal" small label="POST ON X" onPress={() => void postOnX(cert)} style={{ flex: 1.3 }} />
+    </View>
+  );
 }
 
 function Stats({ cert }: { cert: CertStatus }) {
@@ -58,6 +123,7 @@ export function CertClaimPopup() {
           {done ? (
             <>
               <T style={{ textAlign: 'center' }}>Your certificate is in your wallet. It claims the Legendary Jarl Helmet when the Gali NFT market opens.</T>
+              <CertShare cert={cert} />
               <Btn kind="ghost" label="VIEW ON SOLSCAN" onPress={() => void Linking.openURL(`https://solscan.io/token/${minted ?? cert.claim?.asset}`)} />
               <Btn kind="gold" label="NICE" onPress={later} />
             </>
@@ -95,4 +161,5 @@ const styles = StyleSheet.create({
   box: { width: 400, maxWidth: '100%', padding: 18, gap: 10, alignItems: 'center' },
   stats: { flexDirection: 'row', gap: 8, alignSelf: 'stretch' },
   stat: { flex: 1, alignItems: 'center', backgroundColor: 'rgba(4,6,15,0.55)', paddingVertical: 6 },
+  share: { flexDirection: 'row', gap: 6, alignSelf: 'stretch' },
 });

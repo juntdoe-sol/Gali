@@ -84,6 +84,10 @@ const SOURCES = {
   select: require('../../assets/sfx/select.wav'),
   deselect: require('../../assets/sfx/deselect.wav'),
   dig: require('../../assets/sfx/dig.wav'),
+  // soft digging for mining swings, three takes (scripts/sfx/soft-dig.py)
+  dirt0: require('../../assets/sfx/dirt-0.wav'),
+  dirt1: require('../../assets/sfx/dirt-1.wav'),
+  dirt2: require('../../assets/sfx/dirt-2.wav'),
   tick: require('../../assets/sfx/tick.wav'),
   rumble: require('../../assets/sfx/rumble.wav'),
   crack: require('../../assets/sfx/crack.wav'),
@@ -209,6 +213,15 @@ function start(p: AudioPlayer) {
   } catch {
     /* ignore */
   }
+}
+
+let lastDirt = -1;
+/** One soft dig, never the same take twice in a row. */
+export function playDirt() {
+  let k = Math.floor(Math.random() * 3);
+  if (k === lastDirt) k = (k + 1) % 3;
+  lastDirt = k;
+  play((['dirt0', 'dirt1', 'dirt2'] as const)[k]);
 }
 
 export function play(s: Sound) {
