@@ -222,7 +222,8 @@ export function ledgerOf(env) {
   const url = typeof env?.SUPABASE_URL === 'string' ? env.SUPABASE_URL.replace(/\/$/, '') : '';
   const key = env?.SUPABASE_SERVICE_KEY;
   if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(url) || typeof key !== 'string' || key.length < 20) throw new Error('arcade ledger not configured');
-  const headers = { apikey: key, authorization: `Bearer ${key}`, 'content-type': 'application/json' };
+  // the new sb_secret_ keys go in apikey only; a Bearer header must be a JWT, so only legacy eyJ keys send one
+  const headers = { apikey: key, 'content-type': 'application/json', ...(key.startsWith('eyJ') ? { authorization: `Bearer ${key}` } : {}) };
   async function rest(path, init = {}) {
     const res = await fetch(`${url}/rest/v1/${path}`, { ...init, headers: { ...headers, ...(init.headers ?? {}) } });
     if (!res.ok) throw new Error('ledger unavailable');
