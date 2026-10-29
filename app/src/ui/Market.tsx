@@ -111,7 +111,6 @@ function MarketBody({ wide, bottomPad }: { wide: boolean; bottomPad: number }) {
         <T v="display" numberOfLines={1} style={{ fontSize: wide ? 30 : 24, lineHeight: wide ? 30 : 24, letterSpacing: 2, color: COLORS.text }}>
           GEAR <T v="display" style={{ fontSize: wide ? 30 : 24, lineHeight: wide ? 30 : 24, color: COLORS.teal }}>MARKET</T>
         </T>
-        {wide ? <Prompt text={`gali://market  ${book ? book.items.length : '...'} items  drop 01  status: pre-mint  gear changes looks, never the odds`} /> : null}
       </View>
       {wide ? switcher : null}
       <IconBtn onPress={hide} label="Close" kbd="ESC">
@@ -125,7 +124,7 @@ function MarketBody({ wide, bottomPad }: { wide: boolean; bottomPad: number }) {
     <>
       {head}
       <View style={styles.subHead}>
-        <Prompt text="pre-mint · drop 01" style={{ flex: 1 }} />
+        <View style={{ flex: 1 }} />
         {switcher}
       </View>
     </>
@@ -503,7 +502,6 @@ function Spec({ it, tryOn, setTryOn, n, of, style, book, onJump }: { it: GearIte
             </T>
           </View>
         </Readout>
-        <Readout k="EFFECT" v="COSMETIC ONLY" color={TECH.dim} />
         {set.length > 1 ? (
           <View style={{ gap: 4 }}>
             <T v="tiny" style={{ fontSize: 9, color: TECH.dim, letterSpacing: 1 }}>
