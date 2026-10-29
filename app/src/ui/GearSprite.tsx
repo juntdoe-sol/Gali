@@ -4,7 +4,7 @@
  */
 import { useEffect, useState } from 'react';
 import { Image, View, type ImageStyle } from 'react-native';
-import { ANIM, ANIM_SIZE, CELL, COLS, THUMBS, THUMBS_SIZE, type GearItem } from '../game/gear555';
+import { ANIM, ANIM_SIZE, CELL, COLS, THUMBS, THUMBS_SIZE, TRYON, TRYON_CELL, TRYON_SIZE, type GearItem } from '../game/gear555';
 
 const PIX = { imageRendering: 'pixelated' } as ImageStyle;
 /** One shared clock for every animated card, so a grid of Legendaries stays in step. */
@@ -42,6 +42,18 @@ export function GearSprite({ item, scale = 2, animate = false }: { item: GearIte
         fadeDuration={0}
         style={[{ position: 'absolute', left: -x * scale, top: -y * scale, width: size[0] * scale, height: size[1] * scale }, PIX]}
       />
+    </View>
+  );
+}
+
+/** Your miner wearing one item (the Market's TRY ON): the boy or girl miner, idle, cut from the try-on sheet. */
+export function TryOnSprite({ item, sex, scale = 3 }: { item: GearItem; sex: 'm' | 'f'; scale?: number }) {
+  const [cw, ch] = TRYON_CELL;
+  const x = (item.thumb % COLS) * cw;
+  const y = Math.floor(item.thumb / COLS) * ch;
+  return (
+    <View style={{ width: cw * scale, height: ch * scale, overflow: 'hidden' }} accessibilityLabel={`Your miner wearing ${item.name}`}>
+      <Image source={TRYON[sex]} fadeDuration={0} style={[{ position: 'absolute', left: -x * scale, top: -y * scale, width: TRYON_SIZE[0] * scale, height: TRYON_SIZE[1] * scale }, PIX]} />
     </View>
   );
 }

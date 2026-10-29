@@ -124,7 +124,29 @@ for i, x in enumerate(cat):
     if i % 50 == 0:
         print(i, x['id'], flush=True)
 
+# Try-on: every item worn by the full-colour miner (boy and girl), idle frame, 40x56 cells, 24 per row.
+# Pets stand beside a miner in starter gear. The Market's TRY ON shows these.
+TW, TH = kit.CW, kit.CH
+for sex in ('m', 'f'):
+    sheet = Image.new('RGBA', (TW * COLS, TH * math.ceil(len(cat) / COLS)), (0, 0, 0, 0))
+    for i, x in enumerate(cat):
+        key, fn = fns[x['id']]
+        if key == 'pet':
+            img, _ = kit.render({}, 'idle', 0, female=sex == 'f')
+            body = img.crop((6, 0, TW - 6, TH))
+            cell = Image.new('RGBA', (TW, TH), (0, 0, 0, 0))
+            cell.alpha_composite(body.resize((body.width * 3 // 4, body.height * 3 // 4), Image.NEAREST), (0, TH // 4 - 2))
+            pet = fn(0)
+            k = 1 if pet.width > 20 or pet.height > 22 else 1
+            cell.alpha_composite(pet, (max(0, TW - pet.width), max(0, TH - 3 - pet.height)))
+        else:
+            gear = {key: piece(key, fn)}
+            cell, _ = kit.render(gear, 'idle', 0, female=sex == 'f')
+        sheet.alpha_composite(cell, ((i % COLS) * TW, (i // COLS) * TH))
+    sheet.save(f'{OUT}/gear-tryon-{sex}.png', optimize=True)
+    print('tryon', sex, sheet.size)
+
 thumbs.save(f'{OUT}/gear-thumbs.png', optimize=True)
 anim.save(f'{OUT}/gear-anim.png', optimize=True)
-json.dump(dict(cell=[CW, CHH], cols=COLS, animFrames=8, items=items), open(f'{OUT}/gear555.json', 'w'), separators=(',', ':'))
+json.dump(dict(cell=[CW, CHH], tryon=[kit.CW, kit.CH], cols=COLS, animFrames=8, items=items), open(f'{OUT}/gear555.json', 'w'), separators=(',', ':'))
 print('done', len(items), 'legend rows', ai, thumbs.size, anim.size)

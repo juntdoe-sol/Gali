@@ -767,7 +767,8 @@ export class Engine {
         me.swings++;
         this.hits.set(me.target, now);
         if (this.mode === 'island') {
-          this.emit({ t: 'sfx', name: 'hit' });
+          // a soft dig, not the sharp hit: it plays on every swing while mining
+          this.emit({ t: 'sfx', name: 'soil' });
           this.impact(me.x + (IMPACT[0] - ACTORS.miner.ax) * me.facing, me.y, s?.me.look ?? DEFAULT_LOOK);
         }
       }

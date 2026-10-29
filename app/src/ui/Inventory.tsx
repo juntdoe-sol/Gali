@@ -14,7 +14,7 @@ import { PART, PARTS, PARTS_H, PARTS_W, partCell } from '../game/minerParts';
 import { fmtDay, useNft } from '../game/nft';
 import { useGame, useOwnedMask } from '../game/store';
 import { useName } from '../game/username';
-import { CertCard } from './CertClaim';
+import { CertCard, CertShare } from './CertClaim';
 import { Btn, Card, PixelBox, T } from './kit';
 import { PixIcon } from './PixIcon';
 import type { PixName } from './pixIcons';
@@ -171,6 +171,7 @@ export function Inventory() {
             {cert ? `${cert.rounds} beta rounds · first dig ${fmtDay(cert.firstAt)} · soulbound` : 'Soulbound'}
           </T>
           <T style={{ textAlign: 'center' }}>Claims the Legendary Jarl Helmet when the Gali NFT market opens.</T>
+          {cert ? <CertShare cert={cert} /> : null}
         </PixelBox>
       ) : cert?.eligible ? (
         <Card glow={COLORS.gold}>
