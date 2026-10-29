@@ -57,7 +57,8 @@ if (bal.basisPoints < sol(0.02).basisPoints) {
 async function put(path, body, type) {
   const r = await fetch(`${SB}/storage/v1/object/gali-nft/${path}`, {
     method: 'POST',
-    headers: { authorization: `Bearer ${KEY}`, 'content-type': type, 'x-upsert': 'true' },
+    // new sb_secret_ keys go in `apikey` only; legacy service_role JWTs also go as Bearer
+    headers: { apikey: KEY, ...(KEY.startsWith('eyJ') ? { authorization: `Bearer ${KEY}` } : {}), 'content-type': type, 'x-upsert': 'true' },
     body,
   });
   if (!r.ok) throw new Error(`upload ${path}: ${r.status} ${await r.text()}`);
