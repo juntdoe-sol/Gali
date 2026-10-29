@@ -189,24 +189,27 @@ export async function call(env, method, params = [], ms = 4500) {
   const list = providers(env);
   if (!list.length) throw new Error('RPC unavailable');
   let last = new Error('RPC unavailable');
+  const why = []; // each provider's failure, so an outage names its cause
   for (const [i, url] of list.entries()) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), list.length > 1 && i === 0 ? ms : ms + 2500);
     try {
       const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: controller.signal });
-      if (!res.ok) { last = new Error('RPC unavailable'); continue; }
+      if (!res.ok) { why.push(`${i ? 'backup' : 'main'} ${res.status}`); last = new Error(`RPC unavailable (${why.join('; ')})`); continue; }
       const json = await res.json();
       if (json.error) {
         const e = new Error(String(json.error.message || 'rpc error').slice(0, 300));
         e.rpc = true;
         if (method === 'sendTransaction') throw e; // a refused transaction is an answer, not an outage
+        why.push(`${i ? 'backup' : 'main'} said: ${e.message.slice(0, 80)}`);
         last = e;
         continue;
       }
       return json.result;
     } catch (e) {
       if (e?.rpc) throw e;
-      last = new Error('RPC unavailable');
+      why.push(`${i ? 'backup' : 'main'} ${e?.name === 'AbortError' ? 'timeout' : String(e?.message || e).slice(0, 60)}`);
+      last = new Error(`RPC unavailable (${why.join('; ')})`);
     } finally { clearTimeout(timer); }
   }
   throw last;
