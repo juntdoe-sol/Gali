@@ -27,7 +27,7 @@ const TABS: { id: DockTab; label: string }[] = [
   { id: 'pro', label: 'PRO' },
 ];
 
-export function Dock({ embedded }: { embedded?: boolean } = {}) {
+export function Dock({ embedded, noUnclaimed }: { embedded?: boolean; noUnclaimed?: boolean } = {}) {
   const insets = useSafeAreaInsets();
   const tab = useGame((s) => s.dockTab);
   const run = useGame((s) => s.run);
@@ -95,7 +95,7 @@ export function Dock({ embedded }: { embedded?: boolean } = {}) {
     return (
       <View style={styles.embedded}>
         {head}
-        <UnclaimedRow />
+        {noUnclaimed ? null : <UnclaimedRow />}
         {tab === 'lite' ? <DeskLite /> : <DeskPro />}
       </View>
     );
@@ -133,7 +133,7 @@ const LIVE_INFO =
   "Only the gold spot mines ORE: split by SOL there, or all to one miner on a ★ solo spot, with odds equal to their share. ORE keeps 1% of every spot and 10% more of spots that miss. The rest of your SOL comes back to claim. One round in 500 also pays ORE's motherlode, split by SOL on the gold spot.";
 
 /** Unclaimed SOL and SKR from finished rounds, each with its own Claim button. */
-export function UnclaimedRow() {
+export function UnclaimedRow({ boxed }: { boxed?: boolean } = {}) {
   const onChain = useGame(isOnChain);
   const sol = useGame((s) => (onChain ? s.wallet.unclaimed.sol : (s.save.practiceUnclaimedSol ?? 0)));
   const unrefined = useGame((s) => (onChain ? s.wallet.unclaimed.unrefined : (s.save.practiceUnclaimedSkr ?? 0)));
@@ -152,8 +152,8 @@ export function UnclaimedRow() {
   };
   // nothing to claim yet: give the island the room. Any ORE at all shows: one autopilot round can mine well under 0.005
   if (sol < 0.00005 && unrefined + refined <= 0) return null;
-  return (
-    <View style={styles.unclaimed} accessibilityLabel={`Unclaimed ${sol.toFixed(4)} SOL, ${Math.floor(unrefined)} unrefined ORE, ${Math.floor(refined)} refined ORE`}>
+  const body = (
+    <View style={[styles.unclaimed, boxed && styles.unclaimedBoxed]} accessibilityLabel={`Unclaimed ${sol.toFixed(4)} SOL, ${Math.floor(unrefined)} unrefined ORE, ${Math.floor(refined)} refined ORE`}>
       <View style={styles.uRow}>
         <PixIcon name="gift" size={18} />
         <T v="label" style={{ color: COLORS.gold }}>
@@ -179,6 +179,13 @@ export function UnclaimedRow() {
       </View>
       {askHold ? <HoldPrompt unrefined={unrefined} refined={refined} fee={fee} onKeep={() => setAskHold(false)} onClaim={() => { setAskHold(false); void claim('skr'); }} /> : null}
     </View>
+  );
+  if (!boxed) return body;
+  // floating on its own over the map (desktop island): give it a panel of its own
+  return (
+    <PixelBox fill="rgba(15,23,52,0.95)" hi="#33498c" lo="#0c1430" shadow={2} style={{ padding: 8 }}>
+      {body}
+    </PixelBox>
   );
 }
 
@@ -1049,6 +1056,7 @@ const styles = StyleSheet.create({
   inputWrap: { flex: 1, minWidth: 0, marginLeft: 10 },
   input: { width: '100%', minWidth: 0, textAlign: 'right', color: COLORS.gold, fontFamily: F.display, fontSize: 28, paddingVertical: 0, paddingHorizontal: 0, ...WEB_NO_OUTLINE },
   uRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  unclaimedBoxed: { marginBottom: 0 },
   unclaimed: {
     gap: 4,
     paddingHorizontal: 10,
