@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { FEATURE_GALI_PROGRAM } from '../config/features';
 import { Image, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -15,6 +15,8 @@ import { PixIcon } from './PixIcon';
 import type { PixName } from './pixIcons';
 import { GUTTER, LANDSCAPE_APP, RAIL_W, TOP_H, useLayout } from './layout';
 import { HollowBadge } from './Season';
+import { LODE_WORD, lodeTier, useLodeGrowth } from '../game/motherlode';
+import { refreshMarket, useOreStats } from '../game/oreStats';
 
 /** the landscape app's top bar is narrow: numbers keep their width, labels and the address go */
 const TIGHT = LANDSCAPE_APP;
@@ -248,6 +250,11 @@ export function RoundCard({ embedded }: { embedded?: boolean }) {
   const span = useGame(roundSpanMs);
   const pool = useGame((s) => (onChain ? s.wallet.pool : practiceMotherlode(s.roundId)));
   const orePool = useGame((s) => (onChain ? s.wallet.orePool : practiceOreMotherlode(s.roundId)));
+  // a big motherlode turns gold (HUGE also lights the card), and each time it grows the new ORE flashes
+  const tier = liveMode ? lodeTier(orePool) : 'normal';
+  const grew = useLodeGrowth(liveMode ? orePool : 0);
+  const oreUsd = useOreStats((s) => s.market?.oreUsd ?? null);
+  useEffect(() => { if (liveMode) void refreshMarket(); }, [liveMode]);
   const pot = useGame((s) => s.pot);
   const run = useGame((s) => s.run);
   const here = useMinersHere();
@@ -285,7 +292,7 @@ export function RoundCard({ embedded }: { embedded?: boolean }) {
   const timeLabel = syncing ? (liveClockError ? 'BOARD OFFLINE' : 'SYNCING') : idle ? (clockPhase === 'waiting' ? 'FIRST DEPLOY' : 'ROUND SOON') : locking ? 'LOCKED' : 'TIME LEFT';
 
   return (
-    <Frame style={embedded ? styles.roundEmbedded : [styles.round, { top }]} glow={cave ? COLORS.red : undefined}>
+    <Frame style={embedded ? styles.roundEmbedded : [styles.round, { top }]} glow={cave ? COLORS.red : tier === 'huge' ? COLORS.gold : undefined}>
       {embedded ? null : (
         <View
           pointerEvents="none"
@@ -318,10 +325,18 @@ export function RoundCard({ embedded }: { embedded?: boolean }) {
         <BigStat
           icon="ore"
           value={orePool.toFixed(orePool < 100 ? 1 : 0)}
-          label="MOTHERLODE"
-          color={COLORS.teal}
-          sub={liveMode ? undefined : `+${pool >= 1000 ? `${(pool / 1000).toFixed(1)}K` : Math.floor(pool)} SKR POOL`}
-          subColor={COLORS.gold}
+          label={tier === 'normal' ? 'MOTHERLODE' : `${LODE_WORD[tier]} MOTHERLODE`}
+          color={grew ? '#ffffff' : tier === 'normal' ? COLORS.teal : COLORS.gold}
+          sub={
+            liveMode
+              ? grew
+                ? `+${grew.toFixed(grew < 1 ? 2 : 1)} ORE`
+                : oreUsd
+                  ? `≈ $${Math.round(orePool * oreUsd).toLocaleString()}`
+                  : undefined
+              : `+${pool >= 1000 ? `${(pool / 1000).toFixed(1)}K` : Math.floor(pool)} SKR POOL`
+          }
+          subColor={grew ? COLORS.green : COLORS.gold}
         />
         <View style={styles.divider} />
         <BigStat icon="clock" value={timeValue} label={timeLabel} color={timeColor} />
