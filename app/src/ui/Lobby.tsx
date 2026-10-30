@@ -23,6 +23,7 @@ import type { RideView } from '../engine/types';
 import { chatWords, cleanName, LOBBY_CAP, STICKERS, stickerOf, type DoorId } from '../game/lobbyMap';
 import { isOnChain, useGame, useLevelXp } from '../game/store';
 import { play } from '../game/sfx';
+import { EMOTES, useWorld } from '../game/world';
 import { brawlSnap, heal, jump, setMyPos, swing, useBrawl } from '../game/brawl';
 import { useName } from '../game/username';
 import type { LobbyEvent, LobbyPeerView, LobbySnap } from '../engine/lobby';
@@ -433,54 +434,7 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
             </T>
           </PixelBox>
         ) : null}
-        {danceOpen ? (
-          <Frame style={[styles.danceCard, { maxWidth: Math.min(620, L.w - 24) }]}>
-            <View style={styles.auraHead}>
-              <PixIcon name="sparkle" size={22} />
-              <T v="display" style={{ fontSize: 20, lineHeight: 22, color: COLORS.gold, flex: 1 }}>
-                AURA FARMING
-              </T>
-              <IconBtn onPress={() => setDanceOpen(false)} label="Close" kbd="ESC">
-                <PixIcon name="close" size={16} />
-              </IconBtn>
-            </View>
-            <T v="label">Dances · walk to stop</T>
-            <View style={styles.auraGrid}>
-              {DANCES.map((name, i) => {
-                const n = i + 1;
-                return (
-                  <Choice
-                    key={name}
-                    grow={false}
-                    label={name}
-                    on={myDance === n}
-                    onPress={() => {
-                      useLobby.getState().setDance(myDance === n ? 0 : n);
-                      setDanceOpen(false);
-                    }}
-                  />
-                );
-              })}
-            </View>
-            <T v="label">Emotes</T>
-            <View style={styles.auraGrid}>
-              {LOBBY_EMOTES.map((e, i) => (
-                <EmoteKey key={e} icon={e} label={`Emote ${EMOTE_NAME[e] ?? e}`} kbd={String(i + 1)} onPress={() => useLobby.getState().emote(e)} />
-              ))}
-            </View>
-            {myDance ? (
-              <Btn
-                small
-                kind="red"
-                label={`STOP ${DANCES[myDance - 1]}`}
-                onPress={() => {
-                  useLobby.getState().setDance(0);
-                  setDanceOpen(false);
-                }}
-              />
-            ) : null}
-          </Frame>
-        ) : null}
+        {danceOpen ? <AuraCard maxWidth={Math.min(620, L.w - 24)} onClose={() => setDanceOpen(false)} onEmote={(e) => useLobby.getState().emote(e)} /> : null}
         {!L.desktop ? (
           <View style={styles.fightRow} pointerEvents="box-none">
             <TouchZone group="lobby" onPress={() => ref.current?.jump?.()}>
@@ -598,6 +552,99 @@ function SolChip({ sol }: { sol: number }) {
         SOL
       </T>
     </PixelBox>
+  );
+}
+
+/** AURA FARMING: the dances and emotes card, the same in the lobby and on ORE Island. */
+function AuraCard({ maxWidth, onClose, onEmote }: { maxWidth: number; onClose: () => void; onEmote: (e: (typeof LOBBY_EMOTES)[number]) => void }) {
+  const myDance = useLobby((s) => s.myDance);
+  return (
+    <Frame style={[styles.danceCard, { maxWidth }]}>
+      <View style={styles.auraHead}>
+        <PixIcon name="sparkle" size={22} />
+        <T v="display" style={{ fontSize: 20, lineHeight: 22, color: COLORS.gold, flex: 1 }}>
+          AURA FARMING
+        </T>
+        <IconBtn onPress={() => onClose()} label="Close" kbd="ESC">
+          <PixIcon name="close" size={16} />
+        </IconBtn>
+      </View>
+      <T v="label">Dances · walk to stop</T>
+      <View style={styles.auraGrid}>
+        {DANCES.map((name, i) => {
+          const n = i + 1;
+          return (
+            <Choice
+              key={name}
+              grow={false}
+              label={name}
+              on={myDance === n}
+              onPress={() => {
+                useLobby.getState().setDance(myDance === n ? 0 : n);
+                onClose();
+              }}
+            />
+          );
+        })}
+      </View>
+      <T v="label">Emotes</T>
+      <View style={styles.auraGrid}>
+        {LOBBY_EMOTES.map((e, i) => (
+          <EmoteKey key={e} icon={e} label={`Emote ${EMOTE_NAME[e] ?? e}`} kbd={String(i + 1)} onPress={() => onEmote(e)} />
+        ))}
+      </View>
+      {myDance ? (
+        <Btn
+          small
+          kind="red"
+          label={`STOP ${DANCES[myDance - 1]}`}
+          onPress={() => {
+            useLobby.getState().setDance(0);
+            onClose();
+          }}
+        />
+      ) : null}
+    </Frame>
+  );
+}
+
+/** Lobby emote icons as the island's emoji, so both places share one emote row. */
+const ISLAND_EMOJI: Record<(typeof LOBBY_EMOTES)[number], (typeof EMOTES)[number]> = { wave: '👋', laugh: '😂', heart: '❤️', fire: '🔥', pick: '⛏️', gem: '💎' };
+const islandEmote = (e: (typeof LOBBY_EMOTES)[number]) => {
+  useWorld.getState().emote(ISLAND_EMOJI[e]);
+  useGame.getState().doEmote();
+};
+
+/** On ORE Island (computer): the lobby's bottom bar, AURA FARMING, JUMP and HIT, with the same keys (V, 1-6). */
+function IslandAuraBar({ left, right, bottom }: { left: number; right: number; bottom: number }) {
+  const [open, setOpen] = useState(false);
+  const myDance = useLobby((s) => s.myDance);
+  const brawlOn = useBrawl((b) => !b.off);
+  const { w } = useLayout();
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const key = (e: KeyboardEvent) => {
+      if (useLobby.getState().where !== 'island' || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      const n = Number(e.key);
+      if (n >= 1 && n <= LOBBY_EMOTES.length) islandEmote(LOBBY_EMOTES[n - 1]);
+      else if (n === LOBBY_EMOTES.length + 1 || e.key.toLowerCase() === 'v') setOpen((o) => !o);
+      else if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, []);
+  return (
+    <View style={[styles.bottom, { bottom, left, right, alignItems: 'center' }]} pointerEvents="box-none">
+      {open ? <AuraCard maxWidth={Math.min(620, w - left - right - 24)} onClose={() => setOpen(false)} onEmote={islandEmote} /> : null}
+      <PixelBox fill="rgba(8,13,32,0.9)" hi="#2d4282" lo="#04060f" shadow={2} style={styles.emotes}>
+        <AuraKey on={Boolean(myDance) || open} dancing={myDance ? DANCES[myDance - 1] : null} onPress={() => setOpen((o) => !o)} />
+        <View style={styles.emoteSep} />
+        <EmoteKey icon="jump" label="Jump" kbd="SPC" onPress={islandJump} />
+        {brawlOn ? <EmoteKey icon="fist" label="Hit: left click or F" kbd="LMB" onPress={islandFight} /> : null}
+      </PixelBox>
+    </View>
   );
 }
 
@@ -1074,8 +1121,8 @@ export function LobbyBack() {
     <>
       <View style={[styles.backWrap, styles.backRow, { left: ch.left, bottom }]} pointerEvents="box-none">
         <BackPill kbd={ch.desktop ? 'L' : undefined} />
-        {ch.desktop && !LANDSCAPE_APP ? fight : null}
       </View>
+      {ch.desktop && !LANDSCAPE_APP ? <IslandAuraBar left={RAIL_W + GUTTER} right={ch.right} bottom={bottom} /> : null}
       {LANDSCAPE_APP ? <FightPad zone="island" small right={ch.right} bottom={bottom + 54} hit={brawlOn} onHit={islandFight} onJump={islandJump} /> : null}
       {ch.desktop ? null : (
         // phones: the action buttons sit on the right, above CAVE RUN, where a thumb rests
