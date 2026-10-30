@@ -63,6 +63,11 @@ async function loadServer(now: number) {
     const row = Array.isArray(rows) ? rows[0] : null;
     if (row) useOreStats.setState({ gali: { miners: Number(row.miners) || 0, ore: Number(row.ore) || 0 } });
   }
+  await refreshMarket(now);
+}
+
+/** ORE and SOL prices (and Gali-wide totals), saved by the server every 5 minutes. Also used by the round's EV signal. */
+export async function refreshMarket(now = Date.now()) {
   if (now - marketAt > 5 * 60_000) {
     marketAt = now;
     const rows = await rpc('gali_ore_market').catch(() => null);

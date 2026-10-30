@@ -76,7 +76,7 @@ function decodeRound(d: Uint8Array) {
   if (d.length !== ROUND_SIZE) throw new Error(`round is ${d.length} bytes, expected ${ROUND_SIZE}`);
   const dv = dvOf(d);
   return {
-    id: u64(dv, 0), deployed: sq(dv, 8), slotHash: d.slice(8 + 608, 8 + 640), motherlode: u64(dv, 648),
+    id: u64(dv, 0), deployed: sq(dv, 8), count: sq(dv, 408), slotHash: d.slice(8 + 608, 8 + 640), motherlode: u64(dv, 648),
     rewards: sq(dv, 688), topMiner: keyAt(d, 912),
   };
 }
@@ -175,6 +175,7 @@ Deno.serve(async (req) => {
 
     const hits: Record<string, unknown>[] = [];
     const lodes: { id: bigint; w: number; deployed: bigint[]; motherlode: bigint; at: string; approx: boolean }[] = [];
+    const allLodes: Record<string, unknown>[] = [];
     let done = from - 1n; // advance only through rounds that are settled or gone
     const now = Date.now();
     for (let k = 0; k < ids.length; k++) {
@@ -195,6 +196,8 @@ Deno.serve(async (req) => {
         hits.push({ round_id: String(id), kind: 'solo', wallet: r.topMiner, square: w, ore, share: 1, round_sol: Number(r.deployed[w]) / 1e9, at, approx });
       }
       if (r.motherlode > 0n && r.deployed[w] > 0n) lodes.push({ id, w, deployed: r.deployed, motherlode: r.motherlode, at, approx });
+      // every motherlode on the board, for the game's banner to all online miners
+      if (r.motherlode > 0n) allLodes.push({ round_id: String(id), ore: Number(r.motherlode) / ORE_UNIT, square: w, miners: Number(r.count[w]), sol: Number(r.deployed[w]) / 1e9, at, approx });
     }
 
     if (lodes.length && list.length) {
@@ -217,6 +220,10 @@ Deno.serve(async (req) => {
       }
     }
 
+    if (allLodes.length) {
+      const { error } = await db.from('ore_lodes').upsert(allLodes, { onConflict: 'round_id', ignoreDuplicates: true });
+      if (error) throw error;
+    }
     if (hits.length) {
       const { error } = await db.from('ore_hits').upsert(hits, { onConflict: 'round_id,kind,wallet', ignoreDuplicates: true });
       if (error) throw error;

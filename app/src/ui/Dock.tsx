@@ -17,6 +17,9 @@ import { PixIcon } from './PixIcon';
 import type { PixName } from './pixIcons';
 import { useLayout } from './layout';
 import { openScanTv, TV_PAIR } from './TvLink';
+import { evOf } from '../game/ev';
+import { refreshMarket, useOreStats } from '../game/oreStats';
+import { LODE_WORD, lodeTier, useLodeGrowth } from '../game/motherlode';
 
 const SHAKE_G = 2.1;
 const layoutNowDesktop = () => layoutNow().desktop;
@@ -419,6 +422,101 @@ function AutopilotRow() {
 }
 
 /* ---------------- RIGHT BAR (desktop ORE Island) LITE, like ORE: one amount, 0.01 SOL a round on all 25 spots ---------------- */
+
+/**
+ * Round signal: is a SOL put on these spots right now worth more than it costs, on average (+EV), or less (-EV)?
+ * Worked out from ORE's payout rules, the SOL already on each spot, the motherlode and today's ORE/SOL price.
+ * `perSpot` 0 means the player has not entered an amount yet: the signal is then for a small reference stake.
+ */
+const EV_REF_PER_SPOT = 0.0004;
+function EvRow({ squares, perSpot }: { squares: number[]; perSpot: number }) {
+  const live = useGame(isLive);
+  const roundId = useGame((s) => s.roundId);
+  const pot = useGame((s) => s.pot);
+  const orePool = useGame((s) => s.wallet.orePool);
+  const market = useOreStats((s) => s.market);
+  useEffect(() => {
+    if (!live) return;
+    void refreshMarket();
+    const id = setInterval(() => void refreshMarket(), 5 * 60_000);
+    return () => clearInterval(id);
+  }, [live]);
+  if (!live) return null;
+  const ref = !(perSpot > 0);
+  const stake = ref ? EV_REF_PER_SPOT : perSpot;
+  const spots = squares.length ? squares : [...Array(BLOCKS).keys()];
+  const onBoard = pot.roundId === roundId ? pot.perBlock : Array(BLOCKS).fill(0);
+  const price = market?.oreUsd && market.solUsd ? market.oreUsd / market.solUsd : 0;
+  const e = evOf(onBoard, spots, stake, orePool, price, Number(PLATFORM_FEE_BPS));
+  const plus = e ? e.ev >= 0 : false;
+  const pct = e ? `${e.pct >= 0 ? '+' : ''}${(e.pct * 100).toFixed(1)}%` : '';
+  const crowd = e ? spots.reduce((a, i) => a + (onBoard[i] ?? 0), 0) / spots.length : 0;
+  return (
+    <View style={styles.evWrap}>
+      <Row
+        icon="bolt"
+        label="Round signal"
+        info={`Expected value of this deploy, from ORE's own rules. SOL back: ORE keeps 1% of every spot and 10% more of spots that miss, so about 89.5% of each SOL comes back on average (the Gali fee is ${Number(PLATFORM_FEE_BPS) / 100}%). ORE: each spot strikes 1 time in 25; its 1 ORE, plus the motherlode 1 round in 500, is shared by SOL on that spot, so crowded spots pay less. ORE is valued at today's ORE/SOL price (Jupiter, every 5 minutes) minus ORE's 10% claim fee. +EV means the ORE you can expect is worth more than the SOL you can expect to lose. It is an average over many rounds: any one round is all or nothing on the gold spot, and more SOL can land before the round ends. Not financial advice.`}
+        right={
+          e ? (
+            <PixelBox fill={plus ? '#0f3d27' : '#3d0f15'} edge={plus ? COLORS.green : COLORS.red} u={1.5} style={styles.evPill}>
+              <T v="num" style={{ fontSize: 18, lineHeight: 19, color: plus ? COLORS.green : COLORS.red }}>
+                {plus ? '+EV' : '-EV'} {pct}
+              </T>
+            </PixelBox>
+          ) : (
+            <T v="num" style={{ fontSize: 16, color: COLORS.muted }}>
+              {price ? 'NO SPOTS' : 'WAITING FOR PRICE'}
+            </T>
+          )
+        }
+      />
+      {e ? (
+        <T v="num" style={styles.evNote}>
+          {ref ? `For ${fmtSol(stake * spots.length, 4)} SOL on ${spots.length} spot${spots.length > 1 ? 's' : ''}: ` : `Your ${fmtSol(e.cost, 4)} SOL: `}
+          ≈{fmtSol(e.solBack, 4)} SOL back + ≈{e.ore.toFixed(e.ore < 0.01 ? 5 : 3)} ORE. {plus ? 'Pays' : 'Pays off'} while spots hold under {fmtSol(e.breakEvenT, 3)} SOL each (now {fmtSol(crowd, 3)}). Estimate only: SOL can still land before the round ends.
+        </T>
+      ) : null}
+    </View>
+  );
+}
+
+/** ORE's motherlode, gold when it is big, flashing the new ORE each time it grows. */
+function MotherlodeRow() {
+  const live = useGame(isLive);
+  const orePool = useGame((s) => s.wallet.orePool);
+  const oreUsd = useOreStats((s) => s.market?.oreUsd ?? null);
+  const grew = useLodeGrowth(live ? orePool : 0);
+  if (!live || !(orePool > 0)) return null;
+  const tier = lodeTier(orePool);
+  const hot = tier !== 'normal';
+  return (
+    <Row
+      icon="ore"
+      label={hot ? `${LODE_WORD[tier]} motherlode` : 'Motherlode'}
+      info="ORE's jackpot. It grows every round it is not hit, and 1 round in 500 it pays out to everyone on the gold spot, split by SOL there. Gold here means 100 ORE or more; HUGE means 200 or more."
+      right={
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          {grew ? (
+            <T v="num" style={{ fontSize: 15, color: COLORS.green }}>
+              +{grew.toFixed(grew < 1 ? 2 : 1)}
+            </T>
+          ) : oreUsd ? (
+            <T v="num" style={{ fontSize: 15, color: COLORS.muted }}>
+              ≈${Math.round(orePool * oreUsd).toLocaleString()}
+            </T>
+          ) : null}
+          <PixelBox fill={hot ? '#3a2a00' : '#0b1430'} edge={hot ? COLORS.gold : COLORS.trim} u={1.5} style={styles.evPill}>
+            <T v="num" style={{ fontSize: 18, lineHeight: 19, color: grew ? '#ffffff' : hot ? COLORS.gold : COLORS.teal }}>
+              {orePool.toFixed(orePool < 100 ? 1 : 0)} ORE
+            </T>
+          </PixelBox>
+        </View>
+      }
+    />
+  );
+}
+
 const LITE_PER_ROUND = 0.01;
 
 function DeskLite() {
@@ -482,6 +580,8 @@ function DeskLite() {
             }
           />
           <FeeRow live={live} />
+          <MotherlodeRow />
+          <EvRow squares={[...Array(BLOCKS).keys()]} perSpot={rounds ? LITE_PER_ROUND / BLOCKS : 0} />
           <Row
             icon="sol"
             label="Per round"
@@ -613,6 +713,8 @@ function DeskPro() {
             right={<Stepper value={rounds} label="rounds" onMinus={() => editPreset({ rounds: Math.max(1, rounds - 1) })} onPlus={() => editPreset({ rounds: Math.min(100, rounds + 1) })} disabled={lock} />}
           />
           <FeeRow live={live} />
+          <MotherlodeRow />
+          <EvRow squares={picked} perSpot={tiles && per ? perSpot : 0} />
           <Row
             icon="sol"
             label="Per round"
@@ -981,6 +1083,9 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: 6, justifyContent: 'space-between' },
   line: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingVertical: 7, borderBottomWidth: U, borderColor: 'rgba(34,53,111,0.6)', borderStyle: 'dashed', minHeight: 44 },
   lineLeft: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
+  evWrap: { borderBottomWidth: U, borderColor: 'rgba(34,53,111,0.6)', borderStyle: 'dashed', paddingBottom: 7 },
+  evPill: { paddingHorizontal: 8, paddingVertical: 3 },
+  evNote: { fontSize: 14, lineHeight: 16, color: COLORS.muted, marginTop: -2 },
   lineRight: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1, minWidth: 0 },
   info: { width: 18, height: 18, alignItems: 'center', justifyContent: 'center' },
   chip: { paddingHorizontal: 10, paddingVertical: 6, minHeight: 32, justifyContent: 'center' },

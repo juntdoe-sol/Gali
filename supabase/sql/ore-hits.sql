@@ -92,3 +92,11 @@ language sql stable security definer set search_path = public as $$
 $$;
 revoke all on function gali_ore_hits(int) from public;
 grant execute on function gali_ore_hits(int) to anon, authenticated, service_role;
+
+-- Every motherlode ORE's board pays (filled by the ore-hits job), for the "MOTHERLODE HIT!" alert all online players see.
+create table if not exists public.ore_lodes (
+  round_id bigint primary key, ore double precision not null, square int, miners int, sol double precision,
+  at timestamptz not null default now(), approx boolean not null default false
+);
+alter table public.ore_lodes enable row level security;
+-- read through gali_motherlodes(p_limit) only (security definer; applied as migration ore_lodes)
