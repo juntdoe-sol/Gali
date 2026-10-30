@@ -6658,5 +6658,77 @@
 "supply": 5,
 "price": 6500,
 "status": "New"
+},
+{
+"id": "G556",
+"name": "Ten Bagger Pick",
+"slot": "Axes & Weapons",
+"rarity": "Rare",
+"set": "Level 10",
+"art": "Steel pick with a fat money bag tied to the lower tip.",
+"flavor": "Bought the dip at level 1. Ten-bagged by level 10. Claimed at random with the Level 10 certificate. Miners pay the mint.",
+"supply": "claim",
+"price": null,
+"status": "New"
+},
+{
+"id": "G557",
+"name": "Level Up Pick",
+"slot": "Axes & Weapons",
+"rarity": "Rare",
+"set": "Level 10",
+"art": "Green pick whose head is a big LEVEL UP arrow, plus-sparkles.",
+"flavor": "Ding. Ten times. Claimed at random with the Level 10 certificate. Miners pay the mint.",
+"supply": "claim",
+"price": null,
+"status": "New"
+},
+{
+"id": "G558",
+"name": "XP Bar Blade",
+"slot": "Axes & Weapons",
+"rarity": "Rare",
+"set": "Level 10",
+"art": "Long blade made of an XP bar, 8 of 10 segments full.",
+"flavor": "80% to the next level. Slashes anyway. Claimed at random with the Level 10 certificate. Miners pay the mint.",
+"supply": "claim",
+"price": null,
+"status": "New"
+},
+{
+"id": "G559",
+"name": "Wen Moon Hammer",
+"slot": "Axes & Weapons",
+"rarity": "Legendary",
+"set": "Level 20",
+"art": "Hammer head is a rocket, nose up, flame trail glowing.",
+"flavor": "Wen moon? Level 20, ser. Claimed at random with the Level 20 certificate. Miners pay the mint.",
+"supply": "claim",
+"price": null,
+"status": "New"
+},
+{
+"id": "G560",
+"name": "Bull Run Axe",
+"slot": "Axes & Weapons",
+"rarity": "Legendary",
+"set": "Level 20",
+"art": "Golden bull horns off a bull head, red eyes, green candles flying.",
+"flavor": "Twenty levels of green candles. Claimed at random with the Level 20 certificate. Miners pay the mint.",
+"supply": "claim",
+"price": null,
+"status": "New"
+},
+{
+"id": "G561",
+"name": "Genesis Block Hammer",
+"slot": "Axes & Weapons",
+"rarity": "Legendary",
+"set": "Level 20",
+"art": "Glowing gold cube hammer head, block zero.",
+"flavor": "Mined at block zero. Still the heaviest block. Claimed at random with the Level 20 certificate. Miners pay the mint.",
+"supply": "claim",
+"price": null,
+"status": "New"
 }
 ]

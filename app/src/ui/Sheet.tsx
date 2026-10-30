@@ -22,6 +22,8 @@ import { GUTTER, RAIL_W, useLayout } from './layout';
 import { BAR_H, SHEET_TITLE, TAB_PIX, TabBar, type SheetTab } from './TabBar';
 import { BackPill } from './Lobby';
 import { Inventory } from './Inventory';
+import { MilestoneQuests } from './Milestones';
+import { useNft } from '../game/nft';
 import { useOreHits, type OreHit } from '../game/oreHits';
 
 const ORE_PROGRAM_STR = 'oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv';
@@ -103,6 +105,11 @@ function PixSwitch({ value, onChange, label }: { value: boolean; onChange: (v: b
 function Quests() {
   const save = useGame((s) => s.save);
   const claim = useGame((s) => s.claimQuest);
+  const owner = useGame((s) => s.wallet.owner);
+  const refreshNft = useNft((s) => s.refresh);
+  useEffect(() => {
+    void refreshNft(owner);
+  }, [owner, refreshNft]);
   const today = save.questDay === localDay();
   const days = Math.max(0, Math.ceil((SEASON.endsAt - Date.now()) / 86_400_000));
   return (
@@ -113,6 +120,7 @@ function Quests() {
           Ends in {days} days.{FEATURE_GALI_PROGRAM ? ' Top miners by points take the season crown.' : ''}
         </T>
       </Card>
+      <MilestoneQuests />
       <T v="label" style={{ marginTop: 6 }}>
         Daily quests · {QUESTS.filter((q) => today && save.questClaimed.includes(q.id)).length}/{QUESTS.length} done · new ones at midnight
       </T>
