@@ -34,7 +34,7 @@ function FeeRow({ live }: { live: boolean }) {
       icon="sol"
       label="Gali fee"
       info={`Gali adds ${FEE_PCT} of the SOL you deploy, paid to Gali in the same transaction. Autopilot pays it for every funded round when it starts, and it is not refunded if you stop early.`}
-      right={<T v="black" style={{ fontSize: 15, color: COLORS.text }}>{FEE_PCT}</T>}
+      right={<T v="num" style={{ fontSize: 18, color: COLORS.text }}>{FEE_PCT}</T>}
     />
   );
 }
@@ -174,17 +174,17 @@ export function UnclaimedRow() {
         <Info
           text={`Finished rounds credit your SOL and the ORE you mined here${onChain ? ' (held by ORE for your wallet)' : ''}. SOL claims are free. Unrefined ORE pays ORE's own 10% fee when you claim it, and that fee is shared with everyone still holding theirs, as refined ORE you can claim with no fee. The longer you hold, the more refined ORE you collect.`}
         />
-        <T v="black" numberOfLines={1} style={{ flex: 1, fontSize: 13, color: COLORS.sol, textAlign: 'right' }}>
+        <T v="num" numberOfLines={1} style={{ flex: 1, fontSize: 16, color: COLORS.sol, textAlign: 'right' }}>
           {fmtSol(sol)} SOL
         </T>
         <Chip label="CLAIM" on={sol > 0} disabled={!(sol > 0) || Boolean(busy)} onPress={() => void claim('sol')} />
       </View>
       <View style={styles.uRow}>
-        <T v="muted" numberOfLines={1} style={{ flex: 1, fontSize: 11 }}>
+        <T v="num" numberOfLines={1} style={{ flex: 1, fontSize: 14, color: COLORS.muted }}>
           {fmtAmt(unrefined)} unrefined · +{fmtAmt(refined)} refined
           {fee > 0.00005 ? ` · fee ${fmtAmt(fee)}` : ''}
         </T>
-        <T v="black" numberOfLines={1} style={{ fontSize: 13, color: COLORS.skr }}>
+        <T v="num" numberOfLines={1} style={{ fontSize: 16, color: COLORS.skr }}>
           {fmtAmt(unrefined - fee + refined)} ORE
         </T>
         <Chip label="CLAIM" on={unrefined + refined > 0} disabled={!(unrefined + refined > 0) || Boolean(busy)} onPress={claimOre} />
@@ -215,15 +215,15 @@ function HoldPrompt({ unrefined, refined, fee, onKeep, onClaim }: { unrefined: n
             <View style={styles.holdRows}>
               <View style={styles.holdRow}>
                 <T v="muted">Claim now, refining fee</T>
-                <T v="black" style={{ color: COLORS.red }}>-{fmtAmt(fee)} ORE</T>
+                <T v="num" style={{ fontSize: 17, color: COLORS.red }}>-{fmtAmt(fee)} ORE</T>
               </View>
               <View style={styles.holdRow}>
                 <T v="muted">Refined ORE earned so far</T>
-                <T v="black" style={{ color: COLORS.skr }}>+{fmtAmt(refined)} ORE</T>
+                <T v="num" style={{ fontSize: 17, color: COLORS.skr }}>+{fmtAmt(refined)} ORE</T>
               </View>
               <View style={styles.holdRow}>
                 <T v="muted">Unrefined ORE you hold</T>
-                <T v="black">{fmtAmt(unrefined)} ORE</T>
+                <T v="num" style={{ fontSize: 17 }}>{fmtAmt(unrefined)} ORE</T>
               </View>
             </View>
             <Btn kind="gold" label="KEEP HOLDING" sub="Earn from every claim" onPress={onKeep} style={{ marginTop: 12 }} />
@@ -363,7 +363,7 @@ function BigAmount({ value, onChange, hint, disabled }: { value: string; onChang
       />
       <View style={styles.bigBal} accessibilityLabel={`Wallet ${balance.toFixed(4)} SOL`}>
         <PixIcon name="sol" size={16} />
-        <T v="muted" style={{ fontSize: 13 }}>
+        <T v="num" style={{ fontSize: 16, color: COLORS.muted }}>
           {balance.toFixed(4)} {live || onChain ? 'SOL' : 'practice SOL'}
         </T>
       </View>
@@ -387,7 +387,7 @@ function Stepper({ value, onMinus, onPlus, disabled, label }: { value: number; o
     <>
       <Chip label="−" onPress={onMinus} disabled={disabled} />
       <View accessible accessibilityLabel={`${value} ${label}`}>
-        <T v="black" style={{ fontSize: 15, minWidth: 28, textAlign: 'center' }}>
+        <T v="num" style={{ fontSize: 18, minWidth: 28, textAlign: 'center' }}>
           {value}
         </T>
       </View>
@@ -408,7 +408,7 @@ function AutopilotRow() {
       info="Your SOL sits in ORE's automation and is deployed round by round, even with the app closed (0.00001 SOL a round covers the network fee). Stopping closes it and sends what is left back to your wallet."
       right={
         <>
-          <T v="black" style={{ fontSize: 12, color: COLORS.teal, marginRight: 6 }}>
+          <T v="num" style={{ fontSize: 15, color: COLORS.teal, marginRight: 6 }}>
             {fmtSol(autopilot.balance)} SOL left
           </T>
           <Chip label="STOP" onPress={() => void useGame.getState().stopAutopilot()} disabled={Boolean(busy)} />
@@ -476,7 +476,7 @@ function DeskLite() {
             label="Rounds"
             info={`LITE splits your SOL into ${LITE_PER_ROUND} SOL rounds on all 25 spots, so you hit the gold spot every round. More than 1 round runs on autopilot: one wallet approval, then rounds deploy by themselves. Stop any time to get the unused SOL back (the Gali fee is paid up front and not refunded).`}
             right={
-              <T v="black" style={{ fontSize: 15, color: rounds ? COLORS.text : COLORS.muted }}>
+              <T v="num" style={{ fontSize: 18, color: rounds ? COLORS.text : COLORS.muted }}>
                 {rounds}
               </T>
             }
@@ -487,7 +487,7 @@ function DeskLite() {
             label="Per round"
             last
             right={
-              <T v="black" style={{ fontSize: 15, color: rounds ? COLORS.sol : COLORS.muted }}>
+              <T v="num" style={{ fontSize: 18, color: rounds ? COLORS.sol : COLORS.muted }}>
                 {rounds ? LITE_PER_ROUND : 0} SOL
               </T>
             }
@@ -618,7 +618,7 @@ function DeskPro() {
             label="Per round"
             last
             right={
-              <T v="black" style={{ fontSize: 15, color: per ? COLORS.sol : COLORS.muted }}>
+              <T v="num" style={{ fontSize: 18, color: per ? COLORS.sol : COLORS.muted }}>
                 {per ? fmtSol(per) : 0} SOL
               </T>
             }
@@ -770,7 +770,7 @@ function LitePanel({ compact }: { compact: boolean }) {
             label="Spots"
             last
             right={
-              <T v="black" style={{ fontSize: 15, color: n ? COLORS.text : COLORS.muted }}>
+              <T v="num" style={{ fontSize: 18, color: n ? COLORS.text : COLORS.muted }}>
                 {n} selected
               </T>
             }
@@ -877,7 +877,7 @@ function ProPanel({ compact }: { compact: boolean }) {
             info="Tap spots on the map to pick them, take All 25, or Smart: 4, 8, 15 or 20 spots at random. Tap a count again for a new set; autopilot rolls new spots every round."
             right={
               <>
-                <T v="black" style={{ fontSize: 15, color: blocks ? COLORS.text : COLORS.muted, marginRight: 4 }}>
+                <T v="num" style={{ fontSize: 18, color: blocks ? COLORS.text : COLORS.muted, marginRight: 4 }}>
                   {blocks}
                 </T>
                 <Chip label="All" on={p.blocks === 'all'} onPress={pickAll} disabled={Boolean(run)} />
@@ -900,7 +900,7 @@ function ProPanel({ compact }: { compact: boolean }) {
                   </T>
                 </View>
                 <Chip label="−" onPress={() => editPreset({ rounds: Math.max(1, p.rounds - 1) })} disabled={Boolean(run)} />
-                <T v="black" style={{ fontSize: 15, minWidth: 22, textAlign: 'center' }}>
+                <T v="num" style={{ fontSize: 18, minWidth: 22, textAlign: 'center' }}>
                   {p.rounds}
                 </T>
                 <Chip label="+" onPress={() => editPreset({ rounds: Math.min(100, p.rounds + 1) })} disabled={Boolean(run)} />
@@ -924,7 +924,7 @@ function ProPanel({ compact }: { compact: boolean }) {
             info={live ? LIVE_INFO : `Only the gold spot mines ORE. The ORE is split by SOL there, unless it is one of this round's 10 solo spots (★ on the map): then one miner takes it all, with odds equal to their share. A 1-in-500 motherlode pays the whole SKR Motherlode Pool on top, split by SOL on the gold spot, plus 10,000 points. Points: 40 x 25 / spots covered. ${RETURN_INFO}`}
             last
             right={
-              <T v="black" style={{ fontSize: 13, color: COLORS.gold }}>
+              <T v="num" style={{ fontSize: 16, color: COLORS.gold }}>
                 {!blocks ? '—' : live ? `${FEATURE_GALI_PROGRAM ? `+${pointsFor(blocks, false, 10_000)} pts · ` : ''}${Math.round((blocks / BLOCKS) * 100)}% odds · ${soloCount} ★` : `+${pointsFor(blocks, false, boostFor(staked))} pts · ${Math.round((blocks / BLOCKS) * 100)}% odds · ${soloCount} ★`}
               </T>
             }

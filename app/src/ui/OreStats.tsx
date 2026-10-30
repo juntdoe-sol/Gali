@@ -186,7 +186,7 @@ const styles = StyleSheet.create({
   priceLabel: { fontSize: 11, letterSpacing: 1 },
   price: { fontSize: 16, color: COLORS.text, fontVariant: ['tabular-nums'] },
   row: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, paddingVertical: 1 },
-  label: { fontSize: 12, flexShrink: 1 },
+  label: { fontFamily: 'Jersey15_400Regular', fontSize: 15, lineHeight: 17, letterSpacing: 0.4, flexShrink: 1, fontVariant: ['tabular-nums'] },
   value: { fontSize: 18, color: COLORS.text, fontVariant: ['tabular-nums'] },
   note: { fontSize: 12 },
 });
