@@ -7,7 +7,7 @@ import { useEffect, useRef } from 'react';
 import type { View } from 'react-native';
 import { create } from 'zustand';
 
-export type TutTargetId = 'tab-lite' | 'tab-pro' | 'amount' | 'quick' | 'pro-tiles' | 'deploy' | 'unclaimed';
+export type TutTargetId = 'tab-lite' | 'tab-pro' | 'amount' | 'quick' | 'pro-tiles' | 'deploy' | 'unclaimed' | 'tab-quests';
 export interface Rect {
   x: number;
   y: number;
@@ -25,7 +25,9 @@ export const useTut = create<{
   maxAt: number;
   /** bump to empty LITE's amount box (the tutorial starts each lesson from 0) */
   clearAt: number;
-}>(() => ({ active: false, rects: {}, liteAmount: 0, maxAt: 0, clearAt: 0 }));
+  /** bump to open the Quests page (the tutorial's last step) */
+  questsAt: number;
+}>(() => ({ active: false, rects: {}, liteAmount: 0, maxAt: 0, clearAt: 0, questsAt: 0 }));
 
 /** Give the returned ref to the view the tutorial may point at. */
 export function useTutTarget(id: TutTargetId) {

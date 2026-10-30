@@ -7,14 +7,18 @@
  *
  * The level is the one the server worked out from verified XP, so what the quest shows is what the mint checks.
  */
+import { useEffect, useState, type ReactNode } from 'react';
 import { Image, Linking, Platform, Share, StyleSheet, View, type ImageStyle } from 'react-native';
 import { COLORS, levelFromXp, xpForLevel } from '../game/constants';
 import { MILESTONE, MILESTONE_KINDS, useNft, type MilestoneKind, type Milestones } from '../game/nft';
 import { useGame, useLevelXp } from '../game/store';
+import { gearNow, loadGear, type GearBook, type GearItem } from '../game/gear555';
 import { restBase } from '../game/world';
 import { CertCard } from './CertClaim';
-import { Bar, Btn, Card, Pill, T } from './kit';
-import { Corners, Led, Readout, TECH, TechBtn } from './tech';
+import { GearSprite } from './GearSprite';
+import { Bar, Btn, Pill, PixelBox, T } from './kit';
+import { PixIcon } from './PixIcon';
+import { alpha, Corners, Led, Readout, TECH, TechBtn, useTick } from './tech';
 
 const PIX = { imageRendering: 'pixelated' } as ImageStyle;
 const web = Platform.OS === 'web';
@@ -95,86 +99,198 @@ function ClaimState({ kind }: { kind: MilestoneKind }) {
   ) : null;
 }
 
-/** Quest tab: Founding Miner, Reach Level 10, Reach Level 20. */
+/** The gear a certificate claims, drawn from the Gear 555 catalogue (loaded on first use). */
+function useGearItems(ids: string[]) {
+  const [book, setBook] = useState<GearBook | null>(gearNow());
+  useEffect(() => {
+    if (!book) void loadGear().then(setBook);
+  }, [book]);
+  return book ? (ids.map((id) => book.items.find((g) => g.id === id)).filter(Boolean) as GearItem[]) : [];
+}
+
+/** The reward strip: the one item, or the three a certificate rolls between. */
+function Rewards({ ids, hue, random }: { ids: string[]; hue: string; random: boolean }) {
+  const items = useGearItems(ids);
+  return (
+    <View style={styles.rewards}>
+      <T v="tiny" style={{ fontSize: 8, color: hue, letterSpacing: 1 }}>
+        {random ? 'ROLLS 1 OF' : 'CLAIMS'}
+      </T>
+      {items.map((g, i) => (
+        <View key={g.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+          {i > 0 ? (
+            <T v="display" style={{ fontSize: 12, color: TECH.dim }}>
+              ?
+            </T>
+          ) : null}
+          <View style={[styles.rewardCell, { borderColor: alpha(hue, 0.55), backgroundColor: alpha(hue, 0.08) }]}>
+            <GearSprite item={g} scale={1} animate={g.rarity === 'Legendary'} />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+const JARL = ['G084'];
+const PILL_BG: Record<string, string> = { Rare: 'rgba(90,184,255,0.16)', Legendary: 'rgba(255,201,60,0.16)' };
+
+/** One certificate in the collection. */
+function CollectRow({
+  art,
+  title,
+  rarity,
+  hue,
+  status,
+  rewards,
+  random,
+  got,
+  locked,
+  progress,
+  btn,
+  onPress,
+  extra,
+}: {
+  art: ReactNode;
+  title: string;
+  rarity: string;
+  hue: string;
+  status: string;
+  rewards: string[];
+  random: boolean;
+  got: boolean;
+  locked: boolean;
+  progress?: { pct: number; colors: [string, string] };
+  btn: string;
+  onPress: () => void;
+  extra?: ReactNode;
+}) {
+  const ready = btn === 'Claim';
+  return (
+    <PixelBox fill={got ? alpha(hue, 0.1) : ready ? alpha(hue, 0.07) : 'rgba(9,14,34,0.92)'} hi={got || ready ? hue : '#2a3a72'} lo="#04060f" style={styles.collectRow}>
+      <View style={styles.artBox}>
+        <View style={{ opacity: locked ? 0.4 : 1 }}>{art}</View>
+        {locked ? (
+          <View style={styles.lockOver}>
+            <PixIcon name="lock" size={22} />
+          </View>
+        ) : null}
+        {got ? (
+          <View style={[styles.stamp, { backgroundColor: hue }]}>
+            <T v="display" style={{ fontSize: 11, lineHeight: 12, color: TECH.ink, letterSpacing: 1 }}>
+              COLLECTED
+            </T>
+          </View>
+        ) : null}
+      </View>
+      <View style={{ flex: 1, gap: 5 }}>
+        <View style={styles.titleRow}>
+          <T v="display" style={{ fontSize: 18, lineHeight: 19, color: got || ready ? hue : COLORS.text, flexShrink: 1 }}>
+            {title}
+          </T>
+          <Pill text={rarity} color={PILL_BG[rarity]} fg={hue} />
+        </View>
+        {progress ? <Bar pct={progress.pct} colors={progress.colors} /> : null}
+        <T v="muted" style={{ fontSize: 12 }}>
+          {status}
+        </T>
+        <Rewards ids={rewards} hue={hue} random={random} />
+        {extra}
+      </View>
+      {got ? (
+        <View style={styles.btn}>
+          <PixIcon name="medal" size={34} style={{ alignSelf: 'center' }} />
+        </View>
+      ) : (
+        <Btn small kind={ready ? 'gold' : 'plain'} label={btn} disabled={!ready} onPress={onPress} style={styles.btn} />
+      )}
+    </PixelBox>
+  );
+}
+
+/** Quest tab: the certificate collection. Founding Miner, Level 10, Level 20: collect all three. */
 export function MilestoneQuests() {
   const owner = useGame((s) => s.wallet.owner);
   const { cert, claiming, claimKind, claim, openPopup } = useNft();
   const ms = cert?.milestones;
   const { xp, level } = useLevel(ms);
-  const fmBtn = !owner
-    ? { label: 'Wallet', on: false }
-    : cert?.claim?.status === 'minted'
-      ? { label: 'Done', on: false }
-      : cert?.eligible
-        ? { label: 'Claim', on: true }
-        : cert?.counting
-          ? { label: '...', on: false }
-          : { label: 'Beta only', on: false };
+  const t = useTick(500);
+  const fmGot = cert?.claim?.status === 'minted';
+  const fmBtn = !owner ? 'Wallet' : fmGot ? 'Done' : cert?.eligible ? 'Claim' : cert?.counting ? '...' : 'Beta only';
+  const got = [fmGot, ...MILESTONE_KINDS.map((k) => ms?.[k]?.claim?.status === 'minted')];
+  const n = got.filter(Boolean).length;
+  const all = n === got.length;
   return (
-    <>
-      <T v="label" style={{ marginTop: 6 }}>
-        Milestones · certificate NFTs, claim the gear when the market opens
-      </T>
-      <Card style={[styles.row, fmBtn.label === 'Done' && { opacity: 0.6 }]}>
-        <View style={styles.thumb}>
-          <CertCard width={96} />
+    <PixelBox fill="rgba(30,16,52,0.95)" hi={t % 2 ? COLORS.gold : '#fff1a8'} lo="#04060f" shadow={1} style={styles.collection}>
+      <View style={styles.colHead}>
+        <PixIcon name="trophy" size={34} />
+        <View style={{ flex: 1, gap: 2 }}>
+          <T v="display" style={{ fontSize: 24, lineHeight: 25, color: COLORS.gold, letterSpacing: 1 }}>
+            CERTIFICATE COLLECTION
+          </T>
+          <T style={{ fontSize: 13 }}>{all ? 'You collected them all. Your gear drops when the market opens.' : 'Collect all 3. Each NFT claims real gear when the market opens.'}</T>
         </View>
-        <View style={{ flex: 1, gap: 4 }}>
-          <View style={styles.titleRow}>
-            <T v="bold" style={{ flexShrink: 1 }}>
-              Founding Miner
-            </T>
-            <Pill text="Legendary" color="rgba(255,201,60,0.16)" fg={COLORS.gold} />
-          </View>
-          <T v="muted" style={{ fontSize: 12 }}>
-            {cert?.eligible ? `Mined ${cert.rounds.toLocaleString()} ORE rounds in the closed beta.` : 'Mine a live ORE round during the closed beta.'} Claims the Jarl Helmet.
+        <View style={{ alignItems: 'center' }}>
+          <T v="display" style={{ fontSize: 30, lineHeight: 30, color: all ? COLORS.gold : COLORS.text }}>
+            {n}/{got.length}
+          </T>
+          <T v="tiny" style={{ fontSize: 8, color: TECH.dim, letterSpacing: 1 }}>
+            COLLECTED
           </T>
         </View>
-        <Btn small kind={fmBtn.on ? 'gold' : 'plain'} label={fmBtn.label} disabled={!fmBtn.on} onPress={openPopup} style={styles.btn} />
-      </Card>
+      </View>
+      <View style={styles.pips}>
+        {got.map((g, i) => (
+          <View key={i} style={[styles.pip, { backgroundColor: g ? COLORS.gold : '#2a2150', borderColor: g ? '#fff1a8' : '#3c3270' }]} />
+        ))}
+      </View>
+      <CollectRow
+        art={<CertCard width={128} />}
+        title="Founding Miner"
+        rarity="Legendary"
+        hue={COLORS.gold}
+        status={fmGot ? `#${pad4(cert!.claim!.serial)} in your wallet · ${cert!.rounds.toLocaleString()} beta rounds` : cert?.eligible ? `You mined ${cert.rounds.toLocaleString()} ORE rounds in the closed beta.` : 'Closed beta miners only. Gone for good.'}
+        rewards={JARL}
+        random={false}
+        got={fmGot}
+        locked={!fmGot && !cert?.eligible}
+        btn={fmBtn}
+        onPress={openPopup}
+      />
       {MILESTONE_KINDS.map((k) => {
         const m = MILESTONE[k];
         const info = ms?.[k];
         const minted = info?.claim?.status === 'minted';
         const reached = level >= m.level;
-        const pct = Math.min(100, (xp / xpForLevel(m.level)) * 100);
-        const btn = minted
-          ? 'Done'
-          : !reached
-            ? `${Math.floor(pct)}%`
-            : !owner
-              ? 'Wallet'
-              : !ms?.open
-                ? 'Soon'
-                : claiming && claimKind === k
-                  ? '...'
-                  : 'Claim';
+        const need = xpForLevel(m.level);
+        const pct = Math.min(100, (xp / need) * 100);
+        const btn = minted ? 'Done' : !reached ? `${Math.floor(pct)}%` : !owner ? 'Wallet' : !ms?.open ? 'Soon' : claiming && claimKind === k ? '...' : 'Claim';
         return (
-          <Card key={k} style={[styles.row, minted && { opacity: 0.6 }]}>
-            <View style={styles.thumb}>
-              <MilestoneArt kind={k} width={96} still dim={!reached} />
-            </View>
-            <View style={{ flex: 1, gap: 4 }}>
-              <View style={styles.titleRow}>
-                <T v="bold" style={{ flexShrink: 1 }}>
-                  Reach {m.title}
-                </T>
-                <Pill text={m.rarity} color={k === 'lv20' ? 'rgba(255,201,60,0.16)' : 'rgba(90,184,255,0.16)'} fg={HUE[k]} />
-              </View>
-              <Bar pct={pct} colors={k === 'lv20' ? [COLORS.gold2, COLORS.gold] : ['#2f6fd0', '#5ab8ff']} />
-              <T v="muted" style={{ fontSize: 12 }}>
-                {minted
-                  ? `Certificate #${pad4(info!.claim!.serial)} is in your wallet.`
-                  : `Lv ${level} · ${Math.min(xp, xpForLevel(m.level)).toLocaleString()}/${xpForLevel(m.level).toLocaleString()} XP`}{' '}
-                · 1 random {m.rarity} weapon
-              </T>
-              <ClaimState kind={k} />
-            </View>
-            <Btn small kind={btn === 'Claim' ? 'gold' : 'plain'} label={btn} disabled={btn !== 'Claim'} onPress={() => void claim(k)} style={styles.btn} />
-          </Card>
+          <CollectRow
+            key={k}
+            art={<MilestoneArt kind={k} width={128} still={!reached} />}
+            title={`Reach ${m.title}`}
+            rarity={m.rarity}
+            hue={HUE[k]}
+            status={
+              minted
+                ? `#${pad4(info!.claim!.serial)} in your wallet`
+                : reached
+                  ? `${m.title} reached. Claim your certificate.`
+                  : `Lv ${level} · ${Math.min(xp, need).toLocaleString()}/${need.toLocaleString()} XP · ${(need - xp).toLocaleString()} to go`
+            }
+            rewards={m.ids}
+            random
+            got={minted}
+            locked={!reached}
+            progress={minted ? undefined : { pct, colors: k === 'lv20' ? [COLORS.gold2, COLORS.gold] : ['#2f6fd0', '#5ab8ff'] }}
+            btn={btn}
+            onPress={() => void claim(k)}
+            extra={<ClaimState kind={k} />}
+          />
         );
       })}
-    </>
+    </PixelBox>
   );
 }
 
@@ -238,8 +354,16 @@ export function MilestoneVault() {
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  thumb: { width: 96, height: 54, overflow: 'hidden' },
+  collection: { padding: 12, gap: 10, marginTop: 6 },
+  colHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  pips: { flexDirection: 'row', gap: 4 },
+  pip: { flex: 1, height: 8, borderWidth: 1 },
+  collectRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10 },
+  artBox: { width: 128, height: 72, overflow: 'hidden' },
+  lockOver: { position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
+  stamp: { position: 'absolute', right: 3, bottom: 3, paddingHorizontal: 4, paddingVertical: 2, transform: [{ rotate: '-6deg' }] },
+  rewards: { flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' },
+  rewardCell: { width: 40, height: 40, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
   btn: { minWidth: 84, alignSelf: 'center' },
   vaultCard: { borderWidth: 2, padding: 10, gap: 6, backgroundColor: 'rgba(4,6,15,0.5)' },

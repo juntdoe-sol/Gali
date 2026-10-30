@@ -38,6 +38,8 @@ import { useMarket } from './game/market';
 import { ClaimPanel } from './ui/ClaimPanel';
 import { MapHint } from './ui/MapHint';
 import { MineTutorial } from './ui/MineTutorial';
+import { useTut } from './game/tutTargets';
+import { useTutorial } from './game/tutorial';
 import { Splash } from './ui/Splash';
 import { PeerCard } from './ui/World';
 import { CaveScreen } from './ui/Cave';
@@ -51,7 +53,7 @@ import { HollowSplash } from './ui/Season';
 
 
 // lets browser tests watch the game state
-if (Platform.OS === 'web') Object.assign(globalThis, { __gali: useGame, __galiWorld: useWorld, __galiLobbyStore: useLobby, __galiCaveStore: useCave, __galiArcadeStore: useArcade, __galiBrawl: useBrawl, __galiBrawlTest: _test, __galiArenaStore: useArena, __galiMarket: useMarket, __galiNft: useNft, __galiName: useName });
+if (Platform.OS === 'web') Object.assign(globalThis, { __gali: useGame, __galiWorld: useWorld, __galiLobbyStore: useLobby, __galiCaveStore: useCave, __galiArcadeStore: useArcade, __galiBrawl: useBrawl, __galiBrawlTest: _test, __galiArenaStore: useArena, __galiMarket: useMarket, __galiNft: useNft, __galiName: useName, __galiTutorial: useTutorial });
 // pixel art in the interface (gear icons) stays crisp when the browser scales it
 if (Platform.OS === 'web' && typeof document !== 'undefined' && !document.getElementById('gali-pixel-css')) {
   const el = document.createElement('style');
@@ -96,6 +98,11 @@ function Game() {
   const fontsLoaded = useAppFonts();
   const [sheet, setSheet] = useState<SheetTab | null>(null);
   const onboarded = useGame((s) => s.save.onboarded);
+  // the mining tutorial's last step opens Quests
+  const questsAt = useTut((s) => s.questsAt);
+  useEffect(() => {
+    if (questsAt) setSheet('quests');
+  }, [questsAt]);
 
   useEffect(() => {
     // Web: sound files wait for the first touch (browsers won't play before one
