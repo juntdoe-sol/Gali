@@ -21,7 +21,11 @@ export const useTut = create<{
   rects: Partial<Record<TutTargetId, Rect>>;
   /** SOL typed or added in LITE */
   liteAmount: number;
-}>(() => ({ active: false, rects: {}, liteAmount: 0 }));
+  /** when LITE's MAX was last pressed (ms) */
+  maxAt: number;
+  /** bump to empty LITE's amount box (the tutorial starts each lesson from 0) */
+  clearAt: number;
+}>(() => ({ active: false, rects: {}, liteAmount: 0, maxAt: 0, clearAt: 0 }));
 
 /** Give the returned ref to the view the tutorial may point at. */
 export function useTutTarget(id: TutTargetId) {
