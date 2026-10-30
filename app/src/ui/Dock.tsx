@@ -19,7 +19,6 @@ import { useLayout } from './layout';
 import { openScanTv, TV_PAIR } from './TvLink';
 import { evOf } from '../game/ev';
 import { refreshMarket, useOreStats } from '../game/oreStats';
-import { LODE_WORD, lodeTier, useLodeGrowth } from '../game/motherlode';
 
 const SHAKE_G = 2.1;
 const layoutNowDesktop = () => layoutNow().desktop;
@@ -482,41 +481,6 @@ function EvRow({ squares, perSpot }: { squares: number[]; perSpot: number }) {
 }
 
 /** ORE's motherlode, gold when it is big, flashing the new ORE each time it grows. */
-function MotherlodeRow() {
-  const live = useGame(isLive);
-  const orePool = useGame((s) => s.wallet.orePool);
-  const oreUsd = useOreStats((s) => s.market?.oreUsd ?? null);
-  const grew = useLodeGrowth(live ? orePool : 0);
-  if (!live || !(orePool > 0)) return null;
-  const tier = lodeTier(orePool);
-  const hot = tier !== 'normal';
-  return (
-    <Row
-      icon="ore"
-      label={hot ? `${LODE_WORD[tier]} motherlode` : 'Motherlode'}
-      info="ORE's jackpot. It grows every round it is not hit, and 1 round in 500 it pays out to everyone on the gold spot, split by SOL there. Gold here means 100 ORE or more; HUGE means 200 or more."
-      right={
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          {grew ? (
-            <T v="num" style={{ fontSize: 15, color: COLORS.green }}>
-              +{grew.toFixed(grew < 1 ? 2 : 1)}
-            </T>
-          ) : oreUsd ? (
-            <T v="num" style={{ fontSize: 15, color: COLORS.muted }}>
-              ≈${Math.round(orePool * oreUsd).toLocaleString()}
-            </T>
-          ) : null}
-          <PixelBox fill={hot ? '#3a2a00' : '#0b1430'} edge={hot ? COLORS.gold : COLORS.trim} u={1.5} style={styles.evPill}>
-            <T v="num" style={{ fontSize: 18, lineHeight: 19, color: grew ? '#ffffff' : hot ? COLORS.gold : COLORS.teal }}>
-              {orePool.toFixed(orePool < 100 ? 1 : 0)} ORE
-            </T>
-          </PixelBox>
-        </View>
-      }
-    />
-  );
-}
-
 const LITE_PER_ROUND = 0.01;
 
 function DeskLite() {
@@ -580,7 +544,6 @@ function DeskLite() {
             }
           />
           <FeeRow live={live} />
-          <MotherlodeRow />
           <EvRow squares={[...Array(BLOCKS).keys()]} perSpot={rounds ? LITE_PER_ROUND / BLOCKS : 0} />
           <Row
             icon="sol"
@@ -713,7 +676,6 @@ function DeskPro() {
             right={<Stepper value={rounds} label="rounds" onMinus={() => editPreset({ rounds: Math.max(1, rounds - 1) })} onPlus={() => editPreset({ rounds: Math.min(100, rounds + 1) })} disabled={lock} />}
           />
           <FeeRow live={live} />
-          <MotherlodeRow />
           <EvRow squares={picked} perSpot={tiles && per ? perSpot : 0} />
           <Row
             icon="sol"
