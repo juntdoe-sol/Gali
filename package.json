@@ -27,6 +27,7 @@
     "@solana/web3.js": "^1.98.4"
   },
   "devDependencies": {
+    "@bounded-sh/cli": "^0.0.162",
     "@sqds/multisig": "^2.1.4",
     "@types/chai": "^4.3.20",
     "@types/mocha": "^10.0.10",

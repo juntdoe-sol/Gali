@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Gali TV</title>
-<meta name="description" content="Gali TV: Matt the Miner, the Gali pixel cartoon, and updates from the team. Pick a channel, pick a tape, press play.">
+<meta name="description" content="Gali TV: Matt the Miner, the Gali pixel cartoon, updates from the team, and memes and fan art from the community. Pick a channel, pick a tape, press play.">
 <meta name="theme-color" content="#120c16">
 <meta property="og:title" content="Gali TV">
-<meta property="og:description" content="Matt the Miner, the Gali pixel cartoon, and updates from the team.">
+<meta property="og:description" content="Matt the Miner, the Gali pixel cartoon, updates from the team, and community memes and fan art.">
 <meta property="og:image" content="https://gali.lol/game/logo.png">
 <link rel="icon" href="favicon-32.png" sizes="32x32">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -45,6 +45,7 @@
         <div class="screen" id="screen" data-state="boot">
           <div class="backdrop" id="backdrop"></div>
           <video id="video" playsinline preload="metadata"></video>
+          <img id="still" class="still zoom" alt="" decoding="async">
           <canvas class="static" id="static" width="160" height="90" aria-hidden="true"></canvas>
           <div class="testcard" id="testcard" aria-hidden="true">
             <div class="bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
@@ -82,7 +83,7 @@
         <div class="led" id="led" aria-hidden="true"></div>
         <div class="dial-wrap">
           <button class="dial" id="dial" aria-label="Change channel"><i></i></button>
-          <div class="dial-marks" aria-hidden="true"><b data-ch="cartoon">CH1</b><b data-ch="team">CH2</b></div>
+          <div class="dial-marks" aria-hidden="true"><b data-ch="cartoon">CH1</b><b data-ch="team">CH2</b><b data-ch="fan">CH3</b></div>
         </div>
         <div class="grille" aria-hidden="true"></div>
         <div class="brandplate" aria-hidden="true">GALI<small>VISION</small></div>
@@ -106,6 +107,7 @@
     <div class="pl-tabs" role="tablist" aria-label="Playlists" id="channels">
       <button role="tab" data-ch="cartoon" aria-selected="true"><em>CH 1</em>Matt the Miner</button>
       <button role="tab" data-ch="team" aria-selected="false"><em>CH 2</em>Team Updates</button>
+      <button role="tab" data-ch="fan" aria-selected="false"><em>CH 3</em>Memes &amp; Fan Art</button>
     </div>
     <div class="series" id="series"></div>
     <ol class="eps" id="eps" aria-label="Episodes"></ol>
