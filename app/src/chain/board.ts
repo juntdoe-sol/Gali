@@ -13,7 +13,7 @@
 import './polyfill-web';
 import { Buffer } from 'buffer';
 import { Keypair, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
-import { connection, fetchOreBalance, fetchSolBalance } from './client';
+import { connection, fetchOreBalance, fetchSolBalance, warmBlockhash as warmBlockhashNow } from './client';
 import { NOTHING_CLAIMABLE, REFINING_FEE, REFINING_FEE_BPS } from './light';
 import { ORE_MINT, ORE_SPLIT_ADDRESS_B58, TREASURY_ADDRESS } from './ore/consts';
 import {
@@ -27,7 +27,7 @@ import {
   ORE_REFINING_BPS,
   readRewards,
 } from './ore/read';
-import { closeLiveAutomation, deployFromAutomation, oreCheckpoint, oreClaimOre, oreClaimSol, oreDeploy, oreDeployWithWallet, readAutomation, startLiveAutomation, toOre, toSol } from './ore/tx';
+import { closeLiveAutomation, deployFromAutomation, oreCheckpoint, oreClaimOre, oreClaimSol, oreDeploy, oreDeployWithWallet, prewarmDeploy as prewarmOreDeploy, readAutomation, startLiveAutomation, toOre, toSol } from './ore/tx';
 import { decodeBoard, decodeMiner, decodeRound, decodeTreasury, distributionMask, type OreMiner, type OreRound } from './ore/accounts';
 import { minerPda } from './ore/consts';
 
@@ -403,6 +403,12 @@ export async function deployLive(squares: number[], solPerSquare: number, expect
   const { roundId } = await oreDeployWithWallet(squares, BigInt(Math.floor(solPerSquare * LAMPORTS_PER_SOL)), expectedOwner);
   return Number(roundId);
 }
+
+/** Read ahead what a live deploy needs, so the wallet opens sooner when DEPLOY is pressed. */
+export const prewarmDeploy = (owner: PublicKey) => {
+  prewarmOreDeploy(owner);
+  warmBlockhashNow();
+};
 
 /** Live autopilot (ORE's automation). One approval to start, none per round, one to stop and refund. */
 export const startAutopilot = (perSpotSol: number, squares: number[], random: boolean, rounds: number, expectedOwner?: PublicKey, topUpKey?: PublicKey) =>
