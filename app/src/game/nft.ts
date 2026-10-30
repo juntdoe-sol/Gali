@@ -73,6 +73,8 @@ export interface CertStatus {
   counting?: boolean;
   /** the milestone certificates (null when the server could not read them) */
   milestones?: Milestones | null;
+  /** the claim fee per certificate in SOL, paid in the mint transaction (0 = none) */
+  fee?: number;
 }
 export interface InvItem {
   id: string;

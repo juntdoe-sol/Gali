@@ -134,7 +134,7 @@ export function CertClaimPopup() {
                 You mined ORE on Gali Island during the closed beta. Claim your Founding Miner certificate NFT: it stays in your wallet for good and claims the Legendary Jarl Helmet when the NFT market opens.
               </T>
               <T v="muted" style={{ fontSize: 12, textAlign: 'center' }}>
-                You pay the mint: Solana rent and network fee, shown in your wallet before you approve. One per wallet.
+                The cost shows in your wallet before you approve. One per wallet.
               </T>
               {claiming ? (
                 <PixelBox fill="rgba(62,230,255,0.1)" hi={COLORS.teal} lo="#04060f" style={{ padding: 10 }}>

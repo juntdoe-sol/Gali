@@ -26,7 +26,8 @@
 // Secrets: SOLANA_RPC (Helius URL, for DAS), DM_SECRET (sign-in passes), CERT_AUTHORITY (base58 secret key of the
 //   collection authority, made by scripts/cert-collection.mjs), CERT_COLLECTION (collection address),
 //   optional CERT_BETA_END (ISO time; open until then), MILESTONE_COLLECTION (scripts/nft/milestone-collection.mjs),
-//   GEAR_COLLECTION (later)
+//   GEAR_COLLECTION (later), ADMIN_WALLET (gets the claim fee; CERT_FEE_WALLET overrides it),
+//   optional CERT_FEE_SOL (claim fee per certificate, default 0.01; 0 turns it off)
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import bs58 from 'npm:bs58@6';
 import { createUmi } from 'npm:@metaplex-foundation/umi-bundle-defaults@1.6.0';
@@ -160,7 +161,7 @@ async function scan(wallet: string) {
 
 async function status(wallet: string) {
   const [founding, ms] = await Promise.all([foundingStatus(wallet), milestones(wallet).catch(() => null)]);
-  return { ...founding, milestones: ms };
+  return { ...founding, milestones: ms, fee: claimFee() };
 }
 async function foundingStatus(wallet: string) {
   const { data: miner } = await db.from('gali_miners').select('wallet, name').eq('wallet', wallet).maybeSingle();
@@ -213,6 +214,40 @@ function computeBudget() {
   return transactionBuilder()
     .add({ instruction: { programId: COMPUTE_BUDGET, keys: [], data: limit }, signers: [], bytesCreatedOnChain: 0 })
     .add({ instruction: { programId: COMPUTE_BUDGET, keys: [], data: price }, signers: [], bytesCreatedOnChain: 0 });
+}
+
+/**
+ * The claim fee: the miner pays it to the admin wallet in the same transaction as the mint, so a certificate is never
+ * minted without it (Gali has already signed the transaction; changing it breaks those signatures).
+ */
+const FEE_SOL = Number(Deno.env.get('CERT_FEE_SOL') ?? 0.01);
+const feeWallet = () => {
+  const w = (Deno.env.get('CERT_FEE_WALLET') ?? Deno.env.get('ADMIN_WALLET') ?? '').trim();
+  return isWallet(w) ? w : null;
+};
+/** The fee a claim costs right now, in SOL (0 when no fee wallet is set). */
+const claimFee = () => (feeWallet() && FEE_SOL > 0 ? FEE_SOL : 0);
+const SYSTEM_PROGRAM = publicKey('11111111111111111111111111111111');
+function feeIx(payer: ReturnType<typeof createNoopSigner>) {
+  const to = feeWallet();
+  const fee = claimFee();
+  if (!to || !fee) return transactionBuilder();
+  const data = new Uint8Array(12);
+  const dv = new DataView(data.buffer);
+  dv.setUint32(0, 2, true); // SystemProgram Transfer
+  dv.setBigUint64(4, BigInt(Math.round(fee * 1e9)), true);
+  return transactionBuilder().add({
+    instruction: {
+      programId: SYSTEM_PROGRAM,
+      keys: [
+        { pubkey: payer.publicKey, isSigner: true, isWritable: true },
+        { pubkey: publicKey(to), isSigner: false, isWritable: true },
+      ],
+      data,
+    },
+    signers: [payer],
+    bytesCreatedOnChain: 0,
+  });
 }
 
 const pad = (n: number) => String(n).padStart(4, '0');
@@ -282,7 +317,7 @@ async function build(wallet: string) {
   const miner = createNoopSigner(publicKey(wallet));
   const collection = { publicKey: publicKey(Deno.env.get('CERT_COLLECTION')!), updateAuthority: auth.publicKey };
   const bh = await umi.rpc.getLatestBlockhash({ commitment: 'confirmed' });
-  const tx = await computeBudget().add(create(umi, {
+  const tx = await computeBudget().add(feeIx(miner)).add(create(umi, {
     asset,
     collection,
     owner: miner.publicKey,
@@ -381,7 +416,7 @@ async function buildMilestone(wallet: string, kind: Kind) {
   const payer = createNoopSigner(publicKey(wallet));
   const collection = { publicKey: publicKey(Deno.env.get('MILESTONE_COLLECTION')!), updateAuthority: auth.publicKey };
   const bh = await umi.rpc.getLatestBlockhash({ commitment: 'confirmed' });
-  const tx = await computeBudget().add(create(umi, {
+  const tx = await computeBudget().add(feeIx(payer)).add(create(umi, {
     asset,
     collection,
     owner: payer.publicKey,
