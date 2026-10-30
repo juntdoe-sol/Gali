@@ -23,6 +23,7 @@ import { GUTTER, RAIL_W, useLayout } from './layout';
 import { BAR_H, SHEET_TITLE, TAB_PIX, TabBar, type SheetTab } from './TabBar';
 import { BackPill } from './Lobby';
 import { Inventory } from './Inventory';
+import { useOreHits, type OreHit } from '../game/oreHits';
 
 const ORE_PROGRAM_STR = 'oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv';
 
@@ -303,6 +304,90 @@ function practiceRounds(before: number, n: number): BoardRound[] {
   });
 }
 
+const hitAgo = (iso: string) => {
+  const s = (Date.now() - Date.parse(iso)) / 1000;
+  if (s < 3600) return `${Math.max(1, Math.floor(s / 60))}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+};
+type HitFilter = 'all' | 'solo' | 'motherlode';
+/** Every Gali miner's solo wins and motherlode hits, newest first (recorded by the server from ORE's accounts). */
+function BigHits({ owner }: { owner: string | null }) {
+  const { hits, status, load } = useOreHits();
+  const [f, setF] = useState<HitFilter>('all');
+  const [more, setMore] = useState(false);
+  useEffect(() => {
+    void load();
+    const id = setInterval(() => void load(true), 90_000);
+    return () => clearInterval(id);
+  }, [load]);
+  const solo = hits.filter((h) => h.kind === 'solo');
+  const lode = hits.filter((h) => h.kind === 'motherlode');
+  const list = f === 'solo' ? solo : f === 'motherlode' ? lode : hits;
+  const shown = more ? list : list.slice(0, 8);
+  const who = (h: OreHit) => (h.wallet === owner ? 'You' : h.name || short(h.wallet));
+  return (
+    <Card>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <PixIcon name="trophy" size={20} />
+        <T v="label" style={{ flex: 1 }}>
+          Gali big hits
+        </T>
+        <T v="muted" style={{ fontSize: 12 }}>
+          {solo.length} solo · {lode.length} motherlode
+        </T>
+      </View>
+      <T v="muted" style={{ marginTop: 4 }}>
+        Every round a Gali miner took the whole ORE on a ★ solo spot, and every motherlode they were on the gold spot for.
+      </T>
+      <View style={{ flexDirection: 'row', gap: 6, marginTop: 8 }}>
+        <Choice label="All" on={f === 'all'} onPress={() => setF('all')} />
+        <Choice label="Solo" on={f === 'solo'} onPress={() => setF('solo')} />
+        <Choice label="Motherlode" on={f === 'motherlode'} onPress={() => setF('motherlode')} />
+      </View>
+      {status === 'loading' && !hits.length ? (
+        <T v="muted" style={{ marginTop: 8 }}>
+          Loading…
+        </T>
+      ) : status === 'error' && !hits.length ? (
+        <T v="muted" style={{ marginTop: 8 }}>
+          Could not load the big hits. Tap Refresh below to try again.
+        </T>
+      ) : !list.length ? (
+        <T v="muted" style={{ marginTop: 8 }}>
+          {f === 'motherlode' ? 'No Gali miner has hit a motherlode yet. One round in about 500 pays it.' : f === 'solo' ? 'No solo wins yet.' : 'Nothing yet. The first solo win shows up here.'}
+        </T>
+      ) : (
+        <View style={{ marginTop: 8, gap: 6 }}>
+          {shown.map((h) => {
+            const mine = h.wallet === owner;
+            const lodeHit = h.kind === 'motherlode';
+            return (
+              <PixelBox key={`${h.roundId}-${h.kind}-${h.wallet}`} fill="rgba(9,14,34,0.9)" hi={mine ? COLORS.gold : lodeHit ? COLORS.teal : '#22356f'} lo="#04060f" style={styles.past}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <PixIcon name={lodeHit ? 'gem' : 'star'} size={18} />
+                  <T v="bold" style={{ flex: 1, color: mine ? COLORS.gold : COLORS.text }} numberOfLines={1}>
+                    {who(h)}
+                  </T>
+                  <T v="display" style={{ fontSize: 18, color: lodeHit ? COLORS.teal : COLORS.gold }}>
+                    {h.ore === null ? '…' : `${fmtOreAmt(h.ore)} ORE`}
+                  </T>
+                </View>
+                <T v="muted" style={{ fontSize: 12, marginTop: 2 }}>
+                  {lodeHit ? `MOTHERLODE${h.share !== null && h.share < 1 ? ` · ${(h.share * 100).toFixed(h.share < 0.01 ? 2 : 1)}% of the gold spot` : ''}` : '★ Solo win'} · #
+                  {(h.roundId % 100000).toLocaleString()} · {h.approx ? '~' : ''}
+                  {hitAgo(h.at)}
+                </T>
+              </PixelBox>
+            );
+          })}
+          {list.length > 8 ? <Btn small label={more ? 'Show fewer' : `Show all ${list.length}`} onPress={() => setMore((m) => !m)} /> : null}
+        </View>
+      )}
+    </Card>
+  );
+}
+
 function Rounds() {
   const owner = useGame((s) => s.wallet.owner);
   const roundId = useGame((s) => s.roundId);
@@ -337,11 +422,12 @@ function Rounds() {
         </View>
         <T v="muted">Each finished round credits the SOL you get back and the ORE you mined. Claim whenever you like: nothing expires. ORE claimed before it is refined pays ORE's own 10% fee.</T>
       </Card>
+      {onChain ? <BigHits owner={owner} /> : null}
       <View style={[styles.rowCard, { justifyContent: 'space-between' }]}>
         <T v="display" style={{ fontSize: 20 }}>
           Past rounds{onChain ? '' : ' · practice'}
         </T>
-        <Btn small label="Refresh" onPress={() => setAt(Date.now())} />
+        <Btn small label="Refresh" onPress={() => { setAt(Date.now()); void useOreHits.getState().load(true); }} />
       </View>
       {rows === null ? (
         <Card>

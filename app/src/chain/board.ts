@@ -447,6 +447,9 @@ export interface OreStats {
   /** unrefined in grams, and ORE's refining factor now (as a decimal string), for the 24 hour gain */
   unrefinedGrams: string;
   factor: string;
+  /** all-time SOL this wallet put on ORE's board, and all-time SOL ORE gave back to it */
+  deployedSol: number;
+  returnedSol: number;
 }
 
 /** One read: the wallet's ORE miner account and ORE's treasury. A wallet that never mined reads all zeros. */
@@ -455,7 +458,7 @@ export async function fetchOreStats(owner: PublicKey): Promise<OreStats> {
   if (!ti) throw new Error('ORE treasury not found');
   const t = decodeTreasury(ti.data);
   const factor = t.minerRewardsFactor.toString();
-  if (!mi) return { lifetime: 0, unrefined: 0, refined: 0, unrefinedGrams: '0', factor };
+  if (!mi) return { lifetime: 0, unrefined: 0, refined: 0, unrefinedGrams: '0', factor, deployedSol: 0, returnedSol: 0 };
   const m = decodeMiner(mi.data);
   const accrued = t.minerRewardsFactor > m.rewardsFactor ? (m.rewardsOre * (t.minerRewardsFactor - m.rewardsFactor)) / FACTOR_ONE : 0n;
   return {
@@ -464,6 +467,8 @@ export async function fetchOreStats(owner: PublicKey): Promise<OreStats> {
     refined: toOre(m.refinedOre + accrued),
     unrefinedGrams: m.rewardsOre.toString(),
     factor,
+    deployedSol: toSol(m.lifetimeDeployed),
+    returnedSol: toSol(m.lifetimeRewardsSol),
   };
 }
 
