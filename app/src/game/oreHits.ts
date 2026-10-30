@@ -20,6 +20,11 @@ export interface OreHit {
   at: string;
   /** the time is estimated from the round number (rounds found when the record started) */
   approx: boolean;
+  /** SOL this miner put on the board that round, and SOL ORE gave back after its fees; null if unknown */
+  solIn: number | null;
+  solBack: number | null;
+  /** false when worked out from their autopilot settings (Random spots), so the refund is close, not exact */
+  solExact: boolean;
 }
 
 interface HitsState {
@@ -55,6 +60,7 @@ export const useOreHits = create<HitsState>((set, get) => ({
           roundId: Number(x.round_id), kind: x.kind === 'solo' ? 'solo' : 'motherlode', wallet: String(x.wallet),
           name: x.name ? String(x.name) : null, ore: num(x.ore), share: num(x.share), motherlodeOre: num(x.motherlode_ore),
           at: String(x.at), approx: Boolean(x.approx),
+          solIn: num(x.sol_in), solBack: num(x.sol_back), solExact: x.sol_exact !== false,
         })),
       });
     } catch {

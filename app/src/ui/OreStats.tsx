@@ -85,7 +85,8 @@ export function OreStatsPanel() {
         </Pressable>
         {folded ? null : (
           <>
-            <T v="label" style={styles.section}>
+            <View style={[styles.block, { borderColor: COLORS.gold }]}>
+            <T v="label" style={[styles.section, { color: COLORS.gold }]}>
               YOU
             </T>
             {!owner ? (
@@ -115,7 +116,9 @@ export function OreStatsPanel() {
                 />
               </>
             )}
-            <T v="label" style={styles.section}>
+            </View>
+            <View style={[styles.block, { borderColor: COLORS.teal }]}>
+            <T v="label" style={[styles.section, { color: COLORS.teal }]}>
               ALL GALI MINERS
             </T>
             {gali ? (
@@ -133,16 +136,22 @@ export function OreStatsPanel() {
                 tip={`Every Gali wallet together (${market!.miners.toLocaleString()} with ORE accounts). ${PROFIT_TIP}`}
               />
             ) : null}
-            {market?.oreUsd && market.solUsd ? (
-              <T v="muted" style={styles.note}>
-                ORE ${market.oreUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })} · SOL ${market.solUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-              </T>
-            ) : null}
             {gali ? null : (
               <T v="muted" style={styles.note}>
                 Loading…
               </T>
             )}
+            </View>
+            {market?.oreUsd && market.solUsd ? (
+              <View style={styles.prices}>
+                <T v="muted" style={styles.priceLabel}>
+                  ORE <T v="display" style={styles.price}>${market.oreUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</T>
+                </T>
+                <T v="muted" style={styles.priceLabel}>
+                  SOL <T v="display" style={styles.price}>${market.solUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</T>
+                </T>
+              </View>
+            ) : null}
           </>
         )}
       </Frame>
@@ -156,9 +165,13 @@ const styles = StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   title: { flex: 1, fontSize: 18, color: COLORS.gold, letterSpacing: 1 },
   fold: { fontSize: 18, color: COLORS.muted, width: 16, textAlign: 'center' },
-  section: { marginTop: 6, fontSize: 11 },
+  section: { fontSize: 11, marginBottom: 2 },
+  block: { marginTop: 8, paddingHorizontal: 8, paddingVertical: 6, borderWidth: 1, borderLeftWidth: 3, backgroundColor: 'rgba(4,6,15,0.55)' },
+  prices: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 6, paddingHorizontal: 2 },
+  priceLabel: { fontSize: 11, letterSpacing: 1 },
+  price: { fontSize: 16, color: COLORS.text, fontVariant: ['tabular-nums'] },
   row: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, paddingVertical: 1 },
   label: { fontSize: 12, flexShrink: 1 },
-  value: { fontSize: 18, color: COLORS.text },
+  value: { fontSize: 18, color: COLORS.text, fontVariant: ['tabular-nums'] },
   note: { fontSize: 12 },
 });

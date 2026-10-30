@@ -369,15 +369,29 @@ function BigHits({ owner }: { owner: string | null }) {
                   <T v="bold" style={{ flex: 1, color: mine ? COLORS.gold : COLORS.text }} numberOfLines={1}>
                     {who(h)}
                   </T>
-                  <T v="display" style={{ fontSize: 18, color: lodeHit ? COLORS.teal : COLORS.gold }}>
+                  <T v="display" style={{ fontSize: 18, color: lodeHit ? COLORS.teal : COLORS.gold, fontVariant: ['tabular-nums'] }}>
                     {h.ore === null ? '…' : `${fmtOreAmt(h.ore)} ORE`}
                   </T>
                 </View>
-                <T v="muted" style={{ fontSize: 12, marginTop: 2 }}>
+                <T v="muted" style={styles.hitMeta}>
                   {lodeHit ? `MOTHERLODE${h.share !== null && h.share < 1 ? ` · ${(h.share * 100).toFixed(h.share < 0.01 ? 2 : 1)}% of the gold spot` : ''}` : '★ Solo win'} · #
                   {(h.roundId % 100000).toLocaleString()} · {h.approx ? '~' : ''}
                   {hitAgo(h.at)}
                 </T>
+                {h.solIn !== null && h.solBack !== null ? (
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: 14, marginTop: 4 }}>
+                    <T v="muted" style={{ fontSize: 12 }}>
+                      Deployed <T v="display" style={styles.hitNum}>{fmtSol(h.solIn)} SOL</T>
+                    </T>
+                    <T v="muted" style={{ fontSize: 12 }}>
+                      Back after fees{' '}
+                      <T v="display" style={styles.hitNum}>
+                        {h.solExact ? '' : '~'}
+                        {fmtSol(h.solBack)} SOL
+                      </T>
+                    </T>
+                  </View>
+                ) : null}
               </PixelBox>
             );
           })}
@@ -783,6 +797,8 @@ const styles = StyleSheet.create({
   grabber: { alignSelf: 'center', width: 40, height: U * 2, backgroundColor: '#3a5290', marginTop: 8, marginBottom: 4 },
   sheetHead: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 6, paddingBottom: 10, borderBottomColor: '#22356f', borderBottomWidth: U },
   past: { padding: 12 },
+  hitMeta: { fontFamily: 'Jersey15_400Regular', fontSize: 14, lineHeight: 16, marginTop: 3, letterSpacing: 0.4, fontVariant: ['tabular-nums'] },
+  hitNum: { fontSize: 15, lineHeight: 16, color: COLORS.text, fontVariant: ['tabular-nums'] },
   rowCard: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   badge: { width: '48.5%', padding: 12, gap: 4 },
