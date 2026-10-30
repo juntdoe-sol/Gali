@@ -5,16 +5,17 @@
 import { useEffect } from 'react';
 import { Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { COLORS } from '../game/constants';
-import { Dock } from './Dock';
+import { Dock, UnclaimedRow } from './Dock';
 import { RoundCard } from './Hud';
 import { Kbd, PixelBox, T, U } from './kit';
-import { GUTTER, LANDSCAPE_APP, useLayout } from './layout';
+import { GUTTER, LANDSCAPE_APP, RAIL_W, useLayout } from './layout';
 import { HideBtn, MineTab, useMinePanel } from './MineAnywhere';
 import { useLobby } from '../game/lobby';
 
 export function SidePanel() {
   const { desktop, side, mouse } = useLayout();
   const hidden = useMinePanel((st) => st.hidden);
+  const onIsland = useLobby((st) => st.where === 'island');
   // M hides or shows the panel on a computer
   useEffect(() => {
     if (Platform.OS !== 'web' || !desktop || LANDSCAPE_APP) return;
@@ -30,8 +31,24 @@ export function SidePanel() {
     return () => window.removeEventListener('keydown', key);
   }, [desktop]);
   if (!desktop) return null;
-  if (hidden) return <MineTab style={[styles.tabAt, { right: GUTTER, top: GUTTER }]} />;
+  // on the island the Unclaimed box sits on its own at the bottom middle of the map, clear of the panel
+  const unclaimed = onIsland ? (
+    <View pointerEvents="box-none" style={[styles.unclaimedAt, { left: RAIL_W + GUTTER, right: (hidden ? 0 : side) + GUTTER * 2 }]}>
+      <View style={styles.unclaimedW}>
+        <UnclaimedRow boxed />
+      </View>
+    </View>
+  ) : null;
+  if (hidden)
+    return (
+      <>
+        <MineTab style={[styles.tabAt, { right: GUTTER, top: GUTTER }]} />
+        {unclaimed}
+      </>
+    );
   return (
+    <>
+    {unclaimed}
     <View style={[styles.side, { width: side, right: GUTTER, top: GUTTER, bottom: GUTTER }]}>
       <RoundCard embedded />
       <PixelBox fill="rgba(15,23,52,0.95)" hi="#33498c" lo="#0c1430" shadow={2} style={styles.dockBox}>
@@ -45,7 +62,7 @@ export function SidePanel() {
           <HideBtn />
         </View>
         <ScrollView style={{ flexGrow: 0 }} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator>
-          <Dock embedded />
+          <Dock embedded noUnclaimed={onIsland} />
         </ScrollView>
       </PixelBox>
       {mouse ? (
@@ -59,6 +76,7 @@ export function SidePanel() {
         </View>
       ) : null}
     </View>
+    </>
   );
 }
 
@@ -78,6 +96,8 @@ const styles = StyleSheet.create({
   // the deploy card hugs its controls; it only scrolls when the window is too short for them
   dockBox: { flexShrink: 1, minHeight: 0, paddingTop: 10 },
   tabAt: { position: 'absolute', zIndex: 15 },
+  unclaimedAt: { position: 'absolute', bottom: GUTTER, alignItems: 'center', zIndex: 14 },
+  unclaimedW: { width: '100%', maxWidth: 480 },
   dockHead: { paddingHorizontal: 16, paddingBottom: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, borderBottomWidth: U, borderColor: '#22356f', marginHorizontal: U * 2 },
   scroll: { paddingHorizontal: 14, paddingTop: 8, paddingBottom: 12 },
   keys: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10, paddingVertical: 2 },
