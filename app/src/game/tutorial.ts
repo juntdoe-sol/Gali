@@ -18,7 +18,9 @@ interface TutorialState {
   deskDone: boolean;
   /** which tutorial is showing: the computer's or the phone's */
   desk: boolean;
-  start: (desk?: boolean) => void;
+  /** how many steps the showing tutorial has */
+  total: number;
+  start: (desk?: boolean, total?: number) => void;
   next: () => void;
   close: () => void;
   /** the island engine says the miner reached a mining spot */
@@ -44,10 +46,11 @@ export const useTutorial = create<TutorialState>((set, get) => ({
   done: read(),
   deskDone: read(DESK_KEY),
   desk: false,
-  start: (desk = false) => set(desk ? { step: 0, deskDone: false, desk } : { step: 0, done: false, desk }),
+  total: TUTORIAL_STEPS,
+  start: (desk = false, total = TUTORIAL_STEPS) => set(desk ? { step: 0, deskDone: false, desk, total } : { step: 0, done: false, desk, total: TUTORIAL_STEPS }),
   next: () => {
     const n = get().step + 1;
-    if (n >= TUTORIAL_STEPS) get().close();
+    if (n >= get().total) get().close();
     else set({ step: n });
   },
   close: () => {

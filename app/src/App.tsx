@@ -289,7 +289,6 @@ function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTa
         {desktop ? null : <Dock />}
         <TabBar active={sheet} onTab={setSheet} />
         <MapHint />
-        <MineTutorial />
         <LobbyBack />
         <ClaimPanel />
         <PeerCard />
@@ -300,6 +299,7 @@ function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTa
         <LobbyScreen sheet={sheet} onTab={setSheet} />
         {/* after the lobby, so its cards sit on top of it */}
         <Coach />
+        <MineTutorial />
         <MineOffIsland />
         <HollowSplash />
         <Sheet tab={sheet} onTab={setSheet} />

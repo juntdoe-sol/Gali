@@ -42,6 +42,8 @@ export interface Avatar {
   sx?: 'm' | 'f';
   /** the dance they are doing (1 to 12), 0 = none */
   dance?: number;
+  /** the wallet they say is theirs, before (or without) a session signature: enough to address a DM to */
+  claimed?: string | null;
 }
 export interface MeState {
   x: number;
@@ -284,6 +286,7 @@ function onState(p: any) {
     pk: typeof p.pk === 'string' && /^pet-[a-z]{2,12}$/.test(p.pk) ? p.pk : null,
     sx: p.sx === 'f' ? 'f' : 'm',
     dance: Number.isInteger(p.dn) && p.dn >= 1 && p.dn <= 12 ? p.dn : 0,
+    claimed: typeof p.w === 'string' && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(p.w) ? p.w : null,
   };
   useWorld.setState((s) => ({ peers: { ...s.peers, [id]: av } }));
   if (p.bw !== undefined) roomHooks.onBw?.('island', id, p.bw);
@@ -348,6 +351,8 @@ export function publishMe(me: MeState, identity: { wallet: string | null; sessio
   if (bw) payload.bw = bw;
   const key = JSON.stringify(payload);
   if (now - lastSent < SEND_MS || (key === lastKey && now - lastSent < BEAT_MS)) return;
+  // the connected wallet, so others can message it (verified separately below when a session key signs it)
+  if (identity.wallet) payload.w = identity.wallet;
   const claimable = identity.wallet && identity.session && identity.sessionValid;
   // a session key only exists once store.ts has loaded the chain code, so this is set whenever claimable is
   const chain = claimable ? loadedChain() : null;
