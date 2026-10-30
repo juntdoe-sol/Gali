@@ -35,6 +35,7 @@ import { Bar, Btn, Choice, F, FocusRing, Frame, IconBtn, INPUT, Kbd, MapButton, 
 import { GUTTER, LANDSCAPE_APP, RAIL_W, TOP_H, sideWidth, useChrome, useLayout } from './layout';
 import { BAR_H, TabBar, type SheetTab } from './TabBar';
 import { Arcade } from './Arcade';
+import { AnnounceBanner } from './Announce';
 import { PixIcon } from './PixIcon';
 import { DisconnectBtn } from './Hud';
 import { fx } from '../pixel/fx';
@@ -419,6 +420,9 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
           </View>
         </View>
       )}
+
+      {/* team announcements from the admin page */}
+      <AnnounceBanner top={topH + 4} left={left ? left + GUTTER : 0} right={right} />
 
       {/* bottom: emotes and dances, then the same bar as the island (chat lives in CHAT, not over the stick) */}
       <View style={[styles.bottom, L.desktop ? { bottom: GUTTER, left: RAIL_W + GUTTER, right, alignItems: 'center' } : { bottom: bottomInset + BAR_H + 40 }]} pointerEvents="box-none">
