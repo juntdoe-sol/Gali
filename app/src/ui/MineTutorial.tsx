@@ -3,7 +3,7 @@
  * closes with X at any step, and moves on by itself when the miner walks to a spot, picks spots
  * and deploys. Step 2 turns on the island's gold trail to the nearest spot (Snapshot.guide).
  */
-import { useEffect } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../game/constants';
@@ -65,18 +65,33 @@ interface DeskStep {
   target: TutTargetId | null;
   /** where the arrow aims along the target (0 = its left edge) */
   at?: number;
-  /** how much of the target's width glows (the first of a row of buttons) */
+  /** which part of the target's width glows (one button of a row): starts at `from`, `span` wide */
+  from?: number;
   span?: number;
   label?: string;
   waits?: string;
 }
-const DESK_STEPS: DeskStep[] = [
-  { icon: 'ore', title: 'Mine ORE in 3 clicks', body: 'Every round, about a minute, one of 25 spots strikes gold and mines ORE. LITE puts your SOL on all 25, so you are always on the gold spot.', target: null },
-  { icon: 'grid', title: 'LITE is on', body: 'LITE covers every spot for you. Nothing to pick on the map.', target: 'tab-lite', at: 0.1, label: 'LITE' },
-  { icon: 'sol', title: 'Add SOL', body: 'Click +0.01. That is one round. Only mine with SOL you can afford to lose.', target: 'quick', at: 0.04, span: 0.24, label: 'CLICK', waits: 'Moves on when you add SOL' },
-  { icon: 'pick', title: 'Press DEPLOY', body: 'Approve it in your wallet. Your SOL goes on ORE’s board for this round.', target: 'deploy', at: 0.04, label: 'CLICK', waits: 'Moves on when your SOL is in' },
-  { icon: 'gift', title: 'Claim what you mined', body: 'When the round ends, most of your SOL comes back plus the ORE you mined. It waits in Unclaimed under the panel. Claim any time.', target: 'unclaimed', at: 0.04 },
+/** what moves a step on: SOL added, MAX pressed, SOL in the round, the round (or autopilot) over */
+type Wait = 'amount' | 'amount01' | 'max' | 'deployed' | 'done';
+const DESK_STEPS: (DeskStep & { wait?: Wait; clear?: boolean })[] = [
+  { icon: 'ore', title: 'Mine ORE with LITE', body: 'Every round, about a minute, one of 25 spots strikes gold and mines ORE. LITE puts your SOL on all 25, so you are always on the gold spot. Three rounds to learn it: 0.01, then 0.1, then MAX.', target: null },
+  { icon: 'grid', title: 'LITE is on', body: 'LITE covers every spot for you. Nothing to pick on the map. Each round uses 0.01 SOL.', target: 'tab-lite', at: 0.1, label: 'LITE' },
+  // round 1: one round
+  { icon: 'sol', title: 'Round 1: add 0.01', body: 'Click +0.01. That is one round. Only mine with SOL you can afford to lose.', target: 'quick', at: 0.04, span: 0.24, label: 'CLICK', waits: 'Moves on when you add SOL', wait: 'amount' },
+  { icon: 'pick', title: 'Press DEPLOY', body: 'Approve it in your wallet. Your 0.01 SOL goes on ORE’s board for this round.', target: 'deploy', at: 0.04, label: 'CLICK', waits: 'Moves on when your SOL is in', wait: 'deployed' },
+  { icon: 'clock', title: 'Wait for the strike', body: 'When the clock runs out, ORE picks the gold spot. Most of your SOL comes back, plus the ORE you mined, into Unclaimed.', target: 'unclaimed', at: 0.04, waits: 'Moves on when the round ends', wait: 'done' },
+  // round 2: 0.1 = 10 rounds on autopilot
+  { icon: 'sol', title: 'Round 2: add 0.1', body: 'Click +0.1. That is 10 rounds of 0.01, mined one after another on autopilot.', target: 'quick', at: 0.27, from: 0.255, span: 0.24, label: 'CLICK', waits: 'Moves on when you add 0.1', wait: 'amount01', clear: true },
+  { icon: 'bot', title: 'Press DEPLOY once', body: 'One wallet approval funds all 10 rounds. They deploy by themselves, one a minute. STOP gets the unused SOL back.', target: 'deploy', at: 0.04, label: 'CLICK', waits: 'Moves on when autopilot starts', wait: 'deployed' },
+  { icon: 'clock', title: 'Autopilot is mining: take a walk', body: 'Your 10 rounds run on their own, about 10 minutes, wherever you are. Go explore: the lobby, the cave, the market, the arena. We will call you back for round 3.', target: null, waits: 'Moves on when autopilot finishes', wait: 'done' },
+  // round 3: MAX
+  { icon: 'sol', title: 'Round 3: MAX', body: 'Click MAX to put your SOL to work, as many 0.01 rounds as it covers (Gali keeps a little for fees, and autopilot has a cap).', target: 'quick', at: 0.765, from: 0.75, span: 0.25, label: 'CLICK', waits: 'Moves on when you press MAX', wait: 'max', clear: true },
+  { icon: 'pick', title: 'Press DEPLOY', body: 'Approve once and your rounds mine on autopilot. Only mine with SOL you can afford to lose.', target: 'deploy', at: 0.04, label: 'CLICK', waits: 'Moves on when autopilot starts', wait: 'deployed' },
+  { icon: 'gift', title: 'You are a miner now', body: 'Claim your SOL and ORE from Unclaimed any time. Want to pick your own spots? Try PRO.', target: 'unclaimed', at: 0.04 },
 ];
+
+/** the autopilot lesson's "take a walk" step */
+const WALK_STEP = DESK_STEPS.findIndex((d) => d.icon === 'clock' && d.wait === 'done' && /walk/.test(d.title));
 
 const PRO_TOUR: DeskStep[] = [
   { icon: 'grid', title: 'PRO: you pick the spots', body: 'Click spots on the map to choose them yourself, or set how many with − and +. ALL covers every spot.', target: 'pro-tiles', at: 0.04 },
@@ -84,13 +99,13 @@ const PRO_TOUR: DeskStep[] = [
   { icon: 'pick', title: 'Deploy', body: 'Same as LITE: press DEPLOY, approve, wait for the strike. Back to LITE any time.', target: 'deploy', at: 0.04 },
 ];
 
-function DeskCard({ s, step, total, onNext, onClose, tag }: { s: DeskStep; step: number; total: number; onNext: () => void; onClose: () => void; tag: string }) {
+function DeskCard({ s, step, total, onNext, onClose, tag, extra, low }: { s: DeskStep; step: number; total: number; onNext: () => void; onClose: () => void; tag: string; extra?: ReactNode; low?: boolean }) {
   const L = useLayout();
   useTutActive(true);
   return (
     <>
-      <Pointer target={s.target} at={s.at} span={s.span} label={s.label} />
-      <View pointerEvents="box-none" style={[styles.wrap, { top: TOP_H + GUTTER * 2 + 8, left: RAIL_W + GUTTER, right: L.side + GUTTER * 2 }]}>
+      <Pointer target={s.target} at={s.at} from={s.from} span={s.span} label={s.label} />
+      <View pointerEvents="box-none" style={[styles.wrap, low ? { bottom: GUTTER + 96 } : { top: TOP_H + GUTTER * 2 + 8 }, { left: RAIL_W + GUTTER, right: L.side + GUTTER * 2 }]}>
         <PixelBox fill="rgba(8,13,32,0.96)" hi={COLORS.gold} lo="#04060f" shadow={1} style={styles.card}>
           <View style={styles.head}>
             <PixIcon name={s.icon} size={28} />
@@ -114,6 +129,7 @@ function DeskCard({ s, step, total, onNext, onClose, tag }: { s: DeskStep; step:
               Follow the arrow →
             </T>
           ) : null}
+          {extra}
           <View style={styles.foot}>
             <View style={styles.dots}>
               {Array.from({ length: total }, (_, k) => (
@@ -138,6 +154,7 @@ function DeskMineTutorial() {
   const onboarded = useGame((s) => s.save.onboarded);
   const tab = useGame((s) => s.dockTab);
   const inRound = useGame((s) => Boolean(s.pending || s.run));
+  const run = useGame((s) => s.run);
   const amount = useTut((s) => s.liteAmount);
   const { step, desk, deskDone, start, next, close } = useTutorial();
   const pro = useProTutorial();
@@ -149,23 +166,54 @@ function DeskMineTutorial() {
       const t = setTimeout(() => {
         useMinePanel.getState().setHidden(false);
         useGame.getState().setDockTab('lite');
-        start(true);
+        start(true, DESK_STEPS.length);
         useCoach.getState().finishIntro();
       }, 1200);
       return () => clearTimeout(t);
     }
   }, [where, onboarded, deskDone, step, start, introBusy]);
+  // each step's wait; a lesson that adds SOL starts from an empty box
+  const maxAt = useTut((s) => s.maxAt);
+  const enteredAt = useRef(0);
   useEffect(() => {
-    if (!desk) return;
-    if (step === 2 && amount > 0) next();
-    if (step === 3 && inRound) next();
-  }, [desk, step, amount, inRound, next]);
+    if (!desk || step < 0) return;
+    enteredAt.current = Date.now();
+    if (DESK_STEPS[step]?.clear) useTut.setState({ clearAt: Date.now() });
+  }, [desk, step]);
+  useEffect(() => {
+    if (!desk || step < 0) return;
+    const w = DESK_STEPS[step]?.wait;
+    if (!w) return;
+    if ((w === 'amount' && amount > 0) || (w === 'amount01' && amount >= 0.1 - 1e-9) || (w === 'max' && maxAt > enteredAt.current) || (w === 'deployed' && inRound) || (w === 'done' && !inRound)) next();
+  }, [desk, step, amount, maxAt, inRound, next]);
   // PRO's own short tour, the first time a miner switches to PRO
   useEffect(() => {
     if (where === 'island' && tab === 'pro' && !pro.done && pro.step < 0 && step < 0) pro.start();
   }, [where, tab, pro, step]);
 
-  if (where !== 'island') return null;
+  // the autopilot lesson follows the miner off the island: progress while they walk, then a call back for round 3
+  if (where !== 'island') {
+    if (!desk || step < WALK_STEP || step >= DESK_STEPS.length) return null;
+    const away: DeskStep =
+      step === WALK_STEP
+        ? { icon: 'clock', title: 'Autopilot is mining', body: `${run ? `${run.total - run.left} of ${run.total} rounds done. ` : ''}Keep exploring: the cave, the market, the arena and the games row are all in the lobby.`, target: null, waits: 'Moves on when autopilot finishes' }
+        : { icon: 'sol', title: 'Autopilot finished: round 3', body: 'Your 10 rounds are done. Head back to ORE Island for the last lesson: MAX.', target: null };
+    return (
+      <DeskCard
+        key={`a${step}`}
+        s={away}
+        step={step}
+        total={DESK_STEPS.length}
+        onNext={step === WALK_STEP ? next : () => useLobby.getState().go('island')}
+        onClose={close}
+        tag="LITE MINING"
+        low
+        extra={step > WALK_STEP ? <Btn kind="gold" label="BACK TO ORE ISLAND" onPress={() => useLobby.getState().go('island')} /> : null}
+      />
+    );
+  }
+  if (desk && step === WALK_STEP)
+    return <DeskCard key={`l${step}`} s={DESK_STEPS[step]} step={step} total={DESK_STEPS.length} onNext={next} onClose={close} tag="LITE MINING" extra={<Btn kind="gold" label="TAKE A WALK: GO TO THE LOBBY" onPress={() => useLobby.getState().go('lobby')} />} />;
   if (desk && step >= 0 && step < DESK_STEPS.length) return <DeskCard key={`l${step}`} s={DESK_STEPS[step]} step={step} total={DESK_STEPS.length} onNext={next} onClose={close} tag="LITE MINING" />;
   if (pro.step >= 0 && tab === 'pro') return <DeskCard key={`p${pro.step}`} s={PRO_TOUR[pro.step]} step={pro.step} total={PRO_TOUR.length} onNext={pro.next} onClose={pro.close} tag="PRO MINING" />;
   return null;

@@ -508,8 +508,12 @@ function DeskLite() {
   }, [liteMode, run]);
 
   const amt = Number(amount) || 0;
-  // the tutorial moves on when there is SOL in
+  // the tutorial moves on when there is SOL in, and can empty the box between lessons
   useEffect(() => useTut.setState({ liteAmount: amt }), [amt]);
+  const clearAt = useTut((s) => s.clearAt);
+  useEffect(() => {
+    if (clearAt) setAmount('');
+  }, [clearAt]);
   const rounds = Math.floor(amt / LITE_PER_ROUND + 1e-9);
   const total = rounds * LITE_PER_ROUND;
   const need = total + (rounds > 1 ? EXEC_FEE * rounds : 0);
@@ -517,6 +521,7 @@ function DeskLite() {
   const autoCapped = live && rounds > 1 && total > LIVE_AUTOPILOT_MAX_SOL + 1e-9;
   const ready = rounds > 0 && enough && !autoCapped && !(live && autopilot) && !busy;
   const max = () => {
+    useTut.setState({ maxAt: Date.now() });
     const room = Math.min(live ? LIVE_AUTOPILOT_MAX_SOL : Infinity, balance - 0.001);
     setAmount(trim(Math.max(0, Math.floor(room / LITE_PER_ROUND + 1e-9)) * LITE_PER_ROUND));
   };
