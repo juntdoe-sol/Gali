@@ -543,7 +543,7 @@ function Ranks() {
         {(
           [
             ['level', 'LEVEL'],
-            ['ore', 'ORE MINED'],
+            ['ore', 'ORE IN GALI'],
             ['brawl', 'BRAWL'],
             ['clans', 'CLANS'],
           ] as [RankTab, string][]
@@ -574,8 +574,8 @@ function Ranks() {
                 : `XP gained ${when}, by every Gali miner with a wallet. Days start at midnight Malaysia time.`
               : tab === 'ore'
                 ? shownPeriod === 'all'
-                  ? 'Lifetime ORE mined on ORE, read from each wallet on chain.'
-                  : `ORE mined ${when}: the chain's total now, minus where each wallet stood when the ${period} began.`
+                  ? 'ORE mined in Gali, counted from when each miner joined (early miners: from 21 Oct). Mining done before joining doesn’t count.'
+                  : `ORE mined in Gali ${when}, counted from when each miner joined.`
                 : brawl.weekOnly
                   ? 'Brawl, the last 7 days (today, month and year boards switch on with the next server update): 1 point a KO, 3 a match win, 2 a Boss Raid won.'
                   : `Brawl ${when}: 1 point a KO, 3 a match win, 2 a Boss Raid won. A KO counts when the miner who went down reports it.`}
