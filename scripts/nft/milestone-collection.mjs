@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * One-time setup for the Level 10 and Level 20 milestone certificates.
+ * One-time setup for the milestone certificates (Levels 3, 6, 10, 15, 20, 30). Run it again after adding a level:
+ * it reuses the collection and uploads the new card images.
  * Run cert-collection.mjs first: this reuses its authority key (./cert-authority.json).
  *
  *   cd scripts/nft && npm install
@@ -58,7 +59,7 @@ async function put(path, body, type) {
   return `${SB}/storage/v1/object/public/gali-nft/${path}`;
 }
 const files = {};
-for (const lv of [10, 20]) {
+for (const lv of [3, 6, 10, 15, 20, 30]) {
   files[`gif${lv}`] = await put(`milestone/level-${lv}.gif`, readFileSync(here(`assets/level-${lv}.gif`)), 'image/gif');
   files[`png${lv}`] = await put(`milestone/level-${lv}.png`, readFileSync(here(`assets/level-${lv}.png`)), 'image/png');
 }
@@ -67,7 +68,7 @@ const colUri = await put(
   JSON.stringify({
     name: 'Gali Milestones',
     symbol: 'GALI',
-    description: 'Certificates for Gali miners who reached Level 10 or Level 20. Each claims one random weapon when the Gali NFT market opens: a Rare one for Level 10, a Legendary one for Level 20.',
+    description: 'Certificates for Gali miners who reached Level 3, 6, 10, 15, 20 or 30. Each claims that level\'s gear when the Gali NFT market opens: shoes, a tee, weapons and, at Level 30, a full Legendary outfit.',
     image: files.png20,
     animation_url: files.gif20,
     external_url: 'https://gali.lol',

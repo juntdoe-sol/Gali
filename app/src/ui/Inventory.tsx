@@ -9,7 +9,7 @@
  */
 import { useEffect, useState, type ReactNode } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, View, type ImageStyle, type LayoutChangeEvent } from 'react-native';
-import { COLORS, GEAR, RARITY_COLOR, type GearKind } from '../game/constants';
+import { ACHIEVEMENTS, COLORS, GEAR, RARITY_COLOR, type GearKind } from '../game/constants';
 import { useMarket } from '../game/market';
 import { PART, PARTS, PARTS_H, PARTS_W, partCell } from '../game/minerParts';
 import { fmtDay, useNft } from '../game/nft';
@@ -309,16 +309,64 @@ function Bay({ width }: { width: number }) {
   );
 }
 
+/** The vault's two pages: certificate NFTs, and the achievements this miner has unlocked. */
 function Vault() {
+  const [page, setPage] = useState<'certs' | 'achievements'>('certs');
+  const have = useGame((s) => s.save.achievements);
+  const got = ACHIEVEMENTS.filter((a) => have.includes(a.id)).length;
+  return (
+    <View style={{ gap: 10 }}>
+      <View style={{ flexDirection: 'row', gap: 6 }}>
+        <View style={{ flex: 1 }}>
+          <TechBtn label="CERTIFICATES" color={COLORS.gold} primary={page === 'certs'} onPress={() => setPage('certs')} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <TechBtn label={`ACHIEVEMENTS · ${got}`} color={COLORS.teal} primary={page === 'achievements'} onPress={() => setPage('achievements')} />
+        </View>
+      </View>
+      {page === 'certs' ? <Certificates /> : <Achievements />}
+    </View>
+  );
+}
+
+/** The achievements this miner has unlocked (only those; the full list lives on the Quest tab). */
+function Achievements() {
+  const have = useGame((s) => s.save.achievements);
+  const list = ACHIEVEMENTS.filter((a) => have.includes(a.id));
+  return (
+    <TechPanel title={`ACHIEVEMENTS · ${list.length} UNLOCKED`} color={COLORS.teal}>
+      {list.length ? (
+        <View style={styles.achGrid}>
+          {list.map((a) => (
+            <View key={a.id} style={[styles.ach, { borderColor: COLORS.gold, backgroundColor: 'rgba(255,201,60,0.1)' }]}>
+              <PixIcon name="medal" size={30} />
+              <T v="display" style={{ fontSize: 16, lineHeight: 17, color: COLORS.gold, textAlign: 'center' }}>
+                {a.label}
+              </T>
+              <T v="muted" style={{ fontSize: 11, textAlign: 'center' }}>
+                {a.desc}
+              </T>
+            </View>
+          ))}
+        </View>
+      ) : (
+        <T v="muted">No achievements yet. Mine, dig and brawl to unlock them: see the Quest tab.</T>
+      )}
+    </TechPanel>
+  );
+}
+
+function Certificates() {
   const owner = useGame((s) => s.wallet.owner);
   const { cert, items, loading, error, openPopup } = useNft();
   const certs = items.filter((i) => i.kind === 'cert');
+  const foundingName = certs.find((c) => c.name.startsWith('Gali Founding Miner'))?.name;
   const gear = items.filter((i) => i.kind === 'gear');
   const minted = cert?.claim?.status === 'minted';
-  const has = minted || certs.length > 0;
+  const has = minted || Boolean(foundingName);
   return (
     <TechPanel
-      title="VAULT · GALI NFTS"
+      title="CERTIFICATES · GALI NFTS"
       color={COLORS.gold}
       right={
         has ? (
@@ -344,7 +392,7 @@ function Vault() {
             )}
           </Measure>
           <T v="display" style={{ fontSize: 24, lineHeight: 25, color: COLORS.gold, letterSpacing: 1 }}>
-            {certs[0]?.name ?? `Gali Founding Miner #${String(cert?.claim?.serial ?? 0).padStart(4, '0')}`}
+            {foundingName ?? `Gali Founding Miner #${String(cert?.claim?.serial ?? 0).padStart(4, '0')}`}
           </T>
           {cert ? (
             <View style={{ gap: 2 }}>
@@ -430,6 +478,8 @@ const styles = StyleSheet.create({
   slotArt: { alignItems: 'center', justifyContent: 'center', backgroundColor: TECH.ink, overflow: 'hidden' },
   marketSlot: { justifyContent: 'center', gap: 4 },
   bayTag: { position: 'absolute', right: 12, top: 12, flexDirection: 'row', alignItems: 'center', gap: 4 },
+  achGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  ach: { flexGrow: 1, flexBasis: 130, maxWidth: 200, padding: 8, gap: 4, alignItems: 'center', borderWidth: U },
   item: { width: 96, padding: 6, gap: 4, alignItems: 'center', borderWidth: U },
   itemArt: { width: 80, height: 72, alignItems: 'center', justifyContent: 'center', backgroundColor: TECH.ink, overflow: 'hidden' },
   ghost: { height: 140, justifyContent: 'center', borderStyle: 'dashed' },

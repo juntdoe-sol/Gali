@@ -174,13 +174,26 @@ async function foundingStatus(wallet: string) {
 
 const mintOpen = () => Boolean(Deno.env.get('CERT_AUTHORITY') && Deno.env.get('CERT_COLLECTION')) && Date.now() <= BETA_END + 30 * 86_400_000;
 
-/** The milestone certificates. Each claims one of three weapons, rolled at random when the market opens. */
-type Kind = 'lv10' | 'lv20';
-const MILESTONES: Record<Kind, { level: number; rarity: string; title: string; weapons: string[] }> = {
-  lv10: { level: 10, rarity: 'Rare', title: 'Level 10', weapons: ['Ten Bagger Pick', 'Level Up Pick', 'XP Bar Blade'] },
-  lv20: { level: 20, rarity: 'Legendary', title: 'Level 20', weapons: ['Wen Moon Hammer', 'Bull Run Axe', 'Genesis Block Hammer'] },
+/**
+ * The milestone certificates. Each claims its level's gear when the market opens: the one item, or one of several
+ * rolled at random (Level 30: one full outfit, top and pants).
+ */
+type Kind = 'lv3' | 'lv6' | 'lv10' | 'lv15' | 'lv20' | 'lv30';
+const MILESTONES: Record<Kind, { level: number; rarity: string; title: string; reward: string; rewards: string[] }> = {
+  lv3: { level: 3, rarity: 'Uncommon', title: 'Level 3', reward: 'Baby Steps Boots (Uncommon shoes)', rewards: ['Baby Steps Boots'] },
+  lv6: { level: 6, rarity: 'Uncommon', title: 'Level 6', reward: 'Six Pack Tee (Uncommon top)', rewards: ['Six Pack Tee'] },
+  lv10: { level: 10, rarity: 'Rare', title: 'Level 10', reward: '1 random Rare weapon', rewards: ['Ten Bagger Pick', 'Level Up Pick', 'XP Bar Blade'] },
+  lv15: { level: 15, rarity: 'Rare', title: 'Level 15', reward: '1 random pair of Rare shoes', rewards: ['Ore Crusher Boots', 'Speedrun Sneakers', 'Lava Walkers'] },
+  lv20: { level: 20, rarity: 'Legendary', title: 'Level 20', reward: '1 random Legendary weapon', rewards: ['Wen Moon Hammer', 'Bull Run Axe', 'Genesis Block Hammer'] },
+  lv30: {
+    level: 30,
+    rarity: 'Legendary',
+    title: 'Level 30',
+    reward: '1 random Legendary outfit (top and pants)',
+    rewards: ['Ore King Regalia', 'Gradient Prime Suit', 'Pump Tracksuit', 'Magma Core Suit', 'Frost Vein Armour', 'Void Walker Suit', 'Overclock Hazmat', 'Ronin Miner Gi', 'Gold Rush Duster', 'Astro Miner Suit'],
+  },
 };
-const isKind = (k: unknown): k is Kind => k === 'lv10' || k === 'lv20';
+const isKind = (k: unknown): k is Kind => typeof k === 'string' && Object.prototype.hasOwnProperty.call(MILESTONES, k);
 const milestoneOpen = () => Boolean(Deno.env.get('CERT_AUTHORITY') && Deno.env.get('MILESTONE_COLLECTION'));
 
 type MClaim = { kind: Kind; serial: number; asset: string; status: 'reserved' | 'minted'; level: number; reserved_at: string };
@@ -355,7 +368,10 @@ async function uploadMilestoneMeta(kind: Kind, serial: number, name: string | nu
   const meta = {
     name: `Gali ${m.title} Certificate #${pad(serial)}`,
     symbol: 'GALI',
-    description: `Reached ${m.title} on Gali Island. Claims ONE ${m.rarity} weapon at random (${m.weapons.join(', ')}) when the Gali NFT market opens. Soulbound: it stays with the wallet that earned it.`,
+    description:
+      m.rewards.length > 1
+        ? `Reached ${m.title} on Gali Island. Claims ${m.reward} when the Gali NFT market opens, one of: ${m.rewards.join(', ')}. Soulbound: it stays with the wallet that earned it.`
+        : `Reached ${m.title} on Gali Island. Claims the ${m.reward} when the Gali NFT market opens. Soulbound: it stays with the wallet that earned it.`,
     image: img,
     animation_url: img,
     external_url: 'https://gali.lol',
@@ -365,7 +381,7 @@ async function uploadMilestoneMeta(kind: Kind, serial: number, name: string | nu
       { trait_type: 'Milestone', value: m.title },
       { trait_type: 'Level at claim', value: level },
       { trait_type: 'Rarity', value: m.rarity },
-      { trait_type: 'Reward', value: `1 random ${m.rarity} weapon` },
+      { trait_type: 'Reward', value: m.reward },
       { trait_type: 'Reward status', value: 'Unclaimed' },
     ],
     properties: { files: [{ uri: img, type: 'image/gif' }], category: 'image' },
@@ -433,7 +449,7 @@ async function buildMilestone(wallet: string, kind: Kind) {
           { key: 'Milestone', value: m.title },
           { key: 'Level at claim', value: String(level) },
           { key: 'Rarity', value: m.rarity },
-          { key: 'Reward', value: `1 random ${m.rarity} weapon` },
+          { key: 'Reward', value: m.reward },
           { key: 'Reward status', value: 'Unclaimed' },
         ],
       },
