@@ -78,3 +78,17 @@ begin
 end $$;
 revoke all on function public.gali_score_round(text, bigint, int, boolean, boolean, bigint, int) from public, anon, authenticated;
 grant execute on function public.gali_score_round(text, bigint, int, boolean, boolean, bigint, int) to service_role;
+
+-- 30 Oct: what each winner put in and got back that round
+alter table ore_hits add column if not exists sol_in numeric, add column if not exists sol_back numeric, add column if not exists sol_exact boolean;
+drop function if exists gali_ore_hits(int);
+create function gali_ore_hits(p_limit int default 100)
+returns table (round_id bigint, kind text, wallet text, name text, ore numeric, share numeric, motherlode_ore numeric, at timestamptz, approx boolean, sol_in numeric, sol_back numeric, sol_exact boolean)
+language sql stable security definer set search_path = public as $$
+  select h.round_id, h.kind, h.wallet, m.name, h.ore, h.share, h.motherlode_ore, h.at, h.approx, h.sol_in, h.sol_back, h.sol_exact
+  from ore_hits h left join gali_miners m on m.wallet = h.wallet
+  order by h.round_id desc, h.kind, h.ore desc nulls last
+  limit least(greatest(p_limit, 1), 500)
+$$;
+revoke all on function gali_ore_hits(int) from public;
+grant execute on function gali_ore_hits(int) to anon, authenticated, service_role;

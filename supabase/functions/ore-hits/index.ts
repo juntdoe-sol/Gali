@@ -104,6 +104,20 @@ async function prices() {
   return { sol: sol > 0 ? sol : null, ore: ore > 0 ? ore : null };
 }
 
+/** SOL ORE gives back to a miner for a round, as ORE's checkpoint does: 1% off every spot, 10% more off spots that miss. */
+const squareAdmin = (t: bigint) => (t / 100n > 0n ? t / 100n : 1n);
+const squareProtocol = (rest: bigint) => (rest / 10n > 0n ? rest / 10n : 1n);
+function solBack(mine: bigint[], totals: bigint[], w: number) {
+  let back = 0n;
+  for (let i = 0; i < 25; i++) {
+    const total = totals[i], m = mine[i];
+    if (total === 0n || m === 0n) continue;
+    const rest = total - squareAdmin(total);
+    back += (m * (i === w ? rest : rest - squareProtocol(rest))) / total;
+  }
+  return back;
+}
+
 /** XOR of the slot hash's four u64s, as ORE does. Null before the draw, 'refund' when ORE could not draw. */
 function rngOf(h: Uint8Array): bigint | null | 'refund' {
   if (h.every((b) => b === 0)) return null;
@@ -197,15 +211,23 @@ Deno.serve(async (req) => {
             round_id: String(L.id), kind: 'motherlode', wallet: m.authority, square: L.w,
             ore: Number((L.motherlode * mine) / L.deployed[L.w]) / ORE_UNIT, share, round_sol: Number(L.deployed[L.w]) / 1e9,
             motherlode_ore: Number(L.motherlode) / ORE_UNIT, at: L.at, approx: L.approx,
+            sol_in: Number(m.deployed.reduce((x, y) => x + y, 0n)) / 1e9, sol_back: Number(solBack(m.deployed, L.deployed, L.w)) / 1e9, sol_exact: true,
           });
         }
       }
     }
 
-    // Motherlode rows reported by autopilot / play (gali_score_round) arrive without the ORE: work it out from the
-    // round (still on chain for about a day) and the miner's SOL on the gold spot. The Miner account may have
-    // moved on to a later round; an autopilot deploys its automation's fixed amount on each spot, so use that.
-    const { data: todo } = await db.from('ore_hits').select('round_id,wallet').eq('kind', 'motherlode').is('ore', null).gt('at', new Date(Date.now() - 864e5).toISOString()).limit(20);
+    if (hits.length) {
+      const { error } = await db.from('ore_hits').upsert(hits, { onConflict: 'round_id,kind,wallet', ignoreDuplicates: true });
+      if (error) throw error;
+    }
+
+    // Fill in what each hit's miner put in and got back that round (and the ORE of motherlode rows reported by
+    // autopilot / play via gali_score_round). Needs the round, which ORE keeps for about a day. The miner's own
+    // SOL per spot comes from its ORE Miner account while it still holds the round (exact); after it has moved on,
+    // from its autopilot settings (exact spots for Preferred, Random picks its spots, so the refund is estimated).
+    const { data: todo } = await db.from('ore_hits').select('round_id,kind,wallet,ore')
+      .or('sol_in.is.null,and(kind.eq.motherlode,ore.is.null)').gt('at', new Date(Date.now() - 23 * 3600e3).toISOString()).limit(30);
     let filled = 0;
     if (todo?.length) {
       const rIds = [...new Set(todo.map((t) => BigInt(t.round_id)))];
@@ -217,26 +239,41 @@ Deno.serve(async (req) => {
         const r = rounds.get(String(t.round_id));
         if (!r) continue;
         const rng = rngOf(r.slotHash);
-        if (typeof rng !== 'bigint' || r.motherlode === 0n) continue;
+        if (typeof rng !== 'bigint') continue;
         const w = Number(rng % 25n), total = r.deployed[w];
         if (total === 0n) continue;
         const k = ws.indexOf(t.wallet);
-        let mine = 0n;
-        try { const m = mRaw[k] ? decodeMiner(mRaw[k]!) : null; if (m && m.roundId === r.id) mine = m.deployed[w]; } catch { /* skip */ }
-        if (!mine && aRaw[k] && aRaw[k]!.length === AUTOMATION_SIZE) mine = u64(dvOf(aRaw[k]!), 0);
-        if (mine <= 0n || mine > total) continue;
-        const { error } = await db.from('ore_hits').update({
-          square: w, ore: Number((r.motherlode * mine) / total) / ORE_UNIT, share: Number(mine) / Number(total),
-          round_sol: Number(total) / 1e9, motherlode_ore: Number(r.motherlode) / ORE_UNIT,
-        }).eq('round_id', t.round_id).eq('kind', 'motherlode').eq('wallet', t.wallet);
+        // the miner's lamports on each spot that round
+        let per: bigint[] | null = null, exact = false;
+        try { const m = mRaw[k] ? decodeMiner(mRaw[k]!) : null; if (m && m.roundId === r.id && m.deployed[w] > 0n) { per = m.deployed; exact = true; } } catch { /* skip */ }
+        if (!per && aRaw[k] && aRaw[k]!.length === AUTOMATION_SIZE) {
+          const dv = dvOf(aRaw[k]!);
+          const amount = u64(dv, 0), strategy = u64(dv, 88), mask = Number(u64(dv, 96) & 0x1ffffffn);
+          const spots = [...Array(25).keys()].filter((i) => mask & (1 << i));
+          if (amount > 0n && spots.length) {
+            if (strategy === 1n) { // Preferred: these exact spots every round
+              if (spots.includes(w)) { per = Array.from({ length: 25 }, (_, i) => (spots.includes(i) ? amount : 0n)); exact = true; }
+            } else { // Random: the same number of spots, one of them the gold spot (they won), the rest unknown
+              per = Array.from({ length: 25 }, () => 0n);
+              per[w] = amount;
+              let left = spots.length - 1;
+              for (let i = 0; i < 25 && left > 0; i++) if (i !== w) { per[i] = amount; left--; }
+            }
+          }
+        }
+        if (!per || per[w] <= 0n || per[w] > total) continue;
+        const patch: Record<string, unknown> = { sol_in: Number(per.reduce((a, b) => a + b, 0n)) / 1e9, sol_back: Number(solBack(per, r.deployed, w)) / 1e9, sol_exact: exact };
+        if (t.kind === 'motherlode' && t.ore === null && r.motherlode > 0n) {
+          Object.assign(patch, {
+            square: w, ore: Number((r.motherlode * per[w]) / total) / ORE_UNIT, share: Number(per[w]) / Number(total),
+            round_sol: Number(total) / 1e9, motherlode_ore: Number(r.motherlode) / ORE_UNIT,
+          });
+        }
+        const { error } = await db.from('ore_hits').update(patch).eq('round_id', t.round_id).eq('kind', t.kind).eq('wallet', t.wallet);
         if (!error) filled++;
       }
     }
 
-    if (hits.length) {
-      const { error } = await db.from('ore_hits').upsert(hits, { onConflict: 'round_id,kind,wallet', ignoreDuplicates: true });
-      if (error) throw error;
-    }
     if (done > last) {
       const { error } = await db.from('ore_hits_state').upsert({ id: 1, last_round: String(done), updated_at: new Date().toISOString() });
       if (error) throw error;
