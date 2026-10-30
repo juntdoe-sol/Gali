@@ -329,6 +329,118 @@ function slideAdvertise(g: Ctx, now: number, t: number) {
   mid('CONTACT @SMSONX ON X', LED.h - 9, 1, '#0b2a3a');
 }
 
+const midText = (g: Ctx, str: string, y: number, sc: number, col: string, sh?: string) => text(g, str, Math.round(LED.w / 2 - (textWidth(str) * sc) / 2), y, sc, col, sh);
+
+function slideOre(g: Ctx, now: number, t: number) {
+  // ORE: gold nuggets tumbling down a dark mine shaft
+  const grad = g.createLinearGradient(0, 0, 0, LED.h);
+  grad.addColorStop(0, '#1a1206');
+  grad.addColorStop(1, '#3a2408');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, LED.w, LED.h);
+  for (let i = 0; i < 12; i++) {
+    const x = (i * 29 + 5) % LED.w;
+    const y = ((now / 16 + i * 31) % (LED.h + 12)) - 8;
+    g.fillStyle = i % 3 ? '#d69628' : '#ffe9a0';
+    g.fillRect(x, Math.round(y), 3, 3);
+    g.fillStyle = '#7a4a10';
+    g.fillRect(x + 2, Math.round(y) + 2, 1, 1);
+  }
+  midText(g, 'POWERED BY', 3, 1, '#ffffff');
+  const pop = Math.min(1, t * 6);
+  midText(g, 'ORE', Math.round(11 - (1 - pop) * 20), 4, '#ffcf4a', '#7a3a00');
+  const s = sprite('icon-gold');
+  if (s && rect('icon-gold')) {
+    const b = Math.round(Math.sin(now / 300) * 2);
+    g.drawImage(s, 22, 16 + b);
+    g.drawImage(s, LED.w - 22 - s.width, 16 - b);
+  }
+  g.fillStyle = '#ffcf4a';
+  g.fillRect(0, LED.h - 11, LED.w, 9);
+  midText(g, 'A NEW ORE ROUND EVERY MINUTE', LED.h - 9, 1, '#3a2408');
+}
+
+function slideSeeker(g: Ctx, now: number, t: number) {
+  // Seeker: a phone with the island on its screen, in Solana purple and green
+  const grad = g.createLinearGradient(0, 0, LED.w, LED.h);
+  grad.addColorStop(0, '#1b0b33');
+  grad.addColorStop(1, '#06231c');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, LED.w, LED.h);
+  const bob = Math.round(Math.sin(now / 500) * 1.5);
+  const px = 12, py = 5 + bob, pw = 24, ph = 44;
+  g.fillStyle = '#0a0a12';
+  g.fillRect(px + 1, py, pw - 2, ph);
+  g.fillRect(px, py + 1, pw, ph - 2);
+  g.fillStyle = '#3a3a4a';
+  g.fillRect(px + 1, py + 1, pw - 2, 1);
+  // its screen: sea, island, sun
+  g.fillStyle = '#123a6b';
+  g.fillRect(px + 2, py + 4, pw - 4, ph - 8);
+  g.fillStyle = '#e6d29a';
+  g.fillRect(px + 5, py + 26, 14, 4);
+  g.fillStyle = '#5f9d41';
+  g.fillRect(px + 7, py + 22, 10, 5);
+  g.fillStyle = '#ffcf4a';
+  g.fillRect(px + 15, py + 9, 4, 4);
+  if (Math.floor(now / 300) % 2) {
+    g.fillStyle = '#ffffff';
+    g.fillRect(px + 11, py + 18, 2, 2);
+  }
+  g.fillStyle = '#2a2a38';
+  g.fillRect(px + 9, py + ph - 3, 6, 1);
+  const pop = Math.min(1, t * 6);
+  text(g, 'SEEKER', 46, Math.round(8 - (1 - pop) * 20), 3, '#ffffff', '#4a1f8a');
+  text(g, 'BY SOLANA MOBILE', 46, 28, 1, '#14f195');
+  // Solana gradient bar
+  const bar = g.createLinearGradient(0, 0, LED.w, 0);
+  bar.addColorStop(0, '#9945ff');
+  bar.addColorStop(1, '#14f195');
+  g.fillStyle = bar;
+  g.fillRect(40, LED.h - 11, LED.w - 40, 9);
+  text(g, 'PLAY GALI ON YOUR SEEKER', 42 + Math.round((LED.w - 44 - textWidth('PLAY GALI ON YOUR SEEKER')) / 2), LED.h - 9, 1, '#0a0a12');
+}
+
+function slideSuperteam(g: Ctx, now: number, t: number) {
+  // Superteam: a purple night, a glowing pit on the horizon and a lone builder looking in
+  const grad = g.createLinearGradient(0, 0, 0, LED.h);
+  grad.addColorStop(0, '#120a3a');
+  grad.addColorStop(0.6, '#4b1fb0');
+  grad.addColorStop(1, '#2a1880');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, LED.w, LED.h);
+  for (let i = 0; i < 18; i++) {
+    if ((Math.floor(now / 400) + i) % 5 === 0) continue;
+    g.fillStyle = '#ffffff';
+    g.fillRect((i * 47 + 3) % LED.w, (i * 13 + 2) % 26, 1, 1);
+  }
+  // the floor grid
+  g.fillStyle = 'rgba(10,6,40,0.55)';
+  for (let x = -60; x < LED.w + 60; x += 14) {
+    for (let y = 36; y < LED.h; y++) g.fillRect(Math.round(LED.w / 2 + (x - LED.w / 2) * (1 + (y - 36) / 14)), y, 1, 1);
+  }
+  for (const y of [40, 46, 54]) g.fillRect(0, y, LED.w, 1);
+  // the glow
+  const gl = g.createRadialGradient(LED.w / 2, 40, 2, LED.w / 2, 40, 46);
+  gl.addColorStop(0, 'rgba(255,170,60,0.95)');
+  gl.addColorStop(0.5, 'rgba(232,90,140,0.55)');
+  gl.addColorStop(1, 'rgba(120,50,220,0)');
+  g.fillStyle = gl;
+  g.beginPath();
+  g.ellipse(LED.w / 2, 40, 46, 9, 0, 0, Math.PI * 2);
+  g.fill();
+  // the builder
+  const fx = LED.w / 2 + 16;
+  g.fillStyle = '#0a0614';
+  g.fillRect(fx, 33, 2, 2);
+  g.fillRect(fx - 1, 35, 4, 4);
+  g.fillRect(fx - 1, 39, 1, 3);
+  g.fillRect(fx + 2, 39, 1, 3);
+  const pop = Math.min(1, t * 6);
+  midText(g, 'SUPERTEAM', Math.round(6 - (1 - pop) * 20), 3, '#ffffff', '#2a0f6a');
+  midText(g, 'WHERE SOLANA BUILDERS MEET', 23, 1, '#ffd9a0');
+}
+
 /** The signboard, posts on (X, Y). */
 export function drawBillboard(c: Ctx, X: number, Y: number, z: number, now: number, lights: Light[], dpr: number) {
   bbBody ??= paintBillboard();
@@ -338,12 +450,15 @@ export function drawBillboard(c: Ctx, X: number, Y: number, z: number, now: numb
   const cv = bbScreen();
   const g = ctx2d(cv);
   g.clearRect(0, 0, LED.w, LED.h);
-  const slide = Math.floor(now / SLIDE_MS) % 5;
+  const slide = Math.floor(now / SLIDE_MS) % 8;
   const t = (now % SLIDE_MS) / SLIDE_MS;
   if (slide === 0) slideMarket(g, now, t);
   else if (slide === 1) slideParade(g, now);
   else if (slide === 2) slideFounders(g, now, t);
   else if (slide === 3) slideIsland(g, now);
+  else if (slide === 4) slideOre(g, now, t);
+  else if (slide === 5) slideSeeker(g, now, t);
+  else if (slide === 6) slideSuperteam(g, now, t);
   else slideAdvertise(g, now, t);
   // a quick wipe between slides
   if (t < 0.05) {
@@ -353,6 +468,6 @@ export function drawBillboard(c: Ctx, X: number, Y: number, z: number, now: numb
   led(g, LED.w, LED.h);
   c.drawImage(cv, 0, 0, LED.w, LED.h, x0 + LED.x * z, y0 + LED.y * z, LED.w * z, LED.h * z);
   // the screen lights the clearing
-  const col = ['#ffcf4a', '#ff4fd8', '#ffb020', '#3ee6ff', '#3ee6ff'][slide];
+  const col = ['#ffcf4a', '#ff4fd8', '#ffb020', '#3ee6ff', '#ffcf4a', '#9945ff', '#ff9a3c', '#3ee6ff'][slide];
   lights.push({ x: X * dpr, y: (Y - 60 * z) * dpr, r: 120 * z * dpr, c: col, k: 0.8 });
 }
