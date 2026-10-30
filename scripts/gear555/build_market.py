@@ -34,6 +34,10 @@ for slot, (m, key) in MODS.items():
     mod = importlib.import_module(m)
     for (gid, name, rar, fn) in mod.ITEMS:
         fns[gid] = (key, fn)
+# shoes and clothes for the Level 3 / 6 / 15 / 30 certificates (milestone_gear.py)
+import milestone_gear  # noqa: E402
+for (gid, key, _n, _r, _s, fn) in milestone_gear.MARKET:
+    fns[gid] = (key, fn)
 
 
 def piece(key, fn):

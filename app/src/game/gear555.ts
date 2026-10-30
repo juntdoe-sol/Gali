@@ -35,16 +35,16 @@ export interface GearBook {
 
 export const THUMBS: ImageSourcePropType = require('../../assets/market/gear-thumbs.png');
 export const ANIM: ImageSourcePropType = require('../../assets/market/gear-anim.png');
-/** atlas sizes in pixels (24 x 24 cells of 40, and 8 x 60 cells of 40) */
-export const THUMBS_SIZE: [number, number] = [960, 960];
+/** atlas sizes in pixels (24 x 25 cells of 40, and 8 x 80 cells of 40) */
+export const THUMBS_SIZE: [number, number] = [960, 1000];
 /** Try-on: every item worn by the full-colour miner, idle frame, 40x56 cells, 24 to a row (boy and girl). */
 export const TRYON: Record<'m' | 'f', ImageSourcePropType> = {
   m: require('../../assets/market/gear-tryon-m.png'),
   f: require('../../assets/market/gear-tryon-f.png'),
 };
-export const TRYON_SIZE: [number, number] = [960, 1344];
+export const TRYON_SIZE: [number, number] = [960, 1400];
 export const TRYON_CELL: [number, number] = [40, 56];
-export const ANIM_SIZE: [number, number] = [320, 2400];
+export const ANIM_SIZE: [number, number] = [320, 3200];
 export const CELL = 40;
 export const COLS = 24;
 

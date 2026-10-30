@@ -8,7 +8,7 @@
 create table if not exists public.milestone_claims (
   id bigint generated always as identity primary key,
   wallet text not null,
-  kind text not null check (kind in ('lv10', 'lv20')),
+  kind text not null check (kind in ('lv3', 'lv6', 'lv10', 'lv15', 'lv20', 'lv30')),
   serial int not null,
   asset text not null,
   status text not null default 'reserved' check (status in ('reserved', 'minted')),
