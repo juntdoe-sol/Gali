@@ -760,31 +760,31 @@ async function sweep(env, house, token, floorUi, ts) {
 export const HOUSE_SOL_RESERVE = 50_000_000n;
 const solTransfer = (from, to, lamports) => ({ program: SYSTEM_PROGRAM, keys: [{ pubkey: from, signer: true, writable: true }, { pubkey: to, writable: true }], data: concat(u32le(2), u64le(lamports)) });
 /**
- * Send the house wallet's spare SOL to the admin wallet. Only the admin wallet can ask, with a fresh signature over
- * the exact amount; the house always keeps HOUSE_SOL_RESERVE for payouts. The signed request's time stamp goes in
+ * Send the house wallet's spare SOL to a wallet the admin names (their own by default). Only the admin wallet can
+ * ask, with a fresh signature over the exact amount and destination; the house always keeps HOUSE_SOL_RESERVE. The signed request's time stamp goes in
  * the memo, and a request already paid (the same memo in the house's recent history) is never sent twice.
  */
-async function withdrawSol(env, house, admin, lamportsText, ts) {
+async function withdrawSol(env, house, to, lamportsText, ts) {
   let lamports;
   try { lamports = BigInt(lamportsText); } catch { throw new Error('bad amount'); }
   if (lamports <= 0n) throw new Error('bad amount');
   const memo = `gali1solout|${ts}`;
   const recent = await call(env, 'getSignaturesForAddress', [house.owner, { limit: 50, commitment: 'confirmed' }]).catch(() => []);
   const done = (recent ?? []).find((r) => !r.err && typeof r.memo === 'string' && r.memo.includes(memo));
-  if (done) return { state: 'paid', signature: done.signature, sol: fmt(lamports, 9), to: admin };
+  if (done) return { state: 'paid', signature: done.signature, sol: fmt(lamports, 9), to };
   const bal = BigInt((await call(env, 'getBalance', [house.owner, { commitment: 'confirmed' }])).value);
   const spare = bal - HOUSE_SOL_RESERVE - 5_000n;
   if (lamports > spare) throw new Error(`The house can send at most ${fmt(spare > 0n ? spare : 0n, 9)} SOL: it keeps ${fmt(HOUSE_SOL_RESERVE, 9)} SOL to pay winners`);
   const bh = await call(env, 'getLatestBlockhash', [{ commitment: 'confirmed' }]);
-  const { raw, signature } = await signTransaction(house, bh.value.blockhash, [solTransfer(house.owner, admin, lamports), memoIx(memo)]);
+  const { raw, signature } = await signTransaction(house, bh.value.blockhash, [solTransfer(house.owner, to, lamports), memoIx(memo)]);
   await call(env, 'sendTransaction', [b64(raw), { encoding: 'base64', skipPreflight: false, maxRetries: 3 }]);
   for (let i = 0; i < 12; i++) {
     await new Promise((r) => setTimeout(r, 800));
     const st = (await call(env, 'getSignatureStatuses', [[signature]]).catch(() => null))?.value?.[0];
     if (st?.err) throw new Error('The transfer failed on chain');
-    if (st && (st.confirmationStatus === 'confirmed' || st.confirmationStatus === 'finalized')) return { state: 'paid', signature, sol: fmt(lamports, 9), to: admin };
+    if (st && (st.confirmationStatus === 'confirmed' || st.confirmationStatus === 'finalized')) return { state: 'paid', signature, sol: fmt(lamports, 9), to };
   }
-  return { state: 'pending', signature, sol: fmt(lamports, 9), to: admin };
+  return { state: 'pending', signature, sol: fmt(lamports, 9), to };
 }
 
 // ---------- HTTP ----------
@@ -860,8 +860,12 @@ async function handle(req, ctx) {
     }
     if (body.action === 'admin-withdraw-sol') {
       // moving money needs a fresh wallet signature over the exact amount, not only the session
-      const { admin, ts } = await checkSigned(env, body, 'withdrawsol', [String(body.lamports)]);
-      return reply(200, { ok: true, ...(await withdrawSol(env, house, admin, String(body.lamports), ts)) });
+      // the destination is part of what the admin signs; empty means the admin wallet itself
+      const to = typeof body.to === 'string' && body.to.trim() ? body.to.trim() : null;
+      if (to && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(to)) return fail(400, 'That is not a Solana address');
+      const { admin, ts } = await checkSigned(env, body, 'withdrawsol', to ? [String(body.lamports), to] : [String(body.lamports)]);
+      if ((to ?? admin) === house.owner) return fail(400, 'That is the house wallet itself');
+      return reply(200, { ok: true, ...(await withdrawSol(env, house, to ?? admin, String(body.lamports), ts)) });
     }
     if (body.action === 'commit' || body.action === 'settle') {
       const game = body.game, token = body.token, round = body.round;
