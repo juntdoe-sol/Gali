@@ -27,20 +27,6 @@ const TABS: { id: DockTab; label: string }[] = [
   { id: 'pro', label: 'PRO' },
 ];
 
-const FEE_PCT = `${Number(PLATFORM_FEE_BPS) / 100}%`;
-/** The Gali fee, shown before anyone signs a live deploy. */
-function FeeRow({ live }: { live: boolean }) {
-  if (!live) return null;
-  return (
-    <Row
-      icon="sol"
-      label="Gali fee"
-      info={`Gali adds ${FEE_PCT} of the SOL you deploy, paid to Gali in the same transaction. Autopilot pays it for every funded round when it starts, and it is not refunded if you stop early.`}
-      right={<T v="num" style={{ fontSize: 18, color: COLORS.text }}>{FEE_PCT}</T>}
-    />
-  );
-}
-
 export function Dock({ embedded }: { embedded?: boolean } = {}) {
   const insets = useSafeAreaInsets();
   const tab = useGame((s) => s.dockTab);
@@ -543,7 +529,6 @@ function DeskLite() {
               </T>
             }
           />
-          <FeeRow live={live} />
           <EvRow squares={[...Array(BLOCKS).keys()]} perSpot={rounds ? LITE_PER_ROUND / BLOCKS : 0} />
           <Row
             icon="sol"
@@ -675,7 +660,6 @@ function DeskPro() {
             info={live ? `1 = this round only (you approve in your wallet). More = autopilot: one wallet approval funds ORE's automation for every round, then rounds deploy with no pop-up. Up to ${LIVE_AUTOPILOT_MAX_SOL} SOL in total. Stop it any time to get the unused SOL back (the Gali fee is paid up front and not refunded).` : '1 = this round only. More = autopilot repeats the same setup each round.'}
             right={<Stepper value={rounds} label="rounds" onMinus={() => editPreset({ rounds: Math.max(1, rounds - 1) })} onPlus={() => editPreset({ rounds: Math.min(100, rounds + 1) })} disabled={lock} />}
           />
-          <FeeRow live={live} />
           <EvRow squares={picked} perSpot={tiles && per ? perSpot : 0} />
           <Row
             icon="sol"
@@ -845,6 +829,7 @@ function LitePanel({ compact }: { compact: boolean }) {
             <Chip grow label="Pick" on={mode === 'pick'} onPress={() => setLiteMode('pick')} disabled={Boolean(run)} />
           </View>
           {mode === 'smart' ? <SmartCounts value={smartN} onPick={setLiteSmart} disabled={Boolean(run)} /> : null}
+          <EvRow squares={mode === 'all' ? [...Array(BLOCKS).keys()] : selected} perSpot={n ? spot : 0} />
           <T v="muted" style={{ fontSize: 12, textAlign: 'center', marginTop: 10 }}>
             {hint}
           </T>
@@ -981,7 +966,7 @@ function ProPanel({ compact }: { compact: boolean }) {
               right={<Chip label="SCAN TV" onPress={openScanTv} disabled={Boolean(busy)} />}
             />
           ) : null}
-          <FeeRow live={live} />
+          <EvRow squares={picked} perSpot={blocks ? perBlock : 0} />
           <Row
             icon="trophy"
             label="If it strikes"
