@@ -15,6 +15,7 @@ import { PixIcon } from './PixIcon';
 import type { PixName } from './pixIcons';
 import { GUTTER, LANDSCAPE_APP, RAIL_W, TOP_H, useLayout } from './layout';
 import { HollowBadge } from './Season';
+import { useName, useRename } from '../game/username';
 import { LODE_WORD, lodeTier, useLodeGrowth } from '../game/motherlode';
 import { refreshMarket, useOreStats } from '../game/oreStats';
 
@@ -136,7 +137,33 @@ function LevelStat({ lvl, pct, xp }: { lvl: number; pct: number; xp: number }) {
   );
 }
 
-export function TopBar({ onMenu }: { onMenu: () => void }) {
+/** Where the desktop top bar is: its title box changes, nothing else does. */
+export interface TopPlace {
+  title: string;
+  sub: string;
+  icon: PixName;
+  /** a status light before the sub line (the lobby's online dot) */
+  dot?: string;
+}
+const ISLAND_PLACE: TopPlace = { title: 'ORE ISLAND', sub: "Live on ORE's board", icon: 'ore' };
+
+/** The player's name on the top bar; tap to change it (every screen). */
+function NameBtn() {
+  const name = useName((s) => s.name);
+  return (
+    <IconBtn onPress={() => useRename.getState().setOpen(true)} label="Change your name">
+      <T v="display" numberOfLines={1} style={{ fontSize: 18, paddingHorizontal: 10, maxWidth: 170 }}>
+        {name || 'PICK A NAME'}
+      </T>
+    </IconBtn>
+  );
+}
+
+/**
+ * The top bar. On a computer it is the same bar on every screen (ORE Island, the lobby): only the title box
+ * changes, from `place`. `right` keeps it clear of whatever sits on the right.
+ */
+export function TopBar({ onMenu, place = ISLAND_PLACE, right }: { onMenu: () => void; place?: TopPlace; right?: number }) {
   const insets = useSafeAreaInsets();
   const { desktop, side, w, h } = useLayout();
   const short = h < 500;
@@ -144,25 +171,36 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
 
   if (desktop) {
     return (
-      <View style={[styles.deskTop, { left: RAIL_W + GUTTER, right: side + GUTTER * 2 }, TIGHT && { gap: 6 }]} pointerEvents="box-none">
+      <View style={[styles.deskTop, { left: RAIL_W + GUTTER, right: right ?? side + GUTTER * 2 }, TIGHT && { gap: 6 }]} pointerEvents="box-none">
         {w >= 1180 ? (
         <PixelBox fill="rgba(8,13,32,0.9)" hi={COLORS.trim} lo="#04060f" shadow={1} style={styles.deskTitle}>
-          <PixIcon name="ore" size={24} />
+          <PixIcon name={place.icon} size={24} />
           <View>
             <T v="display" style={{ fontSize: 22, lineHeight: 23, color: COLORS.gold, letterSpacing: 1 }}>
-              ORE ISLAND
+              {place.title}
             </T>
-            <T v="label" style={{ fontSize: 12, lineHeight: 13 }}>Live on ORE's board</T>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+              {place.dot ? <View style={{ width: 6, height: 6, backgroundColor: place.dot }} /> : null}
+              <T v="label" style={{ fontSize: 12, lineHeight: 13 }}>{place.sub}</T>
+            </View>
           </View>
         </PixelBox>
         ) : null}
         <HollowBadge compact={w < 1300} />
         <View style={[styles.chipRow, { flex: 1, maxWidth: 560 }]}>
           {FEATURE_GALI_PROGRAM ? <Stat icon="star" color={COLORS.gold} value={points.toLocaleString()} label="PTS" tip="Points from rounds you mined. They rank you on the season board." /> : null}
+          <NameBtn />
           <LevelStat lvl={lvl} pct={pct} xp={xp} />
           <Stat icon="sol" value={sol.toFixed(sol >= 100 ? 1 : 3)} label="SOL" tip="SOL in your wallet." />
           {FEATURE_GALI_PROGRAM && streak >= 2 ? <Stat icon="fire" color={COLORS.red} value={`x${streak}`} tip={`${streak} rounds in a row on the gold spot.`} /> : null}
         </View>
+        <Tip text="How to play (?)" side="bottom" width={150}>
+          <IconBtn onPress={() => globalThis.window?.dispatchEvent(new CustomEvent('gali:help'))} label="How to play" kbd="?">
+            <T v="display" style={{ fontSize: 22, color: COLORS.gold }}>
+              ?
+            </T>
+          </IconBtn>
+        </Tip>
         <InboxBtn />
         <WalletChip onMenu={onMenu} />
       </View>
