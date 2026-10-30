@@ -16,9 +16,10 @@ import { PixIcon } from './PixIcon';
 const FOLD_KEY = 'gali-ore-stats-folded';
 const readFold = () => {
   try {
-    return globalThis.localStorage?.getItem(FOLD_KEY) === '1';
+    // minimised until the player opens it; after that it stays the way they last left it
+    return globalThis.localStorage?.getItem(FOLD_KEY) !== '0';
   } catch {
-    return false;
+    return true;
   }
 };
 
