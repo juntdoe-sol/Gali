@@ -6,6 +6,7 @@ import { useEffect } from 'react';
 import { Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { COLORS } from '../game/constants';
 import { Dock, UnclaimedRow } from './Dock';
+import { OreStatsPanel } from './OreStats';
 import { RoundCard } from './Hud';
 import { Kbd, PixelBox, T, U } from './kit';
 import { GUTTER, LANDSCAPE_APP, useLayout } from './layout';
@@ -32,9 +33,10 @@ export function SidePanel() {
   }, [desktop]);
   if (!desktop) return null;
   if (hidden) return <MineTab style={[styles.tabAt, { right: GUTTER, top: GUTTER }]} />;
-  // one column on the right, centred top to bottom: the round, the deploy panel, then (on the island) Unclaimed
+  // one column on the right: (on the island) ORE stats, the round, the deploy panel, then (on the island) Unclaimed
   return (
     <View pointerEvents="box-none" style={[styles.side, { width: side, right: GUTTER, top: GUTTER, bottom: GUTTER }]}>
+      {onIsland ? <OreStatsPanel /> : null}
       <RoundCard embedded />
       <PixelBox fill="rgba(15,23,52,0.95)" hi="#33498c" lo="#0c1430" shadow={2} style={styles.dockBox}>
         <View style={styles.dockHead}>
@@ -77,7 +79,7 @@ function KeyHint({ k, t }: { k: string; t: string }) {
 }
 
 const styles = StyleSheet.create({
-  side: { position: 'absolute', gap: 12, zIndex: 15, justifyContent: 'center' },
+  side: { position: 'absolute', gap: 12, zIndex: 15 },
   // the deploy card hugs its controls; it only scrolls when the window is too short for them
   dockBox: { flexShrink: 1, minHeight: 0, paddingTop: 10 },
   tabAt: { position: 'absolute', zIndex: 15 },

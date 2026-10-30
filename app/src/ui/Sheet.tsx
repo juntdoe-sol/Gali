@@ -13,7 +13,6 @@ import { PERIOD_WORDS, useMinerRanks, useRanks, type Period } from '../game/rank
 import { ClansSoon, ComingSoon, PeriodPicker } from './Clans';
 import { loadBoard, loadChain } from '../chain/lazy';
 import { ADMIN_FEE, fmtOreAmt, fmtSol, POT_FEE, practiceMotherlode, practiceOreMotherlode, simPot, soloMask } from '../game/pot';
-import { UnclaimedRow } from './Dock';
 import { Bar, Btn, Card, Choice, FocusRing, Frame, IconBtn, INPUT, Kbd, PixelBox, Pill, T, U } from './kit';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { reloadAppAsync } from 'expo';
@@ -310,11 +309,9 @@ const hitAgo = (iso: string) => {
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 };
-type HitFilter = 'all' | 'solo' | 'motherlode';
 /** Every Gali miner's solo wins and motherlode hits, newest first (recorded by the server from ORE's accounts). */
 function BigHits({ owner }: { owner: string | null }) {
   const { hits, status, load } = useOreHits();
-  const [f, setF] = useState<HitFilter>('all');
   const [more, setMore] = useState(false);
   const [moreMine, setMoreMine] = useState(false);
   useEffect(() => {
@@ -324,7 +321,7 @@ function BigHits({ owner }: { owner: string | null }) {
   }, [load]);
   const solo = hits.filter((h) => h.kind === 'solo');
   const lode = hits.filter((h) => h.kind === 'motherlode');
-  const list = f === 'solo' ? solo : f === 'motherlode' ? lode : hits;
+  const list = hits;
   // your own hits first, then everyone else's
   const mineList = owner ? list.filter((h) => h.wallet === owner) : [];
   const others = list.filter((h) => h.wallet !== owner);
@@ -381,11 +378,6 @@ function BigHits({ owner }: { owner: string | null }) {
       <T v="muted" style={{ marginTop: 4 }}>
         Every round a Gali miner took the whole ORE on a ★ solo spot, and every motherlode they were on the gold spot for.
       </T>
-      <View style={{ flexDirection: 'row', gap: 6, marginTop: 8 }}>
-        <Choice label="All" on={f === 'all'} onPress={() => setF('all')} />
-        <Choice label="Solo" on={f === 'solo'} onPress={() => setF('solo')} />
-        <Choice label="Motherlode" on={f === 'motherlode'} onPress={() => setF('motherlode')} />
-      </View>
       {status === 'loading' && !hits.length ? (
         <T v="muted" style={{ marginTop: 8 }}>
           Loading…
@@ -402,7 +394,7 @@ function BigHits({ owner }: { owner: string | null }) {
           {!owner ? (
             <T v="muted">Connect your wallet to see your own big hits.</T>
           ) : !mineList.length ? (
-            <T v="muted">{f === 'motherlode' ? 'No motherlode for you yet. One round in about 500 pays it: be on the gold spot.' : 'No big hits for you yet. Take a ★ solo spot and the whole ORE can be yours.'}</T>
+            <T v="muted">No big hits for you yet. Take a ★ solo spot and the whole ORE can be yours, or be on the gold spot when a motherlode hits.</T>
           ) : (
             <View style={{ gap: 6 }}>{mineShown.map(row)}</View>
           )}
@@ -411,7 +403,7 @@ function BigHits({ owner }: { owner: string | null }) {
             All Gali miners · {others.length}
           </T>
           {!others.length ? (
-            <T v="muted">{f === 'motherlode' ? 'No Gali miner has hit a motherlode yet. One round in about 500 pays it.' : f === 'solo' ? 'No solo wins yet.' : 'Nothing yet. The first solo win shows up here.'}</T>
+            <T v="muted">Nothing yet. The first solo win shows up here.</T>
           ) : (
             <View style={{ gap: 6 }}>{shown.map(row)}</View>
           )}
@@ -449,13 +441,6 @@ function Rounds() {
   }, [onChain, at, roundId]);
   return (
     <>
-      <Card>
-        <T v="label">Your rewards</T>
-        <View style={{ marginTop: 8 }}>
-          <UnclaimedRow />
-        </View>
-        <T v="muted">Each finished round credits the SOL you get back and the ORE you mined. Claim whenever you like: nothing expires. ORE claimed before it is refined pays ORE's own 10% fee.</T>
-      </Card>
       {onChain ? <BigHits owner={owner} /> : null}
       <View style={[styles.rowCard, { justifyContent: 'space-between' }]}>
         <T v="display" style={{ fontSize: 20 }}>

@@ -10,7 +10,7 @@ import { fmtUsd, profitUsd, refreshOreStats, useOreStats } from '../game/oreStat
 import { fmtOreAmt } from '../game/pot';
 import { useGame } from '../game/store';
 import { Frame, T, Tip } from './kit';
-import { GUTTER, LANDSCAPE_APP, RAIL_W, TOP_H, useLayout } from './layout';
+import { LANDSCAPE_APP, useLayout } from './layout';
 import { PixIcon } from './PixIcon';
 
 const FOLD_KEY = 'gali-ore-stats-folded';
@@ -42,6 +42,7 @@ function Row({ label, value, tip, color }: { label: string; value: string; tip?:
   );
 }
 
+/** Desktop ORE Island only: sits at the top of the mining column on the right (see Side.tsx). */
 export function OreStatsPanel() {
   const { desktop } = useLayout();
   const where = useLobby((s) => s.where);
@@ -75,7 +76,7 @@ export function OreStatsPanel() {
     });
   };
   return (
-    <View style={styles.wrap} pointerEvents="box-none">
+    <View pointerEvents="box-none">
       <Frame tone="dark" gems={false} glow={COLORS.gold} style={styles.card}>
         <Pressable onPress={fold} accessibilityRole="button" accessibilityLabel={folded ? 'Show ORE stats' : 'Hide ORE stats'} style={styles.head}>
           <PixIcon name="ore" size={18} />
@@ -175,7 +176,6 @@ export function OreStatsPanel() {
 }
 
 const styles = StyleSheet.create({
-  wrap: { position: 'absolute', left: RAIL_W + GUTTER, top: TOP_H + GUTTER, width: 262 },
   card: { paddingHorizontal: 12, paddingVertical: 8, gap: 3 },
   head: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   title: { flex: 1, fontSize: 18, color: COLORS.gold, letterSpacing: 1 },
