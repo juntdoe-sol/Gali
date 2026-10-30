@@ -27,7 +27,7 @@
 //   collection authority, made by scripts/cert-collection.mjs), CERT_COLLECTION (collection address),
 //   optional CERT_BETA_END (ISO time; open until then), MILESTONE_COLLECTION (scripts/nft/milestone-collection.mjs),
 //   GEAR_COLLECTION (later), optional CERT_FEE_WALLET (gets the claim fee; default: Gali's revenue wallet),
-//   optional CERT_FEE_SOL (claim fee per certificate, default 0.01; 0 turns it off)
+//   optional CERT_FEE_SOL (claim fee per certificate, default 0.005; 0 turns it off)
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import bs58 from 'npm:bs58@6';
 import { createUmi } from 'npm:@metaplex-foundation/umi-bundle-defaults@1.6.0';
@@ -233,7 +233,7 @@ function computeBudget() {
  * The claim fee: the miner pays it to the admin wallet in the same transaction as the mint, so a certificate is never
  * minted without it (Gali has already signed the transaction; changing it breaks those signatures).
  */
-const FEE_SOL = Number(Deno.env.get('CERT_FEE_SOL') ?? 0.01);
+const FEE_SOL = Number(Deno.env.get('CERT_FEE_SOL') ?? 0.005);
 /** Gali's revenue wallet: the deploy fee and the arcade fees go here too (app/src/chain/light.ts REVENUE_WALLET). */
 const REVENUE_WALLET = 'HDa2MTDdZXnrjTs6RRUUzEqCcrWMWu1fM673Cg7pzQMw';
 const feeWallet = () => {
