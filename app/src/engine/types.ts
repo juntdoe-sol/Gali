@@ -44,6 +44,8 @@ export interface PeerView {
   look: Look;
   tone: 'verified' | 'guest' | 'bot';
   emoji: string | null;
+  /** dance 1 to 12, 0 = none */
+  dance?: number;
 }
 
 export interface Snapshot {
@@ -66,7 +68,7 @@ export interface Snapshot {
   solo: number; // bitmask of solo claims this round
   perBlock: number[]; // SOL on each claim
   mine: number[]; // your SOL on each claim
-  me: { look: Look; emoji: string | null; emoteAt: number; name: string };
+  me: { look: Look; emoji: string | null; emoteAt: number; name: string; dance?: number };
   peers: PeerView[];
   practice: boolean;
   /** 0 = low effects (older phones), 1 = full */

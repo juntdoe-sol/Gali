@@ -100,6 +100,7 @@ function snapshot(): Snapshot {
     look: lookOfPeer(p),
     tone: p.bot ? 'bot' : p.wallet ? 'verified' : 'guest',
     emoji: emo(p.id),
+    dance: p.dance ?? 0,
   }));
   return {
     view: viewBand(focus),
@@ -124,6 +125,7 @@ function snapshot(): Snapshot {
       emoji: emo(world.me),
       emoteAt: st.emote,
       name: 'You',
+      dance: useLobby.getState().myDance,
     },
     peers,
     practice: !isOnChain(st),
@@ -313,8 +315,11 @@ export default function PixelMine() {
         const player = st.wallet.player;
         const lvl = levelFromXp(player ? player.xp + st.save.bonusXp : st.save.xp);
         const pose = e.pose === 'walk' || e.pose === 'swing' ? e.pose : 'idle';
+        // walking or swinging stops a dance, as in the lobby
+        if (pose !== 'idle' && useLobby.getState().myDance) useLobby.getState().setDance(0);
+        const dance = useLobby.getState().myDance;
         publishMe(
-          { x: e.x, y: e.y, tx: e.tx, ty: e.ty, facing: e.facing, pose, hat: hat.color, fit: fit.color, pick: pick.accent, pet: pet?.color ?? null, lvl, hk: hat.key, pk: pet?.key ?? null, sx: useName.getState().sex },
+          { x: e.x, y: e.y, tx: e.tx, ty: e.ty, facing: e.facing, pose, hat: hat.color, fit: fit.color, pick: pick.accent, pet: pet?.color ?? null, lvl, hk: hat.key, pk: pet?.key ?? null, sx: useName.getState().sex, dance },
           { wallet: st.wallet.owner, session, sessionValid: Boolean(player && session && player.session === session.publicKey.toBase58() && player.sessionExpires * 1000 > Date.now()) },
         );
         break;

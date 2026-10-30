@@ -11,7 +11,7 @@ import { canvasDpr, reducedMotion } from './screen';
 import { wheelZoom } from './screen';
 import { BannerPlane } from './plane';
 import { ACTORS, ISLE, blit, draw, drawCanvas, has, makeCanvas, ctx2d, sprite, text, textCentered, textWidth, loadAtlas, type Ctx } from './art';
-import { drawMiner, drawPet, frameAt, HIT_FRAME, IMPACT, lampOf, moleNames, petFlies, petLight, POSES, stepBody, type Body } from './actors';
+import { drawDancer, drawMiner, drawPet, frameAt, HIT_FRAME, IMPACT, lampOf, moleNames, petFlies, petLight, POSES, stepBody, type Body } from './actors';
 import { Camera } from './camera';
 import { buildScene, drawScene, newVisit, paintUnderground, SCENE_CX, SH, type Scene, type Visit } from './closeup';
 import { landedSince, rumbleAmp, shouldCelebrate } from './juice';
@@ -1096,14 +1096,20 @@ export class Engine {
         if (ko < 0) drawHp(c, v, X, Y, S, wall, mine);
       }
     };
-    items.push({ z: me.y, f: () => fighter(look, me.pose, mf, me.x, me.y, me.facing, bs?.me, true, this.myJumpAt) });
+    // a dance (AURA FARMING) plays while standing; walking or swinging stops it
+    const myDance = s?.me.dance ?? 0;
+    const knocked = (v: Parameters<typeof koAge>[0]) => koAge(v, wall) >= 0;
+    if (myDance && me.pose === 'idle' && !me.path.length && !knocked(bs?.me)) items.push({ z: me.y, f: () => drawDancer(c, look, myDance, now, OX + me.x * S, OY + me.y * S, S, me.facing) });
+    else items.push({ z: me.y, f: () => fighter(look, me.pose, mf, me.x, me.y, me.facing, bs?.me, true, this.myJumpAt) });
     items.push({ z: me.y + 1000, f: () => { if (!s?.pending && !s?.selected.length) draw(c, 'fx-sparkle-' + (Math.floor(now / 120) % 3), OX + me.x * S, OY + (me.y - 30 + Math.sin(now / 220) * 2) * S, S * 0.55, false, 0.8); } });
     if (look.pet) items.push({ z: this.petPos.y + (petFlies(look.pet) ? 16 : 0), f: () => drawPet(c, look.pet!, now, OX + this.petPos.x * S, OY + this.petPos.y * S, S, me.facing) });
     for (const p of s?.peers ?? []) {
       const d = this.peers.get(p.id);
       if (!d) continue;
       const pf = frameAt(d.pose, d.since, now);
-      items.push({ z: d.y, f: () => fighter(p.look, d.pose, pf, d.x, d.y, p.facing, bs?.peers[p.id], false, bs?.jumps?.[p.id]) });
+      const pd = p.dance ?? 0;
+      if (pd && d.pose === 'idle' && !knocked(bs?.peers[p.id])) items.push({ z: d.y, f: () => drawDancer(c, p.look, pd, now, OX + d.x * S, OY + d.y * S, S, p.facing) });
+      else items.push({ z: d.y, f: () => fighter(p.look, d.pose, pf, d.x, d.y, p.facing, bs?.peers[p.id], false, bs?.jumps?.[p.id]) });
       if (p.look.pet) {
         const fly = petFlies(p.look.pet);
         const px = d.x - 11 * p.facing;

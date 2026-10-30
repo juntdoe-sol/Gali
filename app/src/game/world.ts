@@ -40,6 +40,8 @@ export interface Avatar {
   pk?: string | null;
   /** which miner body they play: 'f' is the girl miner */
   sx?: 'm' | 'f';
+  /** the dance they are doing (1 to 12), 0 = none */
+  dance?: number;
 }
 export interface MeState {
   x: number;
@@ -56,9 +58,11 @@ export interface MeState {
   hk?: string;
   pk?: string | null;
   sx?: 'm' | 'f';
+  /** dance 1 to 12 (AURA FARMING), 0 = none */
+  dance?: number;
 }
 
-export const EMOTES = ['👋', '⛏️', '🎉', '💎', '🔥'] as const;
+export const EMOTES = ['👋', '⛏️', '🎉', '💎', '🔥', '😂', '❤️'] as const;
 
 const URL_ = process.env.EXPO_PUBLIC_WORLD_URL || (cfg.url ? `${cfg.url.replace(/^http/, 'ws')}/realtime/v1` : '');
 const KEY = process.env.EXPO_PUBLIC_WORLD_KEY || cfg.anonKey;
@@ -279,6 +283,7 @@ function onState(p: any) {
     hk: typeof p.hk === 'string' && /^hat-[a-z]{2,12}$/.test(p.hk) ? p.hk : undefined,
     pk: typeof p.pk === 'string' && /^pet-[a-z]{2,12}$/.test(p.pk) ? p.pk : null,
     sx: p.sx === 'f' ? 'f' : 'm',
+    dance: Number.isInteger(p.dn) && p.dn >= 1 && p.dn <= 12 ? p.dn : 0,
   };
   useWorld.setState((s) => ({ peers: { ...s.peers, [id]: av } }));
   if (p.bw !== undefined) roomHooks.onBw?.('island', id, p.bw);
@@ -337,6 +342,7 @@ export function publishMe(me: MeState, identity: { wallet: string | null; sessio
     pk: me.pk ?? null,
     sx: me.sx === 'f' ? 'f' : 'm',
     nm: useName.getState().name || undefined,
+    dn: me.dance || undefined,
   };
   const bw = roomHooks.myBw?.();
   if (bw) payload.bw = bw;
