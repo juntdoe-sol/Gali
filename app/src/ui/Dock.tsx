@@ -1,6 +1,7 @@
 import { layoutNow } from './layout';
 import { FEATURE_GALI_PROGRAM } from '../config/features';
 import { useEffect, useState, type ReactNode } from 'react';
+import { useTut, useTutTarget } from '../game/tutTargets';
 import { Modal, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CLUSTER, LIVE_AUTOPILOT_MAX_SOL, LIVE_MAX_ROUND_SOL, PLATFORM_FEE_BPS, REFINING_FEE } from '../chain/light';
@@ -28,6 +29,8 @@ const TABS: { id: DockTab; label: string }[] = [
 ];
 
 export function Dock({ embedded, noUnclaimed }: { embedded?: boolean; noUnclaimed?: boolean } = {}) {
+  const liteRef = useTutTarget('tab-lite');
+  const proRef = useTutTarget('tab-pro');
   const insets = useSafeAreaInsets();
   const tab = useGame((s) => s.dockTab);
   const run = useGame((s) => s.run);
@@ -62,7 +65,7 @@ export function Dock({ embedded, noUnclaimed }: { embedded?: boolean; noUnclaime
         {TABS.map((t) => {
           const on = tab === t.id;
           return (
-            <Pressable key={t.id} onPress={() => setTab(t.id)} style={styles.segBtn} accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={`${t.label} mode`}>
+            <Pressable key={t.id} ref={t.id === 'lite' ? liteRef : proRef} onPress={() => setTab(t.id)} style={styles.segBtn} accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={`${t.label} mode`}>
               {(st) => {
                 const { hovered, focused } = st as { hovered?: boolean; focused?: boolean };
                 return (
@@ -317,6 +320,7 @@ const cleanAmt = (t: string) => t.replace(',', '.').replace(/[^0-9.]/g, '').repl
 const EXEC_FEE = 0.00001;
 
 function RunButton({ ready, label, sub, onStart }: { ready: boolean; label: string; sub?: string; onStart: () => void }) {
+  const ref = useTutTarget('deploy');
   const run = useGame((s) => s.run);
   const stop = useGame((s) => s.stopRun);
   const busy = useGame((s) => s.wallet.busy);
@@ -335,15 +339,20 @@ function RunButton({ ready, label, sub, onStart }: { ready: boolean; label: stri
     // a phone folds the panel away to show the dig; the desktop panel stays where it is
     if (!layoutNowDesktop()) useGame.getState().setDockOpen(false);
   };
-  return <Btn kind={ready ? 'gold' : 'plain'} label={busy ?? label} sub={sub} onPress={start} disabled={!ready || Boolean(busy)} style={{ marginTop: 10, minHeight: 54 }} />;
+  return (
+    <View ref={ref} collapsable={false} style={{ marginTop: 10 }}>
+      <Btn kind={ready ? 'gold' : 'plain'} label={busy ?? label} sub={sub} onPress={start} disabled={!ready || Boolean(busy)} style={{ minHeight: 54 }} />
+    </View>
+  );
 }
 
 /** ORE-style big amount: type it, or build it with the +0.01 / +0.1 / +1 / MAX chips below. */
 function BigAmount({ value, onChange, hint, disabled }: { value: string; onChange: (v: string) => void; hint: string; disabled?: boolean }) {
   const { balance, live, onChain } = useBalance();
   const empty = !(Number(value) > 0);
+  const ref = useTutTarget('amount');
   return (
-    <View style={styles.big}>
+    <View ref={ref} collapsable={false} style={styles.big}>
       <TextInput
         value={value}
         onChangeText={(t) => onChange(cleanAmt(t))}
@@ -367,8 +376,9 @@ function BigAmount({ value, onChange, hint, disabled }: { value: string; onChang
 }
 
 function QuickAdd({ onAdd, onMax, disabled }: { onAdd: (v: number) => void; onMax: () => void; disabled?: boolean }) {
+  const ref = useTutTarget('quick');
   return (
-    <View style={[styles.lineRight, { marginTop: 4, marginBottom: 4 }]}>
+    <View ref={ref} collapsable={false} style={[styles.lineRight, { marginTop: 4, marginBottom: 4 }]}>
       {[0.01, 0.1, 1].map((v) => (
         <Chip key={v} grow label={`+${v}`} onPress={() => onAdd(v)} disabled={disabled} />
       ))}
@@ -498,6 +508,8 @@ function DeskLite() {
   }, [liteMode, run]);
 
   const amt = Number(amount) || 0;
+  // the tutorial moves on when there is SOL in
+  useEffect(() => useTut.setState({ liteAmount: amt }), [amt]);
   const rounds = Math.floor(amt / LITE_PER_ROUND + 1e-9);
   const total = rounds * LITE_PER_ROUND;
   const need = total + (rounds > 1 ? EXEC_FEE * rounds : 0);
@@ -572,6 +584,7 @@ function DeskLite() {
 
 /* ---------------- RIGHT BAR PRO, like ORE: SOL a round, how many tiles, how many rounds ---------------- */
 function DeskPro() {
+  const tilesRef = useTutTarget('pro-tiles');
   const compact = false;
   const { balance, live } = useBalance();
   const presets = useGame((s) => s.save.presets);
@@ -650,6 +663,7 @@ function DeskPro() {
         <>
           <BigAmount value={perRoundStr} onChange={setPer} hint="SOL a round" disabled={lock} />
           <QuickAdd onAdd={(v) => setPer(addTo(perRoundStr, v))} onMax={max} disabled={lock} />
+          <View ref={tilesRef} collapsable={false}>
           <Row
             icon="grid"
             label="Tiles"
@@ -661,6 +675,7 @@ function DeskPro() {
               </>
             }
           />
+          </View>
           <Row
             icon="hourglass"
             label="Rounds"
