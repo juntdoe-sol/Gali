@@ -12,7 +12,8 @@ import { Image, Pressable, ScrollView, StyleSheet, View, type ImageStyle, type L
 import { ACHIEVEMENTS, COLORS, GEAR, RARITY_COLOR, type GearKind } from '../game/constants';
 import { useMarket } from '../game/market';
 import { PART, PARTS, PARTS_H, PARTS_W, partCell } from '../game/minerParts';
-import { fmtDay, useNft } from '../game/nft';
+import { fmtDay, MILESTONE_KINDS, useNft } from '../game/nft';
+import { useTut } from '../game/tutTargets';
 import { play } from '../game/sfx';
 import { useGame, useOwnedMask } from '../game/store';
 import { useName } from '../game/username';
@@ -358,8 +359,9 @@ function Achievements() {
 
 function Certificates() {
   const owner = useGame((s) => s.wallet.owner);
-  const { cert, items, loading, error, openPopup } = useNft();
+  const { cert, items, loading, error } = useNft();
   const certs = items.filter((i) => i.kind === 'cert');
+  const levelOwned = MILESTONE_KINDS.some((k) => cert?.milestones?.[k]?.claim?.status === 'minted');
   const foundingName = certs.find((c) => c.name.startsWith('Gali Founding Miner'))?.name;
   const gear = items.filter((i) => i.kind === 'gear');
   const minted = cert?.claim?.status === 'minted';
@@ -417,24 +419,18 @@ function Certificates() {
             </View>
           ) : null}
         </View>
-      ) : cert?.eligible ? (
-        <View style={{ gap: 8 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Led color={COLORS.gold} blink />
-            <T v="bold" style={{ flex: 1 }}>
-              You are a Founding Miner: {cert.rounds.toLocaleString()} ORE rounds in the closed beta.
-            </T>
-          </View>
-          <TechBtn primary color={COLORS.gold} label="CLAIM CERTIFICATE" onPress={openPopup} />
+      ) : loading && !cert ? (
+        <T v="muted">Opening the vault...</T>
+      ) : null}
+      {owner ? <MilestoneVault /> : null}
+      {owner && !loading && !has && !levelOwned ? <T v="muted">No certificates yet.</T> : null}
+      {owner ? (
+        <View style={styles.questNote}>
+          <PixIcon name="quest" size={22} />
+          <T style={{ flex: 1, fontSize: 13 }}>Collect certificates on the Quest tab: Founding Miner and every level milestone. Each one claims gear when the market opens.</T>
+          <TechBtn small color={COLORS.gold} label="QUESTS" onPress={() => useTut.setState({ questsAt: Date.now() })} />
         </View>
-      ) : cert?.counting ? (
-        <Prompt color={COLORS.gold} text={`counting your beta rounds: ${cert.rounds.toLocaleString()} so far`} />
-      ) : (
-        <T v="muted">
-          {loading || !cert ? 'Opening the vault...' : 'No Founding Miner certificate: those went to wallets that mined a live ORE round in the closed beta. Gear 555 lands here when the market opens.'}
-        </T>
-      )}
-      <MilestoneVault />
+      ) : null}
       {gear.length ? (
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
           {gear.map((g) => (
@@ -480,6 +476,7 @@ const styles = StyleSheet.create({
   bayTag: { position: 'absolute', right: 12, top: 12, flexDirection: 'row', alignItems: 'center', gap: 4 },
   achGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   ach: { flexGrow: 1, flexBasis: 130, maxWidth: 200, padding: 8, gap: 4, alignItems: 'center', borderWidth: U },
+  questNote: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 8, borderWidth: U, borderColor: TECH.rule, borderStyle: 'dashed' },
   item: { width: 96, padding: 6, gap: 4, alignItems: 'center', borderWidth: U },
   itemArt: { width: 80, height: 72, alignItems: 'center', justifyContent: 'center', backgroundColor: TECH.ink, overflow: 'hidden' },
   ghost: { height: 140, justifyContent: 'center', borderStyle: 'dashed' },
