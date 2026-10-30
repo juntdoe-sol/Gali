@@ -26,7 +26,7 @@
 // Secrets: SOLANA_RPC (Helius URL, for DAS), DM_SECRET (sign-in passes), CERT_AUTHORITY (base58 secret key of the
 //   collection authority, made by scripts/cert-collection.mjs), CERT_COLLECTION (collection address),
 //   optional CERT_BETA_END (ISO time; open until then), MILESTONE_COLLECTION (scripts/nft/milestone-collection.mjs),
-//   GEAR_COLLECTION (later), ADMIN_WALLET (gets the claim fee; CERT_FEE_WALLET overrides it),
+//   GEAR_COLLECTION (later), optional CERT_FEE_WALLET (gets the claim fee; default: Gali's revenue wallet),
 //   optional CERT_FEE_SOL (claim fee per certificate, default 0.01; 0 turns it off)
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import bs58 from 'npm:bs58@6';
@@ -234,8 +234,10 @@ function computeBudget() {
  * minted without it (Gali has already signed the transaction; changing it breaks those signatures).
  */
 const FEE_SOL = Number(Deno.env.get('CERT_FEE_SOL') ?? 0.01);
+/** Gali's revenue wallet: the deploy fee and the arcade fees go here too (app/src/chain/light.ts REVENUE_WALLET). */
+const REVENUE_WALLET = 'HDa2MTDdZXnrjTs6RRUUzEqCcrWMWu1fM673Cg7pzQMw';
 const feeWallet = () => {
-  const w = (Deno.env.get('CERT_FEE_WALLET') ?? Deno.env.get('ADMIN_WALLET') ?? '').trim();
+  const w = (Deno.env.get('CERT_FEE_WALLET') ?? REVENUE_WALLET).trim();
   return isWallet(w) ? w : null;
 };
 /** The fee a claim costs right now, in SOL (0 when no fee wallet is set). */
