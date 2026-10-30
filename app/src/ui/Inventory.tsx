@@ -4,8 +4,8 @@
  * Your miner stands on a holo pedestal with its five slots wired in around it: Head, Clothes and Shoes on the left,
  * Weapon and Pet on the right (and a jump to the Gear Market). Tap a slot and the rail under the bay slides through
  * what you own for it; tap an item to equip it, and the miner re-materialises wearing it. Your look goes out to the
- * lobby, island and arena as before. Below: the vault, with the Gali NFTs the wallet holds (the Founding Miner
- * certificate now, Gear 555 when the market opens), read on chain through the `nft` function.
+ * lobby, island and arena as before. Below: the vault, with the Gali NFTs the wallet holds (the Founding Miner and
+ * Level 10 / Level 20 certificates now, Gear 555 when the market opens), read on chain through the `nft` function.
  */
 import { useEffect, useState, type ReactNode } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, View, type ImageStyle, type LayoutChangeEvent } from 'react-native';
@@ -17,6 +17,7 @@ import { play } from '../game/sfx';
 import { useGame, useOwnedMask } from '../game/store';
 import { useName } from '../game/username';
 import { CertCard, postOnX, saveCert } from './CertClaim';
+import { MilestoneVault } from './Milestones';
 import { T, U } from './kit';
 import { PixIcon } from './PixIcon';
 import type { PixName } from './pixIcons';
@@ -382,9 +383,10 @@ function Vault() {
         <Prompt color={COLORS.gold} text={`counting your beta rounds: ${cert.rounds.toLocaleString()} so far`} />
       ) : (
         <T v="muted">
-          {loading || !cert ? 'Opening the vault...' : 'Empty for now. Founding Miner certificates go to wallets that mined a live ORE round in the closed beta; Gear 555 lands here when the market opens.'}
+          {loading || !cert ? 'Opening the vault...' : 'No Founding Miner certificate: those went to wallets that mined a live ORE round in the closed beta. Gear 555 lands here when the market opens.'}
         </T>
       )}
+      <MilestoneVault />
       {gear.length ? (
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
           {gear.map((g) => (

@@ -108,7 +108,8 @@ function Stats({ cert }: { cert: CertStatus }) {
 }
 
 export function CertClaimPopup() {
-  const { popup, cert, claiming, error, minted, claim, later } = useNft();
+  const { popup, cert, claiming, claimKind, error: lastError, minted, claim, later } = useNft();
+  const error = (claimKind ?? 'founding') === 'founding' ? lastError : null;
   if (!popup || !cert?.eligible) return null;
   const done = cert.claim?.status === 'minted';
   return (

@@ -12,7 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../game/constants';
 import { CATS, loadGear, RARITIES, RARITY_HUE, TRYON_CELL, type GearBook, type GearCat, type GearItem, type GearRarity } from '../game/gear555';
 import { useMarket } from '../game/market';
-import { useNft } from '../game/nft';
+import { MILESTONE, milestoneOfSet, useNft } from '../game/nft';
 import { play } from '../game/sfx';
 import { useName } from '../game/username';
 import { GearSprite, TryOnSprite } from './GearSprite';
@@ -461,7 +461,12 @@ function Spec({ it, tryOn, setTryOn, n, of, style, book, onJump }: { it: GearIte
   const hue = RARITY_HUE[it.rarity];
   const cert = useNft((s) => s.cert);
   const openClaim = useNft((s) => s.openPopup);
+  const claimCert = useNft((s) => s.claim);
+  const claiming = useNft((s) => s.claiming);
   const jarl = it.supply === 'claim';
+  // a Level 10 / Level 20 weapon: claimed at random with that milestone's certificate
+  const ms = milestoneOfSet(it.set);
+  const msInfo = ms ? cert?.milestones?.[ms] : undefined;
   return (
     <TechPanel
       title={`ITEM ${it.id} · ${pad(n + 1)} OF ${pad(of)}`}
@@ -542,7 +547,25 @@ function Spec({ it, tryOn, setTryOn, n, of, style, book, onJump }: { it: GearIte
             <TechBtn small label="ITEM" primary={!tryOn} onPress={() => setTryOn(false)} />
           </View>
         </View>
-        {jarl ? (
+        {ms ? (
+          msInfo?.claim?.status === 'minted' ? (
+            <T v="muted" style={{ fontSize: 12 }}>
+              {`Your ${MILESTONE[ms].title} certificate #${String(msInfo.claim.serial).padStart(4, '0')} rolls one of these ${MILESTONE[ms].rarity} weapons at random when the market opens.`}
+            </T>
+          ) : msInfo?.eligible ? (
+            <TechBtn
+              primary
+              color={COLORS.gold}
+              label={!cert?.milestones?.open ? 'CERTIFICATE MINT SOON' : claiming ? 'CLAIMING...' : `CLAIM ${MILESTONE[ms].title.toUpperCase()} CERTIFICATE`}
+              disabled={!cert?.milestones?.open || !!claiming}
+              onPress={() => void claimCert(ms)}
+            />
+          ) : (
+            <T v="muted" style={{ fontSize: 12 }}>
+              {`Reach ${MILESTONE[ms].title} for the certificate (Quest tab). It rolls one of the three ${MILESTONE[ms].rarity} ${MILESTONE[ms].title} weapons at random when the market opens.`}
+            </T>
+          )
+        ) : jarl ? (
           cert?.eligible ? (
             <TechBtn primary color={COLORS.gold} label={cert.claim?.status === 'minted' ? 'YOUR CERTIFICATE' : 'CLAIM CERTIFICATE'} onPress={openClaim} />
           ) : (
