@@ -1,5 +1,4 @@
 import { useBrawl, _test } from './game/brawl';
-import { OreStatsPanel } from './ui/OreStats';
 import { useAppFonts } from './fonts';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState, type ReactNode } from 'react';
@@ -288,7 +287,6 @@ function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTa
         {desktop ? null : <Dock />}
         <TabBar active={sheet} onTab={setSheet} />
         <MapHint />
-        <OreStatsPanel />
         <MineTutorial />
         <LobbyBack />
         <ClaimPanel />
