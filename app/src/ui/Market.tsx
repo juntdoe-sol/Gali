@@ -550,7 +550,7 @@ function Spec({ it, tryOn, setTryOn, n, of, style, book, onJump }: { it: GearIte
         {ms ? (
           msInfo?.claim?.status === 'minted' ? (
             <T v="muted" style={{ fontSize: 12 }}>
-              {`Your ${MILESTONE[ms].title} certificate #${String(msInfo.claim.serial).padStart(4, '0')} rolls one of these ${MILESTONE[ms].rarity} weapons at random when the market opens.`}
+              {`Your ${MILESTONE[ms].title} certificate #${String(msInfo.claim.serial).padStart(4, '0')} ${MILESTONE[ms].rewards.length > 1 ? `rolls ${MILESTONE[ms].reward}` : `claims the ${MILESTONE[ms].reward}`} when the market opens.`}
             </T>
           ) : msInfo?.eligible ? (
             <TechBtn
@@ -562,7 +562,7 @@ function Spec({ it, tryOn, setTryOn, n, of, style, book, onJump }: { it: GearIte
             />
           ) : (
             <T v="muted" style={{ fontSize: 12 }}>
-              {`Reach ${MILESTONE[ms].title} for the certificate (Quest tab). It rolls one of the three ${MILESTONE[ms].rarity} ${MILESTONE[ms].title} weapons at random when the market opens.`}
+              {`Reach ${MILESTONE[ms].title} for the certificate (Quest tab). It ${MILESTONE[ms].rewards.length > 1 ? `rolls ${MILESTONE[ms].reward}` : `claims the ${MILESTONE[ms].reward}`} when the market opens.`}
             </T>
           )
         ) : jarl ? (

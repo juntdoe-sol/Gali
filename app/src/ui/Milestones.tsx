@@ -1,5 +1,6 @@
 /**
- * Milestone certificates: Level 10 (one random Rare weapon) and Level 20 (one random Legendary weapon).
+ * Milestone certificates for Levels 3, 6, 10, 15, 20 and 30: each claims that level's gear when the market opens
+ * (one item, or one of several at random; Level 30 a full outfit). See MILESTONE in game/nft.ts.
  *
  *  - MilestoneQuests: the Quest tab's "Milestones" list: Founding Miner, Reach Level 10, Reach Level 20, each with
  *    its progress and a claim button for the certificate NFT
@@ -22,12 +23,32 @@ import { alpha, Corners, Led, Readout, TECH, TechBtn, useTick } from './tech';
 
 const PIX = { imageRendering: 'pixelated' } as ImageStyle;
 const web = Platform.OS === 'web';
-const ART: Record<MilestoneKind, number> = {
-  lv10: web ? require('../../assets/market/level-10.gif') : require('../../assets/market/level-10.png'),
-  lv20: web ? require('../../assets/market/level-20.gif') : require('../../assets/market/level-20.png'),
+const GIF: Record<MilestoneKind, number> = {
+  lv3: require('../../assets/market/level-3.gif'),
+  lv6: require('../../assets/market/level-6.gif'),
+  lv10: require('../../assets/market/level-10.gif'),
+  lv15: require('../../assets/market/level-15.gif'),
+  lv20: require('../../assets/market/level-20.gif'),
+  lv30: require('../../assets/market/level-30.gif'),
 };
-const STILL: Record<MilestoneKind, number> = { lv10: require('../../assets/market/level-10.png'), lv20: require('../../assets/market/level-20.png') };
-const HUE: Record<MilestoneKind, string> = { lv10: '#5ab8ff', lv20: COLORS.gold };
+const STILL: Record<MilestoneKind, number> = {
+  lv3: require('../../assets/market/level-3.png'),
+  lv6: require('../../assets/market/level-6.png'),
+  lv10: require('../../assets/market/level-10.png'),
+  lv15: require('../../assets/market/level-15.png'),
+  lv20: require('../../assets/market/level-20.png'),
+  lv30: require('../../assets/market/level-30.png'),
+};
+const ART: Record<MilestoneKind, number> = web ? GIF : STILL;
+const HUE: Record<MilestoneKind, string> = { lv3: '#6ad46f', lv6: '#6ad46f', lv10: '#5ab8ff', lv15: '#5ab8ff', lv20: COLORS.gold, lv30: '#d682ff' };
+const BAR: Record<MilestoneKind, [string, string]> = {
+  lv3: ['#2f8a3a', '#6ad46f'],
+  lv6: ['#2f8a3a', '#6ad46f'],
+  lv10: ['#2f6fd0', '#5ab8ff'],
+  lv15: ['#2f6fd0', '#5ab8ff'],
+  lv20: [COLORS.gold2, COLORS.gold],
+  lv30: ['#7a2ab8', '#d682ff'],
+};
 const STEP: Record<string, string> = {
   'signing-in': 'Sign the free sign-in message in your wallet...',
   building: 'Preparing your certificate...',
@@ -78,7 +99,8 @@ async function saveImage(kind: MilestoneKind, ext: 'gif' | 'png', serial?: numbe
 
 function postOnX(kind: MilestoneKind, serial?: number) {
   const m = MILESTONE[kind];
-  const text = `I hit ${m.title} on Gali Island${serial ? ` (certificate #${pad4(serial)})` : ''}. It rolls one ${m.rarity} weapon at random when the Gali NFT market opens: ${m.weapons.join(', ')}. @Gali_Game`;
+  const what = m.rewards.length > 1 ? `It rolls ${m.reward} when the Gali NFT market opens: ${m.rewards.join(', ')}.` : `It claims the ${m.reward} when the Gali NFT market opens.`;
+  const text = `I hit ${m.title} on Gali Island${serial ? ` (certificate #${pad4(serial)})` : ''}. ${what} @Gali_Game`;
   void Linking.openURL(`https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent('https://gali.lol')}`);
 }
 
@@ -108,17 +130,17 @@ function useGearItems(ids: string[]) {
   return book ? (ids.map((id) => book.items.find((g) => g.id === id)).filter(Boolean) as GearItem[]) : [];
 }
 
-/** The reward strip: the one item, or the three a certificate rolls between. */
+/** The reward strip: the one item, or the ones a certificate rolls between (Level 30: each outfit's top). */
 function Rewards({ ids, hue, random }: { ids: string[]; hue: string; random: boolean }) {
   const items = useGearItems(ids);
   return (
     <View style={styles.rewards}>
       <T v="tiny" style={{ fontSize: 8, color: hue, letterSpacing: 1 }}>
-        {random ? 'ROLLS 1 OF' : 'CLAIMS'}
+        {random ? `ROLLS 1 OF ${ids.length}` : 'CLAIMS'}
       </T>
       {items.map((g, i) => (
         <View key={g.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-          {i > 0 ? (
+          {i > 0 && items.length <= 3 ? (
             <T v="display" style={{ fontSize: 12, color: TECH.dim }}>
               ?
             </T>
@@ -133,7 +155,7 @@ function Rewards({ ids, hue, random }: { ids: string[]; hue: string; random: boo
 }
 
 const JARL = ['G084'];
-const PILL_BG: Record<string, string> = { Rare: 'rgba(90,184,255,0.16)', Legendary: 'rgba(255,201,60,0.16)' };
+const PILL_BG: Record<string, string> = { Uncommon: 'rgba(106,212,111,0.16)', Rare: 'rgba(90,184,255,0.16)', Legendary: 'rgba(255,201,60,0.16)' };
 
 /** One certificate in the collection. */
 function CollectRow({
@@ -228,7 +250,7 @@ export function MilestoneQuests() {
           <T v="display" style={{ fontSize: 24, lineHeight: 25, color: COLORS.gold, letterSpacing: 1 }}>
             CERTIFICATE COLLECTION
           </T>
-          <T style={{ fontSize: 13 }}>{all ? 'You collected them all. Your gear drops when the market opens.' : 'Collect all 3. Each NFT claims real gear when the market opens.'}</T>
+          <T style={{ fontSize: 13 }}>{all ? 'You collected them all. Your gear drops when the market opens.' : `Collect all ${got.length}. Each NFT claims real gear when the market opens.`}</T>
         </View>
         <View style={{ alignItems: 'center' }}>
           <T v="display" style={{ fontSize: 30, lineHeight: 30, color: all ? COLORS.gold : COLORS.text }}>
@@ -280,10 +302,10 @@ export function MilestoneQuests() {
                   : `Lv ${level} · ${Math.min(xp, need).toLocaleString()}/${need.toLocaleString()} XP · ${(need - xp).toLocaleString()} to go`
             }
             rewards={m.ids}
-            random
+            random={m.rewards.length > 1}
             got={minted}
             locked={!reached}
-            progress={minted ? undefined : { pct, colors: k === 'lv20' ? [COLORS.gold2, COLORS.gold] : ['#2f6fd0', '#5ab8ff'] }}
+            progress={minted ? undefined : { pct, colors: BAR[k] }}
             btn={btn}
             onPress={() => void claim(k)}
             extra={<ClaimState kind={k} />}
@@ -321,8 +343,8 @@ export function MilestoneVault() {
             <T v="display" style={{ fontSize: 20, lineHeight: 21, color: reached ? hue : COLORS.text, letterSpacing: 1 }}>
               {minted ? `Gali ${m.title} Certificate #${pad4(info!.claim!.serial)}` : `${m.title} Certificate`}
             </T>
-            <Readout k="ROLLS" v={`1 RANDOM ${m.rarity.toUpperCase()} WEAPON`} color={hue} />
-            <Readout k="ONE OF" v={m.weapons.join(' · ').toUpperCase()} />
+            <Readout k={m.rewards.length > 1 ? 'ROLLS' : 'CLAIMS'} v={m.reward.toUpperCase()} color={hue} />
+            {m.rewards.length > 1 ? <Readout k="ONE OF" v={m.rewards.join(' · ').toUpperCase()} /> : null}
             <Readout k="STATUS" v={minted ? 'IN YOUR WALLET · SOULBOUND' : reached ? 'READY TO CLAIM' : `LV ${level} OF ${m.level} · ${Math.max(0, xpForLevel(m.level) - xp).toLocaleString()} XP TO GO`} color={minted ? COLORS.green : reached ? COLORS.gold : TECH.dim} />
             {minted ? (
               <View style={{ flexDirection: 'row', gap: 6 }}>

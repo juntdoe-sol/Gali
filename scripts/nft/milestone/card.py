@@ -1,11 +1,11 @@
-"""Gali milestone certificates (Level 10, Level 20): animated 16:9 cards in the Founding Miner card's format
-(240x135 art shown at 3x, scene at 2x zoom, 4 s loop).
+"""Gali milestone certificates (Levels 3, 6, 10, 15, 20, 30): animated 16:9 cards in the Founding Miner card's
+format (240x135 art shown at 3x, scene at 2x zoom).
 
-Scene: the miner tries on each of the level's three weapons in turn, a swing with each, a flash between them:
-the certificate claims ONE of them at random when the Gali NFT market opens.
+Scene: the miner wears each of the level's rewards in turn, a flash between them: a certificate with several
+rewards claims ONE of them at random when the Gali NFT market opens (Level 30: one full outfit, top and pants).
 
-usage (from the repo root): python3 -I scripts/nft/milestone/card.py OUTDIR
-writes OUTDIR/level-10.gif, level-10.png, level-20.gif, level-20.png (GIF 720x405, PNG 1200x675)
+usage (from the repo root): python3 -I scripts/nft/milestone/card.py OUTDIR [LEVEL ...]
+writes OUTDIR/level-N.gif and level-N.png (GIF 720x405, PNG 1200x675) for each level (default: all)
 """
 import math
 import os
@@ -18,6 +18,7 @@ GEAR = f'{REPO}/scripts/gear555'
 sys.path.insert(0, GEAR)
 import kit  # noqa: E402
 import milestone_weapons as MW  # noqa: E402
+import milestone_gear as MG  # noqa: E402
 
 OUTDIR = sys.argv[1] if len(sys.argv) > 1 else '.'
 os.makedirs(OUTDIR, exist_ok=True)
@@ -37,10 +38,26 @@ DIM = (150, 130, 176)
 GOLD = [(92, 52, 20), (150, 92, 28), (214, 150, 40), (246, 196, 72), (255, 236, 160)]
 BLUE = [(20, 46, 92), (30, 92, 150), (40, 150, 214), (79, 214, 239), (190, 246, 255)]
 
+GREEN = [(20, 60, 30), (40, 110, 50), (70, 170, 80), (106, 212, 111), (210, 255, 200)]
+VIOLET = [(50, 20, 80), (100, 40, 150), (160, 70, 220), (214, 130, 255), (250, 220, 255)]
+
+_w = lambda fn: {'weapon': fn}  # noqa: E731
 LEVELS = {
-    10: dict(rar='RARE', ramp=BLUE, items=[i for i in MW.ITEMS if i[2] == 'Rare'], ribbon=(30, 92, 170)),
-    20: dict(rar='LEGENDARY', ramp=GOLD, items=[i for i in MW.ITEMS if i[2] == 'Legendary'], ribbon=(216, 38, 58)),
+    3: dict(rar='UNCOMMON', ramp=GREEN, ribbon=(40, 130, 60), items=[{'shoe': MG.baby_steps_boots}],
+            line='UNCOMMON SHOES', reward='Baby Steps Boots', claim='CLAIMS THESE SHOES'),
+    6: dict(rar='UNCOMMON', ramp=GREEN, ribbon=(40, 130, 60), items=[{'top': MG.six_pack_tee}],
+            line='UNCOMMON TOP', reward='Six Pack Tee', claim='CLAIMS THIS TEE'),
+    10: dict(rar='RARE', ramp=BLUE, ribbon=(30, 92, 170), items=[_w(i[3]) for i in MW.ITEMS if i[2] == 'Rare'],
+             line='1 RARE WEAPON  .  RANDOM', reward='1 of 3 weapons', claim='CLAIM 1 AT RANDOM'),
+    15: dict(rar='RARE', ramp=BLUE, ribbon=(30, 92, 170), items=[{'shoe': i[3]} for i in MG.SHOES[1:]],
+             line='1 RARE SHOES  .  RANDOM', reward='1 of 3 shoes', claim='CLAIM 1 AT RANDOM'),
+    20: dict(rar='LEGENDARY', ramp=GOLD, ribbon=(216, 38, 58), items=[_w(i[3]) for i in MW.ITEMS if i[2] == 'Legendary'],
+             line='1 LEGENDARY WEAPON  .  RANDOM', reward='1 of 3 weapons', claim='CLAIM 1 AT RANDOM'),
+    30: dict(rar='LEGENDARY', ramp=VIOLET, ribbon=(150, 40, 200), items=[{'top': o[2], 'bottom': o[4]} for o in MG.OUTFITS],
+             line='1 LEGENDARY OUTFIT  .  RANDOM', reward='1 of 10 outfits', claim='CLAIM 1 AT RANDOM'),
 }
+for _L in LEVELS.values():
+    _L['nf'] = 42 if len(_L['items']) <= 3 else 8 * len(_L['items'])
 
 
 def font(name, size):
@@ -61,16 +78,16 @@ def ground():
 
 
 GROUND = ground()
-SEG = NF // 3  # frames per weapon
-
-
 def scene(k, L):
     sc = Image.new('RGBA', (SW, SH), (0, 0, 0, 255))
     sc.alpha_composite(GROUND)
     sc.alpha_composite(Image.new('RGBA', (SW, SH), (30, 10, 60, 110)))
     ramp = L['ramp']
+    n = len(L['items'])
+    SEG = L['nf'] // n
     i, t = divmod(k, SEG)
-    gid, name, rar, fn = L['items'][i % 3]
+    gear = L['items'][i % n]
+    t = t * 14 // SEG  # the 14-step routine, stretched or squeezed to this level's segment
     # light rays behind the miner, turning
     cx, cy = SW // 2, FEET_Y - 18
     for a in range(8):
@@ -81,9 +98,12 @@ def scene(k, L):
             x, y = int(cx + math.cos(ang) * r), int(cy + math.sin(ang) * r)
             if 0 <= x < SW and 0 <= y < SH:
                 sc.putpixel((x, y), (*ramp[3 if r < 15 else 2], 255))
-    # the miner, holding this weapon: idle, then a swing, then a cheer
-    pose, f = ('idle', (t // 2) % 4) if t < 5 else ('swing', min(5, t - 5)) if t < 11 else ('cheer', 1 + (t - 11) % 3)
-    img, (ax, ay) = kit.render({'weapon': fn()}, pose, f)
+    # the miner wearing it: idle, then a swing (a weapon) or a walk, then a cheer
+    if 'weapon' in gear:
+        pose, f = ('idle', (t // 2) % 4) if t < 5 else ('swing', min(5, t - 5)) if t < 11 else ('cheer', 1 + (t - 11) % 3)
+    else:
+        pose, f = ('idle', (t // 2) % 4) if t < 5 else ('walk', (t - 5) % 6) if t < 11 else ('cheer', 1 + (t - 11) % 3)
+    img, (ax, ay) = kit.render({k_: fn() for k_, fn in gear.items()}, pose, f)
     d = ImageDraw.Draw(sc)
     d.rectangle((cx - 6, FEET_Y, cx + 6, FEET_Y + 1), fill=(8, 12, 24))
     sc.alpha_composite(img, (cx - ax, FEET_Y - ay))
@@ -97,16 +117,16 @@ def scene(k, L):
                     if 0 <= px_ < SW and 0 <= py_ < SH:
                         sc.putpixel((px_, py_), (*ramp[4], 255))
     # "?" over the miner's head: you get one of these at random
-    if t >= 11:
+    if t >= 11 and n > 1:
         qx, qy = cx + 9, FEET_Y - 44
         d.rectangle((qx - 3, qy - 1, qx + 3, qy + 8), fill=(*ramp[1], 255))
         d.text((qx - 2, qy - 1), '?', font=font('Silkscreen_400Regular', 8), fill=(*ramp[4], 255))
-    # flash between weapons
-    if t == 0:
+    # flash between rewards
+    if t == 0 and n > 1:
         sc.alpha_composite(Image.new('RGBA', (SW, SH), (255, 246, 230, 170)))
     elif t == 1:
         sc.alpha_composite(Image.new('RGBA', (SW, SH), (255, 246, 230, 70)))
-    return sc, i % 3
+    return sc, i % n
 
 
 # ---------------------------------------------------------------- the card around it
@@ -183,9 +203,10 @@ def card_base(L):
     return img, PCX
 
 
-def thumb(fn):
-    """The weapon alone, idle, cropped tight (for the claim box)."""
-    gear = {'weapon': fn(), 'head': 'none'}
+def thumb(g):
+    """The reward alone, idle, cropped tight (for the claim box)."""
+    gear = {k: fn() for k, fn in g.items()}
+    gear['head'] = 'none'
     img, _ = kit.render(gear, 'idle', 0, sil=True)
     bare, _ = kit.render({'head': 'none'}, 'idle', 0, sil=True)
     a, b = img.load(), bare.load()
@@ -221,12 +242,12 @@ def text_layer(L, S, PCX, lvl):
     sh = Image.new('L', lay.size, 0)
     sh.paste(m, (S, S))
     lay.paste(Image.new('RGBA', lay.size, (*INK, 255)), (0, 0), sh)
-    say(f"1 {L['rar']} WEAPON  .  RANDOM", PCX, 65, SILK, sz['silk'], ramp[3], shadow=False)
-    rows = [('LEVEL REACHED', str(lvl), 77), ('RARITY', L['rar'].title(), 86), ('REWARD', '1 of 3 weapons', 95)]
+    say(L['line'], PCX, 65, SILK, sz['silk'], ramp[3], shadow=False)
+    rows = [('LEVEL REACHED', str(lvl), 77), ('RARITY', L['rar'].title(), 86), ('REWARD', L['reward'], 95)]
     for (lab, val, y) in rows:
         say(lab, 125, y, SILK, sz['silk'], LILAC, shadow=False, anchor='lt')
         say(val, W - 13, y - 1, PIXB, sz['pix'], CREAM, crisp=False, anchor='rt')
-    say('CLAIM ONE AT RANDOM', 166, 104, SILK, sz['silk'], CREAM, shadow=False, anchor='lt')
+    say(L['claim'], 166, 104, SILK, sz['silk'], CREAM, shadow=False, anchor='lt')
     say('when market opens', 166, 111, PIX, sz['pixs'], LILAC, shadow=False, crisp=False, anchor='lt')
     say('Soulbound  |  gali.lol', PCX, 122, PIX, sz['pixs'], DIM, shadow=False, crisp=False)
     stamp = 'UNCLAIMED'
@@ -255,20 +276,23 @@ def shine_title(img, m, S, k, ramp):
 def render(lvl, S, only=None):
     L = LEVELS[lvl]
     base, PCX = card_base(L)
-    thumbs = [thumb(fn) for (_, _, _, fn) in L['items']]
+    thumbs = [thumb(g) for g in L['items']]
     lay, m = text_layer(L, S, PCX, lvl)
     frames = []
-    for k in range(NF) if only is None else [only]:
+    for k in range(L['nf']) if only is None else [only]:
         a = base.copy()
         sc, cur = scene(k, L)
         a.alpha_composite(sc.resize((SW * 2, SH * 2), Image.NEAREST), (8, 6))
-        # the three weapons in the claim box; the one on show lit, the others dimmed
-        x = 126
-        for j, th in enumerate(thumbs):
+        # the rewards in the claim box (three at a time, the one on show lit, the others dimmed)
+        x = 126 + (13 if len(thumbs) == 1 else 0)
+        n = len(thumbs)
+        show = [cur] if n == 1 else list(range(3)) if n == 3 else [(cur - 1) % n, cur, (cur + 1) % n]
+        for j in show:
+            th = thumbs[j]
             th2 = th.copy()
             if j != cur:
                 th2.putalpha(th2.getchannel('A').point(lambda v: v * 45 // 100))
-            s = min(1.0, 16 / max(th.width, th.height))
+            s = min(1.0, 16 / th.height, 12 / th.width)
             th2 = th2.resize((max(1, round(th.width * s)), max(1, round(th.height * s))), Image.NEAREST)
             a.alpha_composite(th2, (x + (12 - th2.width) // 2, 103 + (16 - th2.height) // 2))
             x += 13
@@ -279,10 +303,11 @@ def render(lvl, S, only=None):
     return frames
 
 
-for lvl in (10, 20):
+for lvl in [int(a) for a in sys.argv[2:]] or sorted(LEVELS):
     fr = render(lvl, 3)
     mosaic = Image.new('RGB', (720, 405 * 4))
     for i, k in enumerate((3, 10, 17, 31)):
+        k = k * len(fr) // 42
         mosaic.paste(fr[k], (0, 405 * i))
     pal = mosaic.quantize(colors=255, method=Image.MEDIANCUT)
     q = [f.quantize(palette=pal, dither=Image.Dither.NONE) for f in fr]
