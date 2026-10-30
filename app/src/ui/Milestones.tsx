@@ -4,7 +4,7 @@
  *
  *  - MilestoneQuests: the Quest tab's "Milestones" list: Founding Miner, Reach Level 10, Reach Level 20, each with
  *    its progress and a claim button for the certificate NFT
- *  - MilestoneVault: the Bag's certificates for the two levels (claimed, ready to claim, or locked with progress)
+ *  - MilestoneVault: the Bag's level certificates, only the ones this wallet owns
  *
  * The level is the one the server worked out from verified XP, so what the quest shows is what the mint checks.
  */
@@ -19,7 +19,7 @@ import { CertCard } from './CertClaim';
 import { GearSprite } from './GearSprite';
 import { Bar, Btn, Pill, PixelBox, T } from './kit';
 import { PixIcon } from './PixIcon';
-import { alpha, Corners, Led, Readout, TECH, TechBtn, useTick } from './tech';
+import { alpha, Corners, Readout, TECH, TechBtn, useTick } from './tech';
 
 const PIX = { imageRendering: 'pixelated' } as ImageStyle;
 const web = Platform.OS === 'web';
@@ -316,58 +316,41 @@ export function MilestoneQuests() {
   );
 }
 
-/** Bag vault: the two level certificates, claimed or not. */
+/** Bag vault: the level certificates this wallet owns (collecting them happens on the Quest tab). */
 export function MilestoneVault() {
   const owner = useGame((s) => s.wallet.owner);
-  const { cert, claiming, claimKind, claim } = useNft();
-  const ms = cert?.milestones;
-  const { xp, level } = useLevel(ms);
-  if (!owner) return null;
+  const ms = useNft((s) => s.cert?.milestones);
+  const owned = MILESTONE_KINDS.filter((k) => ms?.[k]?.claim?.status === 'minted');
+  if (!owner || !owned.length) return null;
   return (
     <View style={{ gap: 12 }}>
-      <T v="tiny" style={{ fontSize: 9, color: TECH.dim, letterSpacing: 1 }}>
-        MILESTONE CERTIFICATES
-      </T>
-      {MILESTONE_KINDS.map((k) => {
+      {owned.map((k) => {
         const m = MILESTONE[k];
-        const info = ms?.[k];
-        const minted = info?.claim?.status === 'minted';
-        const reached = level >= m.level;
+        const serial = ms![k]!.claim!.serial;
         const hue = HUE[k];
         return (
-          <View key={k} style={[styles.vaultCard, { borderColor: reached ? hue : TECH.rule }]}>
+          <View key={k} style={[styles.vaultCard, { borderColor: hue }]}>
             <View style={{ alignSelf: 'center' }}>
-              <MilestoneArt kind={k} width={300} dim={!reached} />
-              {minted ? <Corners color={hue} size={8} inset={-6} /> : null}
+              <MilestoneArt kind={k} width={300} />
+              <Corners color={hue} size={8} inset={-6} />
             </View>
-            <T v="display" style={{ fontSize: 20, lineHeight: 21, color: reached ? hue : COLORS.text, letterSpacing: 1 }}>
-              {minted ? `Gali ${m.title} Certificate #${pad4(info!.claim!.serial)}` : `${m.title} Certificate`}
+            <T v="display" style={{ fontSize: 20, lineHeight: 21, color: hue, letterSpacing: 1 }}>
+              {`Gali ${m.title} Certificate #${pad4(serial)}`}
             </T>
             <Readout k={m.rewards.length > 1 ? 'ROLLS' : 'CLAIMS'} v={m.reward.toUpperCase()} color={hue} />
             {m.rewards.length > 1 ? <Readout k="ONE OF" v={m.rewards.join(' · ').toUpperCase()} /> : null}
-            <Readout k="STATUS" v={minted ? 'IN YOUR WALLET · SOULBOUND' : reached ? 'READY TO CLAIM' : `LV ${level} OF ${m.level} · ${Math.max(0, xpForLevel(m.level) - xp).toLocaleString()} XP TO GO`} color={minted ? COLORS.green : reached ? COLORS.gold : TECH.dim} />
-            {minted ? (
-              <View style={{ flexDirection: 'row', gap: 6 }}>
-                <View style={{ flex: 1 }}>
-                  <TechBtn small label="SAVE GIF" onPress={() => void saveImage(k, 'gif', info!.claim!.serial)} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <TechBtn small label="SAVE PNG" onPress={() => void saveImage(k, 'png', info!.claim!.serial)} />
-                </View>
-                <View style={{ flex: 1.3 }}>
-                  <TechBtn small primary label="POST ON X" onPress={() => postOnX(k, info!.claim!.serial)} />
-                </View>
+            <Readout k="WHEN" v="NFT MARKET OPENS" color={TECH.dim} />
+            <View style={{ flexDirection: 'row', gap: 6 }}>
+              <View style={{ flex: 1 }}>
+                <TechBtn small label="SAVE GIF" onPress={() => void saveImage(k, 'gif', serial)} />
               </View>
-            ) : reached ? (
-              <View style={{ gap: 6 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Led color={hue} blink />
-                  <T style={{ flex: 1, fontSize: 13 }}>The cost shows in your wallet before you approve. One per wallet.</T>
-                </View>
-                <TechBtn primary color={hue} label={!ms?.open ? 'MINT OPENS SOON' : claiming && claimKind === k ? 'CLAIMING...' : 'CLAIM CERTIFICATE'} disabled={!ms?.open || !!claiming} onPress={() => void claim(k)} />
-                <ClaimState kind={k} />
+              <View style={{ flex: 1 }}>
+                <TechBtn small label="SAVE PNG" onPress={() => void saveImage(k, 'png', serial)} />
               </View>
-            ) : null}
+              <View style={{ flex: 1.3 }}>
+                <TechBtn small primary label="POST ON X" onPress={() => postOnX(k, serial)} />
+              </View>
+            </View>
           </View>
         );
       })}
