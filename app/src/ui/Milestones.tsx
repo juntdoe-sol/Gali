@@ -224,7 +224,7 @@ export function MilestoneVault() {
               <View style={{ gap: 6 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   <Led color={hue} blink />
-                  <T style={{ flex: 1, fontSize: 13 }}>You pay the mint: Solana rent and network fee, shown in your wallet. One per wallet.</T>
+                  <T style={{ flex: 1, fontSize: 13 }}>The cost shows in your wallet before you approve. One per wallet.</T>
                 </View>
                 <TechBtn primary color={hue} label={!ms?.open ? 'MINT OPENS SOON' : claiming && claimKind === k ? 'CLAIMING...' : 'CLAIM CERTIFICATE'} disabled={!ms?.open || !!claiming} onPress={() => void claim(k)} />
                 <ClaimState kind={k} />
