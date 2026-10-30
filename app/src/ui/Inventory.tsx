@@ -9,7 +9,7 @@
  */
 import { useEffect, useState, type ReactNode } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, View, type ImageStyle, type LayoutChangeEvent } from 'react-native';
-import { COLORS, GEAR, RARITY_COLOR, type GearKind } from '../game/constants';
+import { ACHIEVEMENTS, COLORS, GEAR, RARITY_COLOR, type GearKind } from '../game/constants';
 import { useMarket } from '../game/market';
 import { PART, PARTS, PARTS_H, PARTS_W, partCell } from '../game/minerParts';
 import { fmtDay, useNft } from '../game/nft';
@@ -309,16 +309,72 @@ function Bay({ width }: { width: number }) {
   );
 }
 
+/** The vault's two pages: certificate NFTs, and the achievements this miner has unlocked. */
 function Vault() {
+  const [page, setPage] = useState<'certs' | 'achievements'>('certs');
+  const got = useGame((s) => s.save.achievements.length);
+  return (
+    <View style={{ gap: 10 }}>
+      <View style={{ flexDirection: 'row', gap: 6 }}>
+        <View style={{ flex: 1 }}>
+          <TechBtn label="CERTIFICATES" color={COLORS.gold} primary={page === 'certs'} onPress={() => setPage('certs')} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <TechBtn label={`ACHIEVEMENTS · ${got}/${ACHIEVEMENTS.length}`} color={COLORS.teal} primary={page === 'achievements'} onPress={() => setPage('achievements')} />
+        </View>
+      </View>
+      {page === 'certs' ? <Certificates /> : <Achievements />}
+    </View>
+  );
+}
+
+/** Every achievement: unlocked ones lit and first, locked ones dimmed with what it takes. */
+function Achievements() {
+  const have = useGame((s) => s.save.achievements);
+  const list = [...ACHIEVEMENTS].sort((a, b) => Number(have.includes(b.id)) - Number(have.includes(a.id)));
+  return (
+    <TechPanel title={`ACHIEVEMENTS · ${have.length}/${ACHIEVEMENTS.length} UNLOCKED`} color={COLORS.teal}>
+      <View style={{ height: 8, flexDirection: 'row', gap: 2 }}>
+        {ACHIEVEMENTS.map((a) => (
+          <View key={a.id} style={{ flex: 1, backgroundColor: have.includes(a.id) ? COLORS.gold : TECH.rule }} />
+        ))}
+      </View>
+      <View style={styles.achGrid}>
+        {list.map((a) => {
+          const on = have.includes(a.id);
+          return (
+            <View key={a.id} style={[styles.ach, { borderColor: on ? COLORS.gold : TECH.rule, backgroundColor: on ? 'rgba(255,201,60,0.1)' : TECH.ink, opacity: on ? 1 : 0.6 }]}>
+              <PixIcon name={on ? 'medal' : 'lock'} size={30} />
+              <T v="display" style={{ fontSize: 16, lineHeight: 17, color: on ? COLORS.gold : COLORS.text, textAlign: 'center' }}>
+                {a.label}
+              </T>
+              <T v="muted" style={{ fontSize: 11, textAlign: 'center' }}>
+                {a.desc}
+              </T>
+              {on ? (
+                <T v="tiny" style={{ fontSize: 8, color: COLORS.gold, letterSpacing: 1 }}>
+                  UNLOCKED
+                </T>
+              ) : null}
+            </View>
+          );
+        })}
+      </View>
+    </TechPanel>
+  );
+}
+
+function Certificates() {
   const owner = useGame((s) => s.wallet.owner);
   const { cert, items, loading, error, openPopup } = useNft();
   const certs = items.filter((i) => i.kind === 'cert');
+  const foundingName = certs.find((c) => c.name.startsWith('Gali Founding Miner'))?.name;
   const gear = items.filter((i) => i.kind === 'gear');
   const minted = cert?.claim?.status === 'minted';
-  const has = minted || certs.length > 0;
+  const has = minted || Boolean(foundingName);
   return (
     <TechPanel
-      title="VAULT · GALI NFTS"
+      title="CERTIFICATES · GALI NFTS"
       color={COLORS.gold}
       right={
         has ? (
@@ -344,7 +400,7 @@ function Vault() {
             )}
           </Measure>
           <T v="display" style={{ fontSize: 24, lineHeight: 25, color: COLORS.gold, letterSpacing: 1 }}>
-            {certs[0]?.name ?? `Gali Founding Miner #${String(cert?.claim?.serial ?? 0).padStart(4, '0')}`}
+            {foundingName ?? `Gali Founding Miner #${String(cert?.claim?.serial ?? 0).padStart(4, '0')}`}
           </T>
           {cert ? (
             <View style={{ gap: 2 }}>
@@ -430,6 +486,8 @@ const styles = StyleSheet.create({
   slotArt: { alignItems: 'center', justifyContent: 'center', backgroundColor: TECH.ink, overflow: 'hidden' },
   marketSlot: { justifyContent: 'center', gap: 4 },
   bayTag: { position: 'absolute', right: 12, top: 12, flexDirection: 'row', alignItems: 'center', gap: 4 },
+  achGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  ach: { flexGrow: 1, flexBasis: 130, maxWidth: 200, padding: 8, gap: 4, alignItems: 'center', borderWidth: U },
   item: { width: 96, padding: 6, gap: 4, alignItems: 'center', borderWidth: U },
   itemArt: { width: 80, height: 72, alignItems: 'center', justifyContent: 'center', backgroundColor: TECH.ink, overflow: 'hidden' },
   ghost: { height: 140, justifyContent: 'center', borderStyle: 'dashed' },
