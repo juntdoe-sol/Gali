@@ -84,7 +84,7 @@ export function DeskHowTo({ items, onClose, onReplay }: { items: HowItem[]; onCl
           <View style={styles.stage}>{cur.title === MINE ? <MiningLesson onTry={tryIt} /> : <Topic item={cur} />}</View>
         </View>
         <View style={{ flexDirection: 'row', gap: 8 }}>
-          <Btn kind="ghost" label="REPLAY MINING TUTORIAL" onPress={onReplay} style={{ flex: 1 }} />
+          <Btn kind="ghost" label="REPLAY TUTORIAL" onPress={onReplay} style={{ flex: 1 }} />
           <Btn kind="gold" label="GOT IT" onPress={onClose} style={{ flex: 1 }} />
         </View>
       </Window>
