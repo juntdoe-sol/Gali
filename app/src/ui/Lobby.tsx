@@ -39,6 +39,7 @@ import { Arcade } from './Arcade';
 import { AnnounceBanner } from './Announce';
 import { PixIcon } from './PixIcon';
 import { DisconnectBtn, TopBar } from './Hud';
+import { DeskHowTo } from './HowTo';
 import { fx } from '../pixel/fx';
 import { DANCES } from '../game/dances';
 import { loadPotw, usePotw } from '../game/ranks';
@@ -719,6 +720,13 @@ const HOWTO: { icon: PixName; title: string; body: string }[] = [
 function HowToPlay({ onClose }: { onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const { desktop } = useLayout();
+  const replay = () => {
+    useTutorial.setState({ done: false, step: -1 });
+    onClose();
+    useLobby.getState().go('island');
+  };
+  // a computer gets topics with pictures; phones keep this list
+  if (desktop) return <DeskHowTo items={HOWTO} onClose={onClose} onReplay={replay} />;
   return (
     <Scrim onPress={onClose}>
       <Window title="HOW TO PLAY" onClose={onClose} width={desktop ? 860 : 520} style={{ maxHeight: '88%', marginTop: insets.top }}>
