@@ -8,7 +8,7 @@ import { COLORS } from '../game/constants';
 import { Dock, UnclaimedRow } from './Dock';
 import { RoundCard } from './Hud';
 import { Kbd, PixelBox, T, U } from './kit';
-import { GUTTER, LANDSCAPE_APP, TOP_H, useLayout } from './layout';
+import { GUTTER, LANDSCAPE_APP, useLayout } from './layout';
 import { HideBtn, MineTab, useMinePanel } from './MineAnywhere';
 import { useLobby } from '../game/lobby';
 
@@ -31,31 +31,11 @@ export function SidePanel() {
     return () => window.removeEventListener('keydown', key);
   }, [desktop]);
   if (!desktop) return null;
-  // on the island the Unclaimed box sits on its own at the bottom middle of the map, clear of the panel
-  const unclaimed = onIsland ? (
-    <View pointerEvents="box-none" style={[styles.unclaimedAt, { left: 0, right: 0 }]}>
-      <View style={styles.unclaimedW}>
-        <UnclaimedRow boxed />
-      </View>
-    </View>
-  ) : null;
-  if (hidden)
-    return (
-      <>
-        <MineTab style={[styles.tabAt, { right: GUTTER, top: GUTTER }]} />
-        {unclaimed}
-      </>
-    );
+  if (hidden) return <MineTab style={[styles.tabAt, { right: GUTTER, top: GUTTER }]} />;
+  // one column on the right, centred top to bottom: the round, the deploy panel, then (on the island) Unclaimed
   return (
-    <>
-    {unclaimed}
-    {/* the round sits at the top middle of the screen; the deploy panel stays on the right, centred top to bottom */}
-    <View pointerEvents="box-none" style={[styles.roundAt, { top: TOP_H + GUTTER * 2 }]}>
-      <View style={{ width: side }}>
-        <RoundCard embedded />
-      </View>
-    </View>
     <View pointerEvents="box-none" style={[styles.side, { width: side, right: GUTTER, top: GUTTER, bottom: GUTTER }]}>
+      <RoundCard embedded />
       <PixelBox fill="rgba(15,23,52,0.95)" hi="#33498c" lo="#0c1430" shadow={2} style={styles.dockBox}>
         <View style={styles.dockHead}>
           <T v="display" style={{ fontSize: 22, lineHeight: 24, color: COLORS.gold, letterSpacing: 1 }}>
@@ -70,6 +50,7 @@ export function SidePanel() {
           <Dock embedded noUnclaimed={onIsland} />
         </ScrollView>
       </PixelBox>
+      {onIsland ? <UnclaimedRow boxed /> : null}
       {mouse ? (
         <View style={styles.keys} accessibilityElementsHidden importantForAccessibility="no">
           <KeyHint k="CLICK" t="pick spot" />
@@ -81,7 +62,6 @@ export function SidePanel() {
         </View>
       ) : null}
     </View>
-    </>
   );
 }
 
@@ -98,12 +78,9 @@ function KeyHint({ k, t }: { k: string; t: string }) {
 
 const styles = StyleSheet.create({
   side: { position: 'absolute', gap: 12, zIndex: 15, justifyContent: 'center' },
-  roundAt: { position: 'absolute', left: 0, right: 0, alignItems: 'center', zIndex: 15 },
   // the deploy card hugs its controls; it only scrolls when the window is too short for them
   dockBox: { flexShrink: 1, minHeight: 0, paddingTop: 10 },
   tabAt: { position: 'absolute', zIndex: 15 },
-  unclaimedAt: { position: 'absolute', bottom: GUTTER, alignItems: 'center', zIndex: 14 },
-  unclaimedW: { width: '100%', maxWidth: 480 },
   dockHead: { paddingHorizontal: 16, paddingBottom: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, borderBottomWidth: U, borderColor: '#22356f', marginHorizontal: U * 2 },
   scroll: { paddingHorizontal: 14, paddingTop: 8, paddingBottom: 12 },
   keys: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10, paddingVertical: 2 },
