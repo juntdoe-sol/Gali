@@ -11,6 +11,7 @@
 import { minerFrame } from './actors';
 import { ctx2d, makeCanvas, sprite, rect, text, textWidth, type Ctx } from './art';
 import type { Look } from './types';
+import { ORE_MARK, ORE_WORD, SEEKER_MARK_S, SEEKER_WORD, drawBits } from './logos';
 
 type Light = { x: number; y: number; r: number; c: string; k: number };
 type Px = (x: number, y: number, w: number, h: number, col: string) => void;
@@ -103,13 +104,8 @@ function paintVending(): HTMLCanvasElement {
   return cv;
 }
 
-/** The vending machine, feet on (X, Y), `z` screen px per art px. */
-export function drawVending(c: Ctx, X: number, Y: number, z: number, now: number, lights: Light[], dpr: number) {
-  vendBody ??= paintVending();
-  const x0 = Math.round((X - (VEND_W / 2) * z) * dpr) / dpr;
-  const y0 = Math.round((Y - VEND_H * z) * dpr) / dpr;
-  c.drawImage(vendBody, 0, 0, VEND_W, VEND_H, x0, y0, VEND_W * z, VEND_H * z);
-  // the screen: a miner trying on looks, a new one every 1.6 s
+/** The vending machine's screen: a miner trying on looks, a new one every 1.6 s. */
+function paintVendScreen(now: number) {
   const k = Math.floor(now / 1600) % LOOKS.length;
   const t = (now % 1600) / 1600;
   const cv = vendScreen();
@@ -148,6 +144,16 @@ export function drawVending(c: Ctx, X: number, Y: number, z: number, now: number
   const scrollX = SCR.w - ((now / 40) % (textWidth(nm) + SCR.w));
   text(g, nm, Math.round(scrollX), SCR.h - 5, 1, RAR[k]);
   led(g, SCR.w, SCR.h);
+  return { cv, k };
+}
+
+/** The vending machine, feet on (X, Y), `z` screen px per art px. */
+export function drawVending(c: Ctx, X: number, Y: number, z: number, now: number, lights: Light[], dpr: number) {
+  vendBody ??= paintVending();
+  const x0 = Math.round((X - (VEND_W / 2) * z) * dpr) / dpr;
+  const y0 = Math.round((Y - VEND_H * z) * dpr) / dpr;
+  c.drawImage(vendBody, 0, 0, VEND_W, VEND_H, x0, y0, VEND_W * z, VEND_H * z);
+  const { cv, k } = paintVendScreen(now);
   c.drawImage(cv, 0, 0, SCR.w, SCR.h, x0 + SCR.x * z, y0 + SCR.y * z, SCR.w * z, SCR.h * z);
   // glass glint
   c.fillStyle = 'rgba(255,255,255,0.12)';
@@ -195,33 +201,59 @@ function paintBillboard(): HTMLCanvasElement {
 const SLIDE_MS = 5200;
 
 function slideMarket(g: Ctx, now: number, t: number) {
-  // GEAR MARKET in big gold letters, a gem burst and a scrolling ticker
+  // the gear vending machine from the market, glowing, with GEAR MARKET beside it
   const grad = g.createLinearGradient(0, 0, 0, LED.h);
   grad.addColorStop(0, '#2a1650');
   grad.addColorStop(1, '#3a0f2e');
   g.fillStyle = grad;
   g.fillRect(0, 0, LED.w, LED.h);
-  for (let i = 0; i < 14; i++) {
-    const a = (i / 14) * Math.PI * 2 + now / 1800;
-    g.strokeStyle = i % 2 ? 'rgba(255,207,74,0.16)' : 'rgba(184,107,255,0.16)';
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2 + now / 1800;
+    g.strokeStyle = i % 2 ? 'rgba(255,207,74,0.14)' : 'rgba(184,107,255,0.14)';
     g.beginPath();
-    g.moveTo(LED.w / 2, 20);
-    g.lineTo(LED.w / 2 + Math.cos(a) * 120, 20 + Math.sin(a) * 120);
+    g.moveTo(28, 30);
+    g.lineTo(28 + Math.cos(a) * 120, 30 + Math.sin(a) * 120);
     g.stroke();
   }
+  vendBody ??= paintVending();
+  const { cv } = paintVendScreen(now);
+  const vx = 4;
+  const vy = LED.h - VEND_H + 2;
+  g.drawImage(vendBody, vx, vy);
+  g.drawImage(cv, vx + SCR.x, vy + SCR.y);
+  g.fillStyle = 'rgba(255,255,255,0.12)';
+  g.fillRect(vx + SCR.x + 2, vy + SCR.y + 1, 2, SCR.h - 6);
+  // sparkles round the machine
+  for (let i = 0; i < 5; i++) {
+    const ph = (now / 500 + i * 1.3) % 3;
+    if (ph > 1) continue;
+    g.fillStyle = '#fff1a8';
+    const x = vx + ((i * 17) % 48), y = vy + 6 + ((i * 23) % 40);
+    g.fillRect(x, y - 1, 1, 3);
+    g.fillRect(x - 1, y, 3, 1);
+  }
   const pop = Math.min(1, t * 6);
-  const s = 2;
-  const w1 = textWidth('GEAR MARKET') * s;
-  text(g, 'GEAR MARKET', Math.round(LED.w / 2 - w1 / 2), Math.round(10 - (1 - pop) * 20), s, '#ffcf4a', '#7a3a00');
-  const w2 = textWidth('555 ITEMS') * s;
-  text(g, '555 ITEMS', Math.round(LED.w / 2 - w2 / 2), 24, s, '#ffffff', '#3a2462');
-  // ticker
+  const R = 54; // the right-hand column
+  const cx = R + (LED.w - R) / 2;
+  const mid = (str: string, y: number, sc: number, col: string, sh?: string) => text(g, str, Math.round(cx - (textWidth(str) * sc) / 2), y, sc, col, sh);
+  mid('GEAR', Math.round(3 - (1 - pop) * 20), 2, '#ffcf4a', '#7a3a00');
+  mid('MARKET', Math.round(15 - (1 - pop) * 20), 2, '#ffcf4a', '#7a3a00');
+  mid('555 ITEMS', 28, 1, '#ffffff', '#3a2462');
+  if (Math.floor(now / 450) % 2 || t > 0.6) mid('IN GALI TOWN', 36, 1, '#3ee6ff');
+  // ticker under the text
+  g.fillStyle = '#120a22';
+  g.fillRect(R, LED.h - 12, LED.w - R, 11);
   g.fillStyle = '#ffcf4a';
-  g.fillRect(0, LED.h - 11, LED.w, 9);
-  const tick = 'HEAD  -  CLOTHES  -  SHOES  -  AXES  -  PETS  -  COMING SOON  -  ';
+  g.fillRect(R, LED.h - 12, LED.w - R, 1);
+  g.save();
+  g.beginPath();
+  g.rect(R, LED.h - 12, LED.w - R, 11);
+  g.clip();
+  const tick = 'HEAD  -  CLOTHES  -  SHOES  -  AXES  -  PETS  -  ';
   const tw = textWidth(tick);
   const off = (now / 30) % tw;
-  for (let x = -off; x < LED.w; x += tw) text(g, tick, Math.round(x), LED.h - 9, 1, '#2a1650');
+  for (let x = R - off; x < LED.w; x += tw) text(g, tick, Math.round(x), LED.h - 9, 1, '#ffe14a', '#000000');
+  g.restore();
 }
 
 function slideParade(g: Ctx, now: number) {
@@ -334,30 +366,23 @@ function slideAdvertise(g: Ctx, now: number, t: number) {
 const midText = (g: Ctx, str: string, y: number, sc: number, col: string, sh?: string) => text(g, str, Math.round(LED.w / 2 - (textWidth(str) * sc) / 2), y, sc, col, sh);
 
 function slideOre(g: Ctx, now: number, t: number) {
-  // ORE: gold nuggets tumbling down a dark mine shaft
-  const grad = g.createLinearGradient(0, 0, 0, LED.h);
-  grad.addColorStop(0, '#1a1206');
-  grad.addColorStop(1, '#3a2408');
-  g.fillStyle = grad;
+  // ORE's own mark and wordmark, white on black, with a few gold sparks
+  g.fillStyle = '#07070d';
   g.fillRect(0, 0, LED.w, LED.h);
-  for (let i = 0; i < 12; i++) {
-    const x = (i * 29 + 5) % LED.w;
-    const y = ((now / 16 + i * 31) % (LED.h + 12)) - 8;
-    g.fillStyle = i % 3 ? '#d69628' : '#ffe9a0';
-    g.fillRect(x, Math.round(y), 3, 3);
-    g.fillStyle = '#7a4a10';
-    g.fillRect(x + 2, Math.round(y) + 2, 1, 1);
+  for (let i = 0; i < 8; i++) {
+    const x = (i * 37 + 9) % LED.w;
+    const y = ((now / 22 + i * 29) % (LED.h + 8)) - 4;
+    g.fillStyle = i % 2 ? 'rgba(214,150,40,0.7)' : 'rgba(255,233,160,0.5)';
+    g.fillRect(x, Math.round(y), 1, 2);
   }
-  midText(g, 'POWERED BY', 3, 1, '#ffffff');
+  midText(g, 'POWERED BY', 3, 1, '#8a93a8');
   const pop = Math.min(1, t * 6);
-  midText(g, 'ORE', Math.round(11 - (1 - pop) * 20), 4, '#ffcf4a', '#7a3a00');
-  const s = sprite('icon-gold');
-  if (s && rect('icon-gold')) {
-    const b = Math.round(Math.sin(now / 300) * 2);
-    g.drawImage(s, 22, 16 + b);
-    g.drawImage(s, LED.w - 22 - s.width, 16 - b);
-  }
-  g.fillStyle = '#120a02';
+  const mw = ORE_MARK[0].length, ww = ORE_WORD[0].length, gap = 7;
+  const x0 = Math.round((LED.w - (mw + gap + ww)) / 2);
+  const y0 = Math.round(11 - (1 - pop) * 24);
+  drawBits(g, ORE_MARK, x0, y0, '#ffffff');
+  drawBits(g, ORE_WORD, x0 + mw + gap, y0 + Math.round((ORE_MARK.length - ORE_WORD.length) / 2), '#ffffff');
+  g.fillStyle = '#000000';
   g.fillRect(0, LED.h - 12, LED.w, 11);
   g.fillStyle = '#ffcf4a';
   g.fillRect(0, LED.h - 12, LED.w, 1);
@@ -365,46 +390,54 @@ function slideOre(g: Ctx, now: number, t: number) {
 }
 
 function slideSeeker(g: Ctx, now: number, t: number) {
-  // Seeker: a phone with the island on its screen, in Solana purple and green
-  const grad = g.createLinearGradient(0, 0, LED.w, LED.h);
-  grad.addColorStop(0, '#1b0b33');
-  grad.addColorStop(1, '#06231c');
-  g.fillStyle = grad;
+  // the Seeker wordmark and SOLANA (S) MOBILE lockup, white on black, beside a phone showing the island
+  g.fillStyle = '#050508';
   g.fillRect(0, 0, LED.w, LED.h);
   const bob = Math.round(Math.sin(now / 500) * 1.5);
-  const px = 12, py = 5 + bob, pw = 24, ph = 44;
-  g.fillStyle = '#0a0a12';
+  const px = 8, py = 5 + bob, pw = 24, ph = 40;
+  g.fillStyle = '#2a2a36';
   g.fillRect(px + 1, py, pw - 2, ph);
   g.fillRect(px, py + 1, pw, ph - 2);
-  g.fillStyle = '#3a3a4a';
-  g.fillRect(px + 1, py + 1, pw - 2, 1);
+  g.fillStyle = '#0a0a12';
+  g.fillRect(px + 2, py + 2, pw - 4, ph - 4);
   // its screen: sea, island, sun
   g.fillStyle = '#123a6b';
-  g.fillRect(px + 2, py + 4, pw - 4, ph - 8);
+  g.fillRect(px + 3, py + 5, pw - 6, ph - 10);
   g.fillStyle = '#e6d29a';
-  g.fillRect(px + 5, py + 26, 14, 4);
+  g.fillRect(px + 6, py + 24, 12, 4);
   g.fillStyle = '#5f9d41';
-  g.fillRect(px + 7, py + 22, 10, 5);
+  g.fillRect(px + 8, py + 20, 8, 5);
   g.fillStyle = '#ffcf4a';
-  g.fillRect(px + 15, py + 9, 4, 4);
+  g.fillRect(px + 15, py + 9, 3, 3);
   if (Math.floor(now / 300) % 2) {
     g.fillStyle = '#ffffff';
-    g.fillRect(px + 11, py + 18, 2, 2);
+    g.fillRect(px + 11, py + 16, 2, 2);
   }
-  g.fillStyle = '#2a2a38';
-  g.fillRect(px + 9, py + ph - 3, 6, 1);
+  const R = 38;
+  const cx = R + (LED.w - R) / 2;
   const pop = Math.min(1, t * 6);
-  text(g, 'SEEKER', 46, Math.round(8 - (1 - pop) * 20), 3, '#ffffff', '#4a1f8a');
-  text(g, 'BY SOLANA MOBILE', 46, 28, 1, '#14f195');
-  // Solana gradient bar
-  const bar = g.createLinearGradient(0, 0, LED.w, 0);
+  const sw = SEEKER_WORD[0].length;
+  drawBits(g, SEEKER_WORD, Math.round(cx - sw / 2), Math.round(7 - (1 - pop) * 24), '#ffffff');
+  // SOLANA (S) MOBILE
+  const a = 'SOLANA', b = 'MOBILE';
+  const mk = SEEKER_MARK_S[0].length;
+  const lw = textWidth(a) + 4 + mk + 4 + textWidth(b);
+  let lx = Math.round(cx - lw / 2);
+  const ly = 25;
+  text(g, a, lx, ly + 2, 1, '#ffffff');
+  lx += textWidth(a) + 4;
+  drawBits(g, SEEKER_MARK_S, lx, ly, '#ffffff');
+  lx += mk + 4;
+  text(g, b, lx, ly + 2, 1, '#ffffff');
+  const bar = g.createLinearGradient(R, 0, LED.w, 0);
   bar.addColorStop(0, '#9945ff');
   bar.addColorStop(1, '#14f195');
-  g.fillStyle = '#05050c';
-  g.fillRect(40, LED.h - 12, LED.w - 40, 11);
+  g.fillStyle = '#000000';
+  g.fillRect(R, LED.h - 12, LED.w - R, 11);
   g.fillStyle = bar;
-  g.fillRect(40, LED.h - 12, LED.w - 40, 1);
-  text(g, 'PLAY GALI ON YOUR SEEKER', 42 + Math.round((LED.w - 44 - textWidth('PLAY GALI ON YOUR SEEKER')) / 2), LED.h - 9, 1, '#14f195', '#000000');
+  g.fillRect(R, LED.h - 12, LED.w - R, 1);
+  const m = 'PLAY GALI ON YOUR SEEKER';
+  text(g, m, Math.round(cx - textWidth(m) / 2), LED.h - 9, 1, '#14f195', '#000000');
 }
 
 function slideSuperteam(g: Ctx, now: number, t: number) {
