@@ -5,6 +5,7 @@
  * Desktop: a rail down the left side, MINE at the top, every tab labelled with its key.
  * It hides on a phone while you are inside a spot's mine, where the spot panel owns the bottom.
  */
+import { useTutTarget } from '../game/tutTargets';
 import { FEATURE_GALI_PROGRAM } from '../config/features';
 import { Image, Pressable, ScrollView, StyleSheet, View, type ImageSourcePropType } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -221,6 +222,8 @@ function Rail({ active, onTab, inSheet, lobby }: { active: SheetTab | null; onTa
   const chatOpen = useLobby((s) => (s.where === 'lobby' && !LANDSCAPE_APP ? !s.chatHidden : s.chatOpen));
   const picked = useGame((s) => (s.dockTab === 'lite' && s.liteMode === 'all' ? 0 : s.selected.length));
   const { press, mine: mineToggle } = useTabActions(active, onTab, inSheet, lobby);
+  // the mining tutorial's last step points here
+  const questRef = useTutTarget('tab-quests');
   // the deploy panel is always open on a desktop, so MINE closes any page and brings the whole island back into view
   const mine = () => {
     if (lobby) return mineToggle();
@@ -234,7 +237,7 @@ function Rail({ active, onTab, inSheet, lobby }: { active: SheetTab | null; onTa
   const item = (t: Item) => {
     const on = t.id === active || (t.id === 'chat' && chatOpen);
     return (
-      <Pressable key={t.id} onPress={() => press(t.id)} accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={`${t.label} (${TAB_KEY[t.id]})`} style={styles.railItem}>
+      <Pressable key={t.id} ref={t.id === 'quests' && !inSheet ? questRef : undefined} onPress={() => press(t.id)} accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={`${t.label} (${TAB_KEY[t.id]})`} style={styles.railItem}>
         {(st) => {
           const { hovered, pressed, focused } = st as { hovered?: boolean; pressed: boolean; focused?: boolean };
           return (

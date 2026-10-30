@@ -60,6 +60,8 @@ const STEPS: Step[] = [
 /* ---------------- computer: LITE, step by step, an arrow on the real button ---------------- */
 interface DeskStep {
   icon: PixName;
+  /** the arrow sits on the target's right, pointing left */
+  flip?: boolean;
   title: string;
   body: string;
   target: TutTargetId | null;
@@ -91,7 +93,10 @@ const DESK_STEPS: (DeskStep & { wait?: Wait; clear?: boolean; approve?: boolean 
   { icon: 'pick', title: 'Press DEPLOY', body: 'Your rounds mine on autopilot. Only mine with SOL you can afford to lose.', target: 'deploy', at: 0.04, label: 'CLICK', waits: 'Moves on when you press DEPLOY', wait: 'clicked' },
   { icon: 'wallet', title: 'Approve in your wallet', body: 'Your wallet asks you to approve the autopilot. Check the amount and approve. Then wait a few seconds for the transaction to go through.', target: null, waits: 'Moves on when the transaction succeeds', wait: 'confirmed', approve: true },
   { icon: 'gift', title: 'You are a miner now', body: 'Claim your SOL and ORE from Unclaimed any time. Want to pick your own spots? Try PRO.', target: 'unclaimed', at: 0.04 },
+  // then: the quests
+  { icon: 'quest', title: 'Now finish your quests', body: 'Daily quests give you XP every day. Reach Level 10 and Level 20 for certificate NFTs that claim a random Rare or Legendary weapon. Open Quests any time with Q.', target: 'tab-quests', at: 1, label: 'QUESTS', flip: true },
 ];
+const QUEST_STEP = DESK_STEPS.length - 1;
 
 /** the autopilot lesson's "take a walk" step */
 const WALK_STEP = DESK_STEPS.findIndex((d) => d.icon === 'clock' && d.wait === 'done' && /walk/.test(d.title));
@@ -107,7 +112,7 @@ function DeskCard({ s, step, total, onNext, onClose, tag, extra, low }: { s: Des
   useTutActive(true);
   return (
     <>
-      <Pointer target={s.target} at={s.at} from={s.from} span={s.span} label={s.label} />
+      <Pointer target={s.target} at={s.at} from={s.from} span={s.span} label={s.label} flip={s.flip} />
       <View pointerEvents="box-none" style={[styles.wrap, low ? { bottom: GUTTER + 96 } : { top: TOP_H + GUTTER * 2 + 8 }, { left: RAIL_W + GUTTER, right: L.side + GUTTER * 2 }]}>
         <PixelBox fill="rgba(8,13,32,0.96)" hi={COLORS.gold} lo="#04060f" shadow={1} style={styles.card}>
           <View style={styles.head}>
@@ -129,7 +134,7 @@ function DeskCard({ s, step, total, onNext, onClose, tag, extra, low }: { s: Des
           </T>
           {s.target ? (
             <T v="label" style={{ color: COLORS.gold }}>
-              Follow the arrow →
+              {s.flip ? "← Follow the arrow" : "Follow the arrow →"}
             </T>
           ) : null}
           {extra}
@@ -236,6 +241,28 @@ function DeskMineTutorial() {
           <T v="label" style={{ color: busy ? COLORS.teal : COLORS.muted }}>
             {busy ? `Wallet: ${busy}` : confirmed ? 'Transaction went through' : 'Waiting for your wallet…'}
           </T>
+        }
+      />
+    );
+  if (desk && step === QUEST_STEP)
+    return (
+      <DeskCard
+        key={`l${step}`}
+        s={DESK_STEPS[step]}
+        step={step}
+        total={DESK_STEPS.length}
+        onNext={next}
+        onClose={close}
+        tag="LITE MINING"
+        extra={
+          <Btn
+            kind="gold"
+            label="OPEN QUESTS"
+            onPress={() => {
+              next();
+              useTut.setState({ questsAt: Date.now() });
+            }}
+          />
         }
       />
     );

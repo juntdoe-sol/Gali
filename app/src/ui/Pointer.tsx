@@ -32,8 +32,11 @@ export function useTutActive(on: boolean) {
   }, [on]);
 }
 
-/** Points at `target`; `at` is where along its width the arrow aims (0 left edge .. 1 right edge). */
-export function Pointer({ target, at = 0, from = 0, span = 1, label }: { target: TutTargetId | null; at?: number; from?: number; span?: number; label?: string }) {
+/**
+ * Points at `target`; `at` is where along its width the arrow aims (0 left edge .. 1 right edge). `flip` puts the
+ * arrow on the target's right, pointing left (for things at the screen's left edge, like the rail).
+ */
+export function Pointer({ target, at = 0, from = 0, span = 1, label, flip }: { target: TutTargetId | null; at?: number; from?: number; span?: number; label?: string; flip?: boolean }) {
   const rect = useTut((s) => (target ? s.rects[target] : undefined));
   const [t, setT] = useState(0);
   useEffect(() => {
@@ -43,7 +46,7 @@ export function Pointer({ target, at = 0, from = 0, span = 1, label }: { target:
   if (!target || !rect) return null;
   const bob = [0, 3, 6, 3][t % 4];
   const ax = rect.x + rect.w * at;
-  const left = ax - AW - 6 - bob;
+  const left = flip ? ax + 6 + bob : ax - AW - 6 - bob;
   const top = rect.y + rect.h / 2 - AH / 2;
   const glow = t % 2 ? '#fff1a8' : COLORS.gold;
   return (
@@ -52,7 +55,7 @@ export function Pointer({ target, at = 0, from = 0, span = 1, label }: { target:
       <View style={{ position: 'absolute', left, top, width: AW, height: AH }}>
         {ARROW.flatMap((row, r) =>
           [...row].map((ch, c) =>
-            ch === '.' ? null : <View key={`${r}-${c}`} style={{ position: 'absolute', left: c * P, top: r * P, width: P, height: P, backgroundColor: ch === '#' ? glow : '#1a0f00' }} />,
+            ch === '.' ? null : <View key={`${r}-${c}`} style={{ position: 'absolute', left: (flip ? row.length - 1 - c : c) * P, top: r * P, width: P, height: P, backgroundColor: ch === '#' ? glow : '#1a0f00' }} />,
           ),
         )}
       </View>
