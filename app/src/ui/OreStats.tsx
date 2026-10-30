@@ -5,7 +5,6 @@
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { COLORS } from '../game/constants';
-import { useLobby } from '../game/lobby';
 import { fmtUsd, profitUsd, refreshOreStats, useOreStats } from '../game/oreStats';
 import { fmtOreAmt } from '../game/pot';
 import { useGame } from '../game/store';
@@ -43,10 +42,9 @@ function Row({ label, value, tip, color }: { label: string; value: string; tip?:
   );
 }
 
-/** Desktop ORE Island only: sits at the top of the mining column on the right (see Side.tsx). */
+/** Desktop only: the top of the mining column on the right (see MineColumn in Side.tsx). */
 export function OreStatsPanel() {
   const { desktop } = useLayout();
-  const where = useLobby((s) => s.where);
   const owner = useGame((s) => s.wallet.owner);
   const { me, gali, status, market } = useOreStats();
   const myProfit = me ? profitUsd(me.lifetime, me.deployedSol, me.returnedSol, market) : null;
@@ -56,7 +54,7 @@ export function OreStatsPanel() {
   const SPENT_TIP = 'What mining really cost: all the SOL put on ORE’s board minus all the SOL ORE gave back, at today’s SOL price. The same SOL redeployed round after round only counts what was lost.';
   const PROFIT_TIP = 'ORE mined at today’s ORE price, plus the SOL ORE gave back, minus all the SOL put on the board, at today’s SOL price. ORE’s 10% claim fee and refined ORE are not counted. Prices from Jupiter, every 5 minutes.';
   const [folded, setFolded] = useState(readFold);
-  const show = desktop && !LANDSCAPE_APP && where === 'island';
+  const show = desktop && !LANDSCAPE_APP;
 
   useEffect(() => {
     if (!show) return;

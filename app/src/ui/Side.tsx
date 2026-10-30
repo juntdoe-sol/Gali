@@ -2,7 +2,7 @@
  * The desktop side panel on the island: the round on top, the deploy controls under it,
  * always open. On a phone the same two pieces are the floating round card and the dock.
  */
-import { useEffect } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { COLORS } from '../game/constants';
 import { Dock, UnclaimedRow } from './Dock';
@@ -33,27 +33,10 @@ export function SidePanel() {
   }, [desktop]);
   if (!desktop) return null;
   if (hidden) return <MineTab style={[styles.tabAt, { right: GUTTER, top: GUTTER }]} />;
-  // one column on the right: (on the island) ORE stats, the round, the deploy panel, then (on the island) Unclaimed
   return (
     <View pointerEvents="box-none" style={[styles.side, { width: side, right: GUTTER, top: GUTTER, bottom: GUTTER }]}>
-      {onIsland ? <OreStatsPanel /> : null}
-      <RoundCard embedded />
-      <PixelBox fill="rgba(15,23,52,0.95)" hi="#33498c" lo="#0c1430" shadow={2} style={styles.dockBox}>
-        <View style={styles.dockHead}>
-          <T v="display" style={{ fontSize: 22, lineHeight: 24, color: COLORS.gold, letterSpacing: 1 }}>
-            DEPLOY
-          </T>
-          <T v="label" style={{ fontSize: 13, flex: 1, textAlign: 'right' }}>
-            Click spots on the map
-          </T>
-          <HideBtn />
-        </View>
-        <ScrollView style={{ flexGrow: 0 }} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator>
-          <Dock embedded noUnclaimed={onIsland} />
-        </ScrollView>
-      </PixelBox>
-      {onIsland ? <UnclaimedRow boxed /> : null}
-      {mouse ? (
+      <MineColumn hint={onIsland ? 'Click spots on the map' : 'LITE covers every spot'} />
+      {mouse && onIsland ? (
         <View style={styles.keys} accessibilityElementsHidden importantForAccessibility="no">
           <KeyHint k="CLICK" t="pick spot" />
           <KeyHint k="WASD" t="walk" />
@@ -64,6 +47,35 @@ export function SidePanel() {
         </View>
       ) : null}
     </View>
+  );
+}
+
+/**
+ * The desktop mining column, the same everywhere (ORE Island, and the drawer in the lobby, cave and arena):
+ * ORE stats, the round, the DEPLOY panel, then Unclaimed. `extra` adds buttons to the DEPLOY header.
+ */
+export function MineColumn({ hint, extra }: { hint: string; extra?: ReactNode }) {
+  return (
+    <>
+      <OreStatsPanel />
+      <RoundCard embedded />
+      <PixelBox fill="rgba(15,23,52,0.95)" hi="#33498c" lo="#0c1430" shadow={2} style={styles.dockBox}>
+        <View style={styles.dockHead}>
+          <T v="display" style={{ fontSize: 22, lineHeight: 24, color: COLORS.gold, letterSpacing: 1 }}>
+            DEPLOY
+          </T>
+          <T v="label" style={{ fontSize: 13, flex: 1, textAlign: 'right' }}>
+            {hint}
+          </T>
+          {extra}
+          <HideBtn />
+        </View>
+        <ScrollView style={{ flexGrow: 0 }} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator>
+          <Dock embedded noUnclaimed />
+        </ScrollView>
+      </PixelBox>
+      <UnclaimedRow boxed />
+    </>
   );
 }
 
