@@ -98,6 +98,11 @@ begin
   values (p_wallet, p_round, p_covered, p_won, p_motherlode, p_points, p_xp)
   on conflict (wallet, round_id) do nothing;
   v_new := found;
+  -- the big-hits list in Rounds (ore-hits.sql): the ore-hits job fills in the ORE
+  if p_motherlode and p_won then
+    insert into ore_hits (round_id, kind, wallet, ore, at, approx) values (p_round, 'motherlode', p_wallet, null, now(), false)
+    on conflict (round_id, kind, wallet) do nothing;
+  end if;
   if v_new then perform gali_recompute(p_wallet); end if;
   return v_new;
 end $$;

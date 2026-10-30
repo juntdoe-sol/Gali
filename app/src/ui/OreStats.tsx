@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { COLORS } from '../game/constants';
 import { useLobby } from '../game/lobby';
-import { refreshOreStats, useOreStats } from '../game/oreStats';
+import { fmtUsd, profitUsd, refreshOreStats, useOreStats } from '../game/oreStats';
 import { fmtOreAmt } from '../game/pot';
 import { useGame } from '../game/store';
 import { Frame, T, Tip } from './kit';
@@ -46,7 +46,10 @@ export function OreStatsPanel() {
   const { desktop } = useLayout();
   const where = useLobby((s) => s.where);
   const owner = useGame((s) => s.wallet.owner);
-  const { me, gali, status } = useOreStats();
+  const { me, gali, status, market } = useOreStats();
+  const myProfit = me ? profitUsd(me.lifetime, me.deployedSol, me.returnedSol, market) : null;
+  const galiProfit = market ? profitUsd(market.ore, market.deployedSol, market.returnedSol, market) : null;
+  const PROFIT_TIP = 'ORE mined at today’s ORE price, plus the SOL ORE gave back, minus all the SOL put on the board, at today’s SOL price. ORE’s 10% claim fee and refined ORE are not counted. Prices from Jupiter, every 5 minutes.';
   const [folded, setFolded] = useState(readFold);
   const show = desktop && !LANDSCAPE_APP && where === 'island';
 
@@ -96,6 +99,12 @@ export function OreStatsPanel() {
             ) : (
               <>
                 <Row label="All-time ORE mined" value={fmtOreAmt(me.lifetime)} tip="Every ORE this wallet has mined on ORE's board, claimed or not. ORE's own lifetime counter." />
+                <Row
+                  label="All-time profit"
+                  value={myProfit === null ? '—' : fmtUsd(myProfit)}
+                  color={myProfit === null ? undefined : myProfit >= 0 ? COLORS.green : COLORS.red}
+                  tip={myProfit === null ? 'Waiting for ORE and SOL prices.' : PROFIT_TIP}
+                />
                 <Row label="Unrefined" value={fmtOreAmt(me.unrefined)} color={COLORS.gold} tip="Mined and not claimed yet. Claiming it costs ORE's 10% fee. Holding it earns refined ORE." />
                 <Row label="Refined, ready" value={fmtOreAmt(me.refined)} color={COLORS.teal} tip="Earned from other miners' 10% fees while you held unrefined ORE. Claims with no fee." />
                 <Row
@@ -115,7 +124,21 @@ export function OreStatsPanel() {
                 value={fmtOreAmt(gali.ore)}
                 tip="Every Gali miner's all-time ORE added up, read from each wallet's ORE miner account when they play."
               />
-            ) : (
+            ) : null}
+            {galiProfit !== null ? (
+              <Row
+                label="All-time profit"
+                value={fmtUsd(galiProfit)}
+                color={galiProfit >= 0 ? COLORS.green : COLORS.red}
+                tip={`Every Gali wallet together (${market!.miners.toLocaleString()} with ORE accounts). ${PROFIT_TIP}`}
+              />
+            ) : null}
+            {market?.oreUsd && market.solUsd ? (
+              <T v="muted" style={styles.note}>
+                ORE ${market.oreUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })} · SOL ${market.solUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+              </T>
+            ) : null}
+            {gali ? null : (
               <T v="muted" style={styles.note}>
                 Loading…
               </T>
