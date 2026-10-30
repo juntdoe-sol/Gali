@@ -43,7 +43,7 @@ export function MapHint() {
   // the landscape app has no room under the map: the DEPLOY panel says the same thing
   if (!onboarded || (dockOpen && !desktop) || LANDSCAPE_APP || tut >= 0) return null;
   return (
-    <Animated.View pointerEvents="none" style={[styles.wrap, desktop ? { bottom: 130, left: 88, right: side + 28 } : { bottom: BAR_H + insets.bottom + 18 }, { opacity: fade }]}>
+    <Animated.View pointerEvents="none" style={[styles.wrap, desktop ? { bottom: 24, left: 88, right: side + 28 } : { bottom: BAR_H + insets.bottom + 18 }, { opacity: fade }]}>
       <PixelBox fill="rgba(8,13,32,0.92)" hi={COLORS.teal} lo="#04060f" shadow={1} style={styles.pill}>
         <PixIcon name="star" size={16} />
         <T v="display" style={styles.text}>
