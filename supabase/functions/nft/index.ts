@@ -1,4 +1,5 @@
-// Gali NFTs: the Founding Miner certificate (closed-beta reward) and the inventory.
+// Gali NFTs: the Founding Miner certificate (closed-beta reward), the Level 10 and Level 20 milestone
+// certificates, and the inventory.
 //
 // Calls (POST, JSON body with `a` for the action):
 //   status    { wallet }        is this wallet a Founding Miner, its beta stats, and its claim if any
@@ -6,7 +7,13 @@
 //                               (the new asset's key and the collection authority). The miner signs as fee payer
 //                               and pays the mint; nothing moves without that signature.
 //   confirm   { pass, sig }     after the miner sends it: check the asset is on chain in their wallet, mark minted
-//   inventory { wallet }        Gali NFTs this wallet holds (certificate now, gear later), read with Helius DAS
+//   inventory { wallet }        Gali NFTs this wallet holds (certificates now, gear later), read with Helius DAS
+//   build and confirm take an optional `kind`: 'lv10' or 'lv20' for a milestone certificate (default: Founding Miner).
+//   status also returns `milestones`: the wallet's level and each milestone's claim.
+//
+// Milestones: a wallet whose server-worked level (gali_miners.level, from verified XP) reached 10 or 20 mints a
+// certificate in the Gali Milestones collection (MILESTONE_COLLECTION, same authority key as the Founding Miners).
+// Each one claims ONE weapon of its milestone's three, picked at random when the Gali NFT market opens.
 //
 // Who qualifies: a wallet that played Gali (it is in gali_miners) and mined at least one ORE round during the
 // closed beta: an ORE Deploy instruction naming the wallet as authority between CERT_BETA_START and CERT_BETA_END.
@@ -18,7 +25,8 @@
 // Deploy: npx supabase functions deploy nft --no-verify-jwt
 // Secrets: SOLANA_RPC (Helius URL, for DAS), DM_SECRET (sign-in passes), CERT_AUTHORITY (base58 secret key of the
 //   collection authority, made by scripts/cert-collection.mjs), CERT_COLLECTION (collection address),
-//   optional CERT_BETA_END (ISO time; open until then), GEAR_COLLECTION (later)
+//   optional CERT_BETA_END (ISO time; open until then), MILESTONE_COLLECTION (scripts/nft/milestone-collection.mjs),
+//   GEAR_COLLECTION (later)
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import bs58 from 'npm:bs58@6';
 import { createUmi } from 'npm:@metaplex-foundation/umi-bundle-defaults@1.6.0';
@@ -151,6 +159,10 @@ async function scan(wallet: string) {
 }
 
 async function status(wallet: string) {
+  const [founding, ms] = await Promise.all([foundingStatus(wallet), milestones(wallet).catch(() => null)]);
+  return { ...founding, milestones: ms };
+}
+async function foundingStatus(wallet: string) {
   const { data: miner } = await db.from('gali_miners').select('wallet, name').eq('wallet', wallet).maybeSingle();
   const { data: claim } = await db.from('cert_claims').select('serial, asset, status, rounds, first_at').eq('wallet', wallet).maybeSingle();
   if (claim?.status === 'minted') return { eligible: true, rounds: claim.rounds, firstAt: claim.first_at, name: miner?.name ?? null, claim, open: mintOpen() };
@@ -160,6 +172,30 @@ async function status(wallet: string) {
 }
 
 const mintOpen = () => Boolean(Deno.env.get('CERT_AUTHORITY') && Deno.env.get('CERT_COLLECTION')) && Date.now() <= BETA_END + 30 * 86_400_000;
+
+/** The milestone certificates. Each claims one of three weapons, rolled at random when the market opens. */
+type Kind = 'lv10' | 'lv20';
+const MILESTONES: Record<Kind, { level: number; rarity: string; title: string; weapons: string[] }> = {
+  lv10: { level: 10, rarity: 'Rare', title: 'Level 10', weapons: ['Ten Bagger Pick', 'Level Up Pick', 'XP Bar Blade'] },
+  lv20: { level: 20, rarity: 'Legendary', title: 'Level 20', weapons: ['Wen Moon Hammer', 'Bull Run Axe', 'Genesis Block Hammer'] },
+};
+const isKind = (k: unknown): k is Kind => k === 'lv10' || k === 'lv20';
+const milestoneOpen = () => Boolean(Deno.env.get('CERT_AUTHORITY') && Deno.env.get('MILESTONE_COLLECTION'));
+
+type MClaim = { kind: Kind; serial: number; asset: string; status: 'reserved' | 'minted'; level: number; reserved_at: string };
+async function milestones(wallet: string) {
+  const [{ data: miner }, { data: rows }] = await Promise.all([
+    db.from('gali_miners').select('level, xp').eq('wallet', wallet).maybeSingle(),
+    db.from('milestone_claims').select('kind, serial, asset, status, level, reserved_at').eq('wallet', wallet),
+  ]);
+  const level = Number(miner?.level ?? 0);
+  const out: Record<Kind, { need: number; rarity: string; eligible: boolean; claim: MClaim | null }> = {} as never;
+  for (const k of Object.keys(MILESTONES) as Kind[]) {
+    const c = (rows ?? []).find((r) => r.kind === k) as MClaim | undefined;
+    out[k] = { need: MILESTONES[k].level, rarity: MILESTONES[k].rarity, eligible: level >= MILESTONES[k].level, claim: c ?? null };
+  }
+  return { level, xp: Number(miner?.xp ?? 0), open: milestoneOpen(), ...out };
+}
 /**
  * A priority fee, so the mint lands when mainnet is busy (the game's own transactions carry one too; without it the
  * network dropped the first claims). Compute budget: price per compute unit, and a unit limit sized for a Core create.
@@ -276,6 +312,120 @@ async function build(wallet: string) {
   return reply(200, { tx: b64, asset: asset.publicKey, serial, lastValidBlockHeight: Number(bh.lastValidBlockHeight) });
 }
 
+/** Write a milestone certificate's metadata JSON to the public bucket and return its URL. */
+async function uploadMilestoneMeta(kind: Kind, serial: number, name: string | null, level: number) {
+  const m = MILESTONES[kind];
+  const base = `${Deno.env.get('SUPABASE_URL')}/storage/v1/object/public/gali-nft`;
+  const img = `${base}/milestone/level-${m.level}.gif`;
+  const meta = {
+    name: `Gali ${m.title} Certificate #${pad(serial)}`,
+    symbol: 'GALI',
+    description: `Reached ${m.title} on Gali Island. Claims ONE ${m.rarity} weapon at random (${m.weapons.join(', ')}) when the Gali NFT market opens. Soulbound: it stays with the wallet that earned it.`,
+    image: img,
+    animation_url: img,
+    external_url: 'https://gali.lol',
+    attributes: [
+      { trait_type: 'Serial', value: pad(serial) },
+      { trait_type: 'Miner', value: name ?? 'anon' },
+      { trait_type: 'Milestone', value: m.title },
+      { trait_type: 'Level at claim', value: level },
+      { trait_type: 'Rarity', value: m.rarity },
+      { trait_type: 'Reward', value: `1 random ${m.rarity} weapon` },
+      { trait_type: 'Reward status', value: 'Unclaimed' },
+    ],
+    properties: { files: [{ uri: img, type: 'image/gif' }], category: 'image' },
+  };
+  const path = `milestone/${kind}-${pad(serial)}.json`;
+  const r = await fetch(`${Deno.env.get('SUPABASE_URL')}/storage/v1/object/gali-nft/${path}`, {
+    method: 'POST',
+    headers: { ...storageAuth(), 'content-type': 'application/json', 'x-upsert': 'true' },
+    body: JSON.stringify(meta),
+  });
+  if (!r.ok) throw new Error(`metadata upload ${r.status}`);
+  return `${base}/${path}`;
+}
+
+async function buildMilestone(wallet: string, kind: Kind) {
+  if (!milestoneOpen()) return reply(409, { error: 'The milestone mint is not open yet.' });
+  const m = MILESTONES[kind];
+  const { data: miner } = await db.from('gali_miners').select('name, level').eq('wallet', wallet).maybeSingle();
+  const level = Number(miner?.level ?? 0);
+  if (level < m.level) return reply(403, { error: `Reach ${m.title} first. You are level ${level}.` });
+  const { data: prev } = await db.from('milestone_claims').select('*').eq('wallet', wallet).eq('kind', kind).maybeSingle();
+  if (prev?.status === 'minted') return reply(409, { error: 'Already claimed', claim: prev });
+
+  const umi = createUmi(rpcUrl()).use(mplCore());
+  const auth = createSignerFromKeypair(umi, umi.eddsa.createKeypairFromSecretKey(bs58.decode(Deno.env.get('CERT_AUTHORITY')!)));
+  umi.use(signerIdentity(auth));
+  const asset = generateSigner(umi);
+
+  let serial: number;
+  if (prev) {
+    if (Date.now() - Date.parse(prev.reserved_at) < RESERVE_MS && (await assetOwner(prev.asset)) === wallet) return reply(409, { error: 'Already claimed', claim: prev });
+    serial = prev.serial;
+    await db.from('milestone_claims').update({ asset: asset.publicKey, reserved_at: new Date().toISOString(), level }).eq('id', prev.id).eq('status', 'reserved');
+  } else {
+    // serials count per milestone; two claims at once can pick the same number, so the loser takes the next one
+    serial = 0;
+    for (let k = 0; k < 5 && !serial; k++) {
+      const { data: top } = await db.from('milestone_claims').select('serial').eq('kind', kind).order('serial', { ascending: false }).limit(1).maybeSingle();
+      const next = Number(top?.serial ?? 0) + 1;
+      const { error } = await db.from('milestone_claims').insert({ wallet, kind, serial: next, asset: asset.publicKey, level });
+      if (!error) serial = next;
+      else if (!/duplicate|unique/i.test(error.message)) throw error;
+      else if (/wallet/i.test(error.message)) return reply(409, { error: 'A claim is already in progress. Try again in a minute.' });
+    }
+    if (!serial) throw new Error('could not reserve a serial');
+  }
+  const uri = await uploadMilestoneMeta(kind, serial, miner?.name ?? null, level);
+  const payer = createNoopSigner(publicKey(wallet));
+  const collection = { publicKey: publicKey(Deno.env.get('MILESTONE_COLLECTION')!), updateAuthority: auth.publicKey };
+  const bh = await umi.rpc.getLatestBlockhash({ commitment: 'confirmed' });
+  const tx = await computeBudget().add(create(umi, {
+    asset,
+    collection,
+    owner: payer.publicKey,
+    payer,
+    authority: auth,
+    name: `Gali ${m.title} Certificate #${pad(serial)}`,
+    uri,
+    plugins: [
+      { type: 'PermanentFreezeDelegate', frozen: true, authority: { type: 'UpdateAuthority' } },
+      {
+        type: 'Attributes',
+        attributeList: [
+          { key: 'Serial', value: pad(serial) },
+          { key: 'Milestone', value: m.title },
+          { key: 'Level at claim', value: String(level) },
+          { key: 'Rarity', value: m.rarity },
+          { key: 'Reward', value: `1 random ${m.rarity} weapon` },
+          { key: 'Reward status', value: 'Unclaimed' },
+        ],
+      },
+    ],
+  }))
+    .setFeePayer(payer)
+    .setVersion('legacy')
+    .setBlockhash(bh)
+    .buildAndSign(umi);
+  const b64 = btoa(String.fromCharCode(...umi.transactions.serialize(tx)));
+  return reply(200, { tx: b64, asset: asset.publicKey, serial, kind, lastValidBlockHeight: Number(bh.lastValidBlockHeight) });
+}
+
+async function confirmMilestone(wallet: string, kind: Kind, sig: string) {
+  const { data: claim } = await db.from('milestone_claims').select('*').eq('wallet', wallet).eq('kind', kind).maybeSingle();
+  if (!claim) return reply(404, { error: 'No claim for this wallet' });
+  if (claim.status === 'minted') return reply(200, { claim });
+  if ((await assetOwner(claim.asset)) !== wallet) return reply(202, { pending: true });
+  const { data } = await db
+    .from('milestone_claims')
+    .update({ status: 'minted', minted_at: new Date().toISOString(), sig: typeof sig === 'string' ? sig.slice(0, 100) : null })
+    .eq('id', claim.id)
+    .select('kind, serial, asset, status, level, reserved_at')
+    .single();
+  return reply(200, { claim: data });
+}
+
 /** The Core asset's owner, read from its account (key byte, then the 32-byte owner). */
 async function assetOwner(asset: string): Promise<string | null> {
   const acc = await rpc<{ value: { owner: string; data: [string, string] } | null }>('getAccountInfo', [asset, { encoding: 'base64', commitment: 'confirmed' }]);
@@ -301,7 +451,8 @@ async function confirm(wallet: string, sig: string) {
 
 type DasAsset = { id: string; content?: { metadata?: { name?: string; attributes?: { trait_type: string; value: unknown }[] }; links?: { image?: string } }; grouping?: { group_key: string; group_value: string }[] };
 async function inventory(wallet: string) {
-  const mine = new Set([Deno.env.get('CERT_COLLECTION'), Deno.env.get('GEAR_COLLECTION')].filter(Boolean) as string[]);
+  const certCols = new Set([Deno.env.get('CERT_COLLECTION'), Deno.env.get('MILESTONE_COLLECTION')].filter(Boolean) as string[]);
+  const mine = new Set([...certCols, Deno.env.get('GEAR_COLLECTION')].filter(Boolean) as string[]);
   if (!mine.size) return reply(200, { items: [] });
   const r = await rpc<{ items: DasAsset[] }>('getAssetsByOwner', { ownerAddress: wallet, page: 1, limit: 1000 });
   const items = r.items
@@ -311,7 +462,7 @@ async function inventory(wallet: string) {
       id: a.id,
       name: a.content?.metadata?.name ?? '',
       image: a.content?.links?.image ?? null,
-      kind: col === Deno.env.get('CERT_COLLECTION') ? 'cert' : 'gear',
+      kind: certCols.has(col!) ? 'cert' : 'gear',
       attributes: a.content?.metadata?.attributes ?? [],
     }));
   return reply(200, { items });
@@ -330,8 +481,10 @@ Deno.serve(async (req) => {
     }
     const me = await readPass(q?.pass);
     if (!me) return reply(401, { error: 'Sign in again' });
-    if (a === 'build') return await build(me);
-    if (a === 'confirm') return await confirm(me, q.sig);
+    if (q.kind !== undefined && q.kind !== 'founding' && !isKind(q.kind)) return reply(400, { error: 'kind' });
+    const kind = isKind(q.kind) ? q.kind : null;
+    if (a === 'build') return kind ? await buildMilestone(me, kind) : await build(me);
+    if (a === 'confirm') return kind ? await confirmMilestone(me, kind, q.sig) : await confirm(me, q.sig);
     return reply(400, { error: 'unknown action' });
   } catch (e) {
     return fail(e);
