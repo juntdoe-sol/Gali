@@ -81,7 +81,7 @@ export function T({
 }: {
   children: ReactNode;
   style?: StyleProp<TextStyle>;
-  v?: 'body' | 'bold' | 'black' | 'display' | 'muted' | 'label' | 'tiny';
+  v?: 'body' | 'bold' | 'black' | 'display' | 'muted' | 'label' | 'tiny' | 'num';
   numberOfLines?: number;
   selectable?: boolean;
 }) {
@@ -97,6 +97,7 @@ export function T({
         v === 'muted' && styles.muted,
         v === 'label' && styles.label,
         v === 'tiny' && styles.tiny,
+        v === 'num' && styles.num,
         style,
       ]}
     >
@@ -469,6 +470,8 @@ const styles = StyleSheet.create({
   display: { fontFamily: F.display, letterSpacing: 0.5 },
   muted: { color: COLORS.muted, fontSize: 13 },
   label: { color: COLORS.muted, fontSize: 15, lineHeight: 16, letterSpacing: 1.6, textTransform: 'uppercase', fontFamily: F.display },
+  // numbers: Jersey 15's digits are easy to tell apart (Pixelify's 1 and 7, 5 and 8 are close at small sizes)
+  num: { fontFamily: F.display, letterSpacing: 0.6, fontVariant: ['tabular-nums'] },
   tiny: { fontFamily: F.tiny, fontSize: 8, letterSpacing: 0.5, textTransform: 'uppercase' },
   rivet: { position: 'absolute', width: U * 1.5, height: U * 1.5, opacity: 0.9 },
   glowLine: { position: 'absolute', left: 4 * U, right: 4 * U, top: 0, height: U },
