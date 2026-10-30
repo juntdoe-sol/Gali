@@ -9,9 +9,9 @@
  * and scaled up with the map. Pure canvas: it only needs the atlas helpers and the miner composer.
  */
 import { minerFrame } from './actors';
-import { ctx2d, makeCanvas, sprite, rect, text, textWidth, type Ctx } from './art';
+import { ctx2d, makeCanvas, text, textWidth, type Ctx } from './art';
 import type { Look } from './types';
-import { ORE_MARK, ORE_WORD, SEEKER_MARK_S, SEEKER_WORD, drawBits } from './logos';
+import { COLOSSEUM_MARK, COLOSSEUM_WORD, ORE_MARK, ORE_WORD, SEEKER_MARK_S, SEEKER_WORD, drawBits } from './logos';
 
 type Light = { x: number; y: number; r: number; c: string; k: number };
 type Px = (x: number, y: number, w: number, h: number, col: string) => void;
@@ -309,31 +309,39 @@ function slideFounders(g: Ctx, now: number, t: number) {
   text(g, 'BETA MINERS ONLY', 50, 46, 1, '#d29bff');
 }
 
-function slideIsland(g: Ctx, now: number) {
-  g.fillStyle = '#123a6b';
+function slideColosseum(g: Ctx, now: number, t: number) {
+  // Colosseum: its pillar mark and wordmark in white on a dark violet night, with light beams rising behind the pillar
+  g.fillStyle = '#1b1426';
   g.fillRect(0, 0, LED.w, LED.h);
-  // waves
-  for (let y = 30; y < LED.h; y += 6)
-    for (let x = 0; x < LED.w; x += 10) {
-      const o = Math.round(Math.sin(now / 400 + x * 0.3 + y) * 2);
-      g.fillStyle = '#2f7fc4';
-      g.fillRect(x + o, y, 5, 1);
-    }
-  // a little island and a pickaxe glint
-  g.fillStyle = '#e6d29a';
-  g.beginPath();
-  g.ellipse(100, 44, 26, 8, 0, 0, Math.PI * 2);
-  g.fill();
-  g.fillStyle = '#5f9d41';
-  g.beginPath();
-  g.ellipse(100, 41, 18, 6, 0, 0, Math.PI * 2);
-  g.fill();
-  const r = rect('icon-gold');
-  const s = sprite('icon-gold');
-  if (r && s) g.drawImage(s, 92, 26 + Math.round(Math.sin(now / 300) * 2));
-  text(g, 'ORE ISLAND', 6, 8, 2, '#3ee6ff', '#0a1e3a');
-  text(g, 'MINE ORE EVERY ROUND', 6, 24, 1, '#ffffff');
-  text(g, 'WALK EAST TO THE PIER', 6, 32, 1, '#8fd8ff');
+  const glow = g.createRadialGradient(18, LED.h, 2, 18, LED.h, 60);
+  glow.addColorStop(0, 'rgba(160,90,255,0.55)');
+  glow.addColorStop(1, 'rgba(160,90,255,0)');
+  g.fillStyle = glow;
+  g.fillRect(0, 0, LED.w, LED.h);
+  // the big pale blocks of the poster, top right
+  g.fillStyle = 'rgba(90,60,110,0.35)';
+  g.fillRect(70, 0, 62, 6);
+  g.fillRect(84, LED.h - 20, 40, 20);
+  const mw = COLOSSEUM_MARK[0].length, ww = COLOSSEUM_WORD[0].length, gap = 5;
+  const x0 = Math.round((LED.w - (mw + gap + ww)) / 2);
+  const pop = Math.min(1, t * 6);
+  const y0 = Math.round(9 - (1 - pop) * 24);
+  // beams up through the pillars, pulsing
+  const k = 0.35 + 0.25 * Math.sin(now / 300);
+  g.fillStyle = `rgba(190,140,255,${k})`;
+  for (const dx of [4, 9, 14]) g.fillRect(x0 + dx, 0, 3, LED.h);
+  drawBits(g, COLOSSEUM_MARK, x0, y0, '#ffffff');
+  drawBits(g, COLOSSEUM_WORD, x0 + mw + gap, y0 + Math.round((COLOSSEUM_MARK.length - COLOSSEUM_WORD.length) / 2), '#ffffff');
+  if (Math.floor(now / 450) % 2 || t > 0.6) midText(g, 'ENTER THE ARENA', 33, 1, '#d8b4ff');
+  // ticker
+  g.fillStyle = '#0a0612';
+  g.fillRect(0, LED.h - 12, LED.w, 11);
+  g.fillStyle = '#a066ff';
+  g.fillRect(0, LED.h - 12, LED.w, 1);
+  const tick = "CRYPTO WORLD'S FAIR  -  BUILD YOUR CRYPTO STARTUP  -  WIN AND JOIN THE ACCELERATOR  -  ";
+  const tw = textWidth(tick);
+  const off = (now / 30) % tw;
+  for (let x = -off; x < LED.w; x += tw) text(g, tick, Math.round(x), LED.h - 9, 1, '#ffffff', '#000000');
 }
 
 function slideAdvertise(g: Ctx, now: number, t: number) {
@@ -494,7 +502,7 @@ export function drawBillboard(c: Ctx, X: number, Y: number, z: number, now: numb
   if (slide === 0) slideMarket(g, now, t);
   else if (slide === 1) slideParade(g, now);
   else if (slide === 2) slideFounders(g, now, t);
-  else if (slide === 3) slideIsland(g, now);
+  else if (slide === 3) slideColosseum(g, now, t);
   else if (slide === 4) slideOre(g, now, t);
   else if (slide === 5) slideSeeker(g, now, t);
   else if (slide === 6) slideSuperteam(g, now, t);
@@ -507,6 +515,6 @@ export function drawBillboard(c: Ctx, X: number, Y: number, z: number, now: numb
   led(g, LED.w, LED.h);
   c.drawImage(cv, 0, 0, LED.w, LED.h, x0 + LED.x * z, y0 + LED.y * z, LED.w * z, LED.h * z);
   // the screen lights the clearing
-  const col = ['#ffcf4a', '#ff4fd8', '#ffb020', '#3ee6ff', '#ffcf4a', '#9945ff', '#ff9a3c', '#3ee6ff'][slide];
+  const col = ['#ffcf4a', '#ff4fd8', '#ffb020', '#a066ff', '#ffcf4a', '#9945ff', '#ff9a3c', '#3ee6ff'][slide];
   lights.push({ x: X * dpr, y: (Y - 60 * z) * dpr, r: 120 * z * dpr, c: col, k: 0.8 });
 }
