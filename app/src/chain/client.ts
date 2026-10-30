@@ -849,9 +849,9 @@ export async function galiRoundIxs(owner: PublicKey): Promise<TransactionInstruc
 /** True when these instructions would run as one transaction (a simulation without signatures). */
 export async function simulates(owner: PublicKey, ixs: TransactionInstruction[]): Promise<boolean> {
   try {
-    const { blockhash } = await connection.getLatestBlockhash('confirmed');
-    const msg = new TransactionMessage({ payerKey: owner, recentBlockhash: blockhash, instructions: ixs }).compileToLegacyMessage();
-    const r = await connection.simulateTransaction(new VersionedTransaction(msg), { sigVerify: false, commitment: 'confirmed' });
+    // the node swaps in its own recent blockhash, so this is one round trip instead of two
+    const msg = new TransactionMessage({ payerKey: owner, recentBlockhash: PublicKey.default.toBase58(), instructions: ixs }).compileToLegacyMessage();
+    const r = await connection.simulateTransaction(new VersionedTransaction(msg), { sigVerify: false, replaceRecentBlockhash: true, commitment: 'confirmed' });
     return !r.value.err;
   } catch {
     return false;

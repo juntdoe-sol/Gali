@@ -322,6 +322,13 @@ const EXEC_FEE = 0.00001;
 function RunButton({ ready, label, sub, onStart }: { ready: boolean; label: string; sub?: string; onStart: () => void }) {
   const ref = useTutTarget('deploy');
   const run = useGame((s) => s.run);
+  // ready to deploy: read ahead now, so the wallet pops up fast when it is pressed
+  useEffect(() => {
+    if (!ready) return;
+    useGame.getState().prewarmDeploy();
+    const id = setInterval(() => useGame.getState().prewarmDeploy(), 15_000);
+    return () => clearInterval(id);
+  }, [ready]);
   const stop = useGame((s) => s.stopRun);
   const busy = useGame((s) => s.wallet.busy);
   if (run)

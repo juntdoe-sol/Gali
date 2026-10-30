@@ -115,6 +115,20 @@ async function feeIx(owner: PublicKey, lamports: bigint): Promise<TransactionIns
   return [SystemProgram.transfer({ fromPubkey: owner, toPubkey: to, lamports: fee })];
 }
 
+/* Reads a deploy needs that do not change from second to second, done ahead while the miner is still choosing. */
+let galiWarm: { owner: string; at: number; ixs: Promise<TransactionInstruction[]> } | null = null;
+const GALI_WARM_MS = 20_000;
+const warmGali = (owner: PublicKey) => (galiWarm && galiWarm.owner === owner.toBase58() && Date.now() - galiWarm.at < GALI_WARM_MS ? galiWarm.ixs : null);
+
+/**
+ * Get a deploy ready before DEPLOY is pressed: Gali's extras for the last round and the fee wallet check. The
+ * wallet then opens after a single read (the round clock and the miner), with the blockhash already fresh.
+ */
+export function prewarmDeploy(owner: PublicKey) {
+  if (!warmGali(owner)) galiWarm = { owner: owner.toBase58(), at: Date.now(), ixs: galiRoundIxs(owner).catch(() => []) };
+  void feeIx(owner, 1_000_000n).catch(() => undefined);
+}
+
 /**
  * Deploy into the current ORE round, signed and paid by the player's own wallet.
  * No session key and no Gali program: this is a plain ORE deploy, the same one
@@ -130,7 +144,15 @@ export async function oreDeployWithWallet(
 ): Promise<{ sig: string; roundId: bigint }> {
   let roundId = 0n;
   const sig = await sendWithWallet(async (owner) => {
-    const [clock, miner] = await Promise.all([fetchClock(connection), fetchOreMiner(connection, owner)]);
+    const mask = squaresToMask(squares);
+    // every read at once (one round trip, not four), so the wallet pops up sooner; Gali's extras may come
+    // from prewarmDeploy, read while the miner was still choosing
+    const [clock, miner, gali, fee] = await Promise.all([
+      fetchClock(connection),
+      fetchOreMiner(connection, owner),
+      warmGali(owner) ?? galiRoundIxs(owner),
+      feeIx(owner, lamportsPerSquare * BigInt(maskToSquares(mask).length)),
+    ]);
     if (clock.phase === 'intermission' || (clock.phase === 'mining' && clock.slotsLeft < LIVE_LOCK_SLOTS)) {
       throw new Error('RoundLocked');
     }
@@ -139,9 +161,7 @@ export async function oreDeployWithWallet(
     const pending = needsCheckpoint(miner, clock);
     if (pending !== null) ixs.push(checkpointIx({ signer: owner, authority: owner, roundId: pending }));
     // Gali's record and jackpot claim for the round the miner still holds, before this deploy replaces it
-    const gali = await galiRoundIxs(owner);
-    const mask = squaresToMask(squares);
-    const tail = [deployIx({ signer: owner, authority: owner, roundId, amount: lamportsPerSquare, squares: mask }), ...(await feeIx(owner, lamportsPerSquare * BigInt(maskToSquares(mask).length)))];
+    const tail = [deployIx({ signer: owner, authority: owner, roundId, amount: lamportsPerSquare, squares: mask }), ...fee];
     // they only ride along when the whole transaction would still go through: the deploy always comes first
     if (gali.length && (await simulates(owner, [...ixs, ...gali, ...tail]))) ixs.push(...gali);
     ixs.push(...tail);
