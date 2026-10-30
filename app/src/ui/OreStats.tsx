@@ -49,6 +49,9 @@ export function OreStatsPanel() {
   const { me, gali, status, market } = useOreStats();
   const myProfit = me ? profitUsd(me.lifetime, me.deployedSol, me.returnedSol, market) : null;
   const galiProfit = market ? profitUsd(market.ore, market.deployedSol, market.returnedSol, market) : null;
+  const usdOf = (sol: number) => (market?.solUsd && market.solUsd > 0 ? fmtUsd(sol * market.solUsd).replace(/^\+/, '') : '—');
+  const solShort = (sol: number) => sol.toLocaleString(undefined, { maximumFractionDigits: sol < 10 ? 3 : sol < 1000 ? 1 : 0 });
+  const DEPLOYED_TIP = 'All the SOL put on ORE’s board, before any refund or claim, at today’s SOL price.';
   const PROFIT_TIP = 'ORE mined at today’s ORE price, plus the SOL ORE gave back, minus all the SOL put on the board, at today’s SOL price. ORE’s 10% claim fee and refined ORE are not counted. Prices from Jupiter, every 5 minutes.';
   const [folded, setFolded] = useState(readFold);
   const show = desktop && !LANDSCAPE_APP && where === 'island';
@@ -106,6 +109,7 @@ export function OreStatsPanel() {
                   color={myProfit === null ? undefined : myProfit >= 0 ? COLORS.green : COLORS.red}
                   tip={myProfit === null ? 'Waiting for ORE and SOL prices.' : PROFIT_TIP}
                 />
+                <Row label={`SOL deployed (${solShort(me.deployedSol)})`} value={usdOf(me.deployedSol)} tip={`${me.deployedSol.toLocaleString(undefined, { maximumFractionDigits: 4 })} SOL. ${DEPLOYED_TIP}`} />
                 <Row label="Unrefined" value={fmtOreAmt(me.unrefined)} color={COLORS.gold} tip="Mined and not claimed yet. Claiming it costs ORE's 10% fee. Holding it earns refined ORE." />
                 <Row label="Refined, ready" value={fmtOreAmt(me.refined)} color={COLORS.teal} tip="Earned from other miners' 10% fees while you held unrefined ORE. Claims with no fee." />
                 <Row
@@ -134,6 +138,13 @@ export function OreStatsPanel() {
                 value={fmtUsd(galiProfit)}
                 color={galiProfit >= 0 ? COLORS.green : COLORS.red}
                 tip={`Every Gali wallet together (${market!.miners.toLocaleString()} with ORE accounts). ${PROFIT_TIP}`}
+              />
+            ) : null}
+            {market && market.deployedSol > 0 ? (
+              <Row
+                label={`SOL deployed (${solShort(market.deployedSol)})`}
+                value={usdOf(market.deployedSol)}
+                tip={`${market.deployedSol.toLocaleString(undefined, { maximumFractionDigits: 2 })} SOL from every Gali wallet together. ${DEPLOYED_TIP}`}
               />
             ) : null}
             {gali ? null : (
