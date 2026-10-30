@@ -1,15 +1,18 @@
 // Gali TV: plays the published videos on a pixel CRT, or on a Seeker phone for vertical Matt the Miner episodes.
 // The list comes from feed.json in the public gali-tv bucket, which the tv-admin function rewrites on every change.
-// Two playlists, each in order from the first episode to the latest. A first visit starts at Matt the Miner
+// Three playlists, each in order from the first post to the latest. Memes & Fan Art also takes pictures: a picture
+// stays on screen for STILL_S seconds with a slow zoom, then the next post plays. A first visit starts at Matt the Miner
 // episode 1; a return visit resumes at the first episode not yet finished. When an episode ends the next one plays.
 // Sound starts on where the browser allows it; otherwise muted until the first tap or key press.
 const FILES = 'https://rckvfpwtdyvvvjqqlffn.supabase.co/storage/v1/object/public/gali-tv/';
 
 const CHANNELS = {
-  cartoon: { num: '01', name: 'MATT', label: 'Matt the Miner', unit: 'episode', blurb: 'A pixel cartoon from Gali Island.', angle: -40 },
-  team: { num: '02', name: 'TEAM', label: 'Team Updates', unit: 'video', blurb: 'News, devlogs and pitches from the Gali team.', angle: 40 },
+  cartoon: { num: '01', name: 'MATT', label: 'Matt the Miner', unit: 'episode', blurb: 'A pixel cartoon from Gali Island.', angle: -50 },
+  team: { num: '02', name: 'TEAM', label: 'Team Updates', unit: 'video', blurb: 'News, devlogs and pitches from the Gali team.', angle: 0 },
+  fan: { num: '03', name: 'FAN', label: 'Memes & Fan Art', unit: 'post', blurb: 'Memes and fan art made by the Gali community.', angle: 50 },
 };
-const ORDER = ['cartoon', 'team'];
+const ORDER = ['cartoon', 'team', 'fan'];
+const STILL_S = 8; // seconds a picture stays on screen
 const UP_NEXT_S = 6;
 const DONE = 0.9; // an episode counts as watched past 90%
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -22,7 +25,7 @@ const el = {
   play: $('b-play'), mute: $('b-mute'), seek: $('seek'), seekFill: $('seek-fill'), seekHead: $('seek-head'), time: $('time'),
   dial: $('dial'), led: $('led'), channels: $('channels'), series: $('series'), eps: $('eps'),
   plMeta: $('pl-meta'), plTitle: $('pl-title'), plDesc: $('pl-desc'), plActions: $('pl-actions'),
-  toast: $('toast'), tv: $('tv'),
+  toast: $('toast'), tv: $('tv'), still: $('still'),
 };
 
 // channel = the playlist on screen in the panel; the playing episode can belong to either
@@ -40,6 +43,15 @@ const clock = (s) => {
 const day = (iso) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 const isFresh = (iso) => Date.now() - new Date(iso).getTime() < 7 * 864e5;
 const byId = (id) => state.videos.find((v) => v.id === id);
+const isStill = (v) => Boolean(v && /\.(png|jpe?g|webp)$/i.test(v.video_path || ''));
+/** "@handle" credits link to X; anything else is shown as plain text. */
+const creditHtml = (c) => {
+  if (!c) return '';
+  const h = String(c).trim().replace(/^https?:\/\/(www\.)?(x|twitter)\.com\//i, '@');
+  return /^@[A-Za-z0-9_]{1,15}$/.test(h)
+    ? `<a href="https://x.com/${esc(h.slice(1))}" target="_blank" rel="noopener">${esc(h)}</a>`
+    : esc(h);
+};
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
@@ -53,6 +65,7 @@ function list(ch = state.channel) {
     : l.sort((a, b) => a.created_at.localeCompare(b.created_at));
 }
 const epLabel = (v, i) => (v.series === 'cartoon' ? `Episode ${v.episode ?? i + 1}` : day(v.created_at));
+const epMark = (v) => (isStill(v) ? 'PIC' : v.duration_s ? clock(Number(v.duration_s)) : '');
 
 const watched = (() => {
   let m = {};
@@ -71,13 +84,15 @@ function resumeIn(ch) {
   const l = list(ch);
   return l.find((v) => watched.get(v.id) < DONE) || l[0] || null;
 }
-/** What plays after `v`: the next episode, and after the last Matt the Miner episode, the team updates. */
+/** What plays after `v`: the next post, and at the end of a channel, the next channel (Matt, then Team, then Fan). */
 function nextAfter(v) {
   if (!v) return null;
   const l = list(v.series);
   const i = l.findIndex((x) => x.id === v.id);
   if (i >= 0 && i < l.length - 1) return l[i + 1];
-  return v.series === 'cartoon' ? resumeIn('team') : null;
+  if (v.series === 'cartoon') return resumeIn('team') || resumeIn('fan');
+  if (v.series === 'team') return resumeIn('fan');
+  return null;
 }
 function prevBefore(v) {
   if (!v) return null;
@@ -189,14 +204,17 @@ function renderTabs() {
   }
 }
 
+const SEND_BTN = '<button class="btn pink sm" data-act="send"><span>+ Send your fan art</span></button>';
+/** The fan art form lives in its own file and loads the first time someone opens it. */
+function openSend() { import('./fanart.js').then((m) => m.open()).catch(() => toast('The form did not load. Try again.')); }
 function renderSeries() {
   const ch = CHANNELS[state.channel];
   const l = list();
   if (!l.length) {
-    el.series.innerHTML = `<h2>${ch.label}</h2><p class="se-blurb">${ch.blurb}</p><p class="se-meta">Nothing here yet. Check back soon.</p>`;
+    el.series.innerHTML = `<h2>${ch.label}</h2><p class="se-blurb">${ch.blurb}</p><p class="se-meta">Nothing here yet. Check back soon.</p>${state.channel === 'fan' ? `<div class="se-actions">${SEND_BTN}</div>` : ''}`;
     return;
   }
-  const total = l.reduce((s, v) => s + Number(v.duration_s || 0), 0);
+  const total = l.reduce((s, v) => s + (isStill(v) ? STILL_S : Number(v.duration_s || 0)), 0);
   const seen = l.filter((v) => watched.get(v.id) >= DONE).length;
   const go = resumeIn(state.channel);
   const i = l.indexOf(go);
@@ -210,7 +228,7 @@ function renderSeries() {
     <div class="se-actions">
       ${playingHere ? '' : `<button class="btn gold" data-act="resume"><span>▶ ${verb} ${esc(what.length > 26 ? `${what.slice(0, 25)}…` : what)}</span></button>`}
       <label class="autoplay"><input type="checkbox" id="autoplay" ${state.autoplay ? 'checked' : ''}><i aria-hidden="true"></i>Autoplay next</label>
-    </div>`;
+    </div>${state.channel === 'fan' ? `<div class="se-send">${SEND_BTN}<span>Made something? Send it in. No sign-up, one post a week.</span></div>` : ''}`;
   $('autoplay').addEventListener('change', (e) => {
     state.autoplay = e.target.checked;
     store.set('galitv:autoplay', state.autoplay ? '1' : '0');
@@ -218,9 +236,9 @@ function renderSeries() {
 }
 
 function epHtml(v, i) {
-  const poster = fileUrl(v.poster_path);
+  const poster = fileUrl(v.poster_path) || (isStill(v) ? fileUrl(v.video_path) : '');
   const w = watched.get(v.id);
-  const dur = v.duration_s ? clock(Number(v.duration_s)) : '';
+  const dur = epMark(v);
   return `<li class="ep${w >= DONE ? ' seen' : ''}" data-id="${esc(v.id)}">
     <button aria-label="Play ${esc(epLabel(v, i))}: ${esc(v.title)}">
       <span class="ep-num" aria-hidden="true"><b>${v.series === 'cartoon' ? v.episode ?? i + 1 : i + 1}</b><span class="eq"><i></i><i></i><i></i></span></span>
@@ -233,7 +251,7 @@ function epHtml(v, i) {
       <span class="ep-txt">
         <span class="ep-top">${esc(epLabel(v, i))}${v.id === state.latestId && isFresh(v.created_at) ? '<em class="new">NEW</em>' : ''}${w >= DONE ? '<em class="done">✓ WATCHED</em>' : ''}</span>
         <b class="ep-title">${esc(v.title)}</b>
-        ${v.description ? `<span class="ep-desc">${esc(v.description)}</span>` : ''}
+        ${v.credit ? `<span class="ep-desc">by ${esc(v.credit)}</span>` : v.description ? `<span class="ep-desc">${esc(v.description)}</span>` : ''}
       </span>
     </button>
   </li>`;
@@ -273,12 +291,13 @@ function renderPlaque(v) {
   }
   const l = list(v.series);
   const i = l.findIndex((x) => x.id === v.id);
-  const chip = v.series === 'cartoon' ? '<span class="chip cartoon">CH 01 · MATT THE MINER</span>' : '<span class="chip team">CH 02 · TEAM UPDATES</span>';
+  const chip = v.series === 'cartoon' ? '<span class="chip cartoon">CH 01 · MATT THE MINER</span>'
+    : v.series === 'fan' ? '<span class="chip fan">CH 03 · MEMES &amp; FAN ART</span>' : '<span class="chip team">CH 02 · TEAM UPDATES</span>';
   const ep = `<span class="chip">${v.series === 'cartoon' ? `EPISODE ${v.episode ?? i + 1} OF ${l.length}` : `${i + 1} OF ${l.length}`}</span>`;
   const fresh = v.id === state.latestId && isFresh(v.created_at) ? '<span class="chip new">NEW</span>' : '';
-  el.plMeta.innerHTML = `${chip}${ep}${fresh}<span>${day(v.created_at)}${v.duration_s ? ` · ${clock(Number(v.duration_s))}` : ''}</span>`;
+  el.plMeta.innerHTML = `${chip}${ep}${fresh}<span>${day(v.created_at)}${isStill(v) ? ' · picture' : v.duration_s ? ` · ${clock(Number(v.duration_s))}` : ''}</span>`;
   el.plTitle.textContent = v.title;
-  el.plDesc.textContent = v.description || '';
+  el.plDesc.innerHTML = `${v.credit ? `<span class="credit">Made by ${creditHtml(v.credit)}</span>` : ''}${esc(v.description || '')}`;
   const next = nextAfter(v);
   el.plActions.innerHTML = [
     next ? `<button class="btn gold" data-act="next"><span>Next: ${esc(next.title.length > 28 ? `${next.title.slice(0, 27)}…` : next.title)} ▶</span></button>` : '',
@@ -291,6 +310,7 @@ function renderPlaque(v) {
 const setEl = $('set');
 function deviceFor(v) {
   if (!v) return state.channel === 'cartoon' ? 'phone' : 'tv';
+  if (isStill(v) && !(v.width && v.height)) return 'tv';
   if (v.width && v.height) return v.height > v.width ? 'phone' : 'tv';
   return v.series === 'cartoon' ? 'phone' : 'tv';
 }
@@ -313,6 +333,7 @@ async function tune(v, { autoplay = true, quiet = false } = {}) {
     void setDevice(deviceFor(null));
     el.video.removeAttribute('src');
     el.video.load();
+    stillStop(true);
     setScreenState('empty', 'OFF AIR', `${CHANNELS[state.channel].label}: first broadcast soon`);
     el.backdrop.style.backgroundImage = '';
     renderPlaque(null);
@@ -328,11 +349,24 @@ async function tune(v, { autoplay = true, quiet = false } = {}) {
   renderDial(v.series);
   const ch = CHANNELS[v.series];
   osd(el.osdCh, `CH ${ch.num} ${ch.name}`, 2600);
-  const poster = fileUrl(v.poster_path);
-  el.backdrop.style.backgroundImage = poster ? `url("${poster}")` : `radial-gradient(circle at 50% 40%, ${v.series === 'team' ? '#1d5f57' : '#6b4a12'}, #120c16)`;
-  el.video.poster = poster || '';
-  el.video.src = fileUrl(v.video_path);
-  el.video.volume = state.volume;
+  const pic = isStill(v);
+  const poster = fileUrl(v.poster_path) || (pic ? fileUrl(v.video_path) : '');
+  el.backdrop.style.backgroundImage = poster ? `url("${poster}")` : `radial-gradient(circle at 50% 40%, ${v.series === 'team' ? '#1d5f57' : v.series === 'fan' ? '#6b1f4f' : '#6b4a12'}, #120c16)`;
+  stillStop(true);
+  el.screen.classList.toggle('is-still', pic);
+  if (pic) {
+    el.video.pause();
+    el.video.removeAttribute('src');
+    el.video.removeAttribute('poster');
+    el.video.load();
+    el.still.src = fileUrl(v.video_path);
+    el.still.alt = v.title + (v.credit ? `, by ${v.credit}` : '');
+  } else {
+    el.still.removeAttribute('src');
+    el.video.poster = poster || '';
+    el.video.src = fileUrl(v.video_path);
+    el.video.volume = state.volume;
+  }
   setScreenState('live');
   renderPlaque(v);
   renderPlaylist();
@@ -346,6 +380,7 @@ async function tune(v, { autoplay = true, quiet = false } = {}) {
 }
 
 async function start() {
+  if (isStill(state.current)) { stillPlay(); el.bigPlay.hidden = true; syncPlayUi(); return; }
   try {
     await el.video.play();
     el.bigPlay.hidden = true;
@@ -362,6 +397,11 @@ async function start() {
 
 function togglePlay() {
   if (!state.current || !state.on) return;
+  if (isStill(state.current)) {
+    if (still.playing) { stillPause(); osd(el.osdStatus, '❚❚ PAUSE', 0); } else { stillPlay(); osd(el.osdStatus, '▶ PLAY'); }
+    syncPlayUi();
+    return;
+  }
   if (el.video.paused) { void start(); osd(el.osdStatus, '▶ PLAY'); } else { el.video.pause(); osd(el.osdStatus, '❚❚ PAUSE', 0); }
 }
 
@@ -388,14 +428,14 @@ const dropFirstGesture = () => GESTURES.forEach((t) => removeEventListener(t, fi
 GESTURES.forEach((t) => addEventListener(t, firstGesture, true));
 
 function syncPlayUi() {
-  const playing = !el.video.paused && !el.video.ended;
+  const playing = isStill(state.current) ? still.playing : !el.video.paused && !el.video.ended;
   el.play.textContent = playing ? '❚❚' : '▶';
   el.play.setAttribute('aria-label', playing ? 'Pause' : 'Play');
   document.body.classList.toggle('paused-all', !playing);
   if (playing) el.osdStatus.classList.remove('on');
   el.mute.textContent = el.video.muted ? '🔇' : state.volume > 0.5 ? '🔊' : '🔉';
   el.mute.setAttribute('aria-label', el.video.muted ? 'Unmute' : 'Mute');
-  el.sound.hidden = !(state.current && el.video.muted && !soundUnlocked && state.on);
+  el.sound.hidden = !(state.current && !isStill(state.current) && el.video.muted && !soundUnlocked && state.on);
   el.led.classList.toggle('on', state.on);
 }
 
@@ -469,10 +509,12 @@ function powerOnFx() {
 function seekTo(clientX) {
   const r = el.seek.getBoundingClientRect();
   const f = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+  if (isStill(state.current)) { stillSeek(f * STILL_S); return; }
   if (Number.isFinite(el.video.duration)) el.video.currentTime = f * el.video.duration;
 }
 function paintProgress() {
-  const d = el.video.duration, t = el.video.currentTime;
+  const pic = isStill(state.current);
+  const d = pic ? STILL_S : el.video.duration, t = pic ? stillTime() : el.video.currentTime;
   const f = Number.isFinite(d) && d > 0 ? t / d : 0;
   el.seekFill.style.width = `calc(${f * 100}% - 4px)`;
   el.seekHead.style.left = `${f * 100}%`;
@@ -496,6 +538,55 @@ async function share() {
   } catch { /* cancelled */ }
 }
 
+/* ---------------- pictures (Memes & Fan Art) ---------------- */
+// A picture plays like a short clip: a timer instead of a video, the same seek bar, Up Next and watched marks.
+const still = { playing: false, base: 0, since: 0, raf: 0 };
+const stillTime = () => Math.min(STILL_S, still.base + (still.playing ? (performance.now() - still.since) / 1000 : 0));
+function stillTick() {
+  if (!still.playing) return;
+  paintProgress();
+  const t = stillTime();
+  if (state.current) watched.set(state.current.id, t / STILL_S);
+  if (t >= STILL_S) { stillPause(); onEnded(); return; }
+  still.raf = requestAnimationFrame(stillTick);
+}
+function stillPlay() {
+  if (still.playing) return;
+  if (still.base >= STILL_S) still.base = 0;
+  still.playing = true;
+  still.since = performance.now();
+  el.screen.classList.add('still-on');
+  el.still.style.animationPlayState = 'running';
+  still.raf = requestAnimationFrame(stillTick);
+}
+function stillPause() {
+  if (!still.playing) return;
+  still.base = stillTime();
+  still.playing = false;
+  cancelAnimationFrame(still.raf);
+  el.still.style.animationPlayState = 'paused';
+  syncPlayUi();
+}
+function stillStop(reset) {
+  still.playing = false;
+  cancelAnimationFrame(still.raf);
+  if (reset) {
+    still.base = 0;
+    el.still.classList.remove('zoom');
+    void el.still.offsetWidth;
+    el.still.classList.add('zoom');
+    el.still.style.animationPlayState = 'paused';
+  }
+}
+function stillSeek(t) {
+  still.base = Math.max(0, Math.min(STILL_S - 0.05, t));
+  still.since = performance.now();
+  paintProgress();
+}
+el.still.addEventListener('error', () => {
+  if (isStill(state.current)) setScreenState('error', 'NO SIGNAL', 'This picture will not load. Try another.');
+});
+
 /* ---------------- events ---------------- */
 el.video.addEventListener('play', syncPlayUi);
 el.video.addEventListener('pause', syncPlayUi);
@@ -510,14 +601,15 @@ el.video.addEventListener('timeupdate', () => {
     watched.set(state.current.id, el.video.currentTime / el.video.duration);
   }
 });
-el.video.addEventListener('ended', () => {
+function onEnded() {
   if (state.current) watched.set(state.current.id, 1);
   syncPlayUi();
   renderPlaylist();
   showUpNext();
-});
+}
+el.video.addEventListener('ended', onEnded);
 el.video.addEventListener('error', () => {
-  if (!state.current) return;
+  if (!state.current || isStill(state.current)) return;
   setScreenState('error', 'NO SIGNAL', 'This episode will not play. Try another.');
 });
 
@@ -525,7 +617,7 @@ el.screen.addEventListener('click', (e) => {
   if (e.target.closest('button')) return;
   // the tap that just turned the sound on shouldn't also pause the video
   if (performance.now() - soundUnlockedAt < 800) return;
-  if (el.video.muted && !soundUnlocked && !el.video.paused) return unlockSound();
+  if (!isStill(state.current) && el.video.muted && !soundUnlocked && !el.video.paused) return unlockSound();
   togglePlay();
 });
 el.screen.addEventListener('dblclick', (e) => { if (!e.target.closest('button')) fullscreen(); });
@@ -553,7 +645,8 @@ el.seek.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
     e.preventDefault();
     e.stopPropagation();
-    el.video.currentTime = Math.max(0, el.video.currentTime + (e.key === 'ArrowRight' ? 5 : -5));
+    if (isStill(state.current)) stillSeek(stillTime() + (e.key === 'ArrowRight' ? 2 : -2));
+    else el.video.currentTime = Math.max(0, el.video.currentTime + (e.key === 'ArrowRight' ? 5 : -5));
   }
 });
 
@@ -569,6 +662,7 @@ el.channels.addEventListener('keydown', (e) => {
 });
 el.series.addEventListener('click', (e) => {
   if (e.target.closest('[data-act=resume]')) { unlockSound(); void tune(resumeIn(state.channel)); }
+  if (e.target.closest('[data-act=send]')) openSend();
 });
 el.eps.addEventListener('click', (e) => {
   const t = e.target.closest('.ep');
@@ -584,7 +678,7 @@ el.plActions.addEventListener('click', (e) => {
 });
 
 addEventListener('keydown', (e) => {
-  if (e.target.closest?.('input,textarea,select,[contenteditable]') || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.target.closest?.('input,textarea,select,[contenteditable],dialog') || document.querySelector('dialog[open]') || e.metaKey || e.ctrlKey || e.altKey) return;
   const k = e.key;
   if (k === ' ' || k === 'k') { if (e.target.closest?.('button,a')) return; e.preventDefault(); unlockSound(); togglePlay(); }
   else if (k === 'ArrowRight') { e.preventDefault(); step(1); }
@@ -623,7 +717,7 @@ addEventListener('keydown', (e) => {
   state.latestId = [...state.videos].sort((a, b) => b.created_at.localeCompare(a.created_at))[0]?.id ?? null;
   // a shared link plays that episode; otherwise Matt the Miner from episode 1, or where this viewer left off
   const want = new URLSearchParams(location.search).get('v');
-  const first = (want && byId(want)) || resumeIn('cartoon') || resumeIn('team');
+  const first = (want && byId(want)) || resumeIn('cartoon') || resumeIn('team') || resumeIn('fan');
   if (!first) {
     renderPlaylist();
     setScreenState('empty', 'OFF AIR', 'First broadcast soon');
@@ -633,4 +727,5 @@ addEventListener('keydown', (e) => {
   }
   // try with sound; start() falls back to muted when the browser blocks it
   await tune(first, { quiet: true });
+  if (new URLSearchParams(location.search).has('send')) { showPlaylist('fan'); openSend(); }
 })();

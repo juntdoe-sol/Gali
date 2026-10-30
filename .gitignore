@@ -57,3 +57,7 @@ tv/android
 tv/ios
 tv/.expo
 tv/dist
+
+# private admin app (Gali Ops) and files waiting to be deleted
+admin-app/
+_to_delete/

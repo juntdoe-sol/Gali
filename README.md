@@ -286,13 +286,6 @@ Re-run it after ORE redeploys.
 
 ---
 
-## Known limitations
-
-- The Gali program has run against `ore-mock` only. Mining, autopilot and claims use ORE's live program and do not need it.
-- Lifetime refined ORE is not shown: ORE resets refined ORE on claim and keeps no history.
-- The all-Gali ORE total adds each wallet's lifetime ORE, which includes ORE mined outside Gali.
-- It is a game of chance with real SOL. A public launch needs age gating and a legal review per market.
-
 ## Security notes
 
 - **Supabase key in the app** is the public anon key, by design. Tables have row level security on, and signed reports for ranks and chat are rolling out.
