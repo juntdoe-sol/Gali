@@ -387,7 +387,7 @@ export function Toasts() {
   const { desktop, side } = useLayout();
   return (
     <View
-      style={[styles.toasts, desktop ? { top: TOP_H + 26, left: RAIL_W + GUTTER, right: side + GUTTER * 2 } : { top: insets.top + 190 }]}
+      style={[styles.toasts, desktop ? { top: TOP_H + 160, left: RAIL_W + GUTTER, right: side + GUTTER * 2 } : { top: insets.top + 190 }]}
       pointerEvents="none"
       accessibilityLiveRegion="polite"
     >

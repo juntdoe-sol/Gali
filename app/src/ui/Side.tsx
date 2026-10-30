@@ -8,7 +8,7 @@ import { COLORS } from '../game/constants';
 import { Dock, UnclaimedRow } from './Dock';
 import { RoundCard } from './Hud';
 import { Kbd, PixelBox, T, U } from './kit';
-import { GUTTER, LANDSCAPE_APP, RAIL_W, useLayout } from './layout';
+import { GUTTER, LANDSCAPE_APP, TOP_H, useLayout } from './layout';
 import { HideBtn, MineTab, useMinePanel } from './MineAnywhere';
 import { useLobby } from '../game/lobby';
 
@@ -33,7 +33,7 @@ export function SidePanel() {
   if (!desktop) return null;
   // on the island the Unclaimed box sits on its own at the bottom middle of the map, clear of the panel
   const unclaimed = onIsland ? (
-    <View pointerEvents="box-none" style={[styles.unclaimedAt, { left: RAIL_W + GUTTER, right: (hidden ? 0 : side) + GUTTER * 2 }]}>
+    <View pointerEvents="box-none" style={[styles.unclaimedAt, { left: 0, right: 0 }]}>
       <View style={styles.unclaimedW}>
         <UnclaimedRow boxed />
       </View>
@@ -49,8 +49,13 @@ export function SidePanel() {
   return (
     <>
     {unclaimed}
-    <View style={[styles.side, { width: side, right: GUTTER, top: GUTTER, bottom: GUTTER }]}>
-      <RoundCard embedded />
+    {/* the round sits at the top middle of the screen; the deploy panel stays on the right, centred top to bottom */}
+    <View pointerEvents="box-none" style={[styles.roundAt, { top: TOP_H + GUTTER * 2 }]}>
+      <View style={{ width: side }}>
+        <RoundCard embedded />
+      </View>
+    </View>
+    <View pointerEvents="box-none" style={[styles.side, { width: side, right: GUTTER, top: GUTTER, bottom: GUTTER }]}>
       <PixelBox fill="rgba(15,23,52,0.95)" hi="#33498c" lo="#0c1430" shadow={2} style={styles.dockBox}>
         <View style={styles.dockHead}>
           <T v="display" style={{ fontSize: 22, lineHeight: 24, color: COLORS.gold, letterSpacing: 1 }}>
@@ -92,7 +97,8 @@ function KeyHint({ k, t }: { k: string; t: string }) {
 }
 
 const styles = StyleSheet.create({
-  side: { position: 'absolute', gap: 12, zIndex: 15 },
+  side: { position: 'absolute', gap: 12, zIndex: 15, justifyContent: 'center' },
+  roundAt: { position: 'absolute', left: 0, right: 0, alignItems: 'center', zIndex: 15 },
   // the deploy card hugs its controls; it only scrolls when the window is too short for them
   dockBox: { flexShrink: 1, minHeight: 0, paddingTop: 10 },
   tabAt: { position: 'absolute', zIndex: 15 },
