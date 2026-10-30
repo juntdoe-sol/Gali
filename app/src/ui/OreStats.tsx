@@ -51,8 +51,8 @@ export function OreStatsPanel() {
   const galiProfit = market ? profitUsd(market.ore, market.deployedSol, market.returnedSol, market) : null;
   const usdOf = (sol: number) => (market?.solUsd && market.solUsd > 0 ? fmtUsd(sol * market.solUsd).replace(/^\+/, '') : '—');
   const solShort = (sol: number) => sol.toLocaleString(undefined, { maximumFractionDigits: sol < 10 ? 3 : sol < 1000 ? 1 : 0 });
-  const SPENT_TIP = 'What mining really cost: all the SOL put on ORE’s board minus all the SOL ORE gave back, at today’s SOL price. The same SOL redeployed round after round only counts what was lost.';
-  const PROFIT_TIP = 'ORE mined at today’s ORE price, plus the SOL ORE gave back, minus all the SOL put on the board, at today’s SOL price. ORE’s 10% claim fee and refined ORE are not counted. Prices from Jupiter, every 5 minutes.';
+  const SPENT_TIP = 'What mining in Gali really cost: the SOL put on ORE’s board minus the SOL ORE gave back, at today’s SOL price, since joining Gali (early miners: since 31 Oct 2026). The same SOL redeployed round after round only counts what was lost.';
+  const PROFIT_TIP = 'ORE mined in Gali at today’s ORE price, plus the SOL ORE gave back, minus the SOL put on the board, at today’s SOL price. ORE’s 10% claim fee and refined ORE are not counted. Prices from Jupiter, every 5 minutes.';
   const [folded, setFolded] = useState(readFold);
   const show = desktop && !LANDSCAPE_APP;
 
@@ -102,9 +102,9 @@ export function OreStatsPanel() {
               </T>
             ) : (
               <>
-                <Row label="All-time ORE mined" value={fmtOreAmt(me.lifetime)} tip="Every ORE this wallet has mined on ORE's board, claimed or not. ORE's own lifetime counter." />
+                <Row label="ORE mined in Gali" value={fmtOreAmt(me.lifetime)} tip="ORE this wallet mined since it joined Gali, claimed or not. Mining done before joining doesn't count. Early miners count from 21 Oct 2026." />
                 <Row
-                  label="All-time profit"
+                  label="Profit in Gali"
                   value={myProfit === null ? '—' : fmtUsd(myProfit)}
                   color={myProfit === null ? undefined : myProfit >= 0 ? COLORS.green : COLORS.red}
                   tip={myProfit === null ? 'Waiting for ORE and SOL prices.' : PROFIT_TIP}
@@ -131,14 +131,14 @@ export function OreStatsPanel() {
             </T>
             {gali ? (
               <Row
-                label={`All-time ORE (${gali.miners.toLocaleString()} miners)`}
+                label={`ORE mined in Gali (${gali.miners.toLocaleString()} miners)`}
                 value={fmtOreAmt(gali.ore)}
-                tip="Every Gali miner's all-time ORE added up, read from each wallet's ORE miner account when they play."
+                tip="Every Gali miner's ORE added up, counted from when each one joined Gali. Mining done before joining doesn't count."
               />
             ) : null}
             {galiProfit !== null ? (
               <Row
-                label="All-time profit"
+                label="Profit in Gali"
                 value={fmtUsd(galiProfit)}
                 color={galiProfit >= 0 ? COLORS.green : COLORS.red}
                 tip={`Every Gali wallet together (${market!.miners.toLocaleString()} with ORE accounts). ${PROFIT_TIP}`}

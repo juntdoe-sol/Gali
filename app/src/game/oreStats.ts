@@ -5,6 +5,10 @@
  * Refined ORE grows on its own while you hold unrefined ORE: every claim of unrefined ORE pays 10% to the
  * holders. ORE keeps one running factor for that; a server job saves it every hour, so the gain over the
  * last 24 hours is your unrefined ORE times how much the factor rose since then.
+ *
+ * ORE mined, SOL in and SOL back count from when the wallet joined Gali: ORE's lifetime counters minus the
+ * baseline the server wrote down at the wallet's first check-in (supabase/sql/gali-since-join.sql). Early miners'
+ * ORE counts from their first daily snapshot (21 Oct 2026); their SOL from 31 Oct 2026.
  */
 import { create } from 'zustand';
 import { loadBoard } from '../chain/lazy';
@@ -13,11 +17,11 @@ import { publicKey, restBase } from './world';
 
 export interface OreStatsState {
   status: 'idle' | 'loading' | 'ok' | 'error';
-  /** you (null until a wallet is connected and read) */
+  /** you (null until a wallet is connected and read). `lifetime`, `deployedSol` and `returnedSol` count since joining Gali */
   me: { lifetime: number; unrefined: number; refined: number; gain: number | null; gainHours: number; deployedSol: number; returnedSol: number } | null;
-  /** everyone who played Gali */
+  /** everyone who played Gali: ORE mined since each joined */
   gali: { miners: number; ore: number } | null;
-  /** ORE and SOL in dollars and every Gali wallet's all-time totals, saved by the server every 5 minutes */
+  /** ORE and SOL in dollars and every Gali wallet's totals since joining Gali, saved by the server every 5 minutes */
   market: { solUsd: number | null; oreUsd: number | null; ore: number; deployedSol: number; returnedSol: number; miners: number } | null;
 }
 
@@ -84,6 +88,21 @@ export async function refreshMarket(now = Date.now()) {
   }
 }
 
+/** This wallet's counters when it joined Gali (read once per wallet; re-read until the server has written them). */
+let baseCache: { wallet: string; ore: number | null; solIn: number | null; solBack: number | null } | null = null;
+async function myBase(wallet: string) {
+  if (baseCache?.wallet === wallet && baseCache.ore !== null && baseCache.solIn !== null && baseCache.solBack !== null) return baseCache;
+  const empty = { wallet, ore: null, solIn: null, solBack: null };
+  const base = restBase();
+  if (!base) return empty;
+  const r = await fetch(`${base}/rest/v1/gali_miners?select=ore_base,sol_in_base,sol_back_base&wallet=eq.${encodeURIComponent(wallet)}`, { headers: headers() }).catch(() => null);
+  const rows = r && r.ok ? ((await r.json()) as { ore_base: unknown; sol_in_base: unknown; sol_back_base: unknown }[]) : [];
+  const n = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+  const row = Array.isArray(rows) ? rows[0] : null;
+  baseCache = row ? { wallet, ore: n(row.ore_base), solIn: n(row.sol_in_base), solBack: n(row.sol_back_base) } : empty;
+  return baseCache;
+}
+
 /** Read everything once. The panel calls this every minute while it is on screen. */
 export async function refreshOreStats() {
   const now = Date.now();
@@ -97,7 +116,7 @@ export async function refreshOreStats() {
     }
     const board = await loadBoard();
     const { PublicKey } = await import('@solana/web3.js');
-    const s = await board.fetchOreStats(new PublicKey(owner));
+    const [s, base] = await Promise.all([board.fetchOreStats(new PublicKey(owner)), myBase(owner)]);
     let gain: number | null = null;
     let gainHours = 24;
     if (rateAgo) {
@@ -105,7 +124,12 @@ export async function refreshOreStats() {
       gain = rise > 0n ? Number((BigInt(s.unrefinedGrams) * rise) / board.FACTOR_ONE) / 1e11 : 0;
       gainHours = Math.max(1, Math.min(24, Math.round((now - rateAgo.at) / 3_600_000)));
     }
-    useOreStats.setState({ status: 'ok', me: { lifetime: s.lifetime, unrefined: s.unrefined, refined: s.refined, gain, gainHours, deployedSol: s.deployedSol, returnedSol: s.returnedSol } });
+    // since joining Gali; no baseline yet (it is written at the first check-in) means nothing counted yet
+    const since = (v: number, b: number | null) => (b === null ? 0 : Math.max(0, v - b));
+    useOreStats.setState({
+      status: 'ok',
+      me: { lifetime: since(s.lifetime, base.ore), unrefined: s.unrefined, refined: s.refined, gain, gainHours, deployedSol: since(s.deployedSol, base.solIn), returnedSol: since(s.returnedSol, base.solBack) },
+    });
   } catch {
     useOreStats.setState((st) => ({ status: st.me ? 'ok' : 'error' }));
   }
