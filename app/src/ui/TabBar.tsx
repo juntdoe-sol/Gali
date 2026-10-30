@@ -79,16 +79,9 @@ const RIGHT: Item[] = [
   { id: 'chat', label: 'CHAT' },
 ];
 
-/** The lobby bar drops QUEST and ROUNDS (they belong to the island); the games live in the TRAVEL menu. */
-const LOBBY_LEFT: Item[] = program([
-  { id: 'bag', label: 'BAG' },
-  { id: 'skr', label: 'BOOST' },
-  { id: 'ranks', label: 'RANKS' },
-]);
-const LOBBY_RIGHT: Item[] = [
-  { id: 'clans', label: 'CLANS' },
-  { id: 'chat', label: 'CHAT' },
-];
+/** Mining works everywhere now, so the lobby keeps the island's tabs (QUEST and ROUNDS too); the games live in the TRAVEL menu. */
+const LOBBY_LEFT: Item[] = LEFT;
+const LOBBY_RIGHT: Item[] = RIGHT;
 
 /** The lobby's version of the bar: same tabs, but the middle button is quick travel and CHAT opens the lobby chat. */
 export interface LobbyBar {
@@ -234,8 +227,7 @@ function Rail({ active, onTab, inSheet, lobby }: { active: SheetTab | null; onTa
     onTab(null);
     useView.getState().go(-1);
   };
-  // the desktop rail keeps QUEST in the lobby too (the phone's bottom bar has no room for it)
-  const items: Item[] = lobby ? [LEFT[0], ...LOBBY_LEFT, ...LOBBY_RIGHT] : [...LEFT, ...RIGHT];
+  const items: Item[] = lobby ? [...LOBBY_LEFT, ...LOBBY_RIGHT] : [...LEFT, ...RIGHT];
   const tabs = items.filter((t) => t.id !== 'chat');
   const chat = items.find((t) => t.id === 'chat');
 
