@@ -25,6 +25,8 @@ export function PeerCard() {
   const insets = useSafeAreaInsets();
   const ch = useChrome(insets);
   const close = () => useWorld.getState().setFocus(null);
+  // a private message goes to their wallet: the verified one, or the one their game says is connected
+  const dmTo = peer?.wallet ?? peer?.claimed ?? null;
   useEffect(() => {
     if (focus && !peer) useWorld.getState().setFocus(null); // they left the world
   }, [focus, peer]);
@@ -58,7 +60,7 @@ export function PeerCard() {
         ))}
       </View>
       <View style={[styles.row, { marginTop: 10 }]}>
-        {peer.wallet && !peer.bot && peer.wallet !== owner && dmReady() ? (
+        {dmTo && !peer.bot && dmTo !== owner && dmReady() ? (
           <Btn
             small
             kind="gold"
@@ -66,13 +68,13 @@ export function PeerCard() {
             style={{ flex: 1 }}
             onPress={() => {
               close();
-              openDm(peer.wallet, peer.name);
+              openDm(dmTo, peer.name);
             }}
           />
         ) : null}
         <Btn
           small
-          label="Open chat"
+          label="Global chat"
           style={{ flex: 1 }}
           onPress={() => {
             close();

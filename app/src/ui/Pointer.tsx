@@ -33,7 +33,7 @@ export function useTutActive(on: boolean) {
 }
 
 /** Points at `target`; `at` is where along its width the arrow aims (0 left edge .. 1 right edge). */
-export function Pointer({ target, at = 0, span = 1, label }: { target: TutTargetId | null; at?: number; span?: number; label?: string }) {
+export function Pointer({ target, at = 0, from = 0, span = 1, label }: { target: TutTargetId | null; at?: number; from?: number; span?: number; label?: string }) {
   const rect = useTut((s) => (target ? s.rects[target] : undefined));
   const [t, setT] = useState(0);
   useEffect(() => {
@@ -48,7 +48,7 @@ export function Pointer({ target, at = 0, span = 1, label }: { target: TutTarget
   const glow = t % 2 ? '#fff1a8' : COLORS.gold;
   return (
     <View pointerEvents="none" style={[StyleSheet.absoluteFill, { zIndex: 60 }]}>
-      <View style={[styles.glow, { left: rect.x - 4, top: rect.y - 4, width: rect.w * span + 8, height: rect.h + 8, borderColor: glow }]} />
+      <View style={[styles.glow, { left: rect.x + rect.w * from - 4, top: rect.y - 4, width: rect.w * span + 8, height: rect.h + 8, borderColor: glow }]} />
       <View style={{ position: 'absolute', left, top, width: AW, height: AH }}>
         {ARROW.flatMap((row, r) =>
           [...row].map((ch, c) =>
