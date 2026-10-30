@@ -304,6 +304,31 @@ function slideIsland(g: Ctx, now: number) {
   text(g, 'WALK EAST TO THE PIER', 6, 32, 1, '#8fd8ff');
 }
 
+function slideAdvertise(g: Ctx, now: number, t: number) {
+  // "your ad here": an invitation to put a product on this screen
+  const grad = g.createLinearGradient(0, 0, 0, LED.h);
+  grad.addColorStop(0, '#0b2a3a');
+  grad.addColorStop(1, '#1a0f2e');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, LED.w, LED.h);
+  const mid = (str: string, y: number, sc: number, col: string, sh?: string) => text(g, str, Math.round(LED.w / 2 - (textWidth(str) * sc) / 2), y, sc, col, sh);
+  mid('WANNA SEE', 3, 1, '#ffffff');
+  const pop = Math.min(1, t * 6);
+  mid('YOUR PRODUCT', Math.round(10 - (1 - pop) * 16), 2, '#ffcf4a', '#7a3a00');
+  mid('ON THIS SCREEN?', 23, 1, '#ffffff');
+  // a dashed frame with marching ants round "YOUR AD HERE"
+  const fx = 36, fy = 30, fw = 60, fh = 11;
+  const step = Math.floor(now / 120) % 4;
+  g.fillStyle = '#3ee6ff';
+  for (let x = 0; x < fw; x++) if ((x + step) % 4 < 2) { g.fillRect(fx + x, fy, 1, 1); g.fillRect(fx + fw - 1 - x, fy + fh - 1, 1, 1); }
+  for (let y = 0; y < fh; y++) if ((y + step) % 4 < 2) { g.fillRect(fx + fw - 1, fy + y, 1, 1); g.fillRect(fx, fy + fh - 1 - y, 1, 1); }
+  if (Math.floor(now / 500) % 2 || t > 0.7) mid('YOUR AD HERE', fy + 3, 1, '#3ee6ff');
+  // the contact on a bar along the bottom
+  g.fillStyle = '#3ee6ff';
+  g.fillRect(0, LED.h - 11, LED.w, 9);
+  mid('CONTACT @SMSONX ON X', LED.h - 9, 1, '#0b2a3a');
+}
+
 /** The signboard, posts on (X, Y). */
 export function drawBillboard(c: Ctx, X: number, Y: number, z: number, now: number, lights: Light[], dpr: number) {
   bbBody ??= paintBillboard();
@@ -313,12 +338,13 @@ export function drawBillboard(c: Ctx, X: number, Y: number, z: number, now: numb
   const cv = bbScreen();
   const g = ctx2d(cv);
   g.clearRect(0, 0, LED.w, LED.h);
-  const slide = Math.floor(now / SLIDE_MS) % 4;
+  const slide = Math.floor(now / SLIDE_MS) % 5;
   const t = (now % SLIDE_MS) / SLIDE_MS;
   if (slide === 0) slideMarket(g, now, t);
   else if (slide === 1) slideParade(g, now);
   else if (slide === 2) slideFounders(g, now, t);
-  else slideIsland(g, now);
+  else if (slide === 3) slideIsland(g, now);
+  else slideAdvertise(g, now, t);
   // a quick wipe between slides
   if (t < 0.05) {
     g.fillStyle = '#ffffff';
@@ -327,6 +353,6 @@ export function drawBillboard(c: Ctx, X: number, Y: number, z: number, now: numb
   led(g, LED.w, LED.h);
   c.drawImage(cv, 0, 0, LED.w, LED.h, x0 + LED.x * z, y0 + LED.y * z, LED.w * z, LED.h * z);
   // the screen lights the clearing
-  const col = ['#ffcf4a', '#ff4fd8', '#ffb020', '#3ee6ff'][slide];
+  const col = ['#ffcf4a', '#ff4fd8', '#ffb020', '#3ee6ff', '#3ee6ff'][slide];
   lights.push({ x: X * dpr, y: (Y - 60 * z) * dpr, r: 120 * z * dpr, c: col, k: 0.8 });
 }
