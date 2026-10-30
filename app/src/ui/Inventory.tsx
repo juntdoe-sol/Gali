@@ -312,7 +312,8 @@ function Bay({ width }: { width: number }) {
 /** The vault's two pages: certificate NFTs, and the achievements this miner has unlocked. */
 function Vault() {
   const [page, setPage] = useState<'certs' | 'achievements'>('certs');
-  const got = useGame((s) => s.save.achievements.length);
+  const have = useGame((s) => s.save.achievements);
+  const got = ACHIEVEMENTS.filter((a) => have.includes(a.id)).length;
   return (
     <View style={{ gap: 10 }}>
       <View style={{ flexDirection: 'row', gap: 6 }}>
@@ -320,7 +321,7 @@ function Vault() {
           <TechBtn label="CERTIFICATES" color={COLORS.gold} primary={page === 'certs'} onPress={() => setPage('certs')} />
         </View>
         <View style={{ flex: 1 }}>
-          <TechBtn label={`ACHIEVEMENTS · ${got}/${ACHIEVEMENTS.length}`} color={COLORS.teal} primary={page === 'achievements'} onPress={() => setPage('achievements')} />
+          <TechBtn label={`ACHIEVEMENTS · ${got}`} color={COLORS.teal} primary={page === 'achievements'} onPress={() => setPage('achievements')} />
         </View>
       </View>
       {page === 'certs' ? <Certificates /> : <Achievements />}
@@ -328,38 +329,29 @@ function Vault() {
   );
 }
 
-/** Every achievement: unlocked ones lit and first, locked ones dimmed with what it takes. */
+/** The achievements this miner has unlocked (only those; the full list lives on the Quest tab). */
 function Achievements() {
   const have = useGame((s) => s.save.achievements);
-  const list = [...ACHIEVEMENTS].sort((a, b) => Number(have.includes(b.id)) - Number(have.includes(a.id)));
+  const list = ACHIEVEMENTS.filter((a) => have.includes(a.id));
   return (
-    <TechPanel title={`ACHIEVEMENTS · ${have.length}/${ACHIEVEMENTS.length} UNLOCKED`} color={COLORS.teal}>
-      <View style={{ height: 8, flexDirection: 'row', gap: 2 }}>
-        {ACHIEVEMENTS.map((a) => (
-          <View key={a.id} style={{ flex: 1, backgroundColor: have.includes(a.id) ? COLORS.gold : TECH.rule }} />
-        ))}
-      </View>
-      <View style={styles.achGrid}>
-        {list.map((a) => {
-          const on = have.includes(a.id);
-          return (
-            <View key={a.id} style={[styles.ach, { borderColor: on ? COLORS.gold : TECH.rule, backgroundColor: on ? 'rgba(255,201,60,0.1)' : TECH.ink, opacity: on ? 1 : 0.6 }]}>
-              <PixIcon name={on ? 'medal' : 'lock'} size={30} />
-              <T v="display" style={{ fontSize: 16, lineHeight: 17, color: on ? COLORS.gold : COLORS.text, textAlign: 'center' }}>
+    <TechPanel title={`ACHIEVEMENTS · ${list.length} UNLOCKED`} color={COLORS.teal}>
+      {list.length ? (
+        <View style={styles.achGrid}>
+          {list.map((a) => (
+            <View key={a.id} style={[styles.ach, { borderColor: COLORS.gold, backgroundColor: 'rgba(255,201,60,0.1)' }]}>
+              <PixIcon name="medal" size={30} />
+              <T v="display" style={{ fontSize: 16, lineHeight: 17, color: COLORS.gold, textAlign: 'center' }}>
                 {a.label}
               </T>
               <T v="muted" style={{ fontSize: 11, textAlign: 'center' }}>
                 {a.desc}
               </T>
-              {on ? (
-                <T v="tiny" style={{ fontSize: 8, color: COLORS.gold, letterSpacing: 1 }}>
-                  UNLOCKED
-                </T>
-              ) : null}
             </View>
-          );
-        })}
-      </View>
+          ))}
+        </View>
+      ) : (
+        <T v="muted">No achievements yet. Mine, dig and brawl to unlock them: see the Quest tab.</T>
+      )}
     </TechPanel>
   );
 }
