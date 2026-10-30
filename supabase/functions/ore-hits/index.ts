@@ -148,11 +148,14 @@ Deno.serve(async (req) => {
     for (let id = from; id <= to; id++) ids.push(id);
     const raws = await accounts(await Promise.all(ids.map(roundPda)));
 
-    const { data: miners, error: mErr } = await db.from('gali_miners').select('wallet');
+    const { data: miners, error: mErr } = await db.from('gali_miners').select('wallet, ore_base, sol_in_base, sol_back_base');
     if (mErr) throw mErr;
+    const bases = new Map((miners ?? []).map((m) => [m.wallet, m]));
     const gali = new Set((miners ?? []).map((m) => m.wallet));
 
-    // every 5 minutes: ORE and SOL prices, and all Gali wallets' lifetime ORE / SOL in / SOL back
+    // every 5 minutes: ORE and SOL prices, and all Gali wallets' ORE / SOL in / SOL back since they joined Gali
+    // (ORE's lifetime counters minus each wallet's baseline, supabase/sql/gali-since-join.sql; a missing baseline is
+    // written down now, so that wallet counts from here)
     const list = [...gali];
     let minerAccts: (Uint8Array | null)[] | null = null;
     const { data: mk } = await db.from('gali_ore_market').select('prices_at,totals_at').eq('id', 1).maybeSingle();
@@ -164,12 +167,26 @@ Deno.serve(async (req) => {
     }
     if (stale(mk?.totals_at) && list.length) {
       minerAccts = await accounts(await minerKeys(list));
-      let ore = 0n, dep = 0n, back = 0n, n = 0;
-      for (const raw of minerAccts) {
-        if (!raw) continue;
-        try { const m = decodeMiner(raw); ore += m.lifetimeOre; dep += m.lifetimeDeployed; back += m.lifetimeSol; n++; } catch { /* skip */ }
-      }
-      market = { ...(market ?? {}), miners: n, ore: Number(ore) / ORE_UNIT, deployed_sol: Number(dep) / 1e9, returned_sol: Number(back) / 1e9, totals_at: new Date().toISOString() };
+      let ore = 0, dep = 0, back = 0, n = 0;
+      const fresh: Promise<unknown>[] = [];
+      minerAccts.forEach((raw, i) => {
+        const b = bases.get(list[i]);
+        let life = { ore: 0, dep: 0, back: 0 };
+        if (raw) {
+          try { const m = decodeMiner(raw); life = { ore: Number(m.lifetimeOre) / ORE_UNIT, dep: Number(m.lifetimeDeployed) / 1e9, back: Number(m.lifetimeSol) / 1e9 }; } catch { return; }
+        }
+        if (b && (b.ore_base === null || b.sol_in_base === null || b.sol_back_base === null)) {
+          fresh.push(Promise.resolve(db.rpc('gali_set_base', { p_wallet: list[i], p_ore: life.ore, p_sol_in: life.dep, p_sol_back: life.back })));
+        }
+        if (!raw) return;
+        const since = (v: number, base: unknown) => (base === null || base === undefined ? 0 : Math.max(0, v - Number(base)));
+        ore += since(life.ore, b?.ore_base ?? life.ore);
+        dep += since(life.dep, b?.sol_in_base ?? life.dep);
+        back += since(life.back, b?.sol_back_base ?? life.back);
+        n++;
+      });
+      await Promise.all(fresh).catch(() => undefined);
+      market = { ...(market ?? {}), miners: n, ore, deployed_sol: dep, returned_sol: back, totals_at: new Date().toISOString() };
     }
     if (market) { const { error } = await db.from('gali_ore_market').upsert({ id: 1, ...market }); if (error) throw error; }
 

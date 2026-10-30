@@ -89,7 +89,7 @@ export function reportWin(o: { mode: string; players: number }) {
   playReport('win', { mode: o.mode, players: Math.min(12, o.players) }, true);
 }
 
-/* ---------------- miner ranks: every Gali wallet, with lifetime ORE read from chain ---------------- */
+/* ---------------- miner ranks: every Gali wallet, with ORE mined since it joined Gali ---------------- */
 
 export interface MinerRow {
   wallet: string;
@@ -99,12 +99,18 @@ export interface MinerRow {
   points: number;
   /** XP gained in the period (all time: the total) */
   gain: number;
-  /** lifetime ORE mined, from ORE's Miner account (null until read) */
+  /**
+   * ORE mined since this wallet joined Gali: ORE's lifetime counter (read from its Miner account) minus the counter
+   * when it joined (`oreBase`, supabase/sql/gali-since-join.sql). Null until read.
+   */
   ore: number | null;
-  /** ORE mined in the period: the chain's total minus the day mark before it (null when there is no mark yet) */
+  /** ORE mined in the period: the chain's total minus the later of the day mark before it and the join baseline */
   oreGain: number | null;
-  /** lifetime SOL deployed on ORE's board */
+  /** SOL deployed on ORE's board since joining Gali */
   deployed: number | null;
+  /** ORE's counters when the wallet joined Gali (null until the server writes them down) */
+  oreBase: number | null;
+  solBase: number | null;
 }
 type Lifetimes = (wallets: string[]) => Promise<Record<string, { ore: number; deployed: number }>>;
 interface MinersState {
@@ -146,19 +152,22 @@ export const useMinerRanks = create<MinersState>((set, get) => ({
     const same = p === get().period;
     if (same && (get().status === 'loading' || Date.now() - get().at < 20_000)) return;
     set({ status: 'loading', period: p, ...(same ? {} : { rows: [] }) });
-    const toRow = (x: Partial<MinerRow> & { gain?: number }): MinerRow => ({ wallet: String(x.wallet), name: clean(String(x.name ?? '')), level: Number(x.level) || 1, xp: Number(x.xp) || 0, points: Number(x.points) || 0, gain: Number(x.gain ?? x.xp) || 0, ore: null, oreGain: null, deployed: null });
+    const num = (v: unknown) => (v === null || v === undefined || v === '' ? null : Number(v));
+    const toRow = (x: Partial<MinerRow> & { gain?: number; ore_base?: unknown; sol_in_base?: unknown }): MinerRow => ({ wallet: String(x.wallet), name: clean(String(x.name ?? '')), level: Number(x.level) || 1, xp: Number(x.xp) || 0, points: Number(x.points) || 0, gain: Number(x.gain ?? x.xp) || 0, ore: null, oreGain: null, deployed: null, oreBase: num(x.ore_base), solBase: num(x.sol_in_base) });
     try {
       // the XP board for the period, and everyone (for ORE)
       const [r, all] = await Promise.all([
         p === 'all' ? null : rpc(base, 'gali_miner_ranks', { p_period: p, p_limit: 100 }),
-        fetch(`${base}/rest/v1/gali_miners?select=wallet,name,level,xp,points&order=xp.desc&limit=200`, { headers: headers() }),
+        fetch(`${base}/rest/v1/gali_miners?select=wallet,name,level,xp,points,ore_base,sol_in_base&order=xp.desc&limit=200`, { headers: headers() }),
       ]);
       // an older server (no period ranks yet): show all time instead of nothing
       const allOnly = Boolean(r && r.status === 404);
       if (!all.ok || (r && !r.ok && !allOnly)) throw new Error(String(r && !r.ok ? r.status : all.status));
       const everyoneRaw = (await all.json()) as Partial<MinerRow>[];
       let everyone = (Array.isArray(everyoneRaw) ? everyoneRaw : []).filter((x) => x && typeof x.wallet === 'string').map(toRow);
-      let rows = r && !allOnly ? ((await r.json()) as Partial<MinerRow>[]).filter((x) => x && typeof x.wallet === 'string').map(toRow) : everyone;
+      // the period board has no baselines: take them from everyone
+      const baseOf = new Map(everyone.map((x) => [x.wallet, x]));
+      let rows = r && !allOnly ? ((await r.json()) as Partial<MinerRow>[]).filter((x) => x && typeof x.wallet === 'string').map(toRow).map((x) => ({ ...x, oreBase: baseOf.get(x.wallet)?.oreBase ?? null, solBase: baseOf.get(x.wallet)?.solBase ?? null })) : everyone;
       if (get().period !== p) return;
       set({ rows, everyone, allOnly, at: Date.now(), status: 'ok' });
       if (lifetimes && everyone.length) {
@@ -170,10 +179,14 @@ export const useMinerRanks = create<MinersState>((set, get) => ({
           const list = b && b.ok ? ((await b.json()) as { wallet: string; ore: number }[]) : [];
           marks = Object.fromEntries((Array.isArray(list) ? list : []).map((x) => [x.wallet, Number(x.ore)]));
         }
+        // only what was mined after joining Gali counts; a wallet with no baseline yet counts nothing until it has one
         const withOre = (x: MinerRow): MinerRow => {
-          const ore = life[x.wallet]?.ore ?? 0;
+          const lifeOre = life[x.wallet]?.ore ?? 0;
+          const ore = x.oreBase === null ? 0 : Math.max(0, lifeOre - x.oreBase);
+          const deployed = x.solBase === null ? 0 : Math.max(0, (life[x.wallet]?.deployed ?? 0) - x.solBase);
           const mark = marks[x.wallet];
-          return { ...x, ore, deployed: life[x.wallet]?.deployed ?? 0, oreGain: p === 'all' || allOnly ? ore : mark === undefined ? null : Math.max(0, ore - mark) };
+          const from = mark === undefined || x.oreBase === null ? null : Math.max(mark, x.oreBase);
+          return { ...x, ore, deployed, oreGain: p === 'all' || allOnly ? ore : from === null ? null : Math.max(0, lifeOre - from) };
         };
         everyone = everyone.map(withOre);
         rows = rows.map(withOre);

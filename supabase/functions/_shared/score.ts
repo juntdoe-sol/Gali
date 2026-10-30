@@ -67,6 +67,7 @@ export function minerFields(d: Uint8Array) {
     roundId: u64(d, 656),
     lifetimeRewardsOre: u64(d, 720),
     lifetimeDeployed: u64(d, 728),
+    lifetimeRewardsSol: u64(d, 736),
   };
 }
 export function roundFields(d: Uint8Array) {
