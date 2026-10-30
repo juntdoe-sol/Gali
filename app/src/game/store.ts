@@ -292,6 +292,8 @@ interface GameState {
   setDockOpen: (open: boolean) => void;
   startRun: (r: Omit<Run, 'left' | 'lastRound'>) => Promise<void>;
   stopRun: () => void;
+  /** a deploy is about to be pressed: read ahead so the wallet opens sooner (live only, at most every 10 s) */
+  prewarmDeploy: () => void;
   refreshPot: () => Promise<void>;
   choosePreset: (i: number) => void;
   editPreset: (p: Partial<Preset>) => void;
@@ -408,6 +410,7 @@ export const useGame = create<GameState>((set, get) => {
   const totalWins = () => get().wallet.player?.wins ?? get().save.wins;
   const staked = () => get().wallet.player?.stakedSkr ?? 0;
   /** The connected wallet as a PublicKey. Loads the chain code, so only on-chain paths call it. */
+  let lastPrewarm = 0;
   const ownerKey = async (): Promise<PublicKey | null> => {
     const o = get().wallet.owner;
     if (!o) return null;
@@ -1431,6 +1434,15 @@ export const useGame = create<GameState>((set, get) => {
       const open = deployOpen(st, 2000);
       get().toast(run.total > 1 ? `Autopilot on: ${run.total} rounds` : open ? 'Deploying this round' : 'Deploying when the next round opens', 'good');
       if (st.phase === 'mining' && !st.pending && open) await runRound();
+    },
+
+    prewarmDeploy: () => {
+      const st = get();
+      if (!isLive(st) || !st.wallet.owner || st.run || Date.now() - lastPrewarm < 10_000) return;
+      lastPrewarm = Date.now();
+      void Promise.all([loadBoard(), ownerKey(), loadOreTx()])
+        .then(([b, o]) => o && b.prewarmDeploy(o))
+        .catch(() => undefined);
     },
 
     stopRun: () => {
