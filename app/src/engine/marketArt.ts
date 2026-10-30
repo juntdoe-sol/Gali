@@ -324,9 +324,11 @@ function slideAdvertise(g: Ctx, now: number, t: number) {
   for (let y = 0; y < fh; y++) if ((y + step) % 4 < 2) { g.fillRect(fx + fw - 1, fy + y, 1, 1); g.fillRect(fx, fy + fh - 1 - y, 1, 1); }
   if (Math.floor(now / 500) % 2 || t > 0.7) mid('YOUR AD HERE', fy + 3, 1, '#3ee6ff');
   // the contact on a bar along the bottom
+  g.fillStyle = '#04121c';
+  g.fillRect(0, LED.h - 12, LED.w, 11);
   g.fillStyle = '#3ee6ff';
-  g.fillRect(0, LED.h - 11, LED.w, 9);
-  mid('CONTACT @SMSONX ON X', LED.h - 9, 1, '#0b2a3a');
+  g.fillRect(0, LED.h - 12, LED.w, 1);
+  mid('CONTACT @SMSONX ON X', LED.h - 9, 1, '#ffe14a', '#000000');
 }
 
 const midText = (g: Ctx, str: string, y: number, sc: number, col: string, sh?: string) => text(g, str, Math.round(LED.w / 2 - (textWidth(str) * sc) / 2), y, sc, col, sh);
@@ -355,9 +357,11 @@ function slideOre(g: Ctx, now: number, t: number) {
     g.drawImage(s, 22, 16 + b);
     g.drawImage(s, LED.w - 22 - s.width, 16 - b);
   }
+  g.fillStyle = '#120a02';
+  g.fillRect(0, LED.h - 12, LED.w, 11);
   g.fillStyle = '#ffcf4a';
-  g.fillRect(0, LED.h - 11, LED.w, 9);
-  midText(g, 'A NEW ORE ROUND EVERY MINUTE', LED.h - 9, 1, '#3a2408');
+  g.fillRect(0, LED.h - 12, LED.w, 1);
+  midText(g, 'A NEW ORE ROUND EVERY MINUTE', LED.h - 9, 1, '#ffffff', '#000000');
 }
 
 function slideSeeker(g: Ctx, now: number, t: number) {
@@ -396,9 +400,11 @@ function slideSeeker(g: Ctx, now: number, t: number) {
   const bar = g.createLinearGradient(0, 0, LED.w, 0);
   bar.addColorStop(0, '#9945ff');
   bar.addColorStop(1, '#14f195');
+  g.fillStyle = '#05050c';
+  g.fillRect(40, LED.h - 12, LED.w - 40, 11);
   g.fillStyle = bar;
-  g.fillRect(40, LED.h - 11, LED.w - 40, 9);
-  text(g, 'PLAY GALI ON YOUR SEEKER', 42 + Math.round((LED.w - 44 - textWidth('PLAY GALI ON YOUR SEEKER')) / 2), LED.h - 9, 1, '#0a0a12');
+  g.fillRect(40, LED.h - 12, LED.w - 40, 1);
+  text(g, 'PLAY GALI ON YOUR SEEKER', 42 + Math.round((LED.w - 44 - textWidth('PLAY GALI ON YOUR SEEKER')) / 2), LED.h - 9, 1, '#14f195', '#000000');
 }
 
 function slideSuperteam(g: Ctx, now: number, t: number) {
