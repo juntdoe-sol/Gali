@@ -15,6 +15,7 @@ import { useLobby } from '../game/lobby';
 import { play } from '../game/sfx';
 import { isLive, roundEndsAt, useGame } from '../game/store';
 import { Dock } from './Dock';
+import { MineColumn } from './Side';
 import { RoundCard } from './Hud';
 import { FocusRing, IconBtn, Kbd, PixelBox, T, U } from './kit';
 import { GUTTER, LANDSCAPE_APP, RAIL_W, TOP_H, useLayout } from './layout';
@@ -178,13 +179,25 @@ function Chip({ onPress, open }: { onPress: () => void; open: boolean }) {
   );
 }
 
-function Drawer({ onClose }: { onClose: () => void }) {
+function Drawer({ onClose, deskTop }: { onClose: () => void; deskTop: number }) {
   const { desktop, side, h } = useLayout();
   const insets = useSafeAreaInsets();
   const toIsland = () => {
     onClose();
     useLobby.getState().go('island');
   };
+  const islandBtn = (
+    <Pressable onPress={toIsland} accessibilityRole="button" accessibilityLabel="Go to ORE Island to pick spots on the map">
+          {(st) => (
+            <View style={[styles.islandBtn, { borderColor: (st as { hovered?: boolean }).hovered ? COLORS.teal : alpha(COLORS.teal, 0.5) }]}>
+              <PixIcon name="map" size={16} />
+              <T v="display" style={{ fontSize: 15, lineHeight: 16, color: COLORS.teal, letterSpacing: 1 }}>
+                ISLAND
+              </T>
+            </View>
+          )}
+        </Pressable>
+  );
   const body = (
     <>
       <View style={styles.drawHead}>
@@ -196,16 +209,7 @@ function Drawer({ onClose }: { onClose: () => void }) {
             Deploy from anywhere
           </T>
         </View>
-        <Pressable onPress={toIsland} accessibilityRole="button" accessibilityLabel="Go to ORE Island to pick spots on the map">
-          {(st) => (
-            <View style={[styles.islandBtn, { borderColor: (st as { hovered?: boolean }).hovered ? COLORS.teal : alpha(COLORS.teal, 0.5) }]}>
-              <PixIcon name="map" size={16} />
-              <T v="display" style={{ fontSize: 15, lineHeight: 16, color: COLORS.teal, letterSpacing: 1 }}>
-                ISLAND
-              </T>
-            </View>
-          )}
-        </Pressable>
+        {islandBtn}
         <HideBtn compact />
         <IconBtn onPress={onClose} label="Close the mining panel" kbd="ESC">
           <PixIcon name="close" size={16} />
@@ -230,11 +234,20 @@ function Drawer({ onClose }: { onClose: () => void }) {
     </>
   );
   if (desktop) {
+    // the same column as ORE Island, under this screen's own top bar
     return (
-      <View style={[styles.deskDrawer, { width: side, right: GUTTER, top: GUTTER, bottom: GUTTER }]} pointerEvents="box-none">
-        <PixelBox fill="rgba(10,16,38,0.97)" hi={COLORS.trim} lo="#04060f" shadow={2} style={styles.drawBox}>
-          {body}
-        </PixelBox>
+      <View style={[styles.deskDrawer, { width: side, right: GUTTER, top: deskTop, bottom: GUTTER }]} pointerEvents="box-none">
+        <MineColumn
+          hint="LITE covers every spot"
+          extra={
+            <>
+              {islandBtn}
+              <IconBtn onPress={onClose} label="Close the mining panel" kbd="ESC">
+                <PixIcon name="close" size={16} />
+              </IconBtn>
+            </>
+          }
+        />
       </View>
     );
   }
@@ -295,7 +308,7 @@ export function MineAnywhere({ at = 'lobby' }: { at?: 'lobby' | 'cave' | 'arena'
           </View>
         )}
       </View>
-      {open && !hidden ? <Drawer onClose={() => setOpen(false)} /> : null}
+      {open && !hidden ? <Drawer onClose={() => setOpen(false)} deskTop={at === 'lobby' ? TOP_H + GUTTER : GUTTER + 56} /> : null}
     </>
   );
 }
@@ -306,7 +319,7 @@ const styles = StyleSheet.create({
   hideBtn: { height: 30, paddingHorizontal: 7, flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: U, backgroundColor: 'rgba(8,13,32,0.85)' },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 10, paddingVertical: 6 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  deskDrawer: { position: 'absolute', zIndex: 46 },
+  deskDrawer: { position: 'absolute', zIndex: 46, gap: 12 },
   phoneDrawer: { position: 'absolute', left: 8, right: 8, zIndex: 46 },
   drawBox: { flexShrink: 1, minHeight: 0, padding: 10, gap: 8 },
   drawHead: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 4 },
