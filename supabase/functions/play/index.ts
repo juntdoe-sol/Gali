@@ -25,6 +25,20 @@ import { readMinerRound } from '../_shared/ore.ts';
 import { scoreRound } from '../_shared/score.ts';
 
 const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+
+/**
+ * Gali counts ORE and SOL from when a wallet joined (supabase/sql/gali-since-join.sql): the first check-in writes
+ * down ORE's lifetime counters as the wallet's baseline. A wallet that never mined on ORE starts at zero.
+ */
+async function setBase(wallet: string) {
+  const { data } = await db.from('gali_miners').select('ore_base, sol_in_base, sol_back_base').eq('wallet', wallet).maybeSingle();
+  if (!data || (data.ore_base !== null && data.sol_in_base !== null && data.sol_back_base !== null)) return;
+  const { miner } = await readMinerRound(wallet);
+  const ore = miner ? Number(miner.lifetimeRewardsOre) / 1e11 : 0;
+  const solIn = miner ? Number(miner.lifetimeDeployed) / 1e9 : 0;
+  const solBack = miner ? Number(miner.lifetimeRewardsSol) / 1e9 : 0;
+  await db.rpc('gali_set_base', { p_wallet: wallet, p_ore: ore, p_sol_in: solIn, p_sol_back: solBack });
+}
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -61,7 +75,9 @@ Deno.serve(async (req) => {
 
     if (a === 'seen') {
       const { error } = await db.rpc('gali_checkin', { p_wallet: me, p_name: cleanName(q.name) });
-      return error ? fail(error) : reply(200, { ok: true });
+      if (error) return fail(error);
+      await setBase(me).catch((e) => console.error('base', (e as Error)?.message ?? e));
+      return reply(200, { ok: true });
     }
     if (a === 'round') {
       const round = BigInt(int(q.round, 0, Number.MAX_SAFE_INTEGER));

@@ -134,14 +134,16 @@ export async function fetchCommunity(): Promise<Community> {
       count(`first_seen=gte.${encodeURIComponent(startOfTodayIso())}`),
       count(`seen=gte.${encodeURIComponent(new Date(Date.now() - 5 * 60_000).toISOString())}`),
     ]);
-    const res = await fetch(`${BASE}/rest/v1/gali_miners?select=wallet,name&order=xp.desc&limit=100`, { headers: H });
-    const rows = res.ok ? ((await res.json()) as { wallet: string; name: string }[]) : [];
+    const res = await fetch(`${BASE}/rest/v1/gali_miners?select=wallet,name,ore_base&order=xp.desc&limit=100`, { headers: H });
+    const rows = res.ok ? ((await res.json()) as { wallet: string; name: string; ore_base: number | string | null }[]) : [];
     const life = await fetchMinerLifetimes(rows.map((r) => r.wallet)).catch(() => ({}) as Record<string, { ore: number; deployed: number }>);
+    // ORE mined in Gali: ORE's lifetime counter minus where the wallet stood when it joined (no baseline yet: nothing)
+    const since = (r: { wallet: string; ore_base: number | string | null }) => (r.ore_base === null || r.ore_base === undefined ? 0 : Math.max(0, (life[r.wallet]?.ore ?? 0) - Number(r.ore_base)));
     const top = rows
-      .map((r) => ({ name: r.name || `${r.wallet.slice(0, 4)}..${r.wallet.slice(-4)}`, wallet: r.wallet, ore: life[r.wallet]?.ore ?? 0 }))
+      .map((r) => ({ name: r.name || `${r.wallet.slice(0, 4)}..${r.wallet.slice(-4)}`, wallet: r.wallet, ore: since(r) }))
       .sort((a, b) => b.ore - a.ore)
       .slice(0, 5);
-    const oreMined = Object.values(life).reduce((a, b) => a + b.ore, 0);
+    const oreMined = rows.reduce((a, r) => a + since(r), 0);
     return { online, registered, newToday, oreMined, top, problem: null };
   } catch (e) {
     const msg = String((e as Error)?.message ?? e);
