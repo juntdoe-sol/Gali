@@ -7,6 +7,7 @@ import { Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { COLORS } from '../game/constants';
 import { Dock, UnclaimedRow } from './Dock';
 import { OreStatsPanel } from './OreStats';
+import { useTutTarget } from '../game/tutTargets';
 import { RoundCard } from './Hud';
 import { Kbd, PixelBox, T, U } from './kit';
 import { GUTTER, LANDSCAPE_APP, useLayout } from './layout';
@@ -55,6 +56,7 @@ export function SidePanel() {
  * ORE stats, the round, the DEPLOY panel, then Unclaimed. `extra` adds buttons to the DEPLOY header.
  */
 export function MineColumn({ hint, extra }: { hint: string; extra?: ReactNode }) {
+  const unclaimedRef = useTutTarget('unclaimed');
   return (
     <>
       <OreStatsPanel />
@@ -74,7 +76,9 @@ export function MineColumn({ hint, extra }: { hint: string; extra?: ReactNode })
           <Dock embedded noUnclaimed />
         </ScrollView>
       </PixelBox>
-      <UnclaimedRow boxed />
+      <View ref={unclaimedRef} collapsable={false}>
+        <UnclaimedRow boxed />
+      </View>
     </>
   );
 }

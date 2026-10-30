@@ -33,7 +33,7 @@ import { islandFight, islandJump, myLook } from '../pixel/PixelMine';
 import { useArena } from '../game/arena';
 import { useView } from '../pixel/view';
 import { Bar, Btn, Choice, F, FocusRing, Frame, IconBtn, INPUT, Kbd, MapButton, PixelBox, Scrim, T, Tip, U, Window } from './kit';
-import { GUTTER, LANDSCAPE_APP, RAIL_W, TOP_H, sideWidth, useChrome, useLayout } from './layout';
+import { GUTTER, LANDSCAPE_APP, RAIL_W, TOP_H, layoutNow, sideWidth, useChrome, useLayout } from './layout';
 import { BAR_H, TabBar, type SheetTab } from './TabBar';
 import { Arcade } from './Arcade';
 import { AnnounceBanner } from './Announce';
@@ -47,6 +47,7 @@ import { InboxBtn } from './Dm';
 import { dmReady, openDm } from '../game/dm';
 import { Sticker } from './Sticker';
 import { useTutorial } from '../game/tutorial';
+import { useCoach } from '../game/coach';
 import { FightPad } from './ActionPad';
 import { TouchZone, useDomZones, zoneEvent } from './zones';
 import type { PixName } from './pixIcons';
@@ -114,7 +115,8 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
     if (!name) return;
     AsyncStorage.getItem(HOWTO_KEY).then(
       (v) => {
-        if (!v) setHowTo(true);
+        // a computer gets the step-by-step coach instead (ui/Coach.tsx)
+        if (!v && !(layoutNow().desktop && !LANDSCAPE_APP)) setHowTo(true);
       },
       () => undefined,
     );
@@ -284,9 +286,11 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
     switch (e.t) {
       case 'swing':
         swing('lobby', e.target, e.x, e.y);
+        useCoach.getState().did('swing');
         break;
       case 'jump':
         jump('lobby');
+        useCoach.getState().did('jump');
         break;
       case 'heal':
         heal(e.hp);
@@ -302,10 +306,12 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
         useRides.getState().toggle();
         const now = useRides.getState().mine;
         if (now !== was) play(now !== null ? 'jump' : 'step');
+        if (now !== null) useCoach.getState().did('ride');
         else if (was === null) useGame.getState().toast('Walk up to a cart or scooter to ride it', 'info');
         break;
       }
       case 'me':
+        useCoach.getState().moved(e.x, e.y);
         rideMoved(e.x, e.y, e.facing);
         setMyPos('lobby', e.x, e.y);
         saveLobbySpot(e.x, e.y);
@@ -721,9 +727,11 @@ function HowToPlay({ onClose }: { onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const { desktop } = useLayout();
   const replay = () => {
-    useTutorial.setState({ done: false, step: -1 });
+    // the whole first-time tour again: walk, jump, swing, ride, then LITE mining and each place
+    useTutorial.setState({ deskDone: false, step: -1 });
+    useCoach.getState().replay();
     onClose();
-    useLobby.getState().go('island');
+    useLobby.getState().go('lobby');
   };
   // a computer gets topics with pictures; phones keep this list
   if (desktop) return <DeskHowTo items={HOWTO} onClose={onClose} onReplay={replay} />;

@@ -314,6 +314,8 @@ function BigHits({ owner }: { owner: string | null }) {
   const { hits, status, load } = useOreHits();
   const [more, setMore] = useState(false);
   const [moreMine, setMoreMine] = useState(false);
+  // one list at a time: your own hits, or every other Gali miner's
+  const [view, setView] = useState<'you' | 'all'>('all');
   useEffect(() => {
     void load();
     const id = setInterval(() => void load(true), 90_000);
@@ -388,26 +390,27 @@ function BigHits({ owner }: { owner: string | null }) {
         </T>
       ) : (
         <>
-          <T v="label" style={[styles.hitHead, { color: COLORS.gold }]}>
-            You · {mineList.length}
-          </T>
-          {!owner ? (
-            <T v="muted">Connect your wallet to see your own big hits.</T>
-          ) : !mineList.length ? (
-            <T v="muted">No big hits for you yet. Take a ★ solo spot and the whole ORE can be yours, or be on the gold spot when a motherlode hits.</T>
+          <View style={{ flexDirection: 'row', gap: 6, marginTop: 10, marginBottom: 8 }}>
+            <Choice label={`You · ${mineList.length}`} on={view === 'you'} onPress={() => setView('you')} />
+            <Choice label={`All Gali miners · ${others.length}`} on={view === 'all'} onPress={() => setView('all')} />
+          </View>
+          {view === 'you' ? (
+            <>
+              {!owner ? (
+                <T v="muted">Connect your wallet to see your own big hits.</T>
+              ) : !mineList.length ? (
+                <T v="muted">No big hits for you yet. Take a ★ solo spot and the whole ORE can be yours, or be on the gold spot when a motherlode hits.</T>
+              ) : (
+                <View style={{ gap: 6 }}>{mineShown.map(row)}</View>
+              )}
+              {mineList.length > 4 ? <Btn small label={moreMine ? 'Show fewer' : `Show all ${mineList.length}`} onPress={() => setMoreMine((m) => !m)} /> : null}
+            </>
           ) : (
-            <View style={{ gap: 6 }}>{mineShown.map(row)}</View>
+            <>
+              {!others.length ? <T v="muted">Nothing yet. The first solo win shows up here.</T> : <View style={{ gap: 6 }}>{shown.map(row)}</View>}
+              {others.length > 8 ? <Btn small label={more ? 'Show fewer' : `Show all ${others.length}`} onPress={() => setMore((m) => !m)} /> : null}
+            </>
           )}
-          {mineList.length > 4 ? <Btn small label={moreMine ? 'Show fewer' : `Show all ${mineList.length}`} onPress={() => setMoreMine((m) => !m)} /> : null}
-          <T v="label" style={styles.hitHead}>
-            All Gali miners · {others.length}
-          </T>
-          {!others.length ? (
-            <T v="muted">Nothing yet. The first solo win shows up here.</T>
-          ) : (
-            <View style={{ gap: 6 }}>{shown.map(row)}</View>
-          )}
-          {others.length > 8 ? <Btn small label={more ? 'Show fewer' : `Show all ${others.length}`} onPress={() => setMore((m) => !m)} /> : null}
         </>
       )}
     </Card>
@@ -802,7 +805,6 @@ const styles = StyleSheet.create({
   grabber: { alignSelf: 'center', width: 40, height: U * 2, backgroundColor: '#3a5290', marginTop: 8, marginBottom: 4 },
   sheetHead: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 6, paddingBottom: 10, borderBottomColor: '#22356f', borderBottomWidth: U },
   past: { padding: 12 },
-  hitHead: { marginTop: 12, marginBottom: 6 },
   hitMeta: { fontFamily: 'Jersey15_400Regular', fontSize: 14, lineHeight: 16, marginTop: 3, letterSpacing: 0.4, fontVariant: ['tabular-nums'] },
   hitNum: { fontSize: 15, lineHeight: 16, color: COLORS.text, fontVariant: ['tabular-nums'] },
   rowCard: { flexDirection: 'row', alignItems: 'center', gap: 10 },
