@@ -25,7 +25,7 @@ import { isOnChain, useGame, useLevelXp } from '../game/store';
 import { play } from '../game/sfx';
 import { EMOTES, useWorld } from '../game/world';
 import { brawlSnap, heal, jump, setMyPos, swing, useBrawl } from '../game/brawl';
-import { useName } from '../game/username';
+import { useName, useRename } from '../game/username';
 import type { LobbyEvent, LobbyPeerView, LobbySnap } from '../engine/lobby';
 import { atlasSource } from '../pixel/atlasSource';
 import LobbyView, { type LobbyRef } from '../pixel/LobbyView';
@@ -38,7 +38,7 @@ import { BAR_H, TabBar, type SheetTab } from './TabBar';
 import { Arcade } from './Arcade';
 import { AnnounceBanner } from './Announce';
 import { PixIcon } from './PixIcon';
-import { DisconnectBtn } from './Hud';
+import { DisconnectBtn, TopBar } from './Hud';
 import { fx } from '../pixel/fx';
 import { DANCES } from '../game/dances';
 import { loadPotw, usePotw } from '../game/ranks';
@@ -86,7 +86,6 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
   const bootAt = useRef(spawn === 'start' ? takeBootSpot() : null).current;
   const name = useName((s) => s.name);
   const nameReady = useName((s) => s.ready);
-  const [editing, setEditing] = useState(false);
   const status = useLobby((s) => s.status);
   const count = useLobby((s) => Object.keys(s.peers).length + 1);
   const lvl = levelFromXp(useLevelXp());
@@ -354,38 +353,18 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
 
       {L.desktop && !LANDSCAPE_APP ? <SharedChat inLobby /> : null}
 
-      {/* header */}
+      {/* header: on a computer the same top bar as ORE Island, titled THE LOBBY */}
       {L.desktop ? (
-        <View style={[styles.deskHead, { left: RAIL_W + GUTTER, right }]} pointerEvents="box-none">
-          <PixelBox fill="rgba(8,13,32,0.9)" hi={COLORS.trim} lo="#04060f" shadow={1} style={styles.deskTitle}>
-            <PixIcon name="users" size={24} />
-            <View>
-              <T v="display" style={{ fontSize: 22, lineHeight: 23, color: COLORS.gold, letterSpacing: 1 }}>
-                THE LOBBY
-              </T>
-              <View style={[styles.headRow, { justifyContent: 'flex-start' }]}>
-                <View style={[styles.dot, { backgroundColor: status === 'online' ? COLORS.green : status === 'full' ? COLORS.red : '#ffb347' }]} />
-                <T v="label" style={{ fontSize: 12, lineHeight: 13 }}>
-                  {status === 'full' ? 'Lobby full' : status === 'online' ? `${count} miner${count === 1 ? '' : 's'} online` : status === 'joining' ? 'Joining' : 'Offline'}
-                </T>
-              </View>
-            </View>
-          </PixelBox>
-          <HollowBadge />
-          <View style={[styles.headRow, { gap: 8 }]}>
-            <NameChip name={name} lvl={lvl} status={status} onPress={() => setEditing(true)} />
-            <SolChip sol={sol} />
-            <Tip text="How to play (?)" side="bottom" width={150}>
-              <IconBtn onPress={() => setHowTo(true)} label="How to play" kbd="?">
-                <T v="display" style={{ fontSize: 22, color: COLORS.gold }}>
-                  ?
-                </T>
-              </IconBtn>
-            </Tip>
-            <InboxBtn />
-            <DisconnectBtn />
-          </View>
-        </View>
+        <TopBar
+          onMenu={() => onTab(sheet === 'me' ? null : 'me')}
+          right={right}
+          place={{
+            title: 'THE LOBBY',
+            icon: 'users',
+            dot: status === 'online' ? COLORS.green : status === 'full' ? COLORS.red : '#ffb347',
+            sub: status === 'full' ? 'Lobby full' : status === 'online' ? `${count} miner${count === 1 ? '' : 's'} online` : status === 'joining' ? 'Joining' : 'Offline',
+          }}
+        />
       ) : (
         <View style={[styles.head, { paddingTop: top + 6 }]} pointerEvents="box-none">
           <View style={styles.headRow} pointerEvents="box-none">
@@ -396,7 +375,7 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
               </T>
             </View>
             <HollowBadge compact />
-            <NameChip name={name} lvl={lvl} status={status} onPress={() => setEditing(true)} />
+            <NameChip name={name} lvl={lvl} status={status} onPress={() => useRename.getState().setOpen(true)} />
           </View>
           <View style={styles.headRow} pointerEvents="box-none">
             <SolChip sol={sol} />
@@ -502,7 +481,7 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
       {howTo ? <HowToPlay onClose={closeHowTo} /> : null}
       <Arcade />
 
-      {nameReady && (!name || editing) ? <NamePrompt first={!name} onDone={() => setEditing(false)} /> : null}
+      {nameReady && !name ? <NamePrompt first onDone={() => undefined} /> : null}
     </View>
   );
 }
@@ -1046,6 +1025,36 @@ const cs = StyleSheet.create({
   stickerKey: { borderRadius: 8 },
   inputRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
 });
+
+/**
+ * Every screen: the rename window (opened from the top bar's name) and, off the lobby, How to play (the ?
+ * button or key). The lobby shows its own How to play.
+ */
+export function GlobalHosts() {
+  const renaming = useRename((r) => r.open);
+  const nameReady = useName((n) => n.ready);
+  const name = useName((n) => n.name);
+  const [help, setHelp] = useState(false);
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const on = () => {
+      if (useLobby.getState().where !== 'lobby') setHelp(true);
+    };
+    const esc = () => setHelp(false);
+    window.addEventListener('gali:help', on);
+    window.addEventListener('gali:escape', esc);
+    return () => {
+      window.removeEventListener('gali:help', on);
+      window.removeEventListener('gali:escape', esc);
+    };
+  }, []);
+  return (
+    <>
+      {nameReady && name && renaming ? <NamePrompt first={false} onDone={() => useRename.getState().setOpen(false)} /> : null}
+      {help ? <HowToPlay onClose={() => setHelp(false)} /> : null}
+    </>
+  );
+}
 
 function NamePrompt({ first, onDone }: { first: boolean; onDone: () => void }) {
   const [v, setV] = useState(useName.getState().name);

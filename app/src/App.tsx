@@ -30,6 +30,7 @@ import { Sheet } from './ui/Sheet';
 import { MarketWindow } from './ui/Market';
 import { MineAnywhere } from './ui/MineAnywhere';
 import { MotherlodeAlert } from './ui/MotherlodeAlert';
+import { GlobalHosts } from './ui/Lobby';
 import { CertClaimPopup } from './ui/CertClaim';
 import { useNft } from './game/nft';
 import { useMarket } from './game/market';
@@ -313,6 +314,7 @@ function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTa
         <ArenaScreen />
         <DmSheet />
         <MotherlodeAlert />
+        <GlobalHosts />
     </>
   );
 }

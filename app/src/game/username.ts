@@ -21,6 +21,9 @@ interface NameState {
   setSex: (s: Sex) => void;
 }
 
+/** The rename window, opened from the top bar on any screen. */
+export const useRename = create<{ open: boolean; setOpen: (v: boolean) => void }>((set) => ({ open: false, setOpen: (open) => set({ open }) }));
+
 export const useName = create<NameState>((set) => ({
   name: '',
   ready: false,
