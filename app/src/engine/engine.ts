@@ -9,6 +9,7 @@
  */
 import { canvasDpr, reducedMotion } from './screen';
 import { wheelZoom } from './screen';
+import { BannerPlane } from './plane';
 import { ACTORS, ISLE, blit, draw, drawCanvas, has, makeCanvas, ctx2d, sprite, text, textCentered, textWidth, loadAtlas, type Ctx } from './art';
 import { drawMiner, drawPet, frameAt, HIT_FRAME, IMPACT, lampOf, moleNames, petFlies, petLight, POSES, stepBody, type Body } from './actors';
 import { Camera } from './camera';
@@ -111,6 +112,7 @@ export class Engine {
   private nextFish = 0;
   private punched = -1;
   private mole = { idx: -1, start: 0, nextAt: Date.now() + 5000, bonkedAt: -1 };
+  private plane = new BannerPlane();
   private flocks = Array.from({ length: 5 }, (_, i) => ({ x: -60 + seeded(i * 3.1) * 480, y: -30 + seeded(i * 5.7) * 260, sp: 6 + seeded(i * 9.3) * 8, dir: seeded(i * 11.9) > 0.5 ? 1 : -1, n: 2 + Math.floor(seeded(i * 7.1) * 3) }));
   private props = (ISLE.props as { s: string; x: number; y: number; n: number; ms: number; sway: number }[]).slice();
   private mode: Mode = 'island';
@@ -1224,6 +1226,7 @@ export class Engine {
         draw(c, up ? 'bird-0' : 'bird-1', OX + bx * S, OY + by * S, S, f.dir < 0, 0.9);
       }
     }
+    this.plane.draw(c, OX, OY, S, now, dt, FIT_X, FIT_Y, FIT_W, FIT_H);
     const parting = el >= 1400 ? Math.max(0.1, 1 - (el - 1400) / 600) : 1;
     this.sky.drawClouds(c, OX, OY, S, Math.max(0, Math.min(1, 1.6 - zoomK * 0.6)) * parting);
     this.sky.drawRain(c, DW, DH, Math.max(1, Math.round(dpr)));
