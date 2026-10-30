@@ -134,7 +134,7 @@ function snapshot(): Snapshot {
     claimedAt: st.claimedAt,
     onIsland: useLobby.getState().where === 'island',
     brawl: brawlSnap(now),
-    guide: useTutorial.getState().step === 1,
+    guide: useTutorial.getState().step === 1 && !useTutorial.getState().desk,
   };
 }
 

@@ -9,7 +9,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../game/constants';
 import { useLobby } from '../game/lobby';
 import { useGame } from '../game/store';
-import { TUTORIAL_STEPS, useTutorial } from '../game/tutorial';
+import { TUTORIAL_STEPS, useProTutorial, useTutorial } from '../game/tutorial';
+import { useTut, type TutTargetId } from '../game/tutTargets';
+import { INTRO_MINE, useCoach } from '../game/coach';
+import { Pointer, useTutActive } from './Pointer';
+import { useMinePanel } from './MineAnywhere';
 import { Btn, IconBtn, PixelBox, T } from './kit';
 import { PixIcon } from './PixIcon';
 import type { PixName } from './pixIcons';
@@ -53,7 +57,127 @@ const STEPS: Step[] = [
   },
 ];
 
+/* ---------------- computer: LITE, step by step, an arrow on the real button ---------------- */
+interface DeskStep {
+  icon: PixName;
+  title: string;
+  body: string;
+  target: TutTargetId | null;
+  /** where the arrow aims along the target (0 = its left edge) */
+  at?: number;
+  /** how much of the target's width glows (the first of a row of buttons) */
+  span?: number;
+  label?: string;
+  waits?: string;
+}
+const DESK_STEPS: DeskStep[] = [
+  { icon: 'ore', title: 'Mine ORE in 3 clicks', body: 'Every round, about a minute, one of 25 spots strikes gold and mines ORE. LITE puts your SOL on all 25, so you are always on the gold spot.', target: null },
+  { icon: 'grid', title: 'LITE is on', body: 'LITE covers every spot for you. Nothing to pick on the map.', target: 'tab-lite', at: 0.1, label: 'LITE' },
+  { icon: 'sol', title: 'Add SOL', body: 'Click +0.01. That is one round. Only mine with SOL you can afford to lose.', target: 'quick', at: 0.04, span: 0.24, label: 'CLICK', waits: 'Moves on when you add SOL' },
+  { icon: 'pick', title: 'Press DEPLOY', body: 'Approve it in your wallet. Your SOL goes on ORE’s board for this round.', target: 'deploy', at: 0.04, label: 'CLICK', waits: 'Moves on when your SOL is in' },
+  { icon: 'gift', title: 'Claim what you mined', body: 'When the round ends, most of your SOL comes back plus the ORE you mined. It waits in Unclaimed under the panel. Claim any time.', target: 'unclaimed', at: 0.04 },
+];
+
+const PRO_TOUR: DeskStep[] = [
+  { icon: 'grid', title: 'PRO: you pick the spots', body: 'Click spots on the map to choose them yourself, or set how many with − and +. ALL covers every spot.', target: 'pro-tiles', at: 0.04 },
+  { icon: 'sol', title: 'SOL a round', body: 'This SOL is split evenly over your spots. Fewer spots: bigger share if one strikes, but you miss more rounds.', target: 'amount', at: 0.04 },
+  { icon: 'pick', title: 'Deploy', body: 'Same as LITE: press DEPLOY, approve, wait for the strike. Back to LITE any time.', target: 'deploy', at: 0.04 },
+];
+
+function DeskCard({ s, step, total, onNext, onClose, tag }: { s: DeskStep; step: number; total: number; onNext: () => void; onClose: () => void; tag: string }) {
+  const L = useLayout();
+  useTutActive(true);
+  return (
+    <>
+      <Pointer target={s.target} at={s.at} span={s.span} label={s.label} />
+      <View pointerEvents="box-none" style={[styles.wrap, { top: TOP_H + GUTTER * 2 + 8, left: RAIL_W + GUTTER, right: L.side + GUTTER * 2 }]}>
+        <PixelBox fill="rgba(8,13,32,0.96)" hi={COLORS.gold} lo="#04060f" shadow={1} style={styles.card}>
+          <View style={styles.head}>
+            <PixIcon name={s.icon} size={28} />
+            <View style={{ flex: 1 }}>
+              <T v="label" style={{ color: COLORS.teal }}>
+                {tag} · {step + 1}/{total}
+              </T>
+              <T v="display" style={{ fontSize: 22, lineHeight: 23, color: COLORS.gold }}>
+                {s.title}
+              </T>
+            </View>
+            <IconBtn onPress={onClose} label="Close the tutorial">
+              <PixIcon name="close" size={16} />
+            </IconBtn>
+          </View>
+          <T v="body" style={{ fontSize: 14, lineHeight: 19 }}>
+            {s.body}
+          </T>
+          {s.target ? (
+            <T v="label" style={{ color: COLORS.gold }}>
+              Follow the arrow →
+            </T>
+          ) : null}
+          <View style={styles.foot}>
+            <View style={styles.dots}>
+              {Array.from({ length: total }, (_, k) => (
+                <View key={k} style={[styles.dot, { backgroundColor: k <= step ? COLORS.gold : '#22356f' }]} />
+              ))}
+            </View>
+            {s.waits ? (
+              <T v="muted" style={{ fontSize: 12, flexShrink: 1, textAlign: 'right' }}>
+                {s.waits}
+              </T>
+            ) : null}
+            <Btn small kind={s.waits ? 'ghost' : 'gold'} label={step === total - 1 ? 'Got it' : s.waits ? 'Skip step' : 'Next'} onPress={onNext} />
+          </View>
+        </PixelBox>
+      </View>
+    </>
+  );
+}
+
+function DeskMineTutorial() {
+  const where = useLobby((s) => s.where);
+  const onboarded = useGame((s) => s.save.onboarded);
+  const tab = useGame((s) => s.dockTab);
+  const inRound = useGame((s) => Boolean(s.pending || s.run));
+  const amount = useTut((s) => s.liteAmount);
+  const { step, desk, deskDone, start, next, close } = useTutorial();
+  const pro = useProTutorial();
+  const introBusy = useCoach((c) => c.introStep >= 0 && c.introStep < INTRO_MINE);
+
+  // the first landing on the island (after the lobby intro) starts LITE; it opens the panel on LITE
+  useEffect(() => {
+    if (where === 'island' && onboarded && !deskDone && step < 0 && !introBusy) {
+      const t = setTimeout(() => {
+        useMinePanel.getState().setHidden(false);
+        useGame.getState().setDockTab('lite');
+        start(true);
+        useCoach.getState().finishIntro();
+      }, 1200);
+      return () => clearTimeout(t);
+    }
+  }, [where, onboarded, deskDone, step, start, introBusy]);
+  useEffect(() => {
+    if (!desk) return;
+    if (step === 2 && amount > 0) next();
+    if (step === 3 && inRound) next();
+  }, [desk, step, amount, inRound, next]);
+  // PRO's own short tour, the first time a miner switches to PRO
+  useEffect(() => {
+    if (where === 'island' && tab === 'pro' && !pro.done && pro.step < 0 && step < 0) pro.start();
+  }, [where, tab, pro, step]);
+
+  if (where !== 'island') return null;
+  if (desk && step >= 0 && step < DESK_STEPS.length) return <DeskCard key={`l${step}`} s={DESK_STEPS[step]} step={step} total={DESK_STEPS.length} onNext={next} onClose={close} tag="LITE MINING" />;
+  if (pro.step >= 0 && tab === 'pro') return <DeskCard key={`p${pro.step}`} s={PRO_TOUR[pro.step]} step={pro.step} total={PRO_TOUR.length} onNext={pro.next} onClose={pro.close} tag="PRO MINING" />;
+  return null;
+}
+
 export function MineTutorial() {
+  const { desktop } = useLayout();
+  if (desktop && !LANDSCAPE_APP) return <DeskMineTutorial />;
+  return <PhoneMineTutorial />;
+}
+
+function PhoneMineTutorial() {
   const where = useLobby((s) => s.where);
   const onboarded = useGame((s) => s.save.onboarded);
   const picked = useGame((s) => s.selected.length);
