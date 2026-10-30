@@ -1,9 +1,11 @@
 /**
- * Gali NFTs in the game: the Founding Miner certificate and the inventory.
+ * Gali NFTs in the game: the Founding Miner certificate, the Level 10 and Level 20 milestone certificates, and the
+ * inventory.
  *
  * Everything goes through the `nft` Supabase function (supabase/functions/nft):
  *  - status: is this wallet a Founding Miner (it mined a live ORE round during the closed beta), and its claim
- *  - build: the mint transaction, already signed by Gali for the new asset and the collection; the miner signs as
+ *  - status also carries `milestones`: the wallet's server-worked level and each milestone certificate's claim
+ *  - build: the mint transaction (a `kind` of 'lv10' or 'lv20' for a milestone certificate), already signed by Gali for the new asset and the collection; the miner signs as
  *    fee payer and pays the mint (Solana rent plus fees, shown by the wallet before approving)
  *  - confirm: once sent, the server checks the certificate is in the wallet
  *  - inventory: the Gali NFTs a wallet holds (read with Helius DAS on the server)
@@ -25,6 +27,39 @@ export interface CertClaim {
   rounds: number;
   first_at: string | null;
 }
+export type MilestoneKind = 'lv10' | 'lv20';
+export type ClaimKind = 'founding' | MilestoneKind;
+export interface MilestoneClaim {
+  kind: MilestoneKind;
+  serial: number;
+  asset: string;
+  status: 'reserved' | 'minted';
+  level: number;
+}
+export interface MilestoneInfo {
+  need: number;
+  rarity: 'Rare' | 'Legendary';
+  eligible: boolean;
+  claim: MilestoneClaim | null;
+}
+export interface Milestones {
+  /** level and XP as the server worked them out (verified XP) */
+  level: number;
+  xp: number;
+  /** the milestone mint is set up on the server */
+  open: boolean;
+  lv10: MilestoneInfo;
+  lv20: MilestoneInfo;
+}
+/** What each milestone certificate is and what it rolls when the market opens. */
+export const MILESTONE: Record<MilestoneKind, { level: number; title: string; rarity: 'Rare' | 'Legendary'; weapons: string[]; ids: string[] }> = {
+  lv10: { level: 10, title: 'Level 10', rarity: 'Rare', weapons: ['Ten Bagger Pick', 'Level Up Pick', 'XP Bar Blade'], ids: ['G556', 'G557', 'G558'] },
+  lv20: { level: 20, title: 'Level 20', rarity: 'Legendary', weapons: ['Wen Moon Hammer', 'Bull Run Axe', 'Genesis Block Hammer'], ids: ['G559', 'G560', 'G561'] },
+};
+export const MILESTONE_KINDS: MilestoneKind[] = ['lv10', 'lv20'];
+/** A catalogue item's milestone, from its set name ("Level 10"). */
+export const milestoneOfSet = (set: string): MilestoneKind | null => (set === 'Level 10' ? 'lv10' : set === 'Level 20' ? 'lv20' : null);
+
 export interface CertStatus {
   eligible: boolean;
   reason?: 'not-a-gali-miner' | 'no-beta-rounds' | null;
@@ -36,6 +71,8 @@ export interface CertStatus {
   open: boolean;
   /** the server is still reading this wallet's history */
   counting?: boolean;
+  /** the milestone certificates (null when the server could not read them) */
+  milestones?: Milestones | null;
 }
 export interface InvItem {
   id: string;
@@ -53,11 +90,13 @@ interface NftState {
   /** the claim popup */
   popup: boolean;
   claiming: null | 'signing-in' | 'building' | 'wallet' | 'confirming';
+  /** which certificate is being claimed */
+  claimKind: ClaimKind | null;
   error: string | null;
   /** the asset just minted, for the celebration */
   minted: string | null;
   refresh: (wallet: string | null, force?: boolean) => Promise<void>;
-  claim: () => Promise<void>;
+  claim: (kind?: ClaimKind) => Promise<void>;
   openPopup: () => void;
   later: () => void;
 }
@@ -88,6 +127,7 @@ export const useNft = create<NftState>((set, get) => ({
   loading: false,
   popup: false,
   claiming: null,
+  claimKind: null,
   error: null,
   minted: null,
 
@@ -135,10 +175,11 @@ export const useNft = create<NftState>((set, get) => ({
     if (w) void AsyncStorage.setItem(`${LATER_KEY}:${w}`, String(Date.now()));
   },
 
-  async claim() {
+  async claim(kind = 'founding') {
     const wallet = get().wallet;
     if (!wallet || get().claiming) return;
-    set({ error: null });
+    const ms = kind === 'founding' ? null : kind;
+    set({ error: null, claimKind: kind });
     try {
       let pass = useDm.getState().me === wallet ? useDm.getState().pass : null;
       if (!pass) {
@@ -148,20 +189,21 @@ export const useNft = create<NftState>((set, get) => ({
         if (!pass) throw new Error('Sign-in was not completed');
       }
       set({ claiming: 'building' });
-      const built = await call<{ tx: string; asset: string; serial: number; lastValidBlockHeight: number }>({ a: 'build', pass });
+      const built = await call<{ tx: string; asset: string; serial: number; lastValidBlockHeight: number }>({ a: 'build', pass, ...(ms ? { kind: ms } : {}) });
       set({ claiming: 'wallet' });
       const chain = await loadChain();
       const sig = await chain.sendPrebuilt(b64ToBytes(built.tx), built.lastValidBlockHeight);
       set({ claiming: 'confirming' });
       // the chain has it; give the server's read a few tries to catch up
       for (let k = 0; k < 6; k++) {
-        const r: { claim?: CertClaim; pending?: boolean } = await call<{ claim?: CertClaim; pending?: boolean }>({ a: 'confirm', pass, sig }).catch(() => ({ pending: true }));
+        const r: { claim?: { status: string }; pending?: boolean } = await call<{ claim?: { status: string }; pending?: boolean }>({ a: 'confirm', pass, sig, ...(ms ? { kind: ms } : {}) }).catch(() => ({ pending: true }));
         if (r.claim?.status === 'minted') break;
         await wait(2500);
       }
-      set({ claiming: null, minted: built.asset });
+      set({ claiming: null, claimKind: null, ...(ms ? {} : { minted: built.asset }) });
       play('levelup');
-      useGame.getState().toast(`Founding Miner #${String(built.serial).padStart(4, '0')} is in your wallet`, 'gold');
+      const serial = String(built.serial).padStart(4, '0');
+      useGame.getState().toast(ms ? `${MILESTONE[ms].title} Certificate #${serial} is in your wallet` : `Founding Miner #${serial} is in your wallet`, 'gold');
       await get().refresh(wallet, true);
     } catch (e) {
       const m = (e as Error).message || 'Something went wrong';

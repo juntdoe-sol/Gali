@@ -1914,7 +1914,7 @@ def _catalogue():
 
 _C = _catalogue()
 ITEMS = [(gid, _C[gid]['name'], _C[gid]['rarity'], fn) for gid, fn in _FN]
-assert len(ITEMS) == 93 and [i[0] for i in ITEMS] == list(_C), 'catalogue mismatch'
+assert len(ITEMS) == 93 and [i[0] for i in ITEMS] == [k for k in _C if k <= 'G463'], 'catalogue mismatch'
 
 
 # ============================================================ revisions (override earlier drafts)
@@ -2128,3 +2128,8 @@ def giant_ban_hammer():
 
 
 ITEMS = [(g, n, r, giant_ban_hammer if g == 'G461' else f) for g, n, r, f in ITEMS]
+
+
+# the milestone weapons (Level 10 and Level 20 certificate rewards), after the 555
+from milestone_weapons import ITEMS as _MILESTONE  # noqa: E402
+ITEMS = ITEMS + _MILESTONE
