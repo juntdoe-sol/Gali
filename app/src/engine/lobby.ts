@@ -25,7 +25,7 @@ import type { BrawlSnap, Look, Pose, RideKindView, RideView } from './types';
 import { drawRide, RIDE_LIFT } from './rideArt';
 import { drawBillboard, drawVending } from './marketArt';
 import { drawHp, drawKo, drawShield, FightFx, hitFlash, jumpLift, koAge, pickTarget, swingTilt } from './brawlfx';
-import { FLAG_H, FLAG_W, paintFlag, ARENA_FLAGS, ARENA_TORCHES, paintColosseum, paintPotw, paintSign, paintSmash, POTW_H, POTW_W, paintSolBase, paintSolLogo, SIGN_H, SIGN_W, SMASH_COLORS, SMASH_DIM, SOL_BASE, SOL_LOGO } from './lobbyArt';
+import { FLAG_H, FLAG_W, paintFlag, ARENA_FLAGS, ARENA_TORCHES, FIGHTCLUB_LAMPS, paintColosseum, paintFightclub, paintPotw, paintSign, paintSmash, POTW_H, POTW_W, paintSolBase, paintSolLogo, SIGN_H, SIGN_W, SMASH_COLORS, SMASH_DIM, SOL_BASE, SOL_LOGO } from './lobbyArt';
 import { CLIFF, DOORS, PAVILIONS, SMASH_HEAL, SMASHABLES, STRUCTURES, doorAt, GRASS, HALL, LCOLS, LH, LROWS, LT, LW, lidx, lobbyMap, lobbyPath, PLANK, PLAZA, ROAD, SAND, SPAWNS, standable, tileCentre, tileOf, WATER, type DoorId } from '../game/lobbyMap';
 
 export type LobbyEvent =
@@ -142,6 +142,8 @@ function buildTargets(): Tgt[] {
 
 /** how long a smashed pot or crate stays rubble before it grows back (ms) */
 const SMASH_BACK_MS = 18000;
+/** The Gali Fightclub stands where the arena was, while its web test flag is on (ui/BrawlOre.tsx). */
+const FIGHTCLUB = typeof window !== 'undefined' && /[?&](fightclub|brawlore)=1\b/.test(window.location?.search ?? '');
 const DOOR_COLOR: Record<DoorId, string> = { island: '#3de0c8', cave: '#ff9a3d', market: '#b86bff', tunnel: '#ff9a3d', pot: '#ffcf4a', crash: '#3de0c8', arena: '#ff4f5e' };
 
 interface Walker extends Body {
@@ -1971,7 +1973,8 @@ export class LobbyEngine {
     } else if (kind === 'sol-crystal') {
       paintSolBase(g);
     } else if (kind === 'arena') {
-      paintColosseum(g);
+      if (FIGHTCLUB) paintFightclub(g);
+      else paintColosseum(g);
     } else if (kind === 'ore-vein') {
       // a dark rock with warm ore running through it
       for (let y = 0; y < 22; y++) {
@@ -2046,6 +2049,12 @@ export class LobbyEngine {
         c.fillRect(Math.round(X + Math.sin(i * 2.4 + now / 900) * 14 * z), Math.round(ly + (lh - t * (lh + 18)) * z), 2 * z, 2 * z);
       }
       c.globalAlpha = 1;
+    } else if (kind === 'arena' && FIGHTCLUB) {
+      // the Fightclub: lanterns by the door, the fight glowing inside
+      const sp0 = X - (sp.width / 2) * z;
+      const sy0 = Y - sp.height * z;
+      for (const [lx, ly] of FIGHTCLUB_LAMPS) lights.push({ x: (sp0 + lx * z) * this.dpr, y: (sy0 + ly * z) * this.dpr, r: 40 * z * this.dpr, c: '#ffb050', k: 0.85 + 0.15 * Math.sin(now / 110 + lx) });
+      lights.push({ x: X * this.dpr, y: (Y - 12 * z) * this.dpr, r: 34 * z * this.dpr, c: '#ff8a3a', k: 0.75 + 0.25 * Math.sin(now / 240) });
     } else if (kind === 'arena') {
       const sp0 = X - (sp.width / 2) * z;
       const sy0 = Y - sp.height * z;
@@ -2333,7 +2342,7 @@ export class LobbyEngine {
       [36.5, 39.6, 'ui-cart', 'GAMES', DOOR_COLOR.pot],
       [36.5, 25.2, 'ui-star', 'PLAZA', '#ffe27a'],
       [8.5, 17.5, 'ui-fire', 'CAMP', '#ff9a3d'],
-      [8.5, 26, 'ui-trophy', 'ARENA', DOOR_COLOR.arena],
+      [8.5, 26, 'ui-trophy', FIGHTCLUB ? 'FIGHTCLUB' : 'ARENA', DOOR_COLOR.arena],
     ];
     const ms = 10;
     for (const [tx, ty, icon, label, col] of marks) {

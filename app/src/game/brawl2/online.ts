@@ -1,5 +1,5 @@
 /**
- * BrawlOre online: finding other miners and carrying the match messages (rules: sim.ts, wire format: net.ts).
+ * Gali Fightclub online: finding other miners and carrying the match messages (rules: sim.ts, wire format: net.ts).
  *
  * Everything rides the arena's relay room ('gali-arena2'), with its own event names, so the relay needs no change:
  *   boq  "I am looking for a match": every 1.5 s while searching  {id, name, look, weapon, q, since}
@@ -18,7 +18,7 @@ import type { Look } from '../../engine/types';
 import { cleanName } from '../lobbyMap';
 import { idFor } from '../peerId';
 import { useWorld, worldClient, worldReady } from '../world';
-import type { Mode } from './sim';
+import { isSpecial, type Mode } from './sim';
 import type { NetPlayer } from './net';
 
 export type Queue = '1v1' | 'ffa' | `code:${string}`;
@@ -66,7 +66,7 @@ let channel: Ch | null = null;
 let joined = false;
 let ticker: ReturnType<typeof setInterval> | null = null;
 let lastPing = 0;
-let mine: { name: string; look: Look; weapon: string } | null = null;
+let mine: { name: string; look: Look; weapon: string; sp: string } | null = null;
 let sink: ((e: string, p: any) => void) | null = null; // eslint-disable-line @typescript-eslint/no-explicit-any
 const seenMids = new Set<string>();
 
@@ -81,7 +81,7 @@ export function sendNet(e: 'bos' | 'boi' | 'bol', p: Record<string, unknown>) {
 }
 
 /** Start looking for a match in a queue. */
-export function search(q: Queue, me: { name: string; look: Look; weapon: string }, wallet: string | null) {
+export function search(q: Queue, me: { name: string; look: Look; weapon: string; sp: string }, wallet: string | null) {
   mine = me;
   useOnline.setState((s) => ({ phase: joined ? 'search' : 'connecting', q, me: idFor(wallet, s.me), since: Date.now(), peers: {}, match: null, solo: false, error: null }));
   lastPing = 0;
@@ -121,7 +121,7 @@ export function queueList(): (NetPlayer & { since: number })[] {
   if (!s.q || !mine) return [];
   const now = Date.now();
   const list = Object.values(s.peers).filter((p) => p.q === s.q && now - p.seen < STALE_MS);
-  list.push({ id: s.me, name: mine.name, look: mine.look, weapon: mine.weapon, q: s.q, since: s.since, seen: now });
+  list.push({ id: s.me, name: mine.name, look: mine.look, weapon: mine.weapon, sp: mine.sp, q: s.q, since: s.since, seen: now });
   return list.sort((a, b) => a.since - b.since || (a.id < b.id ? -1 : 1));
 }
 
@@ -136,7 +136,7 @@ function tick() {
   const now = Date.now();
   if (now - lastPing >= PING_MS) {
     lastPing = now;
-    void channel?.send({ type: 'broadcast', event: 'boq', payload: { id: s.me, name: mine.name, look: mine.look, weapon: mine.weapon, q: s.q, since: s.since } });
+    void channel?.send({ type: 'broadcast', event: 'boq', payload: { id: s.me, name: mine.name, look: mine.look, weapon: mine.weapon, sp: mine.sp, q: s.q, since: s.since } });
   }
   const list = queueList();
   if (s.q.startsWith('code:')) return; // the host presses START
@@ -157,7 +157,7 @@ function tick() {
 function start(list: NetPlayer[], mode: Mode) {
   const s = useOnline.getState();
   const mid = `${s.me}-${Date.now().toString(36)}`;
-  const m: OnlineMatch = { mid, host: s.me, mode, seed: Math.floor(Math.random() * 1e9), players: list.map(({ id, name, look, weapon }) => ({ id, name, look, weapon })) };
+  const m: OnlineMatch = { mid, host: s.me, mode, seed: Math.floor(Math.random() * 1e9), players: list.map(({ id, name, look, weapon, sp }) => ({ id, name, look, weapon, sp })) };
   seenMids.add(mid);
   stopTicker();
   useOnline.setState({ phase: 'match', match: m });
@@ -219,7 +219,7 @@ function onQueue(p: any) { // eslint-disable-line @typescript-eslint/no-explicit
   if (!p || typeof p.id !== 'string' || p.id.length > 32 || typeof p.q !== 'string' || typeof p.since !== 'number') return;
   const s = useOnline.getState();
   if (p.id === s.me || p.q !== s.q) return;
-  const peer: Peer = { id: p.id, name: cleanName(p.name) || 'Miner', look: cleanLook(p.look), weapon: 'pick', q: p.q, since: Math.min(p.since, Date.now()), seen: Date.now() };
+  const peer: Peer = { id: p.id, name: cleanName(p.name) || 'Miner', look: cleanLook(p.look), weapon: 'pick', sp: isSpecial(p.sp) ? p.sp : 'quake', q: p.q, since: Math.min(p.since, Date.now()), seen: Date.now() };
   useOnline.setState({ peers: { ...s.peers, [p.id]: peer } });
 }
 
@@ -238,7 +238,7 @@ function onMatch(p: any) { // eslint-disable-line @typescript-eslint/no-explicit
   }
   if (s.phase !== 'search' || seenMids.has(p.mid) || p.host !== p.id) return;
   seenMids.add(p.mid);
-  const players: NetPlayer[] = p.players.map((x: { id: string; name: unknown; look: unknown }) => ({ id: String(x.id).slice(0, 32), name: cleanName(x.name) || 'Miner', look: x.id === s.me ? mine?.look : cleanLook(x.look), weapon: 'pick' }));
+  const players: NetPlayer[] = p.players.map((x: { id: string; name: unknown; look: unknown; sp?: unknown }) => ({ id: String(x.id).slice(0, 32), name: cleanName(x.name) || 'Miner', look: x.id === s.me ? mine?.look : cleanLook(x.look), weapon: 'pick', sp: isSpecial(x.sp) ? x.sp : 'quake' }));
   stopTicker();
   useOnline.setState({ phase: 'match', match: { mid: p.mid, host: p.host, mode: p.mode === '1v1' ? '1v1' : 'ffa', seed: Number(p.seed) >>> 0, players } });
 }
