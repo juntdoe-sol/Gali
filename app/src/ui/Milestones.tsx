@@ -132,30 +132,6 @@ function useGearItems(ids: string[]) {
   return book ? (ids.map((id) => book.items.find((g) => g.id === id)).filter(Boolean) as GearItem[]) : [];
 }
 
-/** The reward strip: the one item, or the ones a certificate rolls between (Level 30: each outfit's top). */
-function Rewards({ ids, hue, random }: { ids: string[]; hue: string; random: boolean }) {
-  const items = useGearItems(ids);
-  return (
-    <View style={styles.rewards}>
-      <T v="tiny" style={{ fontSize: 8, color: hue, letterSpacing: 1 }}>
-        {random ? `ROLLS 1 OF ${ids.length}` : 'CLAIMS'}
-      </T>
-      {items.map((g, i) => (
-        <View key={g.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-          {i > 0 && items.length <= 3 ? (
-            <T v="display" style={{ fontSize: 12, color: TECH.dim }}>
-              ?
-            </T>
-          ) : null}
-          <View style={[styles.rewardCell, { borderColor: alpha(hue, 0.55), backgroundColor: alpha(hue, 0.08) }]}>
-            <GearSprite item={g} scale={1} animate={g.rarity === 'Legendary'} />
-          </View>
-        </View>
-      ))}
-    </View>
-  );
-}
-
 /**
  * What a milestone gives, shown big and animated in place of the certificate card: the item bobs and glows, and a
  * certificate that rolls between several items flips through them.
@@ -320,7 +296,6 @@ function CollectRow({
         <T v="muted" style={{ fontSize: 12 }}>
           {status}
         </T>
-        {random ? <Rewards ids={rewards} hue={hue} random={random} /> : null}
         {extra}
       </View>
       {got ? (
