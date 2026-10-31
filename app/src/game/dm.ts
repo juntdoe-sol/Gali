@@ -231,6 +231,19 @@ export async function sendDm(text: string): Promise<boolean> {
   }
 }
 
+/** Send one message to a wallet without opening the conversation (a Fightclub callout). False when not signed in. */
+export async function dmTo(wallet: string, text: string): Promise<boolean> {
+  const s = useDm.getState();
+  const body = text.trim().slice(0, 280);
+  if (!s.pass || !s.me || !body || wallet === s.me) return false;
+  try {
+    await call<{ msg: DmMsg }>({ a: 'send', pass: s.pass, to: wallet, body, name: useName.getState().name ?? '' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Send tokens to the player in the open conversation, then post it there. */
 export async function sendTokens(token: TipToken, amount: number): Promise<boolean> {
   const s = useDm.getState();

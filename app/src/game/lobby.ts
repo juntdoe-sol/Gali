@@ -556,6 +556,7 @@ export function joinChat() {
   useLobby.setState({ chatStatus: 'joining' });
   const ch = client.channel('gali-chat', { config: { broadcast: { self: false, ack: false } } });
   ch.on('broadcast', { event: 'chat' }, ({ payload }) => onChat(payload))
+    .on('broadcast', { event: 'cco' }, ({ payload }) => calloutHooks.heard?.(payload))
     .on('broadcast', { event: 'act' }, ({ payload }) => onAct(payload))
     .on('broadcast', { event: 'hist?' }, ({ payload }) => onHistAsk(payload))
     .on('broadcast', { event: 'hist' }, ({ payload }) => onHist(payload))
@@ -574,6 +575,18 @@ export function joinChat() {
   });
   chatChannel = ch;
   chatJoining = false;
+}
+
+/**
+ * Gali Fightclub callouts ride the chat room, which every miner joins on entering the lobby, so a callout reaches
+ * whoever is online anywhere in Gali (game/brawl2/callout.ts sets `heard`).
+ */
+export const calloutHooks: { heard?: (p: unknown) => void } = {};
+/** Say a callout to everyone online (only the miner it names reacts). */
+export function shoutCallout(p: Record<string, unknown>) {
+  if (!chatChannel) return false;
+  void chatChannel.send({ type: 'broadcast', event: 'cco', payload: { ...p, id: useLobby.getState().me } });
+  return true;
 }
 
 export function leaveLobby() {
