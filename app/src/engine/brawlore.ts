@@ -42,7 +42,9 @@ export interface BrawlResult {
   kos: number;
   falls: number;
   /** everyone, in finishing order */
-  table: { name: string; place: number; kos: number; falls: number; you: boolean }[];
+  table: { id: string; name: string; place: number; kos: number; falls: number; you: boolean; bot: boolean }[];
+  /** online: the match id */
+  mid?: string;
 }
 export type BrawlEvent =
   | { t: 'ready' }
@@ -270,9 +272,10 @@ export class BrawlEngine {
     });
     if (Array.isArray(sn.e)) {
       // your own swings already showed their sparks; the rest is news
-      const news = sn.e.filter((ev) => ev && typeof ev === 'object' && !(ev.t === 'hit' && ev.by === this.me) && !(ev.id === this.me && ['jump', 'dodge', 'land', 'swing', 'recover', 'special'].includes(ev.t)));
+      const news = sn.e.filter((ev) => ev && typeof ev === 'object' && !(ev.t === 'hit' && ev.by === this.me) && !(ev.id === this.me && ['jump', 'dodge', 'land', 'swing', 'recover', 'special', 'grab'].includes(ev.t)));
       this.react(m, news);
     }
+    if (sn.m[4] === 1) m.sudden = true;
     if (sn.m[3] === 1 && !m.over) m.over = true;
   }
   /** Draw a corrected fighter where it was, easing to where it is. */
@@ -441,7 +444,7 @@ export class BrawlEngine {
         step(m, inputs);
         if (this.role === 'host') for (const e of m.events) if (e.t !== 'swing' && e.t !== 'recover') this.outbox.push({ ...e });
         // a guest's own copy only speaks for its own miner; the host's snapshots bring the rest
-        this.react(m, guest ? m.events.filter((e) => (e.id === this.me && ['jump', 'dodge', 'land', 'swing', 'recover', 'special'].includes(e.t)) || (e.t === 'hit' && e.by === this.me)) : m.events);
+        this.react(m, guest ? m.events.filter((e) => (e.id === this.me && ['jump', 'dodge', 'land', 'swing', 'recover', 'special', 'grab'].includes(e.t)) || (e.t === 'hit' && e.by === this.me)) : m.events);
       }
       if (n === 5) this.acc = 0;
     }
@@ -463,8 +466,8 @@ export class BrawlEngine {
     if (m && m.over && !this.sent) {
       this.sent = true;
       const me = m.fighters.find((f) => f.id === this.me) ?? m.fighters[0];
-      const table = [...m.fighters].sort((a, b) => (a.place || 99) - (b.place || 99)).map((f) => ({ name: f.name, place: f.place, kos: f.kos, falls: f.falls, you: f.id === this.me }));
-      const result: BrawlResult = { mode: m.mode, diff: this.setup!.diff, place: me.place, of: m.fighters.length, kos: me.kos, falls: me.falls, table, online: this.role !== 'solo', note: this.note };
+      const table = [...m.fighters].sort((a, b) => (a.place || 99) - (b.place || 99)).map((f) => ({ id: f.id, name: f.name, place: f.place, kos: f.kos, falls: f.falls, you: f.id === this.me, bot: Boolean(f.bot) }));
+      const result: BrawlResult = { mode: m.mode, diff: this.setup!.diff, place: me.place, of: m.fighters.length, kos: me.kos, falls: me.falls, table, online: this.role !== 'solo', note: this.note, mid: this.mid || undefined };
       setTimeout(() => this.emit({ t: 'end', result }), this.note ? 200 : 1400);
     }
     this.draw(t);
@@ -510,6 +513,13 @@ export class BrawlEngine {
           this.kick(200, 2.5);
           this.emit({ t: 'sfx', name: 'special' });
         }
+      } else if (e.t === 'sudden') {
+        this.fx.push({ k: 'word', x: 240, y: 110, t0: now, dur: 1600, c: '#ff5a6a', word: 'SUDDEN DEATH' });
+        this.kick(300, 3);
+        this.emit({ t: 'sfx', name: 'ko' });
+      } else if (e.t === 'grab') {
+        this.fx.push({ k: 'dust', x: e.x!, y: e.y!, t0: now, dur: 260, c: '#c8b090', vx: 0, vy: -20 });
+        if (e.id === this.me) this.emit({ t: 'sfx', name: 'pick' });
       } else if (e.t === 'counter') {
         this.fx.push({ k: 'ring', x: e.x!, y: e.y!, t0: now, dur: 380, c: '#c8f0ff', s: 34 });
         this.fx.push({ k: 'word', x: 240, y: 110, t0: now, dur: 900, c: '#c8f0ff', word: 'COUNTER!', small: true });
@@ -783,9 +793,9 @@ export class BrawlEngine {
       text(c, nm, this.W / 2 - (textWidth(nm) * ns) / 2, this.H * 0.3 + big * 8, ns, '#f4ecff', '#120c1a');
     } else {
       const secs = Math.max(0, Math.ceil(m.timeLeft / FPS));
-      const t = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+      const t = m.sudden ? 'SUDDEN DEATH' : `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
       const w = textWidth(t) * s;
-      text(c, t, this.W / 2 - w / 2, 12, s, secs <= 10 ? '#ff5a6a' : '#f4ecff', '#120c1a');
+      text(c, t, this.W / 2 - w / 2, 12, s, m.sudden || secs <= 10 ? '#ff5a6a' : '#f4ecff', '#120c1a');
     }
     // a card per fighter along the bottom (on a phone, along the top so thumbs don't cover it)
     const n = m.fighters.length;

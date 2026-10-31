@@ -66,7 +66,7 @@ let channel: Ch | null = null;
 let joined = false;
 let ticker: ReturnType<typeof setInterval> | null = null;
 let lastPing = 0;
-let mine: { name: string; look: Look; weapon: string; sp: string } | null = null;
+let mine: { name: string; look: Look; weapon: string; sp: string; w?: string } | null = null;
 let sink: ((e: string, p: any) => void) | null = null; // eslint-disable-line @typescript-eslint/no-explicit-any
 const seenMids = new Set<string>();
 
@@ -82,7 +82,7 @@ export function sendNet(e: 'bos' | 'boi' | 'bol', p: Record<string, unknown>) {
 
 /** Start looking for a match in a queue. */
 export function search(q: Queue, me: { name: string; look: Look; weapon: string; sp: string }, wallet: string | null) {
-  mine = me;
+  mine = { ...me, w: wallet && B58.test(wallet) ? wallet : undefined };
   useOnline.setState((s) => ({ phase: joined ? 'search' : 'connecting', q, me: idFor(wallet, s.me), since: Date.now(), peers: {}, match: null, solo: false, error: null }));
   lastPing = 0;
   join();
@@ -121,7 +121,7 @@ export function queueList(): (NetPlayer & { since: number })[] {
   if (!s.q || !mine) return [];
   const now = Date.now();
   const list = Object.values(s.peers).filter((p) => p.q === s.q && now - p.seen < STALE_MS);
-  list.push({ id: s.me, name: mine.name, look: mine.look, weapon: mine.weapon, sp: mine.sp, q: s.q, since: s.since, seen: now });
+  list.push({ id: s.me, name: mine.name, look: mine.look, weapon: mine.weapon, sp: mine.sp, w: mine.w, q: s.q, since: s.since, seen: now });
   return list.sort((a, b) => a.since - b.since || (a.id < b.id ? -1 : 1));
 }
 
@@ -136,7 +136,7 @@ function tick() {
   const now = Date.now();
   if (now - lastPing >= PING_MS) {
     lastPing = now;
-    void channel?.send({ type: 'broadcast', event: 'boq', payload: { id: s.me, name: mine.name, look: mine.look, weapon: mine.weapon, sp: mine.sp, q: s.q, since: s.since } });
+    void channel?.send({ type: 'broadcast', event: 'boq', payload: { id: s.me, name: mine.name, look: mine.look, weapon: mine.weapon, sp: mine.sp, w: mine.w, q: s.q, since: s.since } });
   }
   const list = queueList();
   if (s.q.startsWith('code:')) return; // the host presses START
@@ -157,7 +157,7 @@ function tick() {
 function start(list: NetPlayer[], mode: Mode) {
   const s = useOnline.getState();
   const mid = `${s.me}-${Date.now().toString(36)}`;
-  const m: OnlineMatch = { mid, host: s.me, mode, seed: Math.floor(Math.random() * 1e9), players: list.map(({ id, name, look, weapon, sp }) => ({ id, name, look, weapon, sp })) };
+  const m: OnlineMatch = { mid, host: s.me, mode, seed: Math.floor(Math.random() * 1e9), players: list.map(({ id, name, look, weapon, sp, w }) => ({ id, name, look, weapon, sp, w })) };
   seenMids.add(mid);
   stopTicker();
   useOnline.setState({ phase: 'match', match: m });
@@ -219,7 +219,7 @@ function onQueue(p: any) { // eslint-disable-line @typescript-eslint/no-explicit
   if (!p || typeof p.id !== 'string' || p.id.length > 32 || typeof p.q !== 'string' || typeof p.since !== 'number') return;
   const s = useOnline.getState();
   if (p.id === s.me || p.q !== s.q) return;
-  const peer: Peer = { id: p.id, name: cleanName(p.name) || 'Miner', look: cleanLook(p.look), weapon: 'pick', sp: isSpecial(p.sp) ? p.sp : 'quake', q: p.q, since: Math.min(p.since, Date.now()), seen: Date.now() };
+  const peer: Peer = { id: p.id, name: cleanName(p.name) || 'Miner', look: cleanLook(p.look), weapon: 'pick', sp: isSpecial(p.sp) ? p.sp : 'quake', w: walletOf(p.id, p.w), q: p.q, since: Math.min(p.since, Date.now()), seen: Date.now() };
   useOnline.setState({ peers: { ...s.peers, [p.id]: peer } });
 }
 
@@ -238,9 +238,15 @@ function onMatch(p: any) { // eslint-disable-line @typescript-eslint/no-explicit
   }
   if (s.phase !== 'search' || seenMids.has(p.mid) || p.host !== p.id) return;
   seenMids.add(p.mid);
-  const players: NetPlayer[] = p.players.map((x: { id: string; name: unknown; look: unknown; sp?: unknown }) => ({ id: String(x.id).slice(0, 32), name: cleanName(x.name) || 'Miner', look: x.id === s.me ? mine?.look : cleanLook(x.look), weapon: 'pick', sp: isSpecial(x.sp) ? x.sp : 'quake' }));
+  const players: NetPlayer[] = p.players.map((x: { id: string; name: unknown; look: unknown; sp?: unknown; w?: unknown }) => ({ id: String(x.id).slice(0, 32), name: cleanName(x.name) || 'Miner', look: x.id === s.me ? mine?.look : cleanLook(x.look), weapon: 'pick', sp: isSpecial(x.sp) ? x.sp : 'quake', w: x.id === s.me ? mine?.w : walletOf(String(x.id), x.w) }));
   stopTicker();
   useOnline.setState({ phase: 'match', match: { mid: p.mid, host: p.host, mode: p.mode === '1v1' ? '1v1' : 'ffa', seed: Number(p.seed) >>> 0, players } });
+}
+
+const B58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+/** A wallet someone claims, believed only when their player id carries it (game/peerId.ts). */
+function walletOf(id: string, w: unknown): string | undefined {
+  return typeof w === 'string' && B58.test(w) && id.startsWith(w.slice(0, 8)) ? w : undefined;
 }
 
 const DEFAULT_LOOK: Look = { hat: 'hat-yellow', fit: '#3a5a8a', pick: '#b8c4d6', handle: '#6b4a32', pet: null, glow: 'none', sex: 'm' };
