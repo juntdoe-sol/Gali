@@ -142,8 +142,8 @@ function buildTargets(): Tgt[] {
 
 /** how long a smashed pot or crate stays rubble before it grows back (ms) */
 const SMASH_BACK_MS = 18000;
-/** The Gali Fightclub stands where the arena was, while its web test flag is on (ui/BrawlOre.tsx). */
-const FIGHTCLUB = typeof window !== 'undefined' && /[?&](fightclub|brawlore)=1\b/.test(window.location?.search ?? '');
+/** The Gali Fightclub stands where the arena was (`?oldarena=1` on the web brings the colosseum back, see ui/BrawlOre.tsx). */
+const FIGHTCLUB = !(typeof window !== 'undefined' && /[?&]oldarena=1\b/.test(window.location?.search ?? ''));
 const DOOR_COLOR: Record<DoorId, string> = { island: '#3de0c8', cave: '#ff9a3d', market: '#b86bff', tunnel: '#ff9a3d', pot: '#ffcf4a', crash: '#3de0c8', arena: '#ff4f5e' };
 
 interface Walker extends Body {
