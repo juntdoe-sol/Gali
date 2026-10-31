@@ -169,6 +169,7 @@ Deno.serve(async (req) => {
       minerAccts = await accounts(await minerKeys(list));
       let ore = 0, dep = 0, back = 0, n = 0;
       const fresh: Promise<unknown>[] = [];
+      const snapW: string[] = [], snapO: number[] = [];
       minerAccts.forEach((raw, i) => {
         const b = bases.get(list[i]);
         let life = { ore: 0, dep: 0, back: 0 };
@@ -179,6 +180,8 @@ Deno.serve(async (req) => {
           fresh.push(Promise.resolve(db.rpc('gali_set_base', { p_wallet: list[i], p_ore: life.ore, p_sol_in: life.dep, p_sol_back: life.back })));
         }
         if (!raw) return;
+        snapW.push(list[i]);
+        snapO.push(Math.round(life.ore * 1e6) / 1e6);
         const since = (v: number, base: unknown) => (base === null || base === undefined ? 0 : Math.max(0, v - Number(base)));
         ore += since(life.ore, b?.ore_base ?? life.ore);
         dep += since(life.dep, b?.sol_in_base ?? life.dep);
@@ -186,6 +189,11 @@ Deno.serve(async (req) => {
         n++;
       });
       await Promise.all(fresh).catch(() => undefined);
+      // every wallet's ORE counter for today, so ORE ranks are worked out on the server (supabase/sql/gali-ore-ranks.sql)
+      if (snapW.length) {
+        const { error: snapErr } = await db.rpc('gali_ore_snap', { p_wallets: snapW, p_ore: snapO });
+        if (snapErr) console.error('ore snap', snapErr.message);
+      }
       market = { ...(market ?? {}), miners: n, ore, deployed_sol: dep, returned_sol: back, totals_at: new Date().toISOString() };
     }
     if (market) { const { error } = await db.from('gali_ore_market').upsert({ id: 1, ...market }); if (error) throw error; }
