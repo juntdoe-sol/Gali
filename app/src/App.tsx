@@ -44,7 +44,8 @@ import { Splash } from './ui/Splash';
 import { PeerCard } from './ui/World';
 import { CaveScreen } from './ui/Cave';
 import { ArenaScreen } from './ui/Arena';
-import { BRAWLORE, BrawlOreScreen } from './ui/BrawlOre';
+import { BRAWLORE, BrawlOreScreen, CalloutPopup } from './ui/BrawlOre';
+import { readFightLink, useCallout } from './game/brawl2/callout';
 import { useArena } from './game/arena';
 import { LobbyBack, LobbyScreen, SharedChat } from './ui/Lobby';
 import { useLobby } from './game/lobby';
@@ -54,7 +55,9 @@ import { HollowSplash } from './ui/Season';
 
 
 // lets browser tests watch the game state
-if (Platform.OS === 'web') Object.assign(globalThis, { __gali: useGame, __galiWorld: useWorld, __galiLobbyStore: useLobby, __galiCaveStore: useCave, __galiArcadeStore: useArcade, __galiBrawl: useBrawl, __galiBrawlTest: _test, __galiArenaStore: useArena, __galiMarket: useMarket, __galiNft: useNft, __galiName: useName, __galiTutorial: useTutorial });
+// a ?fight=CODE link (a Fightclub callout) opened the game
+readFightLink();
+if (Platform.OS === 'web') Object.assign(globalThis, { __gali: useGame, __galiWorld: useWorld, __galiLobbyStore: useLobby, __galiCaveStore: useCave, __galiArcadeStore: useArcade, __galiBrawl: useBrawl, __galiBrawlTest: _test, __galiArenaStore: useArena, __galiMarket: useMarket, __galiNft: useNft, __galiName: useName, __galiTutorial: useTutorial, __galiCallout: useCallout });
 // pixel art in the interface (gear icons) stays crisp when the browser scales it
 if (Platform.OS === 'web' && typeof document !== 'undefined' && !document.getElementById('gali-pixel-css')) {
   const el = document.createElement('style');
@@ -323,6 +326,7 @@ function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTa
         <LiveNotice />
         {!guest && <CaveScreen />}
         {BRAWLORE ? <BrawlOreScreen /> : <ArenaScreen />}
+        {BRAWLORE ? <CalloutPopup /> : null}
         <DmSheet />
         <MotherlodeAlert />
         <GlobalHosts />

@@ -51,6 +51,8 @@ export type BrawlEvent =
   | { t: 'end'; result: BrawlResult }
   | { t: 'sfx'; name: 'swing' | 'hit' | 'pop' | 'slam' | 'cheer' | 'ko' | 'pick' | 'throw' | 'special' | 'ready' }
   | { t: 'menu' }
+  /** a callout card, as a PNG data URL */
+  | { t: 'card'; url: string }
   /** online: a message for the app to send ('bos' from the host, 'boi' from a guest) */
   | { t: 'net'; e: 'bos' | 'boi'; p: Record<string, unknown> };
 
@@ -216,6 +218,69 @@ export class BrawlEngine {
   quit() {
     this.match = null;
     this.role = 'solo';
+  }
+
+  /**
+   * A callout card to post on X (1200 x 630): your miner against the rival in a Fightclub stage, the room code
+   * and the link. A rival whose look is unknown (a friend on X) is a dark silhouette with a question mark.
+   */
+  card(o: { me: { name: string; look: Look; special: SpecialId }; rival: { name: string; look?: Look | null }; code: string; link: string; when?: string | null }) {
+    const W = 1200, H = 630;
+    const cv = makeCanvas(W, H);
+    const c = ctx2d(cv);
+    const stage = STAGES[Math.floor(Math.random() * STAGES.length)];
+    let scene = this.scenes.get(stage.id);
+    if (!scene) this.scenes.set(stage.id, (scene = paintScene(stage)));
+    // the stage behind, zoomed on the ring
+    const Z = 2.6;
+    const cx = 240, cy = 150;
+    c.drawImage(scene.cv, W / 2 - (cx - WX0) * Z, H / 2 - (cy - WY0) * Z, WW * Z, WH * Z);
+    const g = c.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, 'rgba(8,4,14,0.78)');
+    g.addColorStop(0.45, 'rgba(8,4,14,0.25)');
+    g.addColorStop(1, 'rgba(8,4,14,0.85)');
+    c.fillStyle = g;
+    c.fillRect(0, 0, W, H);
+    // the miners, face to face
+    drawMiner(c, o.me.look, 'swing', 2, 310, 470, 9, 1);
+    if (o.rival.look) drawMiner(c, o.rival.look, 'swing', 2, 890, 470, 9, -1);
+    else {
+      const tmp = makeCanvas(W, H);
+      const t = ctx2d(tmp);
+      drawMiner(t, o.me.look, 'idle', 0, 890, 470, 9, -1);
+      t.globalCompositeOperation = 'source-atop';
+      t.fillStyle = '#1a1024';
+      t.fillRect(0, 0, W, H);
+      c.drawImage(tmp, 0, 0);
+      text(c, '?', 890 - (textWidth('?') * 12) / 2, 250, 12, '#ff5a6a', '#0a0608');
+    }
+    const ct = (s: string, y: number, sc: number, col: string) => text(c, s, W / 2 - (textWidth(s) * sc) / 2, y, sc, col, '#0a0608');
+    ct('GALI FIGHTCLUB', 36, 7, '#ffc93c');
+    ct('CALLOUT', 104, 4, '#ff5a6a');
+    if (o.when) ct(`FIGHT AT ${o.when}`.toUpperCase(), 140, 3, '#f4ecff');
+    ct('VS', 300, 12, '#ffffff');
+    // names under the miners
+    const nm = (s: string, x: number, col: string) => {
+      const up = s.toUpperCase().slice(0, 16);
+      const sc = up.length > 11 ? 3 : 4;
+      text(c, up, x - (textWidth(up) * sc) / 2, 500, sc, col, '#0a0608');
+    };
+    nm(o.me.name, 310, '#ffc93c');
+    nm(o.rival.name, 890, '#ff5a6a');
+    const sp = SPECIAL_INFO[o.me.special];
+    text(c, sp.name, 310 - (textWidth(sp.name) * 2) / 2, 540, 2, sp.color, '#0a0608');
+    // the room and the link
+    c.fillStyle = 'rgba(10,6,16,0.92)';
+    c.fillRect(0, H - 62, W, 62);
+    c.fillStyle = '#ffc93c';
+    c.fillRect(0, H - 62, W, 3);
+    text(c, `ROOM ${o.code}`, 32, H - 44, 4, '#ffc93c');
+    // the pixel font has no ? = or &: the card names the site, the post carries the full link
+    const l = 'FIGHT AT ' + o.link.replace(/^https?:\/\//, '').split(/[/?]/)[0].toUpperCase();
+    text(c, l, W - 32 - textWidth(l) * 3, H - 40, 3, '#f4ecff');
+    const url = cv.toDataURL('image/png');
+    this.emit({ t: 'card', url });
+    return url;
   }
 
   /** Online: a message from the room (see game/brawl2/online.ts). */

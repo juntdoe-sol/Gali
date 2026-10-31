@@ -12,6 +12,8 @@ export interface BrawlOreRef extends DOMImperativeFactory {
   quit: (...args: any[]) => void;
   /** online: a message from the room */
   feed: (...args: any[]) => void;
+  /** a callout card: answers with a 'card' event */
+  card: (...args: any[]) => void;
 }
 
 export default function BrawlOreView({ ref, onEvent, atlas, touch }: { ref: Ref<BrawlOreRef>; onEvent: (e: BrawlEvent) => void; atlas: string; touch: boolean; dom?: DOMProps }) {
@@ -28,6 +30,7 @@ export default function BrawlOreView({ ref, onEvent, atlas, touch }: { ref: Ref<
       },
       quit: () => engine.current?.quit(),
       feed: (e: any, p: any) => engine.current?.feed(String(e), p),
+      card: (o: any) => engine.current?.card(o),
     }),
     [],
   );
