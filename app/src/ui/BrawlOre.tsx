@@ -8,17 +8,19 @@
  * the results. It opens where the old arena opened (useArena.open).
  */
 import { useEffect, useRef, useState } from 'react';
-import { Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, gearByKey } from '../game/constants';
 import { useArena } from '../game/arena';
 import { play, type Sound } from '../game/sfx';
 import { useName } from '../game/username';
+import { useLobby } from '../game/lobby';
 import { useGame } from '../game/store';
 import { cancel, endMatch, FFA_WAIT_MS, leaveOnline, onNet, queueList, search, sendNet, SOLO_WAIT_MS, startRoom, useOnline, type Queue } from '../game/brawl2/online';
 import { cleanCode, newCode } from '../game/brawl2/net';
 import { SPECIAL_INFO, specialOf } from '../game/brawl2/specials';
 import { reportFight, tierOf, useFcRank } from '../game/brawl2/rank';
+import { checkLater, fightLink, findRivals, fmtWhen, sendCallout, useCallout, xPostText, type Fight, type Rival } from '../game/brawl2/callout';
 import { awardFightXp } from '../game/brawl';
 import { useFightStats } from '../game/fightGear';
 import type { BrawlEvent, BrawlResult } from '../engine/brawlore';
@@ -68,7 +70,7 @@ export function BrawlOreScreen() {
   const name = useName((s) => s.name);
   const ref = useRef<BrawlOreRef>(null);
   const [atlas, setAtlas] = useState<string | null>(null);
-  const [stage, setStage] = useState<'menu' | 'search' | 'fight' | 'done'>('menu');
+  const [stage, setStage] = useState<'menu' | 'search' | 'fight' | 'done' | 'called'>('menu');
   const [tab, setTab] = useState<'online' | 'bots'>('online');
   const [mode, setMode] = useState<Mode>('1v1');
   const [diff, setDiff] = useState<Difficulty>('normal');
@@ -76,6 +78,8 @@ export function BrawlOreScreen() {
   const [result, setResult] = useState<BrawlResult | null>(null);
   const [soloNote, setSoloNote] = useState(false);
   const [xpGot, setXpGot] = useState(0);
+  const [cardUrl, setCardUrl] = useState<string | null>(null);
+  const [calling, setCalling] = useState(false);
   const owner = useGame((s) => s.wallet.owner);
   const rank = useFcRank((s) => s.me);
   const last = useFcRank((s) => s.last);
@@ -130,14 +134,47 @@ export function BrawlOreScreen() {
     setStage('fight');
     ref.current?.begin({ mode, diff, name: name || 'You', look: myLook(), weapon: 'pick', special: myWeapon().sp });
   };
-  const find = (q: Queue) => {
+  const find = (q: Queue, need = 0) => {
     lastQ.current = q;
     setResult(null);
     setStage('search');
-    search(q, { name: name || 'Miner', look: myLook(), weapon: 'pick', sp: myWeapon().sp }, useGame.getState().wallet.owner);
+    search(q, { name: name || 'Miner', look: myLook(), weapon: 'pick', sp: myWeapon().sp }, useGame.getState().wallet.owner, { need });
   };
+  // call out: tell the rivals, make the card; fight now (wait in the room) or later (a reminder at the time)
+  const callOut = (rivals: Rival[], n: number, at: number) => {
+    const fight: Fight = { code: newCode(), at, n, from: name || 'Miner', rivals: rivals.map((r) => (r.x ? '@' + r.x : r.name)), mine: true };
+    setCardUrl(null);
+    const later = at - Date.now() > 60_000;
+    if (later) setStage('called');
+    else find(`code:${fight.code}`, n);
+    void sendCallout(fight, rivals).then((r) => {
+      if (r.of) useGame.getState().toast(r.reached ? `${r.reached} of ${r.of} got your callout` : 'They are offline with no wallet to message. Share the card.', r.reached ? 'good' : 'info');
+    });
+    const peer = (nm: string) => Object.values(useLobby.getState().peers).find((p) => p.name === nm)?.look ?? null;
+    const first = rivals[0];
+    setTimeout(
+      () =>
+        ref.current?.card({
+          me: { name: name || 'Miner', look: myLook(), special: myWeapon().sp },
+          rival: { name: rivals.length > 1 ? `${rivals.length} MINERS` : first.x ? `@${first.x}` : first.name, look: rivals.length > 1 ? null : peer(first.name) },
+          code: fight.code,
+          link: fightLink(fight),
+          when: later ? fmtWhen(at) : null,
+        }),
+      50,
+    );
+  };
+  // a room to walk into: from a callout popup or a ?fight= link
+  const join = useCallout((s) => s.join);
+  useEffect(() => {
+    if (!open || !join || stage === 'fight') return;
+    useCallout.setState({ join: null });
+    find(`code:${join.code}`, join.n);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, join]);
   const onEvent = (e: BrawlEvent) => {
     if (e.t === 'sfx') play(SFX[e.name] ?? 'pop');
+    else if (e.t === 'card') setCardUrl(e.url);
     else if (e.t === 'net') sendNet(e.e, e.p);
     else if (e.t === 'end') {
       const r = e.result;
@@ -200,7 +237,7 @@ export function BrawlOreScreen() {
         <View style={[styles.corner, { top: insets.top + 8, left: 10 }]} pointerEvents="box-none">
           <Btn small kind="ghost" label={stage === 'fight' ? 'QUIT' : 'LOBBY'} onPress={stage === 'fight' ? () => onEvent({ t: 'menu' }) : exit} />
         </View>
-        {stage === 'menu' ? (
+        {stage === 'menu' && !calling ? (
           <ScrollView style={styles.scroll} contentContainerStyle={[styles.center, { paddingVertical: short ? 6 : 12 }]}>
             <PixelBox fill="rgba(20,12,14,0.95)" hi={COLORS.gold} lo="#04060f" shadow={1} style={[styles.card, short && { gap: 6, padding: 10 }]}>
               <View style={styles.head}>
@@ -244,6 +281,7 @@ export function BrawlOreScreen() {
               ) : (
                 <>
                   <Btn kind="gold" label="FIND A MATCH" onPress={() => find(mode)} />
+                  <Btn kind="red" label="CALL OUT A MINER" sub="Challenge a Gali miner or a friend on X" onPress={() => setCalling(true)} />
                   <T v="label" style={styles.lbl}>
                     PRIVATE ROOM
                   </T>
@@ -273,7 +311,28 @@ export function BrawlOreScreen() {
         ) : null}
         {/* mine while you fight: the round chip and the DEPLOY drawer, hideable like everywhere else */}
         <MineAnywhere at="arena" />
-        {stage === 'search' ? <Searching q={lastQ.current} onCancel={() => { cancel(); setStage('menu'); }} /> : null}
+        {stage === 'fight' ? null : <CalloutPopup inside />}
+        {stage === 'search' ? (
+          <Searching
+            q={lastQ.current}
+            card={cardUrl}
+            onCancel={() => {
+              cancel();
+              useCallout.setState({ mine: null });
+              setStage('menu');
+            }}
+          />
+        ) : null}
+        {calling && stage === 'menu' ? (
+          <CallOutPanel
+            onClose={() => setCalling(false)}
+            onPick={(r, n, at) => {
+              setCalling(false);
+              callOut(r, n, at);
+            }}
+          />
+        ) : null}
+        {stage === 'called' ? <Called card={cardUrl} onDone={() => setStage('menu')} /> : null}
         {stage === 'done' && result ? (
           <View style={styles.centerAbs} pointerEvents="box-none">
             <PixelBox fill="rgba(12,8,24,0.95)" hi={result.place === 1 ? COLORS.gold : '#3a2c50'} lo="#04060f" shadow={1} style={styles.card}>
@@ -339,6 +398,12 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: 8 },
   res: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4, paddingHorizontal: 6 },
   head: { alignItems: 'center', gap: 2 },
+  input: { minHeight: 40, borderWidth: 2, borderColor: '#3a2414', backgroundColor: '#140a08', color: COLORS.text, paddingHorizontal: 10, fontSize: 15 },
+  rival: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6, paddingHorizontal: 8, backgroundColor: 'rgba(255,255,255,0.04)' },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  popWrap: { position: 'absolute', top: 70, left: 0, right: 0, alignItems: 'center', zIndex: 50 },
+  popCard: { width: 380, maxWidth: '94%', padding: 12, gap: 6 },
+  when: { borderWidth: 1, borderColor: '#5a3040', paddingHorizontal: 8, paddingVertical: 5 },
   rank: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, paddingHorizontal: 8, paddingVertical: 3, marginVertical: 2 },
   rankGem: { width: 8, height: 8, transform: [{ rotate: '45deg' }] },
   tabs: { flexDirection: 'row', borderWidth: 2, borderColor: '#3a2414', backgroundColor: '#140a08' },
@@ -349,7 +414,8 @@ const styles = StyleSheet.create({
 });
 
 /** Looking for other miners: who is in, and what happens next. */
-function Searching({ q, onCancel }: { q: Queue; onCancel: () => void }) {
+function Searching({ q, onCancel, card }: { q: Queue; onCancel: () => void; card: string | null }) {
+  const mine = useCallout((s) => s.mine);
   const phase = useOnline((s) => s.phase);
   const me = useOnline((s) => s.me);
   const since = useOnline((s) => s.since);
@@ -368,6 +434,7 @@ function Searching({ q, onCancel }: { q: Queue; onCancel: () => void }) {
   let line: string;
   if (error) line = error;
   else if (phase === 'connecting') line = 'Connecting to the arena...';
+  else if (room && mine && mine.fight.code === room) line = list.length < mine.fight.n ? `Waiting for ${mine.fight.rivals.join(', ')}. The fight starts when ${mine.fight.n > 2 ? 'everyone is' : 'they are'} in.` : 'Everyone is here. Starting...';
   else if (room) line = host ? (list.length < 2 ? 'Share the code. You start when someone joins.' : 'Start when everyone is in (up to 4).') : 'Waiting for the room host to start.';
   else if (list.length < 2) line = `Nobody yet. Bots step in after ${left(SOLO_WAIT_MS)}s.`;
   else if (q === 'ffa') line = list.length >= 4 ? 'Starting...' : `Starting in ${left(FFA_WAIT_MS)}s. Bots fill the empty spots.`;
@@ -387,8 +454,9 @@ function Searching({ q, onCancel }: { q: Queue; onCancel: () => void }) {
             {p.id === list[0].id ? <T v="muted">HOST</T> : null}
           </View>
         ))}
+        {mine && room === mine.fight.code ? <CardShare rivals={mine.rivals} fight={mine.fight} card={card} /> : null}
         <View style={styles.row}>
-          {room && host ? <Btn kind="gold" label="START" disabled={list.length < 2} onPress={startRoom} style={{ flex: 1 }} /> : null}
+          {room && host && !(mine && mine.fight.code === room) ? <Btn kind="gold" label="START" disabled={list.length < 2} onPress={startRoom} style={{ flex: 1 }} /> : null}
           <Btn kind="plain" label="CANCEL" onPress={onCancel} style={{ flex: 1 }} />
         </View>
       </PixelBox>
@@ -456,6 +524,233 @@ function SpecialCard({ name, line, item, color, keyHint, short }: { name: string
           </T>
         )}
       </View>
+    </View>
+  );
+}
+
+const WHEN: [string, number][] = [
+  ['NOW', 0],
+  ['15 MIN', 15],
+  ['30 MIN', 30],
+  ['1 HR', 60],
+  ['2 HRS', 120],
+  ['TONIGHT 9PM', -1],
+];
+/** "TONIGHT 9PM": 9pm today, or tomorrow if it is past. Other choices: minutes from now. */
+const whenAt = (m: number) => {
+  if (m >= 0) return Date.now() + m * 60_000;
+  const d = new Date();
+  d.setHours(21, 0, 0, 0);
+  if (d.getTime() < Date.now() + 5 * 60_000) d.setDate(d.getDate() + 1);
+  return d.getTime();
+};
+
+/**
+ * Who to call out, and when. 1v1: a Gali miner by name (online ones first) or a friend on X. Free for all: up to 3
+ * online Gali miners with a wallet.
+ */
+function CallOutPanel({ onPick, onClose }: { onPick: (r: Rival[], n: number, at: number) => void; onClose: () => void }) {
+  const [tab, setTab] = useState<'gali' | 'x' | 'ffa'>('gali');
+  const [q, setQ] = useState('');
+  const [handle, setHandle] = useState('');
+  const [list, setList] = useState<Rival[]>([]);
+  const [picked, setPicked] = useState<Rival[]>([]);
+  const [when, setWhen] = useState(0);
+  useEffect(() => {
+    let on = true;
+    const t = setTimeout(() => void findRivals(q, tab === 'ffa').then((r) => on && setList(r)), 250);
+    return () => {
+      on = false;
+      clearTimeout(t);
+    };
+  }, [q, tab]);
+  const h = handle.replace(/^@/, '').replace(/[^A-Za-z0-9_]/g, '').slice(0, 15);
+  const at = whenAt(WHEN[when][1]);
+  const toggle = (r: Rival) => setPicked((p) => (p.some((x) => x.wallet === r.wallet) ? p.filter((x) => x.wallet !== r.wallet) : p.length >= 3 ? p : [...p, r]));
+  return (
+    <View style={styles.centerAbs} pointerEvents="box-none">
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.center}>
+        <PixelBox fill="rgba(20,12,14,0.97)" hi="#ff5a6a" lo="#04060f" shadow={1} style={styles.card}>
+          <T v="display" style={[styles.logo, { fontSize: 24, lineHeight: 26, color: '#ff5a6a' }]}>
+            CALL OUT
+          </T>
+          <View style={styles.tabs}>
+            <Tab label="1V1 GALI" on={tab === 'gali'} onPress={() => setTab('gali')} />
+            <Tab label="1V1 ON X" on={tab === 'x'} onPress={() => setTab('x')} />
+            <Tab label="FREE FOR ALL" on={tab === 'ffa'} onPress={() => setTab('ffa')} />
+          </View>
+          <T v="label" style={styles.lbl}>
+            WHEN
+          </T>
+          <View style={[styles.row, { flexWrap: 'wrap', gap: 4 }]}>
+            {WHEN.map(([l], k) => (
+              <Pressable key={l} onPress={() => setWhen(k)} style={[styles.when, when === k && { backgroundColor: '#ff5a6a', borderColor: '#ff5a6a' }]}>
+                <T v="bold" style={{ fontSize: 11, color: when === k ? '#1a0608' : COLORS.text }}>
+                  {l}
+                </T>
+              </Pressable>
+            ))}
+          </View>
+          <T v="muted" style={{ fontSize: 11 }}>
+            {when === 0 ? 'You wait in the room and the fight starts when they walk in.' : `Fight at ${fmtWhen(at, false)}. No waiting: everyone gets a FIGHT popup at the time.`}
+          </T>
+          {tab === 'x' ? (
+            <>
+              <TextInput value={handle} onChangeText={setHandle} placeholder="@handle" placeholderTextColor={COLORS.muted} autoCapitalize="none" autoCorrect={false} style={styles.input} />
+              <Btn kind="red" label="CALL OUT ON X" disabled={h.length < 1} onPress={() => onPick([{ name: '@' + h, wallet: null, x: h }], 2, at)} />
+              <T v="muted" style={{ fontSize: 11 }}>
+                You get a card and a ready post. Your friend taps the link, picks a name, and lands in your room.
+              </T>
+            </>
+          ) : (
+            <>
+              <TextInput value={q} onChangeText={setQ} placeholder={tab === 'ffa' ? 'Filter online miners' : 'Gali name'} placeholderTextColor={COLORS.muted} autoCapitalize="none" autoCorrect={false} style={styles.input} />
+              <View style={{ gap: 4 }}>
+                {!list.length ? (
+                  <T v="muted" style={{ fontSize: 12 }}>
+                    {tab === 'ffa' ? 'No online miners with a wallet right now.' : q.length < 2 ? 'Miners online now show here. Type 2 letters to search every Gali miner.' : 'No miner by that name.'}
+                  </T>
+                ) : (
+                  list.map((r) => {
+                    const on = picked.some((x) => x.wallet === r.wallet);
+                    return (
+                      <Pressable key={(r.wallet ?? '') + r.name} onPress={() => (tab === 'ffa' ? toggle(r) : onPick([r], 2, at))} style={[styles.rival, on && { backgroundColor: 'rgba(255,90,106,0.18)' }]}>
+                        <View style={[styles.dot, { backgroundColor: r.online ? COLORS.green : '#4a4060' }]} />
+                        <T v="bold" style={{ flex: 1 }} numberOfLines={1}>
+                          {r.name}
+                        </T>
+                        {r.level ? <T v="muted">Lv {r.level}</T> : null}
+                        <T v="bold" style={{ color: '#ff5a6a' }}>
+                          {tab === 'ffa' ? (on ? 'IN' : 'ADD') : 'CALL OUT'}
+                        </T>
+                      </Pressable>
+                    );
+                  })
+                )}
+              </View>
+              {tab === 'ffa' ? (
+                <Btn kind="red" label={`CALL OUT ${picked.length || ''} ${picked.length === 1 ? 'MINER' : 'MINERS'}`.replace('  ', ' ')} disabled={!picked.length} onPress={() => onPick(picked, picked.length + 1, at)} />
+              ) : null}
+              <T v="muted" style={{ fontSize: 11 }}>
+                {tab === 'ffa' ? 'Pick up to 3 online miners with a wallet. Bots fill a spot if someone does not show.' : 'Online miners get a popup at once. Miners with a wallet also get it as a message.'}
+              </T>
+            </>
+          )}
+          <Btn kind="plain" label="BACK" onPress={onClose} />
+        </PixelBox>
+      </ScrollView>
+    </View>
+  );
+}
+
+/** A callout set for later: the card to share, and a note that the game will call everyone at the time. */
+function Called({ card, onDone }: { card: string | null; onDone: () => void }) {
+  const mine = useCallout((s) => s.mine);
+  if (!mine) return null;
+  return (
+    <View style={styles.centerAbs} pointerEvents="box-none">
+      <PixelBox fill="rgba(20,12,14,0.97)" hi="#ff5a6a" lo="#04060f" shadow={1} style={styles.card}>
+        <T v="display" style={[styles.logo, { fontSize: 22, lineHeight: 24, color: '#ff5a6a' }]}>
+          CALLOUT SET
+        </T>
+        <T style={{ textAlign: 'center' }}>{`${mine.fight.rivals.join(', ')} · ${fmtWhen(mine.fight.at)} · room ${mine.fight.code}`}</T>
+        <CardShare rivals={mine.rivals} fight={mine.fight} card={card} />
+        <T v="muted" style={{ fontSize: 11, textAlign: 'center' }}>
+          At the time, a FIGHT popup takes you in. Keep Gali open, or come back then.
+        </T>
+        <Btn kind="plain" label="DONE" onPress={onDone} />
+      </PixelBox>
+    </View>
+  );
+}
+
+/** The callout card and how to share it. */
+function CardShare({ rivals, fight, card }: { rivals: Rival[]; fight: Fight; card: string | null }) {
+  const link = fightLink(fight);
+  const code = fight.code;
+  const post = () => void Linking.openURL(`https://x.com/intent/post?text=${encodeURIComponent(xPostText(rivals, fight))}&url=${encodeURIComponent(link)}`);
+  const save = () => {
+    if (!card || Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const a = document.createElement('a');
+    a.href = card;
+    a.download = `gali-callout-${code}.png`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+  const copy = () => {
+    try {
+      void (globalThis as unknown as { navigator?: { clipboard?: { writeText: (s: string) => Promise<void> } } }).navigator?.clipboard?.writeText(link);
+      useGame.getState().toast('Link copied', 'good');
+    } catch {
+      /* no clipboard */
+    }
+  };
+  return (
+    <View style={{ gap: 6 }}>
+      {card ? <Image source={{ uri: card }} style={{ width: '100%', aspectRatio: 1200 / 630 }} resizeMode="contain" accessibilityLabel="Your callout card" /> : null}
+      <View style={styles.row}>
+        {Platform.OS === 'web' ? <Btn small kind="plain" label="SAVE CARD" disabled={!card} onPress={save} style={{ flex: 1 }} /> : null}
+        <Btn small kind="gold" label="POST ON X" onPress={post} style={{ flex: 1.3 }} />
+        {Platform.OS === 'web' ? <Btn small kind="plain" label="COPY LINK" onPress={copy} style={{ flex: 1 }} /> : null}
+      </View>
+      <T v="muted" style={{ fontSize: 11, textAlign: 'center' }}>
+        {Platform.OS === 'web' ? 'Save the card, then attach it to your post on X.' : 'Screenshot the card to attach it to your post.'}
+      </T>
+    </View>
+  );
+}
+
+/**
+ * Someone called you out (or a ?fight= link opened the game): a popup anywhere in Gali, and FIGHT takes you into
+ * their room. Lives outside the Fightclub screen (App.tsx).
+ */
+export function CalloutPopup({ inside = false }: { inside?: boolean }) {
+  const incoming = useCallout((s) => s.incoming);
+  const join = useCallout((s) => s.join);
+  const name = useName((s) => s.name);
+  const open = useArena((s) => s.open);
+  // saved fights whose time has come (one copy of the popup does the checking)
+  useEffect(() => {
+    if (inside) return;
+    checkLater();
+    const t = setInterval(checkLater, 10_000);
+    return () => clearInterval(t);
+  }, []);
+  // a room to join: once you have a name, open the Fightclub (it walks you in)
+  useEffect(() => {
+    if (!inside && join && name && !open) useArena.getState().show(BRAWLORE);
+  }, [inside, join, name, open]);
+  // the Fightclub screen covers the app, so it has its own copy of the popup
+  if (!incoming || open !== inside) return null;
+  const late = incoming.at - Date.now() > 60_000;
+  return (
+    <View style={styles.popWrap} pointerEvents="box-none">
+      <PixelBox fill="rgba(20,12,14,0.97)" hi="#ff5a6a" lo="#04060f" shadow={1} style={styles.popCard}>
+        <T v="label" style={{ color: '#ff5a6a', letterSpacing: 2 }}>
+          GALI FIGHTCLUB
+        </T>
+        <T v="display" style={{ fontSize: 20, lineHeight: 22, color: COLORS.text }}>
+          {incoming.mine ? 'YOUR CALLOUT IS ON' : `${incoming.from.toUpperCase()} CALLED YOU OUT!`}
+        </T>
+        <T v="muted" style={{ fontSize: 12 }}>
+          {incoming.mine
+            ? `Time to fight ${incoming.rivals.join(', ')}. Room ${incoming.code}.`
+            : `${incoming.n > 2 ? 'A free for all' : 'A 1v1'}${late ? ` at ${fmtWhen(incoming.at, false)}` : ''} in room ${incoming.code}.`}
+        </T>
+        <View style={styles.row}>
+          <Btn
+            kind="red"
+            label="FIGHT"
+            onPress={() => {
+              play('select');
+              useCallout.setState({ incoming: null, join: incoming });
+            }}
+            style={{ flex: 1.3 }}
+          />
+          <Btn kind="plain" label="LATER" onPress={() => useCallout.setState({ incoming: null })} style={{ flex: 1 }} />
+        </View>
+      </PixelBox>
     </View>
   );
 }
