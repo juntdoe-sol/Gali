@@ -198,7 +198,7 @@ interface ArenaState {
   downAt: number;
   /** teammates standing over a downed miner, getting them up */
   revives: { id: string; t: string; at: number }[];
-  show: () => void;
+  show: (quiet?: boolean) => void;
   close: () => void;
   setLoadout: (l: Partial<Loadout>) => void;
 }
@@ -226,11 +226,13 @@ export const useArena = create<ArenaState>((set, get) => ({
   thrown: null,
   downAt: 0,
   revives: [],
-  show: () => {
+  show: (quiet) => {
     if (get().open) return;
     set({ open: true, peers: {}, match: blankMatch(), pickups: [], shots: [], ammo: 0, spectator: false, emotes: [], emoteOpen: false, holding: null, heldBy: null, thrown: null, downAt: 0, revives: [] });
     enterScope('arena');
     // the host loop runs even offline: alone, you practise against the boss
+    // quiet: BrawlOre uses the arena's open state but none of its networking or host loop
+    if (quiet) return;
     if (!hostTimer) hostTimer = setInterval(hostTick, 250);
     join();
   },
