@@ -13,7 +13,8 @@ import { ctx2d, loadAtlas, makeCanvas, text, textWidth, type Ctx } from './art';
 import { drawMiner, frameAt } from './actors';
 import type { Look } from './types';
 import { Bots } from '../game/brawl2/bots';
-import { FPS, MOVES, moveHitbox, newMatch, NO_INPUT, poseOf, step, STOCKS, type Difficulty, type Fighter, type Input, type Match, type Mode, type Weapon } from '../game/brawl2/sim';
+import { FPS, MOVES, moveHitbox, newMatch, NO_INPUT, poseOf, step, STOCKS, type Difficulty, type Fighter, type Input, type Match, type MatchEvent, type Mode, type Weapon } from '../game/brawl2/sim';
+import { adoptSelf, applySelf, packSelf, packSnap, setFighter, type NetPlayer, type Snap } from '../game/brawl2/net';
 
 export interface BrawlSetup {
   mode: Mode;
@@ -22,8 +23,13 @@ export interface BrawlSetup {
   look: Look;
   weapon: Weapon;
   seed?: number;
+  /** online (game/brawl2/online.ts): this miner's id, the match, and who hosts it */
+  net?: { role: 'host' | 'guest'; me: string; mid: string; host: string; players: NetPlayer[] };
 }
 export interface BrawlResult {
+  online?: boolean;
+  /** said under the result, e.g. when the host left */
+  note?: string;
   mode: Mode;
   diff: Difficulty;
   place: number;
@@ -37,9 +43,16 @@ export type BrawlEvent =
   | { t: 'ready' }
   | { t: 'end'; result: BrawlResult }
   | { t: 'sfx'; name: 'swing' | 'hit' | 'pop' | 'slam' | 'cheer' | 'ko' | 'pick' | 'throw' }
-  | { t: 'menu' };
+  | { t: 'menu' }
+  /** online: a message for the app to send ('bos' from the host, 'boi' from a guest) */
+  | { t: 'net'; e: 'bos' | 'boi'; p: Record<string, unknown> };
 
+/** your fighter's id offline */
 const ME = 'me';
+/** a guest whose host goes quiet this long ends the match; a guest the host stops hearing becomes a bot */
+const HOST_LOST_MS = 3500;
+const GUEST_LOST_MS = 5000;
+const NET_MS = 100;
 /** each fighter's colour: you are gold */
 const COLORS = ['#ffc93c', '#ff5a6a', '#4fd6ef', '#8ef06a'];
 const BOT_NAMES = ['Rusty', 'Clank', 'Pebble', 'Grit'];
@@ -88,6 +101,21 @@ export class BrawlEngine {
   private sent = false;
   private ready = false;
   private since = new Map<string, { pose: string; at: number }>();
+  /* online */
+  private me = ME;
+  private role: 'solo' | 'host' | 'guest' = 'solo';
+  private mid = '';
+  private hostId = '';
+  private remoteIn = new Map<string, Input>();
+  private heard = new Map<string, number>();
+  private hostHeard = 0;
+  private outbox: MatchEvent[] = [];
+  private netAt = 0;
+  private overSends = 0;
+  private note: string | undefined;
+  private lastIn: Input = NO_INPUT;
+  /** where a fighter was drawn before a correction moved it: eased away over a few frames */
+  private off = new Map<string, { x: number; y: number }>();
   /* input */
   private keys = new Set<string>();
   private mouse = { light: false, heavy: false };
@@ -131,18 +159,46 @@ export class BrawlEngine {
   /** Start a match against bots. */
   begin(s: BrawlSetup) {
     this.setup = s;
-    const n = s.mode === '1v1' ? 1 : 3;
-    const players = [{ id: ME, name: s.name || 'You', bot: null, weapon: s.weapon }];
-    for (let k = 0; k < n; k++) players.push({ id: `bot${k}`, name: BOT_NAMES[k], bot: s.diff as never, weapon: 'pick' as Weapon });
-    this.match = newMatch({ mode: s.mode, players, seed: s.seed ?? Math.floor(Math.random() * 1e9) });
-    this.bots = new Bots();
+    const net = s.net;
+    this.role = net ? net.role : 'solo';
+    this.me = net ? net.me : ME;
+    this.mid = net?.mid ?? '';
+    this.hostId = net?.host ?? '';
+    this.remoteIn.clear();
+    this.heard.clear();
+    this.outbox = [];
+    this.overSends = 0;
+    this.note = undefined;
+    this.off.clear();
+    this.hostHeard = performance.now();
     this.looks.clear();
     this.colorOf.clear();
-    this.looks.set(ME, s.look);
-    players.forEach((p, k) => {
-      if (p.id !== ME) this.looks.set(p.id, BOT_LOOKS[(k - 1) % BOT_LOOKS.length]);
-      this.colorOf.set(p.id, COLORS[k % COLORS.length]);
-    });
+    const players: { id: string; name: string; bot: Difficulty | null; weapon: Weapon }[] = [];
+    if (net) {
+      // the same list, in the same order, on every device in the match
+      for (const p of net.players) {
+        players.push({ id: p.id, name: p.id === this.me ? s.name || 'You' : p.name, bot: null, weapon: 'pick' });
+        this.looks.set(p.id, p.id === this.me ? s.look : ((p.look as Look) ?? BOT_LOOKS[0]));
+        if (p.id !== this.me) this.heard.set(p.id, performance.now());
+      }
+    } else {
+      players.push({ id: ME, name: s.name || 'You', bot: null, weapon: s.weapon });
+      this.looks.set(ME, s.look);
+    }
+    const want = s.mode === '1v1' ? 2 : 4;
+    for (let k = 0; players.length < want; k++) {
+      players.push({ id: `bot${k}`, name: BOT_NAMES[k], bot: (net ? 'normal' : s.diff) as Difficulty, weapon: 'pick' });
+      this.looks.set(`bot${k}`, BOT_LOOKS[k % BOT_LOOKS.length]);
+    }
+    this.match = newMatch({ mode: s.mode, players, seed: s.seed ?? Math.floor(Math.random() * 1e9) });
+    if (this.role === 'guest') {
+      this.match.authority = false;
+      this.match.local = this.me;
+    }
+    this.bots = new Bots();
+    // you are always gold
+    let ci = 1;
+    for (const p of players) this.colorOf.set(p.id, p.id === this.me ? COLORS[0] : COLORS[ci++ % COLORS.length]);
     this.fx = [];
     this.sent = false;
     this.acc = 0;
@@ -151,6 +207,92 @@ export class BrawlEngine {
   /** Leave the match (back to the menu). */
   quit() {
     this.match = null;
+    this.role = 'solo';
+  }
+
+  /** Online: a message from the room (see game/brawl2/online.ts). */
+  feed(e: string, p: Record<string, unknown>) {
+    const m = this.match;
+    if (!m || !p) return;
+    const from = typeof p.id === 'string' ? p.id : '';
+    if (this.role === 'host') {
+      const f = m.fighters.find((x) => x.id === from);
+      if (!f || from === this.me) return;
+      if (e === 'boi' && !f.bot) {
+        this.heard.set(from, performance.now());
+        let i = this.remoteIn.get(from);
+        if (!i) this.remoteIn.set(from, (i = { ...NO_INPUT }));
+        const ox = f.x, oy = f.y;
+        if (applySelf(f, p.s as number[], i)) this.ease(f, ox, oy);
+      } else if (e === 'bol' || e === 'bye') this.toBot(f);
+    } else if (this.role === 'guest') {
+      if (from !== this.hostId) return;
+      if (e === 'bos') this.onSnap(m, p as unknown as Snap);
+      else if (e === 'bol' || e === 'bye') this.hostLeft(m);
+    }
+  }
+  private toBot(f: Fighter) {
+    if (f.bot) return;
+    f.bot = 'normal';
+    this.remoteIn.delete(f.id);
+  }
+  private hostLeft(m: Match) {
+    if (m.over) return;
+    this.note = 'The host left the match.';
+    m.over = true;
+    // whoever left loses; the rest finish in order of lives, then damage
+    const host = m.fighters.find((f) => f.id === this.hostId);
+    if (host) host.stocks = 0;
+    const left = [...m.fighters].filter((f) => f.stocks > 0).sort((a, b) => b.stocks - a.stocks || a.dmg - b.dmg);
+    left.forEach((f, k) => (f.place = k + 1));
+    if (host) host.place = left.length + 1;
+  }
+  private onSnap(m: Match, sn: Snap) {
+    if (!sn || !Array.isArray(sn.f) || !Array.isArray(sn.m) || sn.f.length !== m.fighters.length) return;
+    this.hostHeard = performance.now();
+    m.frame = sn.m[0];
+    m.countdown = sn.m[1];
+    m.timeLeft = sn.m[2];
+    m.fighters.forEach((f, k) => {
+      const ox = f.x, oy = f.y;
+      if (f.id === this.me) {
+        if (adoptSelf(f, sn.f[k])) this.ease(f, ox, oy);
+      } else {
+        setFighter(f, sn.f[k], true);
+        this.ease(f, ox, oy);
+      }
+    });
+    if (Array.isArray(sn.e)) {
+      // your own swings already showed their sparks; the rest is news
+      const news = sn.e.filter((ev) => ev && typeof ev === 'object' && !(ev.t === 'hit' && ev.by === this.me) && !(ev.id === this.me && ['jump', 'dodge', 'land', 'swing', 'recover'].includes(ev.t)));
+      this.react(m, news);
+    }
+    if (sn.m[3] === 1 && !m.over) m.over = true;
+  }
+  /** Draw a corrected fighter where it was, easing to where it is. */
+  private ease(f: Fighter, ox: number, oy: number) {
+    const dx = ox - f.x, dy = oy - f.y;
+    const o = this.off.get(f.id) ?? { x: 0, y: 0 };
+    if (Math.hypot(dx + o.x, dy + o.y) > 60) this.off.delete(f.id);
+    else this.off.set(f.id, { x: o.x + dx, y: o.y + dy });
+  }
+  private netTick(m: Match, now: number) {
+    if (this.role === 'solo' || now - this.netAt < NET_MS) return;
+    this.netAt = now;
+    if (this.role === 'host') {
+      if (m.over && ++this.overSends > 15) return;
+      const ins: Record<string, Input> = {};
+      for (const [id, i] of this.remoteIn) ins[id] = i;
+      ins[this.me] = this.lastIn;
+      this.emit({ t: 'net', e: 'bos', p: { ...packSnap(this.mid, m, ins, this.outbox) } as unknown as Record<string, unknown> });
+      this.outbox = [];
+      for (const f of m.fighters) if (!f.bot && f.id !== this.me && now - (this.heard.get(f.id) ?? now) > GUEST_LOST_MS) this.toBot(f);
+    } else {
+      if (m.over) return;
+      const f = m.fighters.find((x) => x.id === this.me);
+      if (f) this.emit({ t: 'net', e: 'boi', p: { mid: this.mid, s: packSelf(f, this.lastIn) } });
+      if (now - this.hostHeard > HOST_LOST_MS) this.hostLeft(m);
+    }
   }
 
   /* ---------------- input ---------------- */
@@ -271,26 +413,45 @@ export class BrawlEngine {
       while (this.acc >= 1 / FPS && n < 5) {
         this.acc -= 1 / FPS;
         n++;
-        const inputs = this.bots.inputs(m);
-        inputs[ME] = m.fighters[0].stocks > 0 ? this.myInput() : NO_INPUT;
+        const guest = this.role === 'guest';
+        const inputs: Record<string, Input> = guest ? {} : this.bots.inputs(m);
+        const meF = m.fighters.find((f) => f.id === this.me);
+        this.lastIn = meF && meF.stocks > 0 ? this.myInput() : NO_INPUT;
+        inputs[this.me] = this.lastIn;
+        for (const f of m.fighters) {
+          if (f.id === this.me || f.bot) continue;
+          // the others: online players hold what they last sent (host) or what the snapshot said (guest)
+          const r = guest ? f.prev : this.remoteIn.get(f.id);
+          inputs[f.id] = { ...NO_INPUT, mx: r?.mx ?? 0, my: r?.my ?? 0 };
+        }
+        if (guest) for (const f of m.fighters) if (f.bot) inputs[f.id] = { ...NO_INPUT, mx: f.prev.mx, my: f.prev.my };
         step(m, inputs);
-        this.react(m);
+        if (this.role === 'host') for (const e of m.events) if (e.t !== 'swing' && e.t !== 'recover') this.outbox.push({ ...e });
+        // a guest's own copy only speaks for its own miner; the host's snapshots bring the rest
+        this.react(m, guest ? m.events.filter((e) => (e.id === this.me && ['jump', 'dodge', 'land', 'swing', 'recover'].includes(e.t)) || (e.t === 'hit' && e.by === this.me)) : m.events);
       }
       if (n === 5) this.acc = 0;
     }
+    if (m) this.netTick(m, t);
+    for (const [id, o] of this.off) {
+      o.x *= 0.82;
+      o.y *= 0.82;
+      if (Math.abs(o.x) + Math.abs(o.y) < 0.3) this.off.delete(id);
+    }
     if (m && m.over && !this.sent) {
       this.sent = true;
-      const me = m.fighters[0];
-      const table = [...m.fighters].sort((a, b) => a.place - b.place).map((f) => ({ name: f.name, place: f.place, kos: f.kos, falls: f.falls, you: f.id === ME }));
-      setTimeout(() => this.emit({ t: 'end', result: { mode: m.mode, diff: this.setup!.diff, place: me.place, of: m.fighters.length, kos: me.kos, falls: me.falls, table } }), 1400);
+      const me = m.fighters.find((f) => f.id === this.me) ?? m.fighters[0];
+      const table = [...m.fighters].sort((a, b) => (a.place || 99) - (b.place || 99)).map((f) => ({ name: f.name, place: f.place, kos: f.kos, falls: f.falls, you: f.id === this.me }));
+      const result: BrawlResult = { mode: m.mode, diff: this.setup!.diff, place: me.place, of: m.fighters.length, kos: me.kos, falls: me.falls, table, online: this.role !== 'solo', note: this.note };
+      setTimeout(() => this.emit({ t: 'end', result }), this.note ? 200 : 1400);
     }
     this.draw(t);
   }
 
   /** Effects and sounds for what happened this step. */
-  private react(m: Match) {
+  private react(m: Match, events: MatchEvent[]) {
     const now = performance.now();
-    for (const e of m.events) {
+    for (const e of events) {
       const col = (e.id && this.colorOf.get(e.id)) || '#fff';
       if (e.t === 'hit') {
         const big = Boolean(e.heavy);
@@ -307,14 +468,14 @@ export class BrawlEngine {
         const b = m.stage.blast;
         const ang = e.x! <= b.x0 + 1 ? 0 : e.x! >= b.x1 - 1 ? Math.PI : e.y! <= b.y0 + 1 ? Math.PI / 2 : -Math.PI / 2;
         this.fx.push({ k: 'beam', x: e.x!, y: e.y!, t0: now, dur: 700, c: col, ang });
-        this.fx.push({ k: 'word', x: 240, y: 110, t0: now, dur: 1000, c: col, word: e.by === ME ? 'KO!' : e.id === ME ? 'OUCH' : 'KO' });
+        this.fx.push({ k: 'word', x: 240, y: 110, t0: now, dur: 1000, c: col, word: e.by === this.me ? 'KO!' : e.id === this.me ? 'OUCH' : 'KO' });
         this.kick(420, 5);
         this.emit({ t: 'sfx', name: 'ko' });
       } else if (e.t === 'land' && e.heavy) {
         for (let k = 0; k < 6; k++) this.fx.push({ k: 'dust', x: e.x! + (k - 3) * 3, y: e.y!, t0: now, dur: 420, c: '#b9a8c8', vx: (k - 3) * 20, vy: -30 });
       } else if (e.t === 'jump') {
         this.fx.push({ k: 'dust', x: e.x!, y: e.y!, t0: now, dur: 300, c: '#9a8aa8', vx: 0, vy: -10 });
-      } else if (e.t === 'swing' && e.id === ME) {
+      } else if (e.t === 'swing' && e.id === this.me) {
         this.emit({ t: 'sfx', name: 'swing' });
       } else if (e.t === 'dodge') {
         this.fx.push({ k: 'ring', x: e.x!, y: e.y! - 10, t0: now, dur: 220, c: '#c8f0ff', s: 10 });
@@ -359,11 +520,18 @@ export class BrawlEngine {
     }
     const zFit = Math.min(this.W / (x1 - x0 + 60), this.H / (y1 - y0 + 70));
     const zMax = this.touch ? 3.2 : 3;
-    const z = Math.max(this.W / WW, Math.min(zMax, zFit));
+    // never zoomed out past the painted world
+    const zMin = Math.max(this.W / WW, this.H / WH);
+    const z = Math.max(zMin, Math.min(Math.max(zMax, zMin), zFit));
     this.cam.z += (z - this.cam.z) * 0.06;
+    if (this.cam.z < zMin) this.cam.z = zMin;
     this.cam.x += ((x0 + x1) / 2 - this.cam.x) * 0.1;
     this.cam.y += ((y0 + y1) / 2 - this.cam.y) * 0.1;
     const Z = this.cam.z;
+    // and never looking past its edges
+    const hw = this.W / 2 / Z, hh = this.H / 2 / Z;
+    this.cam.x = Math.max(WX0 + hw, Math.min(WX0 + WW - hw, this.cam.x));
+    this.cam.y = Math.max(WY0 + hh, Math.min(WY0 + WH - hh, this.cam.y));
     let shx = 0, shy = 0;
     if (now < this.shake.until) {
       shx = (Math.random() - 0.5) * this.shake.mag * 2;
@@ -397,8 +565,11 @@ export class BrawlEngine {
       return;
     }
     // fighters
-    const order = [...m.fighters].sort((a, b) => (a.id === ME ? 1 : 0) - (b.id === ME ? 1 : 0));
-    for (const f of order) this.drawFighter(c, f, m, sx, sy, Z, now);
+    const order = [...m.fighters].sort((a, b) => (a.id === this.me ? 1 : 0) - (b.id === this.me ? 1 : 0));
+    for (const f of order) {
+      const o = this.off.get(f.id);
+      this.drawFighter(c, o ? { ...f, x: f.x + o.x, y: f.y + o.y } : f, m, sx, sy, Z, now);
+    }
     // effects
     this.fx = this.fx.filter((e) => now - e.t0 < e.dur);
     for (const e of this.fx) this.drawFx(c, e, now, sx, sy, Z);
@@ -458,12 +629,12 @@ export class BrawlEngine {
     }
     drawMiner(c, look, pv.pose, k, sx(f.x), sy(gy), Z, f.facing, blink ? 0.35 : f.dodge > 0 ? 0.6 : 1, lift, tilt);
     // name over the head, YOU arrow
-    const label = f.id === ME ? 'YOU' : f.name;
+    const label = f.id === this.me ? 'YOU' : f.name;
     const ts = Math.max(1, Math.round(Z * 0.5));
     const tw = textWidth(label) * ts;
     const ty = sy(f.y - 34);
     text(c, label, sx(f.x) - tw / 2, ty, ts, col, '#120c1a');
-    if (f.id === ME) {
+    if (f.id === this.me) {
       c.fillStyle = col;
       const ax = sx(f.x);
       c.beginPath();
@@ -536,8 +707,10 @@ export class BrawlEngine {
     }
     // a card per fighter along the bottom (on a phone, along the top so thumbs don't cover it)
     const n = m.fighters.length;
-    const cw = Math.min(150, (this.W - 40) / n - 8);
-    const ch = 16 * s;
+    const cw = Math.min(s * 58, (this.W - 40) / n - 8);
+    // the text scale the card fits ("12345678" over "999%")
+    const hs = Math.max(1, Math.min(s, Math.floor(cw / 58)));
+    const ch = 16 * hs;
     const total = n * cw + (n - 1) * 8;
     const left = this.touch ? this.W / 2 - total / 2 : this.W / 2 - total / 2;
     const top = this.touch ? 12 + 10 * s : this.H - ch - 12;
@@ -548,17 +721,17 @@ export class BrawlEngine {
       c.fillRect(x, top, cw, ch);
       c.fillStyle = col;
       c.fillRect(x, top, 3, ch);
-      const name = (f.id === ME ? 'YOU' : f.name).slice(0, 8);
-      text(c, name, x + 7, top + 3, Math.max(1, s - 1), col);
+      const name = (f.id === this.me ? 'YOU' : f.name).slice(0, 8);
+      text(c, name, x + 7, top + 3, Math.max(1, hs - 1), col);
       // damage %: white to yellow to red as it rises; out = grey
       const d = Math.round(f.dmg);
       const dc = f.stocks <= 0 ? '#5a5070' : d < 50 ? '#ffffff' : d < 100 ? '#ffe46a' : d < 150 ? '#ff9a3a' : '#ff4a4a';
       const ds = f.stocks <= 0 ? 'OUT' : `${d}%`;
       const shakeX = f.hitstun > 0 && f.stocks > 0 ? Math.round((Math.random() - 0.5) * 3) : 0;
-      text(c, ds, x + cw - textWidth(ds) * (s + 1) - 6 + shakeX, top + 3 + s * 2, s + 1, dc, '#120c1a');
+      text(c, ds, x + cw - textWidth(ds) * (hs + 1) - 6 + shakeX, top + 3 + hs * 2, hs + 1, dc, '#120c1a');
       for (let i = 0; i < STOCKS; i++) {
         c.fillStyle = i < f.stocks ? col : 'rgba(255,255,255,0.15)';
-        c.fillRect(x + 7 + i * (s * 4), top + ch - s * 4, s * 3, s * 3);
+        c.fillRect(x + 7 + i * (hs * 4), top + ch - hs * 4, hs * 3, hs * 3);
       }
       if (f.respawn > 0 && f.stocks > 0) {
         c.globalAlpha = 0.6;
