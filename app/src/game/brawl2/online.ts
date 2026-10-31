@@ -66,6 +66,11 @@ let channel: Ch | null = null;
 let joined = false;
 let ticker: ReturnType<typeof setInterval> | null = null;
 let lastPing = 0;
+/**
+ * A callout room starts by itself: when everyone called out is in (`need`), or, for a free for all, 2 minutes
+ * after the first two are in (bots take the empty spots). No START needed.
+ */
+let autoStart: { need: number; pairAt: number } | null = null;
 let mine: { name: string; look: Look; weapon: string; sp: string; w?: string } | null = null;
 let sink: ((e: string, p: any) => void) | null = null; // eslint-disable-line @typescript-eslint/no-explicit-any
 const seenMids = new Set<string>();
@@ -81,7 +86,8 @@ export function sendNet(e: 'bos' | 'boi' | 'bol', p: Record<string, unknown>) {
 }
 
 /** Start looking for a match in a queue. */
-export function search(q: Queue, me: { name: string; look: Look; weapon: string; sp: string }, wallet: string | null) {
+export function search(q: Queue, me: { name: string; look: Look; weapon: string; sp: string }, wallet: string | null, opts?: { need?: number }) {
+  autoStart = opts?.need ? { need: Math.max(2, Math.min(4, opts.need)), pairAt: 0 } : null;
   mine = { ...me, w: wallet && B58.test(wallet) ? wallet : undefined };
   useOnline.setState((s) => ({ phase: joined ? 'search' : 'connecting', q, me: idFor(wallet, s.me), since: Date.now(), peers: {}, match: null, solo: false, error: null }));
   lastPing = 0;
@@ -139,7 +145,15 @@ function tick() {
     void channel?.send({ type: 'broadcast', event: 'boq', payload: { id: s.me, name: mine.name, look: mine.look, weapon: mine.weapon, sp: mine.sp, w: mine.w, q: s.q, since: s.since } });
   }
   const list = queueList();
-  if (s.q.startsWith('code:')) return; // the host presses START
+  if (s.q.startsWith('code:')) {
+    // a callout starts by itself when the rival arrives; a private room waits for its host's START
+    if (autoStart && list.length >= 2) {
+      if (!autoStart.pairAt) autoStart.pairAt = now;
+      const all = list.length >= autoStart.need;
+      if (list[0].id === s.me && (all || now - autoStart.pairAt > 120_000)) start(list.slice(0, autoStart.need), autoStart.need === 2 ? '1v1' : 'ffa');
+    } else if (autoStart) autoStart.pairAt = 0;
+    return;
+  }
   const waited = now - s.since;
   if (list.length === 1) {
     if (waited >= SOLO_WAIT_MS) {
