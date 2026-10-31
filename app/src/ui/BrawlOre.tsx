@@ -28,7 +28,7 @@ import type { Difficulty, Mode } from '../game/brawl2/sim';
 import { atlasSource } from '../pixel/atlasSource';
 import BrawlOreView, { type BrawlOreRef } from '../pixel/BrawlOreView';
 import { myLook } from '../pixel/PixelMine';
-import { Btn, Choice, PixelBox, T } from './kit';
+import { Btn, Choice, INPUT, PixelBox, T } from './kit';
 import { MineAnywhere, useMinePanel } from './MineAnywhere';
 import { LANDSCAPE_APP, useLayout } from './layout';
 
@@ -398,19 +398,23 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: 8 },
   res: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4, paddingHorizontal: 6 },
   head: { alignItems: 'center', gap: 2 },
-  input: { minHeight: 40, borderWidth: 2, borderColor: '#3a2414', backgroundColor: '#140a08', color: COLORS.text, paddingHorizontal: 10, fontSize: 15 },
+  // position: relative, or the panel's fill (positioned) paints over the text field on the web
+  input: { ...INPUT, position: 'relative', zIndex: 1, color: '#ffffff', backgroundColor: '#0c0610', borderTopColor: '#000000', borderLeftColor: '#000000', borderBottomColor: '#ff5a6a', borderRightColor: '#ff5a6a' },
   rival: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6, paddingHorizontal: 8, backgroundColor: 'rgba(255,255,255,0.04)' },
   dot: { width: 8, height: 8, borderRadius: 4 },
   popWrap: { position: 'absolute', top: 70, left: 0, right: 0, alignItems: 'center', zIndex: 50 },
   popCard: { width: 380, maxWidth: '94%', padding: 12, gap: 6 },
-  when: { borderWidth: 1, borderColor: '#5a3040', paddingHorizontal: 8, paddingVertical: 5 },
+  when: { borderWidth: 1, borderColor: '#5a3040', paddingHorizontal: 8, paddingVertical: 7 },
+  whenOn: { backgroundColor: '#ff5a6a', borderColor: '#ff5a6a' },
+  stepper: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#5a3040', backgroundColor: '#0c0610' },
+  stepBtn: { paddingHorizontal: 8, paddingVertical: 4 },
   rank: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, paddingHorizontal: 8, paddingVertical: 3, marginVertical: 2 },
   rankGem: { width: 8, height: 8, transform: [{ rotate: '45deg' }] },
   tabs: { flexDirection: 'row', borderWidth: 2, borderColor: '#3a2414', backgroundColor: '#140a08' },
   tab: { flex: 1, paddingVertical: 8, alignItems: 'center' },
   sp: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 2, paddingVertical: 8, paddingHorizontal: 10, backgroundColor: 'rgba(255,255,255,0.03)' },
   spBadge: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderWidth: 2, transform: [{ rotate: '45deg' }] },
-  code: { width: 86, minHeight: 40, borderWidth: 2, borderColor: '#2d4282', backgroundColor: '#0b1430', color: COLORS.text, textAlign: 'center', fontSize: 18, letterSpacing: 4, paddingHorizontal: 6 },
+  code: { position: 'relative', zIndex: 1, width: 86, minHeight: 40, borderWidth: 2, borderColor: '#2d4282', backgroundColor: '#0b1430', color: COLORS.text, textAlign: 'center', fontSize: 18, letterSpacing: 4, paddingHorizontal: 6 },
 });
 
 /** Looking for other miners: who is in, and what happens next. */
@@ -528,22 +532,96 @@ function SpecialCard({ name, line, item, color, keyHint, short }: { name: string
   );
 }
 
-const WHEN: [string, number][] = [
-  ['NOW', 0],
-  ['15 MIN', 15],
-  ['30 MIN', 30],
-  ['1 HR', 60],
-  ['2 HRS', 120],
-  ['TONIGHT 9PM', -1],
-];
-/** "TONIGHT 9PM": 9pm today, or tomorrow if it is past. Other choices: minutes from now. */
-const whenAt = (m: number) => {
-  if (m >= 0) return Date.now() + m * 60_000;
+/** A time you set: the day (0 = today) and the clock, in your own time zone. */
+interface When {
+  now: boolean;
+  day: number;
+  hour: number;
+  min: number;
+}
+const whenAt = (w: When) => {
+  if (w.now) return Date.now();
   const d = new Date();
-  d.setHours(21, 0, 0, 0);
-  if (d.getTime() < Date.now() + 5 * 60_000) d.setDate(d.getDate() + 1);
+  d.setDate(d.getDate() + w.day);
+  d.setHours(w.hour, w.min, 0, 0);
   return d.getTime();
 };
+/** the next quarter hour, at least 15 minutes away */
+function nextSlot(): When {
+  const d = new Date(Date.now() + 15 * 60_000);
+  d.setMinutes(Math.ceil(d.getMinutes() / 15) * 15, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const day = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() - today.getTime()) / 86_400_000);
+  return { now: false, day, hour: d.getHours(), min: d.getMinutes() };
+}
+const dayName = (k: number) => {
+  if (k === 0) return 'TODAY';
+  if (k === 1) return 'TOMORROW';
+  const d = new Date();
+  d.setDate(d.getDate() + k);
+  return d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase();
+};
+
+/** One value with arrows either side: the day, the hour, the minutes. */
+function Stepper({ label, value, onStep, width = 70 }: { label: string; value: string; onStep: (d: number) => void; width?: number }) {
+  return (
+    <View style={{ alignItems: 'center', gap: 2 }}>
+      <T v="tiny" style={{ fontSize: 8, color: COLORS.muted, letterSpacing: 1 }}>
+        {label}
+      </T>
+      <View style={styles.stepper}>
+        <Pressable onPress={() => onStep(-1)} style={styles.stepBtn} accessibilityLabel={`${label} back`}>
+          <T v="display" style={{ fontSize: 16, color: '#ff5a6a' }}>
+            ‹
+          </T>
+        </Pressable>
+        <T v="display" style={{ fontSize: 15, color: COLORS.text, width, textAlign: 'center' }}>
+          {value}
+        </T>
+        <Pressable onPress={() => onStep(1)} style={styles.stepBtn} accessibilityLabel={`${label} forward`}>
+          <T v="display" style={{ fontSize: 16, color: '#ff5a6a' }}>
+            ›
+          </T>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+/** NOW, or a day and time you set yourself (up to 2 weeks ahead). */
+function WhenPicker({ when, setWhen }: { when: When; setWhen: (w: When) => void }) {
+  const at = whenAt(when);
+  const past = !when.now && at < Date.now() + 60_000;
+  const h12 = when.hour % 12 || 12;
+  return (
+    <View style={{ gap: 6 }}>
+      <View style={styles.row}>
+        <Pressable onPress={() => setWhen({ ...when, now: true })} style={[styles.when, { flex: 1, alignItems: 'center' }, when.now && styles.whenOn]}>
+          <T v="bold" style={{ fontSize: 12, color: when.now ? '#1a0608' : COLORS.text }}>
+            FIGHT NOW
+          </T>
+        </Pressable>
+        <Pressable onPress={() => setWhen(when.now ? nextSlot() : when)} style={[styles.when, { flex: 1, alignItems: 'center' }, !when.now && styles.whenOn]}>
+          <T v="bold" style={{ fontSize: 12, color: !when.now ? '#1a0608' : COLORS.text }}>
+            SET A TIME
+          </T>
+        </Pressable>
+      </View>
+      {when.now ? null : (
+        <View style={[styles.row, { justifyContent: 'center', flexWrap: 'wrap', gap: 10 }]}>
+          <Stepper label="DAY" value={dayName(when.day)} width={110} onStep={(d) => setWhen({ ...when, day: Math.max(0, Math.min(13, when.day + d)) })} />
+          <Stepper label="HOUR" value={String(h12)} width={30} onStep={(d) => setWhen({ ...when, hour: (when.hour + d + 24) % 24 })} />
+          <Stepper label="MIN" value={String(when.min).padStart(2, '0')} width={30} onStep={(d) => setWhen({ ...when, min: (when.min + d * 5 + 60) % 60 })} />
+          <Stepper label="AM / PM" value={when.hour < 12 ? 'AM' : 'PM'} width={30} onStep={() => setWhen({ ...when, hour: (when.hour + 12) % 24 })} />
+        </View>
+      )}
+      <T v="muted" style={{ fontSize: 11, color: past ? '#ff5a6a' : COLORS.muted }}>
+        {when.now ? 'You wait in the room and the fight starts when they walk in.' : past ? 'That time has passed. Pick a time in the future.' : `Fight at ${fmtWhen(at)}. No waiting: everyone gets a FIGHT popup at the time.`}
+      </T>
+    </View>
+  );
+}
 
 /**
  * Who to call out, and when. 1v1: a Gali miner by name (online ones first) or a friend on X. Free for all: up to 3
@@ -555,7 +633,7 @@ function CallOutPanel({ onPick, onClose }: { onPick: (r: Rival[], n: number, at:
   const [handle, setHandle] = useState('');
   const [list, setList] = useState<Rival[]>([]);
   const [picked, setPicked] = useState<Rival[]>([]);
-  const [when, setWhen] = useState(0);
+  const [when, setWhen] = useState<When>({ now: true, day: 0, hour: 21, min: 0 });
   useEffect(() => {
     let on = true;
     const t = setTimeout(() => void findRivals(q, tab === 'ffa').then((r) => on && setList(r)), 250);
@@ -565,7 +643,8 @@ function CallOutPanel({ onPick, onClose }: { onPick: (r: Rival[], n: number, at:
     };
   }, [q, tab]);
   const h = handle.replace(/^@/, '').replace(/[^A-Za-z0-9_]/g, '').slice(0, 15);
-  const at = whenAt(WHEN[when][1]);
+  const at = whenAt(when);
+  const bad = !when.now && at < Date.now() + 60_000;
   const toggle = (r: Rival) => setPicked((p) => (p.some((x) => x.wallet === r.wallet) ? p.filter((x) => x.wallet !== r.wallet) : p.length >= 3 ? p : [...p, r]));
   return (
     <View style={styles.centerAbs} pointerEvents="box-none">
@@ -582,22 +661,11 @@ function CallOutPanel({ onPick, onClose }: { onPick: (r: Rival[], n: number, at:
           <T v="label" style={styles.lbl}>
             WHEN
           </T>
-          <View style={[styles.row, { flexWrap: 'wrap', gap: 4 }]}>
-            {WHEN.map(([l], k) => (
-              <Pressable key={l} onPress={() => setWhen(k)} style={[styles.when, when === k && { backgroundColor: '#ff5a6a', borderColor: '#ff5a6a' }]}>
-                <T v="bold" style={{ fontSize: 11, color: when === k ? '#1a0608' : COLORS.text }}>
-                  {l}
-                </T>
-              </Pressable>
-            ))}
-          </View>
-          <T v="muted" style={{ fontSize: 11 }}>
-            {when === 0 ? 'You wait in the room and the fight starts when they walk in.' : `Fight at ${fmtWhen(at, false)}. No waiting: everyone gets a FIGHT popup at the time.`}
-          </T>
+          <WhenPicker when={when} setWhen={setWhen} />
           {tab === 'x' ? (
             <>
               <TextInput value={handle} onChangeText={setHandle} placeholder="@handle" placeholderTextColor={COLORS.muted} autoCapitalize="none" autoCorrect={false} style={styles.input} />
-              <Btn kind="red" label="CALL OUT ON X" disabled={h.length < 1} onPress={() => onPick([{ name: '@' + h, wallet: null, x: h }], 2, at)} />
+              <Btn kind="red" label="CALL OUT ON X" disabled={h.length < 1 || bad} onPress={() => onPick([{ name: '@' + h, wallet: null, x: h }], 2, at)} />
               <T v="muted" style={{ fontSize: 11 }}>
                 You get a card and a ready post. Your friend taps the link, picks a name, and lands in your room.
               </T>
@@ -614,7 +682,7 @@ function CallOutPanel({ onPick, onClose }: { onPick: (r: Rival[], n: number, at:
                   list.map((r) => {
                     const on = picked.some((x) => x.wallet === r.wallet);
                     return (
-                      <Pressable key={(r.wallet ?? '') + r.name} onPress={() => (tab === 'ffa' ? toggle(r) : onPick([r], 2, at))} style={[styles.rival, on && { backgroundColor: 'rgba(255,90,106,0.18)' }]}>
+                      <Pressable key={(r.wallet ?? '') + r.name} onPress={() => (tab === 'ffa' ? toggle(r) : !bad && onPick([r], 2, at))} style={[styles.rival, on && { backgroundColor: 'rgba(255,90,106,0.18)' }]}>
                         <View style={[styles.dot, { backgroundColor: r.online ? COLORS.green : '#4a4060' }]} />
                         <T v="bold" style={{ flex: 1 }} numberOfLines={1}>
                           {r.name}
@@ -629,7 +697,7 @@ function CallOutPanel({ onPick, onClose }: { onPick: (r: Rival[], n: number, at:
                 )}
               </View>
               {tab === 'ffa' ? (
-                <Btn kind="red" label={`CALL OUT ${picked.length || ''} ${picked.length === 1 ? 'MINER' : 'MINERS'}`.replace('  ', ' ')} disabled={!picked.length} onPress={() => onPick(picked, picked.length + 1, at)} />
+                <Btn kind="red" label={`CALL OUT ${picked.length || ''} ${picked.length === 1 ? 'MINER' : 'MINERS'}`.replace('  ', ' ')} disabled={!picked.length || bad} onPress={() => onPick(picked, picked.length + 1, at)} />
               ) : null}
               <T v="muted" style={{ fontSize: 11 }}>
                 {tab === 'ffa' ? 'Pick up to 3 online miners with a wallet. Bots fill a spot if someone does not show.' : 'Online miners get a popup at once. Miners with a wallet also get it as a message.'}
