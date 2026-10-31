@@ -485,3 +485,102 @@ export function paintPotw(g: G, p: { name: string; level: number; gain: number }
   const xp = p.gain >= 100000 ? `${Math.floor(p.gain / 1000)}K` : p.gain.toLocaleString('en-US');
   mid(`+${xp} XP`, 42, '#ffd24a');
 }
+
+/* ---------------- the Gali Fightclub (replaces the arena while the test flag is on) ---------------- */
+
+/** lanterns either side of the mine door, in sprite px (their light is drawn live) */
+export const FIGHTCLUB_LAMPS: [number, number][] = [
+  [62, 84],
+  [114, 84],
+];
+
+/**
+ * The Gali Fightclub: a rocky hill with a timbered mine door dug into it, a GALI FIGHTCLUB board over the door,
+ * ore glinting in the rock, rails running out of the door and lanterns either side. Same footprint as the arena.
+ */
+export function paintFightclub(g: G) {
+  const W = ARENA_W;
+  const H = ARENA_H;
+  const cx = W / 2;
+  const P = (x: number, y: number, w: number, h: number, c: string) => {
+    g.fillStyle = c;
+    g.fillRect(x, y, w, h);
+  };
+  const rockL = hex('#8a7466');
+  const rockM = hex('#6a5650');
+  const rockD = hex('#4a3a3a');
+  // the hill: a lumpy dome of rock, lit from the upper left
+  const top = (x: number) => 20 + Math.round(((x - cx) / (W / 2)) ** 2 * 62 + Math.sin(x * 0.21) * 3 + Math.sin(x * 0.07) * 4);
+  for (let x = 0; x < W; x++) {
+    const t0 = top(x);
+    for (let y = t0; y < H - 6; y++) {
+      const n = noise(x >> 2, y >> 2);
+      const shade = (x - cx) / W * 0.5 + (y - t0) / 120;
+      const base = shade < 0 ? mix(rockL, rockM, n * 0.6) : shade < 0.35 ? mix(rockM, rockD, n * 0.5) : mix(rockD, hex('#2e2428'), n * 0.6);
+      P(x, y, 1, 1, rgb(base, y === t0 ? 1.25 : 1));
+    }
+    // a few tufts of grass on the crest
+    if (noise(x, 3) < 0.3) P(x, t0 - 1, 1, 2, x % 3 ? '#4f8a3a' : '#6aa84a');
+  }
+  // cracks between the boulders
+  for (let i = 0; i < 16; i++) {
+    const x = Math.floor(noise(i, 9) * W), y0 = top(x) + 6 + Math.floor(noise(i, 11) * 50);
+    if (y0 > H - 12 || Math.abs(x - cx) < 30) continue;
+    const dir = noise(i, 13) < 0.5 ? -1 : 1;
+    for (let k = 0; k < 5; k++) P(x + Math.floor(k / 2) * dir, y0 + k, 1, 1, 'rgba(30,20,22,0.7)');
+  }
+  // ore glinting in the rock: gold and teal
+  for (let i = 0; i < 34; i++) {
+    const x = Math.floor(noise(i, 21) * (W - 8)) + 4;
+    const y = top(x) + 6 + Math.floor(noise(i, 23) * 60);
+    if (y > H - 14 || (Math.abs(x - cx) < 34 && y > 50)) continue;
+    const c = noise(i, 27) < 0.7 ? '#ffc93c' : '#3de0c8';
+    P(x, y, 2, 2, c);
+    P(x, y, 1, 1, '#fff3b0');
+  }
+  // the mine door: a timber frame round a dark tunnel, the fight's glow deep inside
+  const dx0 = cx - 22, dx1 = cx + 22, dTop = 62, dBot = H - 8;
+  for (let y = dTop + 4; y < dBot; y++) {
+    const k = (y - dTop) / (dBot - dTop);
+    P(dx0 + 4, y, dx1 - dx0 - 8, 1, `rgb(${Math.round(20 + 50 * k)},${Math.round(12 + 18 * k)},${Math.round(16 + 6 * k)})`);
+  }
+  for (let y = dBot - 18; y < dBot; y++) P(dx0 + 4, y, dx1 - dx0 - 8, 1, `rgba(255,140,50,${(((y - (dBot - 18)) / 18) * 0.35).toFixed(3)})`);
+  // posts and the lintel
+  for (const x of [dx0, dx1 - 6]) {
+    P(x, dTop, 6, dBot - dTop, '#6a4426');
+    P(x, dTop, 2, dBot - dTop, '#8a5e36');
+    P(x + 5, dTop, 1, dBot - dTop, '#3a2414');
+  }
+  P(dx0 - 6, dTop - 6, dx1 - dx0 + 12, 7, '#6a4426');
+  P(dx0 - 6, dTop - 6, dx1 - dx0 + 12, 2, '#8a5e36');
+  P(dx0 - 6, dTop, dx1 - dx0 + 12, 1, '#3a2414');
+  // the board over the door: GALI on top, FIGHTCLUB under it
+  const bw = Math.max(textWidth('FIGHTCLUB'), textWidth('GALI')) + 12;
+  const bx = Math.round(cx - bw / 2), by = dTop - 30;
+  for (const x of [bx + 4, bx + bw - 5]) P(x, by + 20, 1, 5, '#3a2414');
+  P(bx - 1, by - 1, bw + 2, 22, '#1a0e08');
+  P(bx, by, bw, 20, '#2a1408');
+  P(bx, by, bw, 1, '#5a3a24');
+  text(g as Ctx, 'GALI', Math.round(cx - textWidth('GALI') / 2), by + 3, 1, '#3de0c8');
+  text(g as Ctx, 'FIGHTCLUB', Math.round(cx - textWidth('FIGHTCLUB') / 2), by + 11, 1, '#ffc93c');
+  // rails out of the door, and a cart of ore beside it
+  for (const x of [cx - 9, cx + 8]) P(x, dBot - 2, 1, 10, '#8a8a96');
+  for (let y = dBot - 1; y < H; y += 3) P(cx - 11, y, 22, 1, '#5a3a24');
+  const kx = dx1 + 8, ky = H - 20;
+  P(kx, ky, 18, 9, '#4a4a56');
+  P(kx, ky, 18, 1, '#8a8a96');
+  P(kx + 2, ky - 3, 14, 3, '#ffc93c');
+  P(kx + 4, ky - 4, 3, 1, '#fff3b0');
+  P(kx + 2, ky + 9, 3, 3, '#26202e');
+  P(kx + 13, ky + 9, 3, 3, '#26202e');
+  // lantern hooks (the light is drawn live)
+  for (const [lx, ly] of FIGHTCLUB_LAMPS) {
+    P(lx - 3, ly - 6, 7, 1, '#3a2414');
+    P(lx, ly - 5, 1, 3, '#8a8a96');
+    P(lx - 2, ly - 2, 5, 6, '#2a2a34');
+    P(lx - 1, ly - 1, 3, 4, '#ffd27a');
+  }
+  // a soft shadow round the foot
+  P(10, H - 6, W - 20, 2, 'rgba(0,0,0,0.22)');
+  P(24, H - 4, W - 48, 2, 'rgba(0,0,0,0.14)');
+}

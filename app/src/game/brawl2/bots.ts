@@ -3,7 +3,7 @@
  * them too. Three levels differ in how fast they react, how often they attack well, and how well they recover.
  * Deterministic: they draw from the match's seeded random.
  */
-import { MOVES, rand, type Difficulty, type Fighter, type Input, type Match } from './sim';
+import { METER_FULL, MOVES, rand, type Difficulty, type Fighter, type Input, type Match } from './sim';
 
 interface Brain {
   /** frames until the next decision; the input is held until then */
@@ -26,13 +26,13 @@ export class Bots {
       if (!f.bot || f.stocks <= 0) continue;
       let b = this.brains.get(f.id);
       if (!b) {
-        b = { wait: 0, out: { mx: 0, my: 0, jump: false, light: false, heavy: false, dodge: false }, target: null };
+        b = { wait: 0, out: { mx: 0, my: 0, jump: false, light: false, heavy: false, dodge: false, special: false }, target: null };
         this.brains.set(f.id, b);
       }
       if (b.wait > 0) {
         b.wait--;
         // buttons are taps: release them after the frame they were pressed
-        out[f.id] = { ...b.out, light: false, heavy: false, dodge: false, jump: b.out.jump && b.wait > 3 };
+        out[f.id] = { ...b.out, light: false, heavy: false, dodge: false, special: false, jump: b.out.jump && b.wait > 3 };
         b.out = out[f.id];
         continue;
       }
@@ -47,7 +47,7 @@ export class Bots {
     const L = LEVEL[f.bot!];
     const st = match.stage;
     const main = st.plats.find((p) => !p.soft)!;
-    const i: Input = { mx: 0, my: 0, jump: false, light: false, heavy: false, dodge: false };
+    const i: Input = { mx: 0, my: 0, jump: false, light: false, heavy: false, dodge: false, special: false };
     if (match.countdown > 0 || f.respawn > 0) return i;
 
     // 1. off the stage: get back
@@ -58,7 +58,8 @@ export class Bots {
       i.mx = home;
       if (rand(match) < L.recover) {
         const needUp = f.y > main.y - 30 || f.vy > 120;
-        if (needUp && f.airJumps > 0 && f.vy > -60) i.jump = true;
+        if (needUp && f.special === 'moon' && f.meter >= METER_FULL && f.airJumps === 0) i.special = true;
+        else if (needUp && f.airJumps > 0 && f.vy > -60) i.jump = true;
         else if (needUp && f.airJumps === 0 && !f.recoveryUsed && f.vy > 0) {
           i.heavy = true;
           i.my = -1;
@@ -80,6 +81,10 @@ export class Bots {
     const adx = Math.abs(dx);
 
     // 3. danger: the foe is swinging close by
+    if (foe.act && adx < 44 && Math.abs(dy) < 34 && f.special === 'guard' && f.meter >= METER_FULL && !f.act && rand(match) < L.aim) {
+      i.special = true;
+      return i;
+    }
     if (foe.act && adx < 36 && Math.abs(dy) < 30 && rand(match) < L.dodge) {
       i.dodge = true;
       i.mx = -Math.sign(dx);
@@ -87,6 +92,19 @@ export class Bots {
     }
 
     // 4. in reach: attack
+    // a full meter: the special, when it would land
+    if (f.meter >= METER_FULL && !f.act && f.special !== 'guard' && rand(match) < L.aim) {
+      const fits =
+        f.special === 'rush' ? adx < 90 && Math.abs(dy) < 20 && Math.sign(dx) === f.facing :
+        f.special === 'moon' ? adx < 24 && dy < 4 && dy > -50 :
+        f.special === 'dive' ? adx < 70 && adx > 20 && Math.abs(dy) < 30 && Math.sign(dx) === f.facing :
+        f.special === 'whirl' ? adx < 30 && Math.abs(dy) < 26 :
+        adx < 38 && Math.abs(dy) < 14 && f.grounded;
+      if (fits) {
+        i.special = true;
+        return i;
+      }
+    }
     const reach = MOVES[f.weapon].sLight.hx + MOVES[f.weapon].sLight.hw;
     if (adx < reach + 2 && Math.abs(dy) < 26 && !f.act) {
       if (rand(match) > L.aim) {

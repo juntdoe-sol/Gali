@@ -1,19 +1,22 @@
 /**
- * BrawlOre, drawn and played: the platform fighter's canvas (rules: game/brawl2/sim.ts, bots: game/brawl2/bots.ts).
+ * Gali Fightclub, drawn and played: the platform fighter's canvas (rules: game/brawl2/sim.ts, bots: game/brawl2/bots.ts).
+ * The place is an underground fight pit dug into an ORE mine.
  *
  * The match runs right here at a fixed 60 steps a second, so a button press moves your miner on the very next
  * frame. Phone controls are drawn and heard inside the canvas too (a floating stick on the left half, four buttons
  * on the right), with no trip through the app, which is what made the old arena's buttons feel late.
  *
  * Keys (computer): A / D or arrows move, W / Up / Space jump, S / Down drop through or aim down,
- * J or left click light attack, K or right click heavy attack, L or Shift dodge.
+ * J or left click light attack, K or right click heavy attack, L or Shift dodge, I or E or middle click special.
  */
 import { canvasDpr, reducedMotion } from './screen';
 import { ctx2d, loadAtlas, makeCanvas, text, textWidth, type Ctx } from './art';
 import { drawMiner, frameAt } from './actors';
 import type { Look } from './types';
 import { Bots } from '../game/brawl2/bots';
-import { FPS, MOVES, moveHitbox, newMatch, NO_INPUT, poseOf, step, STOCKS, type Difficulty, type Fighter, type Input, type Match, type MatchEvent, type Mode, type Weapon } from '../game/brawl2/sim';
+import { FPS, METER_FULL, STAGES, moveHitbox, moveOf, newMatch, NO_INPUT, poseOf, step, STOCKS, type Difficulty, type Fighter, type Input, type Match, type MatchEvent, type Mode, type SpecialId, type Weapon } from '../game/brawl2/sim';
+import { SPECIAL_INFO } from '../game/brawl2/specials';
+import { animateScene, paintScene, WH, WW, WX0, WY0, type Scene } from './fightclubArt';
 import { adoptSelf, applySelf, packSelf, packSnap, setFighter, type NetPlayer, type Snap } from '../game/brawl2/net';
 
 export interface BrawlSetup {
@@ -22,6 +25,8 @@ export interface BrawlSetup {
   name: string;
   look: Look;
   weapon: Weapon;
+  /** your special move (game/brawl2/specials.ts specialOf your weapon) */
+  special: SpecialId;
   seed?: number;
   /** online (game/brawl2/online.ts): this miner's id, the match, and who hosts it */
   net?: { role: 'host' | 'guest'; me: string; mid: string; host: string; players: NetPlayer[] };
@@ -42,7 +47,7 @@ export interface BrawlResult {
 export type BrawlEvent =
   | { t: 'ready' }
   | { t: 'end'; result: BrawlResult }
-  | { t: 'sfx'; name: 'swing' | 'hit' | 'pop' | 'slam' | 'cheer' | 'ko' | 'pick' | 'throw' }
+  | { t: 'sfx'; name: 'swing' | 'hit' | 'pop' | 'slam' | 'cheer' | 'ko' | 'pick' | 'throw' | 'special' | 'ready' }
   | { t: 'menu' }
   /** online: a message for the app to send ('bos' from the host, 'boi' from a guest) */
   | { t: 'net'; e: 'bos' | 'boi'; p: Record<string, unknown> };
@@ -56,16 +61,12 @@ const NET_MS = 100;
 /** each fighter's colour: you are gold */
 const COLORS = ['#ffc93c', '#ff5a6a', '#4fd6ef', '#8ef06a'];
 const BOT_NAMES = ['Rusty', 'Clank', 'Pebble', 'Grit'];
+const BOT_SPECIALS: SpecialId[] = ['rush', 'quake', 'moon', 'whirl'];
 const BOT_LOOKS: Look[] = [
   { hat: 'hat-red', fit: '#7a2f5c', pick: '#b8c4d6', handle: '#6b4a32', pet: null, glow: 'none', sex: 'm' },
   { hat: 'hat-teal', fit: '#8a7a4a', pick: '#3de0c8', handle: '#2b2140', pet: null, glow: 'none', sex: 'f' },
   { hat: 'hat-songkok', fit: '#ff7a00', pick: '#ffc83d', handle: '#5a3a24', pet: null, glow: 'none', sex: 'm' },
 ];
-/** the world painted behind the stage (map px), wide enough to show the blast zone edges */
-const WX0 = -100;
-const WY0 = -140;
-const WW = 680;
-const WH = 540;
 
 interface Fx {
   k: 'spark' | 'ring' | 'beam' | 'dust' | 'word';
@@ -79,6 +80,8 @@ interface Fx {
   s?: number;
   word?: string;
   ang?: number;
+  /** a smaller word (special names) */
+  small?: boolean;
 }
 
 export class BrawlEngine {
@@ -89,7 +92,8 @@ export class BrawlEngine {
   private raf = 0;
   private last = 0;
   private acc = 0;
-  private world: HTMLCanvasElement | null = null;
+  private scenes = new Map<string, Scene>();
+  private ready2 = false;
   private match: Match | null = null;
   private setup: BrawlSetup | null = null;
   private bots = new Bots();
@@ -118,9 +122,11 @@ export class BrawlEngine {
   private off = new Map<string, { x: number; y: number }>();
   /* input */
   private keys = new Set<string>();
-  private mouse = { light: false, heavy: false };
+  private mouse = { light: false, heavy: false, special: false };
+  /** your meter was full last frame (for the READY call) */
+  private wasFull = false;
   private stick: { id: number; ox: number; oy: number; x: number; y: number } | null = null;
-  private held = new Map<number, 'jump' | 'light' | 'heavy' | 'dodge'>();
+  private held = new Map<number, 'jump' | 'light' | 'heavy' | 'dodge' | 'special'>();
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -134,7 +140,7 @@ export class BrawlEngine {
 
   async start(atlasUrl: string) {
     await loadAtlas(atlasUrl);
-    this.world = paintWorld();
+    this.ready2 = true;
     this.last = performance.now();
     const loop = (t: number) => {
       this.raf = requestAnimationFrame(loop);
@@ -173,21 +179,21 @@ export class BrawlEngine {
     this.hostHeard = performance.now();
     this.looks.clear();
     this.colorOf.clear();
-    const players: { id: string; name: string; bot: Difficulty | null; weapon: Weapon }[] = [];
+    const players: { id: string; name: string; bot: Difficulty | null; weapon: Weapon; special: SpecialId }[] = [];
     if (net) {
       // the same list, in the same order, on every device in the match
       for (const p of net.players) {
-        players.push({ id: p.id, name: p.id === this.me ? s.name || 'You' : p.name, bot: null, weapon: 'pick' });
+        players.push({ id: p.id, name: p.id === this.me ? s.name || 'You' : p.name, bot: null, weapon: 'pick', special: p.id === this.me ? s.special : ((p.sp as SpecialId) ?? 'quake') });
         this.looks.set(p.id, p.id === this.me ? s.look : ((p.look as Look) ?? BOT_LOOKS[0]));
         if (p.id !== this.me) this.heard.set(p.id, performance.now());
       }
     } else {
-      players.push({ id: ME, name: s.name || 'You', bot: null, weapon: s.weapon });
+      players.push({ id: ME, name: s.name || 'You', bot: null, weapon: s.weapon, special: s.special ?? 'quake' });
       this.looks.set(ME, s.look);
     }
     const want = s.mode === '1v1' ? 2 : 4;
     for (let k = 0; players.length < want; k++) {
-      players.push({ id: `bot${k}`, name: BOT_NAMES[k], bot: (net ? 'normal' : s.diff) as Difficulty, weapon: 'pick' });
+      players.push({ id: `bot${k}`, name: BOT_NAMES[k], bot: (net ? 'normal' : s.diff) as Difficulty, weapon: 'pick', special: BOT_SPECIALS[k % BOT_SPECIALS.length] });
       this.looks.set(`bot${k}`, BOT_LOOKS[k % BOT_LOOKS.length]);
     }
     this.match = newMatch({ mode: s.mode, players, seed: s.seed ?? Math.floor(Math.random() * 1e9) });
@@ -264,7 +270,7 @@ export class BrawlEngine {
     });
     if (Array.isArray(sn.e)) {
       // your own swings already showed their sparks; the rest is news
-      const news = sn.e.filter((ev) => ev && typeof ev === 'object' && !(ev.t === 'hit' && ev.by === this.me) && !(ev.id === this.me && ['jump', 'dodge', 'land', 'swing', 'recover'].includes(ev.t)));
+      const news = sn.e.filter((ev) => ev && typeof ev === 'object' && !(ev.t === 'hit' && ev.by === this.me) && !(ev.id === this.me && ['jump', 'dodge', 'land', 'swing', 'recover', 'special'].includes(ev.t)));
       this.react(m, news);
     }
     if (sn.m[3] === 1 && !m.over) m.over = true;
@@ -305,7 +311,7 @@ export class BrawlEngine {
   private onKeyUp = (e: KeyboardEvent) => this.keys.delete(e.key.toLowerCase());
   private onBlur = () => {
     this.keys.clear();
-    this.mouse = { light: false, heavy: false };
+    this.mouse = { light: false, heavy: false, special: false };
   };
   private bind() {
     if (typeof window === 'undefined') return;
@@ -318,6 +324,10 @@ export class BrawlEngine {
       if (e.pointerType === 'mouse') {
         if (e.button === 0) this.mouse.light = true;
         if (e.button === 2) this.mouse.heavy = true;
+        if (e.button === 1) {
+          e.preventDefault();
+          this.mouse.special = true;
+        }
         return;
       }
       e.preventDefault();
@@ -338,6 +348,7 @@ export class BrawlEngine {
       if (e.pointerType === 'mouse') {
         if (e.button === 0) this.mouse.light = false;
         if (e.button === 2) this.mouse.heavy = false;
+        if (e.button === 1) this.mouse.special = false;
         return;
       }
       this.held.delete(e.pointerId);
@@ -348,7 +359,7 @@ export class BrawlEngine {
   }
 
   /** The phone buttons, in CSS px: [id, x, y, radius, label]. */
-  private buttons(): ['jump' | 'light' | 'heavy' | 'dodge', number, number, number, string][] {
+  private buttons(): ['jump' | 'light' | 'heavy' | 'dodge' | 'special', number, number, number, string][] {
     const r = Math.max(26, Math.min(40, this.H * 0.085));
     const bx = this.W - r * 1.6;
     const by = this.H - r * 1.5;
@@ -357,6 +368,7 @@ export class BrawlEngine {
       ['heavy', bx - r * 2.3, by - r * 0.9, r, 'HEAVY'],
       ['jump', bx, by, r * 1.05, 'JUMP'],
       ['dodge', bx - r * 2.4, by - r * 3.2, r * 0.8, 'DODGE'],
+      ['special', bx - r * 4.4, by - r * 0.4, r * 0.9, 'SPECIAL'],
     ];
   }
   private buttonAt(x: number, y: number) {
@@ -384,6 +396,7 @@ export class BrawlEngine {
       light: k.has('j') || this.mouse.light || held.has('light'),
       heavy: k.has('k') || this.mouse.heavy || held.has('heavy'),
       dodge: k.has('l') || k.has('shift') || held.has('dodge'),
+      special: k.has('i') || k.has('e') || this.mouse.special || held.has('special'),
     };
   }
 
@@ -428,11 +441,20 @@ export class BrawlEngine {
         step(m, inputs);
         if (this.role === 'host') for (const e of m.events) if (e.t !== 'swing' && e.t !== 'recover') this.outbox.push({ ...e });
         // a guest's own copy only speaks for its own miner; the host's snapshots bring the rest
-        this.react(m, guest ? m.events.filter((e) => (e.id === this.me && ['jump', 'dodge', 'land', 'swing', 'recover'].includes(e.t)) || (e.t === 'hit' && e.by === this.me)) : m.events);
+        this.react(m, guest ? m.events.filter((e) => (e.id === this.me && ['jump', 'dodge', 'land', 'swing', 'recover', 'special'].includes(e.t)) || (e.t === 'hit' && e.by === this.me)) : m.events);
       }
       if (n === 5) this.acc = 0;
     }
     if (m) this.netTick(m, t);
+    if (m) {
+      const meF = m.fighters.find((f) => f.id === this.me);
+      const full = Boolean(meF && meF.meter >= METER_FULL && meF.stocks > 0);
+      if (full && !this.wasFull && !m.over && m.countdown === 0) {
+        this.fx.push({ k: 'word', x: 240, y: 110, t0: performance.now(), dur: 800, c: SPECIAL_INFO[meF!.special].color, word: 'SPECIAL READY', small: true });
+        this.emit({ t: 'sfx', name: 'ready' });
+      }
+      this.wasFull = full;
+    }
     for (const [id, o] of this.off) {
       o.x *= 0.82;
       o.y *= 0.82;
@@ -477,6 +499,21 @@ export class BrawlEngine {
         this.fx.push({ k: 'dust', x: e.x!, y: e.y!, t0: now, dur: 300, c: '#9a8aa8', vx: 0, vy: -10 });
       } else if (e.t === 'swing' && e.id === this.me) {
         this.emit({ t: 'sfx', name: 'swing' });
+      } else if (e.t === 'special') {
+        const f = m.fighters.find((x) => x.id === e.id);
+        const info = f ? SPECIAL_INFO[f.special] : null;
+        if (info) {
+          this.fx.push({ k: 'ring', x: e.x!, y: e.y! - 12, t0: now, dur: 420, c: info.color, s: 30 });
+          this.fx.push({ k: 'ring', x: e.x!, y: e.y! - 12, t0: now + 80, dur: 420, c: '#ffffff', s: 18 });
+          this.fx.push({ k: 'word', x: 240, y: 110, t0: now, dur: 900, c: info.color, word: e.id === this.me ? info.name : `${f!.name.slice(0, 8)}: ${info.name}`, small: true });
+          if (f!.special === 'quake') for (let k = 0; k < 12; k++) this.fx.push({ k: 'dust', x: e.x! + (k - 6) * 6, y: e.y!, t0: now + 180, dur: 500, c: '#c8a070', vx: (k - 6) * 30, vy: -40 });
+          this.kick(200, 2.5);
+          this.emit({ t: 'sfx', name: 'special' });
+        }
+      } else if (e.t === 'counter') {
+        this.fx.push({ k: 'ring', x: e.x!, y: e.y!, t0: now, dur: 380, c: '#c8f0ff', s: 34 });
+        this.fx.push({ k: 'word', x: 240, y: 110, t0: now, dur: 900, c: '#c8f0ff', word: 'COUNTER!', small: true });
+        this.kick(300, 4);
       } else if (e.t === 'dodge') {
         this.fx.push({ k: 'ring', x: e.x!, y: e.y! - 10, t0: now, dur: 220, c: '#c8f0ff', s: 10 });
       } else if (e.t === 'go') {
@@ -501,8 +538,11 @@ export class BrawlEngine {
     c.imageSmoothingEnabled = false;
     c.fillStyle = '#0b0712';
     c.fillRect(0, 0, this.W, this.H);
-    if (!this.world) return;
+    if (!this.ready2) return;
     const m = this.match;
+    const stage = m?.stage ?? STAGES[0];
+    let scene = this.scenes.get(stage.id);
+    if (!scene) this.scenes.set(stage.id, (scene = paintScene(stage)));
     // the camera: everyone in play, and the main stage, in view
     let x0 = 120, x1 = 360, y0 = 120, y1 = 210;
     if (m) {
@@ -541,24 +581,40 @@ export class BrawlEngine {
     const oy = this.H / 2 - this.cam.y * Z + shy;
     const sx = (x: number) => ox + x * Z;
     const sy = (y: number) => oy + y * Z;
-    c.drawImage(this.world, sx(WX0), sy(WY0), WW * Z, WH * Z);
-    // torches flicker
-    for (const [tx, ty] of TORCHES) {
-      const fl = 0.75 + 0.25 * Math.sin(now / 90 + tx) * Math.sin(now / 37 + ty);
-      const gl = c.createRadialGradient(sx(tx), sy(ty - 3), 0, sx(tx), sy(ty - 3), 26 * Z);
-      gl.addColorStop(0, `rgba(255,150,50,${0.28 * fl})`);
-      gl.addColorStop(1, 'rgba(255,150,50,0)');
+    c.drawImage(scene.cv, sx(WX0), sy(WY0), WW * Z, WH * Z);
+    animateScene(c, stage, now, sx, sy, Z);
+    // mine lamps swing a little and flicker
+    for (const [tx, ty] of scene.lamps) {
+      const fl = 0.8 + 0.2 * Math.sin(now / 90 + tx) * Math.sin(now / 37 + ty);
+      const sw = Math.sin(now / 900 + tx) * 1.5;
+      const lx = tx + sw;
+      const gl = c.createRadialGradient(sx(lx), sy(ty + 4), 0, sx(lx), sy(ty + 4), 40 * Z);
+      gl.addColorStop(0, hexA(scene.lamp, 0.3 * fl));
+      gl.addColorStop(1, hexA(scene.lamp, 0));
       c.fillStyle = gl;
-      c.fillRect(sx(tx - 26), sy(ty - 29), 52 * Z, 52 * Z);
-      // the sconce, and a flame that flickers
-      c.fillStyle = '#2a1e30';
-      c.fillRect(sx(tx - 2), sy(ty), 5 * Z, 2 * Z);
-      c.fillRect(sx(tx), sy(ty + 2), 1 * Z, 4 * Z);
-      const h = 3 + Math.round(fl * 3);
-      c.fillStyle = '#ff7a1a';
-      c.fillRect(sx(tx - 1), sy(ty - h), 3 * Z, h * Z);
-      c.fillStyle = '#ffe08a';
-      c.fillRect(sx(tx), sy(ty - h + 1), 1 * Z, (h - 1) * Z);
+      c.fillRect(sx(lx - 40), sy(ty - 36), 80 * Z, 80 * Z);
+      c.strokeStyle = '#8a8a96';
+      c.lineWidth = Math.max(1, Z * 0.6);
+      c.beginPath();
+      c.moveTo(sx(tx), sy(2));
+      c.lineTo(sx(lx), sy(ty));
+      c.stroke();
+      c.fillStyle = '#2a2a34';
+      c.fillRect(sx(lx - 3), sy(ty), 6 * Z, 2 * Z);
+      c.fillStyle = `rgba(255,${Math.round(200 + 40 * fl)},120,1)`;
+      c.fillRect(sx(lx - 2), sy(ty + 2), 4 * Z, 4 * Z);
+      c.fillStyle = '#2a2a34';
+      c.fillRect(sx(lx - 3), sy(ty + 6), 6 * Z, 1 * Z);
+    }
+    // the crowd's helmet lamps, and a cheer that runs through them when someone is knocked out
+    const cheer = now < this.shake.until;
+    for (let k = 0; k < scene.crowd.length; k++) {
+      const [cx, cy] = scene.crowd[k];
+      const on = (Math.floor(now / 400) + k * 7) % 11 !== 0;
+      if (!on) continue;
+      const hop = cheer && k % 2 ? Math.round(Math.sin(now / 60 + k)) : 0;
+      c.fillStyle = '#fff3b0';
+      c.fillRect(sx(cx), sy(cy - 1 + hop), Math.max(1, Z), Math.max(1, Z));
     }
     if (!m) {
       this.drawTouch(now, false);
@@ -609,11 +665,33 @@ export class BrawlEngine {
     const tilt = f.hitstun > 0 ? Math.max(-0.9, Math.min(0.9, (f.vx / 400) * -f.facing)) : f.dodge > 0 ? 0.3 * f.facing : 0;
     // the active hit: a slash arc where the weapon is
     if (f.act) {
-      const mv = MOVES[f.weapon][f.act.move];
-      if (f.act.f >= mv.start - 1 && f.act.f < mv.start + mv.active + 1) {
+      const mv = moveOf(f, f.act.move);
+      const sp = f.act.move === 'special' ? SPECIAL_INFO[f.special] : null;
+      if (sp) {
+        // the special's aura: the item's own colour round the miner
+        const a = 0.35 + 0.2 * Math.sin(now / 50);
+        const gl = c.createRadialGradient(sx(f.x), sy(f.y - 12), 0, sx(f.x), sy(f.y - 12), 30 * Z);
+        gl.addColorStop(0, hexA(look.pick, a));
+        gl.addColorStop(1, hexA(look.pick, 0));
+        c.fillStyle = gl;
+        c.fillRect(sx(f.x - 30), sy(f.y - 42), 60 * Z, 60 * Z);
+        if (mv.guard && f.act.f < mv.start + mv.active) {
+          // Diamond Hands: a diamond of light round the miner
+          c.strokeStyle = sp.color;
+          c.lineWidth = Math.max(2, Z * 1.4);
+          c.beginPath();
+          c.moveTo(sx(f.x), sy(f.y - 34));
+          c.lineTo(sx(f.x + 14), sy(f.y - 14));
+          c.lineTo(sx(f.x), sy(f.y + 4));
+          c.lineTo(sx(f.x - 14), sy(f.y - 14));
+          c.closePath();
+          c.stroke();
+        }
+      }
+      if (!mv.guard && f.act.f >= mv.start - 1 && f.act.f < mv.start + mv.active + 1) {
         const hb = moveHitbox(f, mv);
-        c.strokeStyle = f.act.move.endsWith('Heavy') || f.act.move === 'pound' ? '#fff3b0' : 'rgba(255,255,255,0.85)';
-        c.lineWidth = Math.max(2, Z * 1.6);
+        c.strokeStyle = sp ? sp.color : f.act.move.endsWith('Heavy') || f.act.move === 'pound' ? '#fff3b0' : 'rgba(255,255,255,0.85)';
+        c.lineWidth = Math.max(2, Z * (sp ? 2.6 : 1.6));
         c.beginPath();
         const cx = sx((hb.x0 + hb.x1) / 2), cy = sy((hb.y0 + hb.y1) / 2);
         const r = Math.max(hb.x1 - hb.x0, hb.y1 - hb.y0) * 0.55 * Z;
@@ -681,12 +759,12 @@ export class BrawlEngine {
       c.globalAlpha = 1;
     } else if (e.k === 'word') {
       // big centred word on the screen
-      const s = Math.max(3, Math.round(Math.min(this.W, this.H) / 70));
+      const s = Math.max(e.small ? 2 : 3, Math.round(Math.min(this.W, this.H) / (e.small ? 180 : 70)));
       const pop = p < 0.15 ? 1 + (0.15 - p) * 4 : 1;
       const ss = Math.round(s * pop);
       const w = textWidth(e.word!) * ss;
       c.globalAlpha = p > 0.75 ? (1 - p) * 4 : 1;
-      text(c, e.word!, this.W / 2 - w / 2, this.H * 0.3, ss, e.c, '#120c1a');
+      text(c, e.word!, this.W / 2 - w / 2, this.H * (e.small ? 0.22 : 0.3), ss, e.c, '#120c1a');
       c.globalAlpha = 1;
     }
   }
@@ -699,6 +777,10 @@ export class BrawlEngine {
       const big = s * 4;
       const w = textWidth(String(n)) * big;
       text(c, String(n), this.W / 2 - w / 2, this.H * 0.3, big, '#ffc93c', '#120c1a');
+      // where you are fighting
+      const nm = m.stage.name;
+      const ns = Math.max(2, s);
+      text(c, nm, this.W / 2 - (textWidth(nm) * ns) / 2, this.H * 0.3 + big * 8, ns, '#f4ecff', '#120c1a');
     } else {
       const secs = Math.max(0, Math.ceil(m.timeLeft / FPS));
       const t = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
@@ -733,6 +815,14 @@ export class BrawlEngine {
         c.fillStyle = i < f.stocks ? col : 'rgba(255,255,255,0.15)';
         c.fillRect(x + 7 + i * (hs * 4), top + ch - hs * 4, hs * 3, hs * 3);
       }
+      // the special meter along the bottom edge; full, it glows in the special's colour
+      const full = f.meter >= METER_FULL;
+      const spc = SPECIAL_INFO[f.special].color;
+      c.fillStyle = 'rgba(255,255,255,0.1)';
+      c.fillRect(x + 3, top + ch - 2, cw - 3, 2);
+      c.fillStyle = full ? (Math.floor(now / 200) % 2 ? spc : '#ffffff') : spc;
+      c.fillRect(x + 3, top + ch - 2, ((cw - 3) * Math.min(METER_FULL, f.meter)) / METER_FULL, 2);
+      if (full && f.stocks > 0) text(c, 'SP', x + 7 + STOCKS * hs * 4 + hs, top + ch - hs * 4 - Math.max(0, hs - 1), Math.max(1, hs - 1), spc, '#120c1a');
       if (f.respawn > 0 && f.stocks > 0) {
         c.globalAlpha = 0.6;
         c.fillStyle = '#000';
@@ -740,15 +830,40 @@ export class BrawlEngine {
         c.globalAlpha = 1;
       }
     });
-    void now;
   }
 
   private drawTouch(now: number, live: boolean) {
     if (!this.touch || !live) return;
     const c = this.c;
     const held = new Set(this.held.values());
+    const meF = this.match?.fighters.find((f) => f.id === this.me);
+    const ready = Boolean(meF && meF.meter >= METER_FULL);
     for (const [id, x, y, r, label] of this.buttons()) {
       const on = held.has(id);
+      if (id === 'special') {
+        // fills up as the meter does
+        const k = meF ? Math.min(1, meF.meter / METER_FULL) : 0;
+        const col = meF ? SPECIAL_INFO[meF.special].color : '#ffffff';
+        c.fillStyle = 'rgba(14,10,26,0.55)';
+        c.beginPath();
+        c.arc(x, y, r, 0, Math.PI * 2);
+        c.fill();
+        c.strokeStyle = col;
+        c.lineWidth = 3;
+        c.beginPath();
+        c.arc(x, y, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * k);
+        c.stroke();
+        if (ready) {
+          c.globalAlpha = 0.25 + 0.2 * Math.sin(now / 120);
+          c.fillStyle = col;
+          c.beginPath();
+          c.arc(x, y, r, 0, Math.PI * 2);
+          c.fill();
+          c.globalAlpha = 1;
+        }
+        text(c, 'SP', x - textWidth('SP'), y - 3 * 2, 2, ready ? '#ffffff' : 'rgba(244,236,255,0.5)', '#120c1a');
+        continue;
+      }
       c.fillStyle = on ? 'rgba(255,201,60,0.55)' : 'rgba(14,10,26,0.55)';
       c.beginPath();
       c.arc(x, y, r, 0, Math.PI * 2);
@@ -782,68 +897,8 @@ export class BrawlEngine {
   }
 }
 
-/* ---------------- the hall, painted once ---------------- */
-const TORCHES: [number, number][] = [
-  [60, 90],
-  [180, 70],
-  [300, 70],
-  [420, 90],
-];
-
-function paintWorld(): HTMLCanvasElement {
-  const cv = makeCanvas(WW, WH);
-  const g = ctx2d(cv);
-  const px = (x: number, y: number, w: number, h: number, col: string) => {
-    g.fillStyle = col;
-    g.fillRect(Math.round(x - WX0), Math.round(y - WY0), Math.round(w), Math.round(h));
-  };
-  // night air: dark violet at the top, black in the abyss
-  for (let y = WY0; y < WY0 + WH; y++) {
-    const k = (y - WY0) / WH;
-    const r = Math.round(30 - 22 * k), gg = Math.round(18 - 12 * k), b = Math.round(46 - 30 * k);
-    px(WX0, y, WW, 1, `rgb(${Math.max(6, r)},${Math.max(4, gg)},${Math.max(10, b)})`);
-  }
-  // the far wall of the hall: stone with tall arched windows glowing red
-  for (let y = -40; y < 260; y += 9) {
-    for (let x = WX0; x < WX0 + WW; x += 16) {
-      const off = ((y + 40) / 9) % 2 ? 0 : 8;
-      px(x + off, y, 15, 8, (x * 7 + y * 3) % 5 ? '#1c1328' : '#20162e');
-    }
-  }
-  for (const wx of [0, 120, 240, 360, 480]) {
-    // window: arch top, red glow, mullions
-    const w = 34, top = 10, bot = 150;
-    for (let y = top; y < bot; y++) {
-      const half = y < top + w / 2 ? Math.sqrt(Math.max(0, (w / 2) ** 2 - (top + w / 2 - y) ** 2)) : w / 2;
-      const k = (y - top) / (bot - top);
-      px(wx - half, y, half * 2, 1, `rgb(${Math.round(150 - 60 * k)},${Math.round(24 + 10 * k)},${Math.round(40 + 6 * k)})`);
-    }
-    px(wx - 1, top + 6, 2, bot - top - 6, '#3a1420');
-    for (let y = top + 30; y < bot; y += 28) px(wx - w / 2, y, w, 2, '#3a1420');
-    // pillar between windows
-    px(wx + 60 - 7, -40, 14, 300, '#140d1c');
-    px(wx + 60 - 7, -40, 2, 300, '#2a1e3a');
-  }
-  // the abyss below: mist bands
-  for (let y = 240; y < 400; y += 6) {
-    const a = Math.min(0.35, (y - 240) / 400);
-    g.fillStyle = `rgba(90,60,130,${a})`;
-    g.fillRect(0, y - WY0, WW, 2);
-  }
-  // the main stage: a thick block of stone over the abyss, with a lit top edge and roots hanging under it
-  const main = { x0: 110, x1: 370, y: 196 };
-  for (let y = main.y; y < main.y + 40; y++) {
-    const inset = Math.max(0, (y - main.y - 22) * 1.6);
-    px(main.x0 + inset, y, main.x1 - main.x0 - inset * 2, 1, y === main.y ? '#c8b8e0' : y < main.y + 3 ? '#7a6a96' : (y % 6 === 0 ? '#2e2240' : '#3a2c50'));
-  }
-  for (let x = main.x0 + 6; x < main.x1 - 6; x += 22) px(x, main.y + 4, 1, 14, '#2a1e3a');
-  for (let x = main.x0 + 20; x < main.x1 - 20; x += 37) px(x, main.y + 40, 1, 10 + (x % 7), '#2a1e3a');
-  // soft platforms: thin slabs hung on chains
-  for (const p of [{ x0: 140, x1: 214, y: 150 }, { x0: 266, x1: 340, y: 150 }]) {
-    px(p.x0, p.y, p.x1 - p.x0, 1, '#d8c8f0');
-    px(p.x0, p.y + 1, p.x1 - p.x0, 3, '#6a5a86');
-    px(p.x0 + 2, p.y + 4, p.x1 - p.x0 - 4, 1, '#3a2c50');
-    for (const cx of [p.x0 + 6, p.x1 - 7]) for (let y = -40; y < p.y; y += 4) px(cx, y, 1, 2, '#4a3c60');
-  }
-  return cv;
+/** '#rrggbb' with alpha */
+function hexA(hex: string, a: number) {
+  const h = /^#([0-9a-f]{6})$/i.test(hex) ? hex.slice(1) : 'ffc93c';
+  return `rgba(${parseInt(h.slice(0, 2), 16)},${parseInt(h.slice(2, 4), 16)},${parseInt(h.slice(4, 6), 16)},${a})`;
 }

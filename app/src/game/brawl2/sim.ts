@@ -19,7 +19,12 @@
 export type Weapon = 'pick' | 'axe' | 'hammer' | 'blade';
 export type MoveId =
   | 'nLight' | 'sLight' | 'dLight' | 'nAir' | 'sAir' | 'dAir'
-  | 'nHeavy' | 'sHeavy' | 'dHeavy' | 'recovery' | 'pound';
+  | 'nHeavy' | 'sHeavy' | 'dHeavy' | 'recovery' | 'pound' | 'special';
+/**
+ * Special moves: one button, used when the meter is full. Each weapon family has one (game/brawl2/specials.ts
+ * maps gear and NFT items to them). They are tuned to be equally strong: different, never better.
+ */
+export type SpecialId = 'quake' | 'rush' | 'moon' | 'whirl' | 'dive' | 'guard';
 export type Mode = '1v1' | 'ffa';
 export type Difficulty = 'easy' | 'normal' | 'hard';
 
@@ -31,8 +36,10 @@ export interface Input {
   light: boolean;
   heavy: boolean;
   dodge: boolean;
+  /** the special move (needs a full meter) */
+  special?: boolean;
 }
-export const NO_INPUT: Input = { mx: 0, my: 0, jump: false, light: false, heavy: false, dodge: false };
+export const NO_INPUT: Input = { mx: 0, my: 0, jump: false, light: false, heavy: false, dodge: false, special: false };
 
 export interface Move {
   /** frames before, during and after the hit */
@@ -55,6 +62,10 @@ export interface Move {
   air?: boolean;
   /** a ground pound: falls fast until it lands */
   slam?: boolean;
+  /** launch away from the attacker whichever way they face (spins) */
+  away?: boolean;
+  /** a counter stance: no hitbox; a hit that lands during it is turned back on the attacker */
+  guard?: boolean;
 }
 
 export interface Fighter {
@@ -99,6 +110,9 @@ export interface Fighter {
   place: number;
   /** hits taken so far: online, a guest notices a new hit by this going up */
   hitN: number;
+  special: SpecialId;
+  /** 0..METER_FULL: fills by landing and taking hits */
+  meter: number;
 }
 
 export interface Platform {
@@ -110,6 +124,7 @@ export interface Platform {
 }
 
 export interface Stage {
+  id: 'pit' | 'grotto' | 'refinery';
   name: string;
   w: number;
   h: number;
@@ -120,9 +135,15 @@ export interface Stage {
   respawn: [number, number];
 }
 
-/** The Gothic Hall: one wide main stage over the abyss, two soft platforms above it. */
-export const HALL: Stage = {
-  name: 'Gothic Hall',
+/**
+ * The Gali Fightclub's three stages, all underground. Same blast zone and about the same space to fight in;
+ * each has its own floor plan. One is picked at random for each match (online, from the host's seed).
+ */
+const BLAST = { x0: -70, x1: 550, y0: -110, y1: 360 };
+/** The Ore Pit: the club's main ring, a plank floor over the shaft, two scaffold planks above. */
+export const PIT: Stage = {
+  id: 'pit',
+  name: 'THE ORE PIT',
   w: 480,
   h: 300,
   plats: [
@@ -130,15 +151,47 @@ export const HALL: Stage = {
     { x0: 140, x1: 214, y: 150, soft: true },
     { x0: 266, x1: 340, y: 150, soft: true },
   ],
-  blast: { x0: -70, x1: 550, y0: -110, y1: 360 },
-  spawns: [
-    [160, 196],
-    [320, 196],
-    [200, 150],
-    [280, 150],
-  ],
+  blast: BLAST,
+  spawns: [[160, 196], [320, 196], [200, 150], [280, 150]],
   respawn: [240, 70],
 };
+/** The Crystal Grotto: a narrower rock shelf, one high crystal ledge in the middle and two low ones out wide. */
+export const GROTTO: Stage = {
+  id: 'grotto',
+  name: 'CRYSTAL GROTTO',
+  w: 480,
+  h: 300,
+  plats: [
+    { x0: 126, x1: 354, y: 200, soft: false },
+    { x0: 200, x1: 280, y: 132, soft: true },
+    { x0: 92, x1: 150, y: 166, soft: true },
+    { x0: 330, x1: 388, y: 166, soft: true },
+  ],
+  blast: BLAST,
+  spawns: [[170, 200], [310, 200], [120, 166], [360, 166]],
+  respawn: [240, 70],
+};
+/** The Refinery: a long iron catwalk over molten ore, three short gantries in a row above it. */
+export const REFINERY: Stage = {
+  id: 'refinery',
+  name: 'THE REFINERY',
+  w: 480,
+  h: 300,
+  plats: [
+    { x0: 96, x1: 384, y: 204, soft: false },
+    { x0: 120, x1: 182, y: 158, soft: true },
+    { x0: 209, x1: 271, y: 140, soft: true },
+    { x0: 298, x1: 360, y: 158, soft: true },
+  ],
+  blast: BLAST,
+  spawns: [[150, 204], [330, 204], [150, 158], [330, 158]],
+  respawn: [240, 70],
+};
+export const STAGES: Stage[] = [PIT, GROTTO, REFINERY];
+/** older name for the first stage */
+export const HALL = PIT;
+/** The stage for a match: picked from its seed, so every player in an online match gets the same one. */
+export const stageFor = (seed: number) => STAGES[(seed >>> 0) % STAGES.length];
 
 export const FPS = 60;
 const DT = 1 / FPS;
@@ -166,6 +219,10 @@ const COUNTDOWN_F = 3 * FPS;
 /** a fighter's hurtbox, around the feet */
 const BODY_W = 12;
 const BODY_H = 22;
+export const METER_FULL = 100;
+/** meter per damage dealt and taken */
+const METER_DEAL = 2.2;
+const METER_TAKE = 1.2;
 
 /* ---------------- movesets ---------------- */
 /** knockback growth, tuned so most stocks are taken between about 110% and 180% */
@@ -185,7 +242,29 @@ const PICK: Record<MoveId, Move> = {
   dHeavy: m({ start: 14, active: 6, end: 20, hx: -18, hy: -8, hw: 48, hh: 9, dmg: 14, base: 160, growth: 170, angle: -45 }),
   recovery: m({ start: 3, active: 10, end: 14, hx: -4, hy: -30, hw: 20, hh: 30, dmg: 9, base: 140, growth: 110, angle: -75, lunge: [40, -360], air: true }),
   pound: m({ start: 8, active: 30, end: 16, hx: -8, hy: -6, hw: 24, hh: 12, dmg: 13, base: 150, growth: 150, angle: 70, air: true, slam: true }),
+  // stands in for the fighter's own special (moveOf picks the real one)
+  special: m({ start: 8, active: 6, end: 20, dmg: 14, base: 190, growth: 180, angle: -45 }),
 };
+
+/** The specials, same budget each: about 14 damage and a finisher's knockback, paid for with wind-up or end lag. */
+export const SPECIALS: Record<SpecialId, Move> = {
+  // Ore Quake: stamps the floor, the shockwave launches both sides upward
+  quake: m({ start: 13, active: 6, end: 24, hx: -32, hy: -10, hw: 64, hh: 12, dmg: 13, base: 185, growth: 172, angle: -80, away: true }),
+  // Rush Strike: a long dash through the foe
+  rush: m({ start: 8, active: 10, end: 22, hx: 2, hy: -20, hw: 20, hh: 18, dmg: 13, base: 200, growth: 175, angle: -20, lunge: [330, 0] }),
+  // Moon Shot: a rising uppercut, also a second recovery
+  moon: m({ start: 7, active: 8, end: 26, hx: -4, hy: -40, hw: 24, hh: 40, dmg: 12, base: 200, growth: 158, angle: -88, lunge: [20, -380] }),
+  // Whirlwind: spins, hitting all round
+  whirl: m({ start: 5, active: 16, end: 18, hx: -20, hy: -26, hw: 40, hh: 26, dmg: 14, base: 190, growth: 185, angle: -35, away: true }),
+  // Liquidation: hops and dives forward, spiking down
+  dive: m({ start: 6, active: 20, end: 16, hx: 2, hy: -14, hw: 20, hh: 16, dmg: 14, base: 170, growth: 170, angle: 45, lunge: [240, -170] }),
+  // Diamond Hands: a counter stance; whoever hits you during it gets hit back hard
+  guard: m({ start: 1, active: 32, end: 14, hx: -6, hy: -30, hw: 24, hh: 30, dmg: 17, base: 240, growth: 200, angle: -40, away: true, guard: true }),
+};
+export const SPECIAL_IDS = Object.keys(SPECIALS) as SpecialId[];
+export const isSpecial = (x: unknown): x is SpecialId => typeof x === 'string' && (SPECIAL_IDS as string[]).includes(x);
+/** The move a fighter is doing (its own special for 'special'). */
+export const moveOf = (f: Pick<Fighter, 'weapon' | 'special'>, id: MoveId): Move => (id === 'special' ? SPECIALS[f.special] : MOVES[f.weapon][id]);
 
 const tune = (base: Record<MoveId, Move>, f: (mv: Move, id: MoveId) => Partial<Move>) =>
   Object.fromEntries((Object.keys(base) as MoveId[]).map((id) => [id, { ...base[id], ...f(base[id], id) }])) as Record<MoveId, Move>;
@@ -208,7 +287,7 @@ export const MOVES: Record<Weapon, Record<MoveId, Move>> = {
 
 /* ---------------- the match ---------------- */
 export interface MatchEvent {
-  t: 'hit' | 'ko' | 'jump' | 'dodge' | 'swing' | 'land' | 'spawn' | 'go' | 'end' | 'recover';
+  t: 'hit' | 'ko' | 'jump' | 'dodge' | 'swing' | 'land' | 'spawn' | 'go' | 'end' | 'recover' | 'special' | 'counter';
   id?: string;
   by?: string;
   x?: number;
@@ -248,18 +327,18 @@ export function rand(match: Match): number {
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
 
-export function newFighter(o: { id: string; name: string; bot: Difficulty | null; weapon: Weapon; team: number; at: [number, number]; facing: 1 | -1 }): Fighter {
+export function newFighter(o: { id: string; name: string; bot: Difficulty | null; weapon: Weapon; special?: SpecialId; team: number; at: [number, number]; facing: 1 | -1 }): Fighter {
   return {
     id: o.id, name: o.name, bot: o.bot, weapon: o.weapon, team: o.team,
     x: o.at[0], y: o.at[1], vx: 0, vy: 0, facing: o.facing, grounded: false, on: -1,
     airJumps: 1, recoveryUsed: false, airDodgeUsed: false,
     dmg: 0, stocks: STOCKS, hitstun: 0, freeze: 0, invuln: 0, dodge: 0, dodgeCool: 0, dodgeDir: [0, 0], dropping: 0, respawn: 0,
-    act: null, lastBy: null, lastAt: 0, kos: 0, falls: 0, prev: { ...NO_INPUT }, place: 0, hitN: 0,
+    act: null, lastBy: null, lastAt: 0, kos: 0, falls: 0, prev: { ...NO_INPUT }, place: 0, hitN: 0, special: o.special ?? 'quake', meter: 0,
   };
 }
 
-export function newMatch(o: { mode: Mode; players: { id: string; name: string; bot: Difficulty | null; weapon: Weapon }[]; seed?: number; stage?: Stage }): Match {
-  const stage = o.stage ?? HALL;
+export function newMatch(o: { mode: Mode; players: { id: string; name: string; bot: Difficulty | null; weapon: Weapon; special?: SpecialId }[]; seed?: number; stage?: Stage }): Match {
+  const stage = o.stage ?? stageFor(o.seed ?? 12345);
   const fighters = o.players.map((p, i) => newFighter({ ...p, team: i, at: stage.spawns[i % stage.spawns.length], facing: stage.spawns[i % stage.spawns.length][0] < stage.w / 2 ? 1 : -1 }));
   return { stage, mode: o.mode, frame: 0, countdown: COUNTDOWN_F, timeLeft: MATCH_F, fighters, over: false, seed: o.seed ?? 12345, events: [] };
 }
@@ -286,7 +365,7 @@ function startMove(match: Match, f: Fighter, id: MoveId, i: Input) {
   }
   if (Math.abs(i.mx) > 0.3 && f.grounded) f.facing = i.mx > 0 ? 1 : -1;
   f.act = { move: id, f: 0, hit: [] };
-  const mv = MOVES[f.weapon][id];
+  const mv = moveOf(f, id);
   if (mv.lunge) {
     f.vx = mv.lunge[0] * f.facing + (f.grounded ? 0 : f.vx * 0.3);
     if (mv.lunge[1]) {
@@ -295,14 +374,15 @@ function startMove(match: Match, f: Fighter, id: MoveId, i: Input) {
       f.on = -1;
     }
   }
-  match.events.push({ t: 'swing', id: f.id, move: id, heavy: id.endsWith('Heavy') || id === 'pound' || id === 'recovery' });
+  match.events.push({ t: 'swing', id: f.id, move: id, heavy: id.endsWith('Heavy') || id === 'pound' || id === 'recovery' || id === 'special' });
+  if (id === 'special') match.events.push({ t: 'special', id: f.id, x: f.x, y: f.y });
   if (id === 'recovery') match.events.push({ t: 'recover', id: f.id, x: f.x, y: f.y });
 }
 
 /** One fighter's own movement and buttons for one frame. */
 function control(match: Match, f: Fighter, i: Input) {
   const p = f.prev;
-  const pressed = { jump: i.jump && !p.jump, light: i.light && !p.light, heavy: i.heavy && !p.heavy, dodge: i.dodge && !p.dodge };
+  const pressed = { jump: i.jump && !p.jump, light: i.light && !p.light, heavy: i.heavy && !p.heavy, dodge: i.dodge && !p.dodge, special: Boolean(i.special && !p.special) };
   const downPressed = i.my > 0.6 && p.my <= 0.6;
   f.prev = { ...i };
   if (f.dodgeCool > 0) f.dodgeCool--;
@@ -325,7 +405,7 @@ function control(match: Match, f: Fighter, i: Input) {
     return;
   }
   const busy = f.act !== null;
-  const mv = f.act ? MOVES[f.weapon][f.act.move] : null;
+  const mv = f.act ? moveOf(f, f.act.move) : null;
 
   // dodge
   if (pressed.dodge && f.dodgeCool === 0 && (f.grounded || !f.airDodgeUsed) && (!busy || (f.act && f.act.f >= mv!.start + mv!.active))) {
@@ -342,10 +422,13 @@ function control(match: Match, f: Fighter, i: Input) {
     return;
   }
   // attacks
-  if (!busy && (pressed.light || pressed.heavy)) startMove(match, f, pickMove(f, i, pressed.heavy), i);
+  if (!busy && pressed.special && f.meter >= METER_FULL) {
+    f.meter = 0;
+    startMove(match, f, 'special', i);
+  } else if (!busy && (pressed.light || pressed.heavy)) startMove(match, f, pickMove(f, i, pressed.heavy), i);
   // jump (also cancels the end of a light attack)
-  const cur = f.act ? MOVES[f.weapon][f.act.move] : null;
-  const canCancel = Boolean(f.act && cur && !cur.slam && f.act.f >= cur.start + cur.active + 2 && !f.act.move.endsWith('Heavy') && f.act.move !== 'recovery' && f.act.move !== 'pound');
+  const cur = f.act ? moveOf(f, f.act.move) : null;
+  const canCancel = Boolean(f.act && cur && !cur.slam && f.act.f >= cur.start + cur.active + 2 && !f.act.move.endsWith('Heavy') && f.act.move !== 'recovery' && f.act.move !== 'pound' && f.act.move !== 'special');
   if (pressed.jump && (!f.act || canCancel)) {
     if (f.grounded) {
       f.vy = -JUMP_V;
@@ -399,60 +482,77 @@ export { hitbox as moveHitbox };
 function strike(match: Match) {
   for (const a of match.fighters) {
     if (!alive(a) || !a.act || a.freeze > 0) continue;
-    const mv = MOVES[a.weapon][a.act.move];
+    const mv = moveOf(a, a.act.move);
     const f = a.act.f;
-    if (f < mv.start || f >= mv.start + mv.active) continue;
+    if (mv.guard || f < mv.start || f >= mv.start + mv.active) continue;
     const box = hitbox(a, mv);
     for (const d of match.fighters) {
       if (d === a || !alive(d) || d.invuln > 0 || a.act.hit.includes(d.id)) continue;
       if (match.mode !== 'ffa' && d.team === a.team) continue;
       if (!overlap(box, hurtbox(d))) continue;
+      const heavy = a.act.move.endsWith('Heavy') || a.act.move === 'pound' || a.act.move === 'special';
       if (match.authority === false) {
         // a guest: only its own swings, and only the spark and sound; the host's snapshot brings the hit
         if (a.id !== match.local) continue;
         a.act.hit.push(d.id);
-        match.events.push({ t: 'hit', id: d.id, by: a.id, x: d.x, y: d.y - BODY_H / 2, dmg: mv.dmg, kb: 0, heavy: a.act.move.endsWith('Heavy') || a.act.move === 'pound' });
+        match.events.push({ t: 'hit', id: d.id, by: a.id, x: d.x, y: d.y - BODY_H / 2, dmg: mv.dmg, kb: 0, heavy });
         continue;
       }
       a.act.hit.push(d.id);
-      d.hitN++;
-      d.dmg = Math.min(999, d.dmg + mv.dmg);
-      const kb = mv.base + (mv.growth * d.dmg) / 100;
-      // the launch angle, mirrored by facing; a hit from behind still sends them away from the attacker
-      const dir = d.x >= a.x ? 1 : -1;
-      const face = Math.abs(mv.angle) >= 85 ? dir : a.facing;
-      const rad = (mv.angle * Math.PI) / 180;
-      d.vx = Math.cos(rad) * kb * face;
-      d.vy = Math.sin(rad) * kb;
-      // grounded and sent down: bounce up instead
-      if (d.grounded && d.vy > 0) d.vy = -d.vy * 0.5;
-      d.grounded = d.vy >= 0 && d.grounded;
-      if (d.vy < 0) {
-        d.grounded = false;
-        d.on = -1;
+      // Diamond Hands: the hit is turned back on the one who swung
+      const dm = d.act ? moveOf(d, d.act.move) : null;
+      if (dm?.guard && d.act && d.act.f >= dm.start && d.act.f < dm.start + dm.active && !d.act.hit.includes(a.id)) {
+        d.act.hit.push(a.id);
+        d.act.f = dm.start + dm.active;
+        match.events.push({ t: 'counter', id: d.id, by: a.id, x: d.x, y: d.y - BODY_H / 2 });
+        land(match, d, a, dm, true);
+        break;
       }
-      d.hitstun = Math.round(Math.min(60, 6 + kb * 0.05));
-      d.act = null;
-      d.dodge = 0;
-      d.lastBy = a.id;
-      d.lastAt = match.frame;
-      // a hit resets the air options, so you can recover
-      d.airJumps = 1;
-      d.recoveryUsed = false;
-      d.airDodgeUsed = false;
-      const stop = Math.round(Math.min(10, 3 + mv.dmg / 3));
-      a.freeze = stop;
-      d.freeze = stop;
-      match.events.push({ t: 'hit', id: d.id, by: a.id, x: d.x, y: d.y - BODY_H / 2, dmg: mv.dmg, kb, heavy: kb > 300 || a.act.move.endsWith('Heavy') || a.act.move === 'pound' });
+      land(match, a, d, mv, heavy || mv.dmg >= 12);
+      if (a.act.move !== 'special') a.meter = Math.min(METER_FULL, a.meter + mv.dmg * METER_DEAL);
     }
   }
+}
+
+/** a lands a hit with move mv on d */
+function land(match: Match, a: Fighter, d: Fighter, mv: Move, heavy: boolean) {
+  d.hitN++;
+  d.dmg = Math.min(999, d.dmg + mv.dmg);
+  d.meter = Math.min(METER_FULL, d.meter + mv.dmg * METER_TAKE);
+  const kb = mv.base + (mv.growth * d.dmg) / 100;
+  // the launch angle, mirrored by facing; a hit from behind still sends them away from the attacker
+  const dir = d.x >= a.x ? 1 : -1;
+  const face = mv.away || Math.abs(mv.angle) >= 85 ? dir : a.facing;
+  const rad = (mv.angle * Math.PI) / 180;
+  d.vx = Math.cos(rad) * kb * face;
+  d.vy = Math.sin(rad) * kb;
+  // grounded and sent down: bounce up instead
+  if (d.grounded && d.vy > 0) d.vy = -d.vy * 0.5;
+  d.grounded = d.vy >= 0 && d.grounded;
+  if (d.vy < 0) {
+    d.grounded = false;
+    d.on = -1;
+  }
+  d.hitstun = Math.round(Math.min(60, 6 + kb * 0.05));
+  d.act = null;
+  d.dodge = 0;
+  d.lastBy = a.id;
+  d.lastAt = match.frame;
+  // a hit resets the air options, so you can recover
+  d.airJumps = 1;
+  d.recoveryUsed = false;
+  d.airDodgeUsed = false;
+  const stop = Math.round(Math.min(10, 3 + mv.dmg / 3));
+  a.freeze = stop;
+  d.freeze = stop;
+  match.events.push({ t: 'hit', id: d.id, by: a.id, x: d.x, y: d.y - BODY_H / 2, dmg: mv.dmg, kb, heavy: kb > 300 || heavy });
 }
 
 /** Gravity, platforms and the blast zone. */
 function physics(match: Match, f: Fighter) {
   const st = match.stage;
   if (!f.grounded) {
-    const slam = f.act && MOVES[f.weapon][f.act.move].slam;
+    const slam = f.act && moveOf(f, f.act.move).slam;
     f.vy += GRAV * DT;
     const cap = slam ? FAST_FALL * 1.3 : f.hitstun > 0 ? 9999 : f.prev.my > 0.6 ? FAST_FALL : MAX_FALL;
     if (f.vy > cap) f.vy = cap;
@@ -485,8 +585,8 @@ function physics(match: Match, f: Fighter) {
         f.airJumps = 1;
         f.recoveryUsed = false;
         f.airDodgeUsed = false;
-        if (f.act && MOVES[f.weapon][f.act.move].air) {
-          const slam = MOVES[f.weapon][f.act.move].slam;
+        if (f.act && moveOf(f, f.act.move).air) {
+          const slam = moveOf(f, f.act.move).slam;
           f.act = null;
           if (slam) f.freeze = 6;
         }
@@ -584,7 +684,7 @@ export function step(match: Match, inputs: Record<string, Input>) {
     control(match, f, inputs[f.id] ?? NO_INPUT);
     if (f.act) {
       f.act.f++;
-      const mv = MOVES[f.weapon][f.act.move];
+      const mv = moveOf(f, f.act.move);
       // a ground pound keeps going until it lands; everything else ends on time
       if (mv.slam) {
         if (f.act.f >= mv.start + mv.active) f.act.f = mv.start + mv.active - 1;
@@ -609,7 +709,7 @@ export function step(match: Match, inputs: Record<string, Input>) {
 /** The view a renderer needs of one fighter. */
 export function poseOf(f: Fighter): { pose: 'idle' | 'walk' | 'swing' | 'cheer'; k: number; air: boolean } {
   if (f.act) {
-    const mv = MOVES[f.weapon][f.act.move];
+    const mv = moveOf(f, f.act.move);
     const total = mv.start + mv.active + mv.end;
     // the swing's 6 frames: wind up through the start, frame 3 is the hit
     const k = f.act.f < mv.start ? Math.floor((f.act.f / Math.max(1, mv.start)) * 3) : f.act.f < mv.start + mv.active ? 3 : 4 + Math.min(1, Math.floor(((f.act.f - mv.start - mv.active) / Math.max(1, mv.end)) * 2));
