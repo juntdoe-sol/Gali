@@ -60,8 +60,9 @@ $$;
 create or replace function public.fc_ranks(p_limit int default 50)
 returns table (wallet text, name text, rating int, tier text, games int, wins int)
 language sql stable security definer set search_path = public as $$
-  select r.wallet, gali_display_name(r.wallet), r.rating, fc_tier(r.rating), r.games, r.wins
-  from fc_ratings r where r.games > 0
+  select r.wallet, coalesce(nullif(m.name, ''), left(r.wallet, 4) || '…' || right(r.wallet, 4)), r.rating, fc_tier(r.rating), r.games, r.wins
+  from fc_ratings r left join gali_miners m on m.wallet = r.wallet
+  where r.games > 0
   order by r.rating desc, r.wins desc, r.at asc
   limit least(greatest(p_limit, 1), 100)
 $$;
