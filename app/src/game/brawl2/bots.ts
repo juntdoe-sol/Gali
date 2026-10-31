@@ -50,6 +50,15 @@ export class Bots {
     const i: Input = { mx: 0, my: 0, jump: false, light: false, heavy: false, dodge: false, special: false };
     if (match.countdown > 0 || f.respawn > 0) return i;
 
+    // 0. hanging from a ledge: climb up, or jump if someone waits above
+    if (f.hang > 0) {
+      if (f.hang > 8 + Math.floor(rand(match) * 20)) {
+        if (rand(match) < 0.35) i.jump = true;
+        else i.mx = f.facing;
+      }
+      return i;
+    }
+
     // 1. off the stage: get back
     const off = f.x < main.x0 + 4 || f.x > main.x1 - 4;
     const below = f.y > main.y - 4 && !f.grounded;

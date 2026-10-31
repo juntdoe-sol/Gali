@@ -61,7 +61,7 @@ const DOOR_UI: { id: DoorId; label: string; sub: string; color: string }[] = [
   { id: 'island', label: 'ISLAND', sub: 'Mine ORE', color: '#3de0c8' },
   { id: 'cave', label: 'CAVE', sub: 'Dig for XP', color: '#ff9a3d' },
   { id: 'market', label: 'MARKET', sub: 'Gear 555', color: '#b86bff' },
-  { id: 'arena', label: 'ARENA', sub: 'Brawl', color: '#ff4f5e' },
+  { id: 'arena', label: 'FIGHTCLUB', sub: 'Fight', color: '#ff4f5e' },
 ];
 const EMOTE_NAME: Record<string, string> = { wave: 'Wave', laugh: 'Laugh', heart: 'Love', fire: 'Fire', pick: 'Pickaxe', gem: 'Gem' };
 
@@ -713,7 +713,7 @@ const HOWTO: { icon: PixName; title: string; body: string }[] = [
   { icon: 'gem', title: 'Smash things', body: 'Hit pots, crates, barrels, bushes and stones to smash them. Breaking one heals you, up to 15 HP. Crack a dark ore vein with 5 hits for 1 to 10 XP. Everything grows back.' },
   { icon: 'ore', title: 'ORE Island: mine ORE', body: 'Walk down the pier, or tap GO then ORE ISLAND. Pick spots, deploy SOL, and win ORE when your spot is the gold one. Your wallet approves every deploy. Only play with SOL you can afford to lose.' },
   { icon: 'fire', title: 'Autopilot', body: 'On the island, open MINE, then PRO, and set Rounds above 1. One approval funds ORE automation, and your rounds deploy by themselves even with the app closed. STOP returns the unused SOL.' },
-  { icon: 'trophy', title: 'Arena', body: 'The colosseum west of the plaza. Last Miner Standing, King of the Ring, or team up against the boss. Q, E, R, C, V and X fire your powers as you level up. Wins and KOs put you on the Brawl ranks.' },
+  { icon: 'trophy', title: 'Gali Fightclub', body: 'The mine door west of the plaza. Knock miners out of the ring, 1v1 or free for all, online or against bots. Fill your meter and fire your weapon’s special. Online matches move your Fightclub rank.' },
   { icon: 'pick', title: 'Cave Run', body: 'Walk into the cave in the north west. Dig down, dodge the rocks, and earn XP. It never spends SOL.' },
   { icon: 'cart', title: 'Mini games', body: 'Three pavilions south of the plaza: Tunnel Collapse, Gold Rush Pot and Crash Cart. Stake ORE or SKR, with a new round every 40 seconds. 5% house fee. 18+ only, stake only what you can afford to lose.' },
   { icon: 'quest', title: 'Quests and ranks', body: 'QUEST has nine daily quests across the whole game, plus achievements. Claim each one for XP. RANKS shows miners by level, ORE mined on chain and Brawl points, for today, this month, this year or all time. Clans will be available soon.' },
