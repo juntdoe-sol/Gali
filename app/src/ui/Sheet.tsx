@@ -9,7 +9,8 @@ import {
 } from '../game/constants';
 import { isLive, isOnChain, useGame, useLevelXp, usePoints } from '../game/store';
 import { chainReady, CLUSTER, oreLive, PROGRAM_ID_STR, short, SKR_MINT_STR, type BoardRound } from '../chain/light';
-import { PERIOD_WORDS, useMinerRanks, useRanks, type Period } from '../game/ranks';
+import { PERIOD_WORDS, useMinerRanks, type Period } from '../game/ranks';
+import { tierOf, useFcRank } from '../game/brawl2/rank';
 import { ClansSoon, ComingSoon, PeriodPicker } from './Clans';
 import { loadBoard, loadChain } from '../chain/lazy';
 import { ADMIN_FEE, fmtOreAmt, fmtSol, POT_FEE, practiceMotherlode, practiceOreMotherlode, simPot, soloMask } from '../game/pot';
@@ -522,17 +523,22 @@ function Ranks() {
   const xp = useLevelXp();
   const [tab, setTab] = useState<RankTab>('level');
   const miners = useMinerRanks();
-  const brawl = useRanks();
+  const fc = useFcRank();
   const [period, setPeriod] = useState<Period>(() => useMinerRanks.getState().period);
   useEffect(() => {
     void useMinerRanks.getState().load(period, oreLive ? (w) => loadBoard().then((b) => b.fetchMinerLifetimes(w)) : undefined);
-    void useRanks.getState().load(period);
   }, [period]);
+  useEffect(() => {
+    if (tab === 'brawl') {
+      void useFcRank.getState().loadBoard();
+      void useFcRank.getState().loadMe(owner);
+    }
+  }, [tab, owner]);
   const rows =
     tab === 'ore'
       ? miners.everyone.filter((r) => (r.oreGain ?? 0) > 0).sort((a, b) => (b.oreGain ?? 0) - (a.oreGain ?? 0))
       : [...miners.rows].sort((a, b) => b.gain - a.gain);
-  const status = tab === 'brawl' ? brawl.status : miners.status;
+  const status = tab === 'brawl' ? fc.status : miners.status;
   const when = PERIOD_WORDS[period];
   // the server has no period boards yet: say so, and show all time
   const fallback = tab !== 'brawl' && miners.allOnly && period !== 'all';
@@ -544,7 +550,7 @@ function Ranks() {
           [
             ['level', 'LEVEL'],
             ['ore', 'ORE IN GALI'],
-            ['brawl', 'BRAWL'],
+            ['brawl', 'FIGHTCLUB'],
             ['clans', 'CLANS'],
           ] as [RankTab, string][]
         ).map(([k, label]) => (
@@ -561,7 +567,7 @@ function Ranks() {
         <ComingSoon icon="users" title="CLAN RANKS" line="Clans ranked by the XP their miners earn, today, this month, this year and all time." />
       ) : (
         <>
-          <PeriodPicker period={period} onPick={setPeriod} />
+          {tab === 'brawl' ? null : <PeriodPicker period={period} onPick={setPeriod} />}
           {fallback ? (
             <T v="bold" style={{ fontSize: 12, color: COLORS.gold }}>
               Today, month and year boards switch on with the next server update. Showing all time for now.
@@ -576,9 +582,7 @@ function Ranks() {
                 ? shownPeriod === 'all'
                   ? 'ORE mined in Gali, counted from when each miner joined (early miners: from 21 Oct). Mining done before joining doesn’t count.'
                   : `ORE mined in Gali ${when}, counted from when each miner joined.`
-                : brawl.weekOnly
-                  ? 'Brawl, the last 7 days (today, month and year boards switch on with the next server update): 1 point a KO, 3 a match win, 2 a Boss Raid won.'
-                  : `Brawl ${when}: 1 point a KO, 3 a match win, 2 a Boss Raid won. A KO counts when the miner who went down reports it.`}
+                : `Gali Fightclub rank: online matches against miners move your rating (everyone starts at 1000). A match counts once every miner in it reports the same result.${fc.me && fc.me.games ? ` You: ${fc.me.rating} ${fc.me.tier}${fc.me.place ? `, #${fc.me.place}` : ''}.` : ''}`}
           </T>
           {status === 'off' ? (
             <Card>
@@ -588,27 +592,33 @@ function Ranks() {
             <Card>
               <T>Could not load the ranks. Try again in a moment.</T>
             </Card>
-          ) : (status === 'loading' || status === 'idle') && !(tab === 'brawl' ? brawl.rows : miners.rows).length ? (
+          ) : (status === 'loading' || status === 'idle') && !(tab === 'brawl' ? fc.rows : miners.rows).length ? (
             <Card>
               <T>Loading the ranks…</T>
             </Card>
           ) : tab === 'brawl' ? (
-            !brawl.rows.length ? (
+            !fc.rows.length ? (
               <Card>
-                <T>No fights {when} yet. Be the first on the board.</T>
+                <T>No rated matches yet. Win an online match in the Gali Fightclub to be first on the board.</T>
               </Card>
             ) : (
-              brawl.rows.map((r, k) => (
-                <PixelBox key={r.name} fill="rgba(9,14,34,0.9)" hi="#22356f" lo="#04060f" style={styles.rank}>
+              fc.rows.map((r, k) => (
+                <PixelBox key={r.wallet} fill={r.wallet === owner ? 'rgba(255,201,60,0.12)' : 'rgba(9,14,34,0.9)'} hi={r.wallet === owner ? COLORS.gold : '#22356f'} lo="#04060f" style={styles.rank}>
                   <RankNo k={k} />
-                  <T v="bold" style={{ flex: 1 }} numberOfLines={1}>
-                    {r.name}
+                  <View style={{ flex: 1 }}>
+                    <T v="bold" numberOfLines={1}>
+                      {r.name || short(r.wallet)}
+                      {r.wallet === owner ? '  (you)' : ''}
+                    </T>
+                    <T v="muted" style={{ fontSize: 11 }}>
+                      {r.games} rated · {r.wins} W
+                    </T>
+                  </View>
+                  <T v="label" style={{ color: tierOf(r.rating).color }}>
+                    {r.tier}
                   </T>
-                  <T v="muted">
-                    {r.kos} KO · {r.wins} W{r.bosses ? ` · ${r.bosses} B` : ''}
-                  </T>
-                  <T v="display" style={{ color: COLORS.gold, fontSize: 20, minWidth: 54, textAlign: 'right' }}>
-                    {r.points}
+                  <T v="display" style={{ color: COLORS.gold, fontSize: 20, minWidth: 60, textAlign: 'right' }}>
+                    {r.rating}
                   </T>
                 </PixelBox>
               ))

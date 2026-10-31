@@ -12,6 +12,8 @@
 //   win    { mode, players }            this wallet won an arena match or a raid
 //   chat   { mid, sender, name, body }  save one of this wallet's lobby chat lines
 //   ticket { id }                       a signed arena ticket for this wallet and player id (see below)
+//   fight  { mid, mode, ord }           Gali Fightclub: this wallet's view of an online match's finishing order
+//                                       (wallets, 1st first). Ranks change once every wallet in it agrees (below).
 // Deploy: npx supabase functions deploy play
 // Secrets: DM_SECRET (shared with dm), SOLANA_RPC, TICKET_KEY (32-byte ed25519 seed, hex; see scripts/ticket-key.mjs)
 //
@@ -62,6 +64,45 @@ function ticketKey(): Uint8Array | null {
   return /^[0-9a-f]{64}$/i.test(hex) ? Uint8Array.from(hex.match(/../g)!.map((h) => parseInt(h, 16))) : null;
 }
 const b64 = (b: Uint8Array) => btoa(String.fromCharCode(...b));
+
+/**
+ * Gali Fightclub: once every wallet in a match has reported, and all name the same order, the ratings move.
+ * Elo between every pair (the better finisher wins the pair), K = 32 shared across the pairs; a pair that already
+ * played 5 rated matches today does not count. Reports that disagree settle the match with no change.
+ */
+async function settleFight(mid: string, players: string[]) {
+  const { data: reps } = await db.from('fc_reports').select('wallet, ord').eq('mid', mid);
+  if (!reps || reps.length < players.length) return;
+  // claim it, so two last reports arriving together settle it once
+  const { data: claimed } = await db.from('fc_matches').update({ settled: true }).eq('mid', mid).eq('settled', false).select('mid');
+  if (!claimed?.length) return;
+  const first = (reps[0].ord as string[]).join();
+  if (!reps.every((r) => (r.ord as string[]).join() === first)) return;
+  const ord = reps[0].ord as string[];
+  const { data: rows } = await db.from('fc_ratings').select('wallet, rating, games, wins').in('wallet', ord);
+  const cur = new Map((rows ?? []).map((r) => [r.wallet as string, r]));
+  const R = (w: string) => Number(cur.get(w)?.rating ?? 1000);
+  const delta = new Map(ord.map((w) => [w, 0]));
+  const K = 32 / (ord.length - 1);
+  for (let i = 0; i < ord.length; i++) {
+    for (let j = i + 1; j < ord.length; j++) {
+      const { data: n } = await db.rpc('fc_pair_count', { p_a: ord[i], p_b: ord[j] });
+      if (Number(n ?? 0) >= 5) continue;
+      const e = 1 / (1 + 10 ** ((R(ord[j]) - R(ord[i])) / 400));
+      delta.set(ord[i], delta.get(ord[i])! + K * (1 - e));
+      delta.set(ord[j], delta.get(ord[j])! - K * (1 - e));
+    }
+  }
+  const now = new Date().toISOString();
+  const ratings = ord.map((w, k) => {
+    const c = cur.get(w);
+    return { wallet: w, rating: Math.max(100, Math.round(R(w) + delta.get(w)!)), games: Number(c?.games ?? 0) + 1, wins: Number(c?.wins ?? 0) + (k === 0 ? 1 : 0), at: now };
+  });
+  const up = await db.from('fc_ratings').upsert(ratings, { onConflict: 'wallet' });
+  if (up.error) throw up.error;
+  const res = await db.from('fc_results').insert(ratings.map((r, k) => ({ mid, wallet: r.wallet, place: k + 1, delta: r.rating - R(r.wallet), rating: r.rating })));
+  if (res.error) throw res.error;
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
@@ -121,6 +162,27 @@ Deno.serve(async (req) => {
       if (!MODES.has(q.mode) || (players < 2 && q.mode !== 'boss' && q.mode !== 'waves')) return reply(400, { error: 'bad report' });
       const { error } = await db.from('brawl_wins').insert({ winner: me, host: me, mode: q.mode, players });
       return error ? fail(error) : reply(200, { ok: true });
+    }
+    if (a === 'fight') {
+      const mid = String(q.mid ?? '');
+      const mode = q.mode === '1v1' || q.mode === 'ffa' ? q.mode : null;
+      const ord: string[] = Array.isArray(q.ord) ? q.ord.map((w: unknown) => String(w)) : [];
+      if (!/^[A-Za-z0-9-]{6,64}$/.test(mid) || !mode || ord.length < 2 || ord.length > 4 || !ord.every(isWallet) || new Set(ord).size !== ord.length || !ord.includes(me)) return reply(400, { error: 'bad report' });
+      const { count } = await db.from('fc_reports').select('mid', { count: 'exact', head: true }).eq('wallet', me).gt('at', new Date(Date.now() - 86_400_000).toISOString());
+      if ((count ?? 0) >= 120) return reply(200, { ok: false, reason: 'daily limit' });
+      const players = [...ord].sort();
+      // the first report fixes who was in the match; later ones must name the same wallets
+      const ins = await db.from('fc_matches').upsert({ mid, mode, players }, { onConflict: 'mid', ignoreDuplicates: true });
+      if (ins.error) return fail(ins.error);
+      const { data: m, error } = await db.from('fc_matches').select('players, settled, at, mode').eq('mid', mid).single();
+      if (error || !m) return fail(error);
+      if ((m.players as string[]).join() !== players.join() || m.mode !== mode) return reply(200, { ok: false, reason: 'players differ' });
+      if (Date.now() - Date.parse(m.at) > 15 * 60_000) return reply(200, { ok: false, reason: 'too late' });
+      const rep = await db.from('fc_reports').upsert({ mid, wallet: me, ord }, { onConflict: 'mid,wallet', ignoreDuplicates: true });
+      if (rep.error) return fail(rep.error);
+      if (!m.settled) await settleFight(mid, players).catch((e) => console.error('settle', (e as Error)?.message ?? e));
+      const { data: mine } = await db.from('fc_results').select('delta, rating, place').eq('mid', mid).eq('wallet', me).maybeSingle();
+      return reply(200, { ok: true, settled: Boolean(mine), ...(mine ?? {}) });
     }
     if (a === 'chat') {
       const mid = String(q.mid ?? '');

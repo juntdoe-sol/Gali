@@ -22,6 +22,8 @@ export interface NetPlayer {
   weapon: string;
   /** the special move their weapon gives (specials.ts) */
   sp?: string;
+  /** their wallet, for the rank (the server only counts it once that wallet reports the same result) */
+  w?: string;
 }
 
 /* ---------- a guest's own state, guest -> host ('boi') ---------- */
@@ -31,7 +33,7 @@ export function packSelf(f: Fighter, i: Input): SelfPack {
     r1(f.x), r1(f.y), Math.round(f.vx), Math.round(f.vy), f.facing, f.grounded ? 1 : 0, f.on,
     f.airJumps, f.recoveryUsed ? 1 : 0, f.airDodgeUsed ? 1 : 0, f.dodge, f.dodgeCool, f.dodgeDir[0], f.dodgeDir[1], f.dropping,
     f.act ? MOVE_LIST.indexOf(f.act.move) : -1, f.act ? f.act.f : 0,
-    f.hitN, f.falls, r1(i.mx), r1(i.my),
+    f.hitN, f.falls, r1(i.mx), r1(i.my), f.hang, f.ledge,
   ];
 }
 /** The host takes a guest's own report for its fighter, unless the host knows of a hit or a fall it has not seen yet. */
@@ -55,6 +57,10 @@ export function applySelf(f: Fighter, p: SelfPack, input: Input): boolean {
   f.dodgeCool = p[11] | 0;
   f.dodgeDir = [p[12], p[13]];
   f.dropping = p[14] | 0;
+  if (p.length >= 23) {
+    f.hang = Math.max(0, p[21] | 0);
+    f.ledge = p[22] | 0;
+  }
   let mv = MOVE_LIST[p[15]];
   // a special costs a full meter, and the host keeps the meter
   if (mv === 'special' && f.act?.move !== 'special') {
@@ -72,8 +78,8 @@ export function applySelf(f: Fighter, p: SelfPack, input: Input): boolean {
 export interface Snap {
   /** match id */
   mid: string;
-  /** frame, countdown, timeLeft, over */
-  m: [number, number, number, number];
+  /** frame, countdown, timeLeft, over, sudden death */
+  m: [number, number, number, number, number?];
   /** fighters, in match order */
   f: number[][];
   /** what happened since the last snapshot (only what a guest cannot see coming) */
@@ -85,7 +91,7 @@ export function packFighter(f: Fighter, i: Input | undefined): number[] {
     f.airJumps, f.recoveryUsed ? 1 : 0, f.airDodgeUsed ? 1 : 0, f.dodge, f.dodgeCool, f.dodgeDir[0], f.dodgeDir[1], f.dropping,
     f.act ? MOVE_LIST.indexOf(f.act.move) : -1, f.act ? f.act.f : 0,
     f.hitN, f.falls, r1(i?.mx ?? 0), r1(i?.my ?? 0),
-    r1(f.dmg), f.stocks, f.hitstun, f.freeze, f.invuln, f.respawn, f.kos, f.place, f.bot ? 1 : 0, Math.round(f.meter),
+    r1(f.dmg), f.stocks, f.hitstun, f.freeze, f.invuln, f.respawn, f.kos, f.place, f.bot ? 1 : 0, Math.round(f.meter), f.hang, f.ledge,
   ];
 }
 /** Set a fighter from the snapshot: everything (another fighter), or only the score (your own, see adoptSelf). */
@@ -122,6 +128,10 @@ function setPhys(f: Fighter, p: number[]) {
   f.dodgeCool = p[11];
   f.dodgeDir = [p[12], p[13]];
   f.dropping = p[14];
+  if (p.length >= 33) {
+    f.hang = p[31];
+    f.ledge = p[32];
+  }
   const mv = MOVE_LIST[p[15]];
   f.act = mv ? { move: mv, f: p[16], hit: f.act && f.act.move === mv ? f.act.hit : [] } : null;
 }
@@ -148,7 +158,7 @@ export function adoptSelf(f: Fighter, p: number[]): boolean {
 }
 
 export function packSnap(mid: string, m: Match, inputs: Record<string, Input>, events: MatchEvent[]): Snap {
-  return { mid, m: [m.frame, m.countdown, m.timeLeft, m.over ? 1 : 0], f: m.fighters.map((f) => packFighter(f, inputs[f.id])), e: events.slice(-24) };
+  return { mid, m: [m.frame, m.countdown, m.timeLeft, m.over ? 1 : 0, m.sudden ? 1 : 0], f: m.fighters.map((f) => packFighter(f, inputs[f.id])), e: events.slice(-24) };
 }
 
 const clamp1 = (n: number) => Math.max(-1, Math.min(1, n));

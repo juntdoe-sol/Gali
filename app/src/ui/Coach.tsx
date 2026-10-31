@@ -32,7 +32,7 @@ const INTRO_CARDS: Record<(typeof INTRO)[number], Card> = {
 const PLACE_CARDS: Record<PlaceId, Card> = {
   cave: { icon: 'pick', title: 'Cave Run', body: 'Dig down, dodge the falling rocks and earn XP. It never spends SOL. Walk in to start.' },
   market: { icon: 'bag', title: 'Gear Market', body: 'The vending machine sells gear for your miner: helmets, clothes, shoes, axes and pets. Step up to it to browse.' },
-  arena: { icon: 'trophy', title: 'Arena', body: 'Last Miner Standing, King of the Ring, or team up against the boss. Q, E, R, C, V and X are your powers. Wins and KOs put you on the Brawl ranks.' },
+  arena: { icon: 'trophy', title: 'Gali Fightclub', body: 'Knock miners out of the ring: 3 lives each, the higher their %, the further they fly. Fill your meter and fire your special. Online matches move your Fightclub rank.' },
   games: { icon: 'cart', title: 'Mini games', body: 'Tunnel Collapse, Gold Rush Pot and Crash Cart. Stake ORE or SKR, a new round every 40 seconds, 5% house fee. 18+ only: stake only what you can afford to lose.' },
 };
 

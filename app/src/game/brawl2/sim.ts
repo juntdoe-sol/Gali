@@ -113,6 +113,11 @@ export interface Fighter {
   special: SpecialId;
   /** 0..METER_FULL: fills by landing and taking hits */
   meter: number;
+  /** hanging from a ledge: frames so far (0 = not), and which platform's edge */
+  hang: number;
+  ledge: number;
+  /** frames before another ledge grab */
+  ledgeCool: number;
 }
 
 export interface Platform {
@@ -220,6 +225,9 @@ const COUNTDOWN_F = 3 * FPS;
 const BODY_W = 12;
 const BODY_H = 22;
 export const METER_FULL = 100;
+/** a ledge hang lasts at most this long, and is safe at first */
+const HANG_MAX = 150;
+const HANG_INV = 24;
 /** meter per damage dealt and taken */
 const METER_DEAL = 2.2;
 const METER_TAKE = 1.2;
@@ -287,7 +295,7 @@ export const MOVES: Record<Weapon, Record<MoveId, Move>> = {
 
 /* ---------------- the match ---------------- */
 export interface MatchEvent {
-  t: 'hit' | 'ko' | 'jump' | 'dodge' | 'swing' | 'land' | 'spawn' | 'go' | 'end' | 'recover' | 'special' | 'counter';
+  t: 'hit' | 'ko' | 'jump' | 'dodge' | 'swing' | 'land' | 'spawn' | 'go' | 'end' | 'recover' | 'special' | 'counter' | 'grab' | 'sudden';
   id?: string;
   by?: string;
   x?: number;
@@ -307,6 +315,8 @@ export interface Match {
   timeLeft: number;
   fighters: Fighter[];
   over: boolean;
+  /** time ran out with a tie at the top: the tied fighters play on, 1 life each, next KO wins */
+  sudden?: boolean;
   /** seeded random, for bots and sudden death */
   seed: number;
   events: MatchEvent[];
@@ -333,7 +343,7 @@ export function newFighter(o: { id: string; name: string; bot: Difficulty | null
     x: o.at[0], y: o.at[1], vx: 0, vy: 0, facing: o.facing, grounded: false, on: -1,
     airJumps: 1, recoveryUsed: false, airDodgeUsed: false,
     dmg: 0, stocks: STOCKS, hitstun: 0, freeze: 0, invuln: 0, dodge: 0, dodgeCool: 0, dodgeDir: [0, 0], dropping: 0, respawn: 0,
-    act: null, lastBy: null, lastAt: 0, kos: 0, falls: 0, prev: { ...NO_INPUT }, place: 0, hitN: 0, special: o.special ?? 'quake', meter: 0,
+    act: null, lastBy: null, lastAt: 0, kos: 0, falls: 0, prev: { ...NO_INPUT }, place: 0, hitN: 0, special: o.special ?? 'quake', meter: 0, hang: 0, ledge: -1, ledgeCool: 0,
   };
 }
 
@@ -387,6 +397,40 @@ function control(match: Match, f: Fighter, i: Input) {
   f.prev = { ...i };
   if (f.dodgeCool > 0) f.dodgeCool--;
   if (f.dropping > 0) f.dropping--;
+  if (f.ledgeCool > 0) f.ledgeCool--;
+
+  // hanging from a ledge: climb up, jump off, or let go
+  if (f.hang > 0) {
+    const p = match.stage.plats[f.ledge];
+    f.hang++;
+    f.vx = 0;
+    f.vy = 0;
+    const inward = f.facing;
+    if (!p || f.hang > HANG_MAX || downPressed) {
+      f.hang = 0;
+      f.ledgeCool = 40;
+      return;
+    }
+    if (pressed.jump) {
+      f.hang = 0;
+      f.ledgeCool = 20;
+      f.vy = -JUMP_V;
+      f.airJumps = 1;
+      match.events.push({ t: 'jump', id: f.id, x: f.x, y: f.y });
+      return;
+    }
+    if (f.hang > 6 && (Math.sign(i.mx) === inward && Math.abs(i.mx) > 0.4 || i.my < -0.6 || pressed.light || pressed.heavy)) {
+      f.hang = 0;
+      f.ledgeCool = 20;
+      f.x = inward > 0 ? p.x0 + 8 : p.x1 - 8;
+      f.y = p.y;
+      f.grounded = true;
+      f.on = f.ledge;
+      f.invuln = Math.max(f.invuln, 10);
+      match.events.push({ t: 'land', id: f.id, x: f.x, y: f.y });
+    }
+    return;
+  }
 
   if (f.hitstun > 0) {
     f.hitstun--;
@@ -534,6 +578,8 @@ function land(match: Match, a: Fighter, d: Fighter, mv: Move, heavy: boolean) {
     d.on = -1;
   }
   d.hitstun = Math.round(Math.min(60, 6 + kb * 0.05));
+  d.hang = 0;
+  d.ledgeCool = 30;
   d.act = null;
   d.dodge = 0;
   d.lastBy = a.id;
@@ -551,6 +597,7 @@ function land(match: Match, a: Fighter, d: Fighter, mv: Move, heavy: boolean) {
 /** Gravity, platforms and the blast zone. */
 function physics(match: Match, f: Fighter) {
   const st = match.stage;
+  if (f.hang > 0) return;
   if (!f.grounded) {
     const slam = f.act && moveOf(f, f.act.move).slam;
     f.vy += GRAV * DT;
@@ -643,6 +690,36 @@ function ko(match: Match, f: Fighter) {
   }
 }
 
+/** Falling past the end of a solid platform, close to its edge: grab the ledge. */
+function grabLedge(match: Match, f: Fighter) {
+  if (f.hang > 0 || f.grounded || f.vy < 0 || f.hitstun > 0 || f.ledgeCool > 0 || f.dodge > 0) return;
+  if (f.act && !moveOf(f, f.act.move).air && f.act.move !== 'special') return;
+  const plats = match.stage.plats;
+  for (let k = 0; k < plats.length; k++) {
+    const p = plats[k];
+    if (p.soft || f.y < p.y + 4 || f.y > p.y + 28) continue;
+    const left = f.x > p.x0 - 16 && f.x < p.x0 - 1;
+    const right = f.x < p.x1 + 16 && f.x > p.x1 + 1;
+    if (!left && !right) continue;
+    // someone already hangs there
+    if (match.fighters.some((o) => o !== f && o.hang > 0 && o.ledge === k && (o.x < (p.x0 + p.x1) / 2) === left)) continue;
+    f.hang = 1;
+    f.ledge = k;
+    f.facing = left ? 1 : -1;
+    f.x = left ? p.x0 - 6 : p.x1 + 6;
+    f.y = p.y + 20;
+    f.vx = 0;
+    f.vy = 0;
+    f.act = null;
+    f.invuln = Math.max(f.invuln, HANG_INV);
+    f.airJumps = 1;
+    f.recoveryUsed = false;
+    f.airDodgeUsed = false;
+    match.events.push({ t: 'grab', id: f.id, x: f.x, y: p.y });
+    return;
+  }
+}
+
 /** Advance the match one frame. `inputs` by fighter id (missing = no buttons). */
 export function step(match: Match, inputs: Record<string, Input>) {
   match.events.length = 0;
@@ -657,7 +734,7 @@ export function step(match: Match, inputs: Record<string, Input>) {
     if (match.countdown === 0) match.events.push({ t: 'go' });
     return;
   }
-  match.timeLeft--;
+  if (!match.sudden && match.timeLeft > 0) match.timeLeft--;
   for (const f of match.fighters) {
     if (f.stocks <= 0) continue;
     if (f.respawn > 0) {
@@ -692,13 +769,34 @@ export function step(match: Match, inputs: Record<string, Input>) {
       } else if (f.act.f >= mv.start + mv.active + mv.end) f.act = null;
     }
     physics(match, f);
+    grabLedge(match, f);
   }
   strike(match);
   if (match.authority === false) return;
   for (const f of match.fighters) if (f.stocks > 0 && f.respawn === 0) ko(match, f);
   // the end: one fighter (or one team) left, or the clock ran out
   const left = match.fighters.filter(inPlay);
-  if (left.length <= 1 || match.timeLeft <= 0) {
+  if (left.length > 1 && match.timeLeft <= 0 && !match.sudden) {
+    const order = [...left].sort((a, b) => b.stocks - a.stocks || a.dmg - b.dmg);
+    const top = order.filter((f) => f.stocks === order[0].stocks);
+    if (top.length > 1) {
+      // a tie on lives: sudden death between the tied, one life each and already hurt; the rest are out
+      match.sudden = true;
+      const rest = order.filter((f) => !top.includes(f));
+      rest.forEach((f, k) => {
+        f.place = top.length + k + 1;
+        f.stocks = 0;
+      });
+      for (const f of top) {
+        f.stocks = 1;
+        f.dmg = Math.max(f.dmg, 120);
+        f.meter = METER_FULL;
+      }
+      match.events.push({ t: 'sudden' });
+      return;
+    }
+  }
+  if (left.length <= 1 || (match.timeLeft <= 0 && !match.sudden)) {
     const order = [...left].sort((a, b) => b.stocks - a.stocks || a.dmg - b.dmg);
     order.forEach((f, k) => (f.place = k + 1));
     match.over = true;
@@ -715,6 +813,7 @@ export function poseOf(f: Fighter): { pose: 'idle' | 'walk' | 'swing' | 'cheer';
     const k = f.act.f < mv.start ? Math.floor((f.act.f / Math.max(1, mv.start)) * 3) : f.act.f < mv.start + mv.active ? 3 : 4 + Math.min(1, Math.floor(((f.act.f - mv.start - mv.active) / Math.max(1, mv.end)) * 2));
     return { pose: 'swing', k: Math.min(5, k), air: !f.grounded && total > 0 };
   }
+  if (f.hang > 0) return { pose: 'idle', k: 1, air: true };
   if (!f.grounded) return { pose: 'idle', k: f.vy < 0 ? 1 : 2, air: true };
   if (Math.abs(f.vx) > 20) return { pose: 'walk', k: -1, air: false };
   return { pose: 'idle', k: -1, air: false };

@@ -5,8 +5,7 @@
  * (game/brawl2/specials.ts), used when the meter is full.
  *
  * The fight runs in the canvas (pixel/BrawlOreView, engine/brawlore.ts); this screen is the menu around it and
- * the results. It opens where the old arena opened (useArena.open) while the test flag is on
- * (`?fightclub=1`, or the older `?brawlore=1`).
+ * the results. It opens where the old arena opened (useArena.open).
  */
 import { useEffect, useRef, useState } from 'react';
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
@@ -19,6 +18,9 @@ import { useGame } from '../game/store';
 import { cancel, endMatch, FFA_WAIT_MS, leaveOnline, onNet, queueList, search, sendNet, SOLO_WAIT_MS, startRoom, useOnline, type Queue } from '../game/brawl2/online';
 import { cleanCode, newCode } from '../game/brawl2/net';
 import { SPECIAL_INFO, specialOf } from '../game/brawl2/specials';
+import { reportFight, tierOf, useFcRank } from '../game/brawl2/rank';
+import { awardFightXp } from '../game/brawl';
+import { useFightStats } from '../game/fightGear';
 import type { BrawlEvent, BrawlResult } from '../engine/brawlore';
 import type { Difficulty, Mode } from '../game/brawl2/sim';
 import { atlasSource } from '../pixel/atlasSource';
@@ -28,8 +30,11 @@ import { Btn, Choice, PixelBox, T } from './kit';
 import { MineAnywhere, useMinePanel } from './MineAnywhere';
 import { LANDSCAPE_APP, useLayout } from './layout';
 
-/** On while Gali Fightclub is being tested: `?fightclub=1` (or the older `?brawlore=1`) on the web. */
-export const BRAWLORE = Platform.OS === 'web' && typeof window !== 'undefined' && /[?&](fightclub|brawlore)=1\b/.test(window.location?.search ?? '');
+/**
+ * Gali Fightclub is the arena now, on the web and in the app. The old arena (Last Miner Standing, King of the
+ * Ring, raids) stays in the code for a week as a fallback: `?oldarena=1` on the web opens it instead.
+ */
+export const BRAWLORE = !(Platform.OS === 'web' && typeof window !== 'undefined' && /[?&]oldarena=1\b/.test(window.location?.search ?? ''));
 
 const SFX: Record<string, Sound> = { swing: 'dig', hit: 'bonk', slam: 'crack', ko: 'ko', cheer: 'win', pop: 'pop', pick: 'pop', throw: 'dig', special: 'crack', ready: 'pop' };
 
@@ -41,6 +46,15 @@ function myWeapon() {
   return { item, sp, info: SPECIAL_INFO[sp] };
 }
 const ORD = ['', '1ST', '2ND', '3RD', '4TH'];
+
+/**
+ * XP for a match, under the daily fight XP cap (game/brawl.ts DAY_CAP). Online against miners pays more than
+ * practice against bots.
+ */
+function matchXp(r: BrawlResult) {
+  if (r.online) return (r.place === 1 ? 40 : r.place === 2 && r.of > 2 ? 20 : 10) + r.kos * 5;
+  return (r.place === 1 ? 12 : 4) + r.kos * 2;
+}
 const DIFF: [Difficulty, string, string][] = [
   ['easy', 'EASY', 'Slow bots, good to learn'],
   ['normal', 'NORMAL', 'A fair fight'],
@@ -61,6 +75,10 @@ export function BrawlOreScreen() {
   const [code, setCode] = useState('');
   const [result, setResult] = useState<BrawlResult | null>(null);
   const [soloNote, setSoloNote] = useState(false);
+  const [xpGot, setXpGot] = useState(0);
+  const owner = useGame((s) => s.wallet.owner);
+  const rank = useFcRank((s) => s.me);
+  const last = useFcRank((s) => s.last);
   const lastQ = useRef<Queue>('1v1');
   const phase = useOnline((s) => s.phase);
   const omatch = useOnline((s) => s.match);
@@ -76,6 +94,9 @@ export function BrawlOreScreen() {
       leaveOnline();
     }
   }, [open, atlas]);
+  useEffect(() => {
+    if (open) void useFcRank.getState().loadMe(owner);
+  }, [open, owner]);
 
   // match messages from the room go straight to the canvas
   useEffect(() => {
@@ -119,8 +140,32 @@ export function BrawlOreScreen() {
     if (e.t === 'sfx') play(SFX[e.name] ?? 'pop');
     else if (e.t === 'net') sendNet(e.e, e.p);
     else if (e.t === 'end') {
-      if (e.result.online) endMatch(false);
-      setResult(e.result);
+      const r = e.result;
+      const om = useOnline.getState().match;
+      if (r.online) endMatch(false);
+      setXpGot(r.place > 0 ? awardFightXp(matchXp(r)) : 0);
+      // daily quests, achievements, fight titles and trails count Fightclub matches like the old arena's
+      const g = useGame.getState();
+      const fs = useFightStats.getState();
+      g.track('arena');
+      for (let k = 0; k < Math.min(r.kos, 10); k++) g.track('ko');
+      if (r.kos) fs.add('kos', r.kos);
+      if (r.falls) fs.add('downs', r.falls);
+      if (r.place === 1 && r.of >= 2) {
+        fs.add('wins');
+        g.track('win');
+      }
+      // online, with every miner signed in: report the order so the server can rank it
+      useFcRank.setState({ last: null });
+      if (r.online && om && owner && r.mid === om.mid) {
+        // miners who left mid-match were handed to a bot: they can't report, so the match isn't rated
+        const humans = r.table.filter((t) => !t.bot);
+        const left = om.players.some((p) => r.table.find((t) => t.id === p.id)?.bot);
+        const ws = humans.map((t) => om.players.find((p) => p.id === t.id)?.w);
+        if (!left && ws.length >= 2 && ws.every(Boolean) && ws.includes(owner)) void reportFight({ mid: om.mid, mode: om.mode, ord: ws as string[], me: owner });
+        else useFcRank.setState({ last: { mid: om.mid, state: 'unrated', why: left ? 'a miner left the match' : 'every miner needs a wallet signed in' } });
+      }
+      setResult(r);
       setStage('done');
     } else if (e.t === 'menu') {
       // Escape with the mining drawer out closes the drawer, not the match
@@ -165,6 +210,7 @@ export function BrawlOreScreen() {
                 <T v="display" style={[styles.logo, short && { fontSize: 24, lineHeight: 26 }]}>
                   GALI FIGHTCLUB
                 </T>
+                <RankChip rating={rank?.rating ?? null} games={rank?.games ?? 0} place={rank?.place ?? null} signedIn={Boolean(owner)} />
                 {short ? null : (
                   <T v="muted" style={{ textAlign: 'center', fontSize: 12 }}>
                     Knock miners out of the ring. Every hit raises their %, and the higher it gets, the further they fly. 3 lives each.
@@ -252,6 +298,23 @@ export function BrawlOreScreen() {
                   {result.note}
                 </T>
               ) : null}
+              <View style={[styles.row, { justifyContent: 'center', flexWrap: 'wrap' }]}>
+                <T v="bold" style={{ color: COLORS.teal }}>{xpGot > 0 ? `+${xpGot} XP` : 'Daily fight XP reached'}</T>
+                {result.online ? (
+                  <T v="bold" style={{ color: last?.state === 'done' ? ((last.delta ?? 0) >= 0 ? COLORS.green : COLORS.red) : COLORS.muted }}>
+                    {' · '}
+                    {!last
+                      ? 'Sign in to be ranked'
+                      : last.state === 'waiting'
+                        ? 'Rank: waiting for every miner’s result…'
+                        : last.state === 'done'
+                          ? `RANK ${(last.delta ?? 0) >= 0 ? '+' : ''}${last.delta} · ${last.rating} ${tierOf(last.rating ?? 1000).tier}`
+                          : `Not ranked: ${last.why}`}
+                  </T>
+                ) : (
+                  <T v="muted">{' · '}Practice: online matches move your rank</T>
+                )}
+              </View>
               <View style={styles.row}>
                 <Btn kind="gold" label={result.online || soloNote ? 'PLAY AGAIN' : 'REMATCH'} onPress={again} style={{ flex: 1 }} />
                 <Btn kind="plain" label="MENU" onPress={() => setStage('menu')} style={{ flex: 1 }} />
@@ -276,6 +339,8 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: 8 },
   res: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4, paddingHorizontal: 6 },
   head: { alignItems: 'center', gap: 2 },
+  rank: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, paddingHorizontal: 8, paddingVertical: 3, marginVertical: 2 },
+  rankGem: { width: 8, height: 8, transform: [{ rotate: '45deg' }] },
   tabs: { flexDirection: 'row', borderWidth: 2, borderColor: '#3a2414', backgroundColor: '#140a08' },
   tab: { flex: 1, paddingVertical: 8, alignItems: 'center' },
   sp: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 2, paddingVertical: 8, paddingHorizontal: 10, backgroundColor: 'rgba(255,255,255,0.03)' },
@@ -327,6 +392,33 @@ function Searching({ q, onCancel }: { q: Queue; onCancel: () => void }) {
           <Btn kind="plain" label="CANCEL" onPress={onCancel} style={{ flex: 1 }} />
         </View>
       </PixelBox>
+    </View>
+  );
+}
+
+/** Your Fightclub rank in the menu: tier badge and rating (online matches move it). */
+function RankChip({ rating, games, place, signedIn }: { rating: number | null; games: number; place: number | null; signedIn: boolean }) {
+  if (!signedIn) {
+    return (
+      <T v="muted" style={{ fontSize: 11 }}>
+        Connect your wallet to get a Fightclub rank.
+      </T>
+    );
+  }
+  const r = rating ?? 1000;
+  const t = tierOf(r);
+  return (
+    <View style={[styles.rank, { borderColor: t.color }]}>
+      <View style={[styles.rankGem, { backgroundColor: t.color }]} />
+      <T v="display" style={{ color: t.color, fontSize: 14 }}>
+        {t.tier}
+      </T>
+      <T v="bold" style={{ fontSize: 13 }}>
+        {r}
+      </T>
+      <T v="muted" style={{ fontSize: 11 }}>
+        {games ? `${games} rated${place ? ` · #${place}` : ''}` : 'unrated'}
+      </T>
     </View>
   );
 }

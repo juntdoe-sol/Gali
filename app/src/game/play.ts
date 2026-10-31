@@ -20,7 +20,7 @@ export function setPlayPass(p: string | null, wallet: string | null) {
 export const playWallet = () => passWallet;
 
 /** One call that needs the answer (an arena ticket). Null without a pass or on any failure. */
-export async function playCall<T>(a: 'ticket', body: Record<string, unknown>): Promise<T | null> {
+export async function playCall<T>(a: 'ticket' | 'fight', body: Record<string, unknown>): Promise<T | null> {
   const base = restBase();
   if (!base || !pass) return null;
   try {
