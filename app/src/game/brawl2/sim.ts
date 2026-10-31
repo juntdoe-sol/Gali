@@ -97,6 +97,8 @@ export interface Fighter {
   prev: Input;
   /** match result: 1st, 2nd... (0 while still in) */
   place: number;
+  /** hits taken so far: online, a guest notices a new hit by this going up */
+  hitN: number;
 }
 
 export interface Platform {
@@ -229,6 +231,13 @@ export interface Match {
   /** seeded random, for bots and sudden death */
   seed: number;
   events: MatchEvent[];
+  /**
+   * Online, a guest's copy of the match is not the judge: it moves the local fighter at once and shows its own
+   * swings landing (sparks, sound), but damage, knockback, lives and the end come from the host's snapshots.
+   * False only there; `local` is the guest's own fighter.
+   */
+  authority?: boolean;
+  local?: string;
 }
 
 export function rand(match: Match): number {
@@ -245,7 +254,7 @@ export function newFighter(o: { id: string; name: string; bot: Difficulty | null
     x: o.at[0], y: o.at[1], vx: 0, vy: 0, facing: o.facing, grounded: false, on: -1,
     airJumps: 1, recoveryUsed: false, airDodgeUsed: false,
     dmg: 0, stocks: STOCKS, hitstun: 0, freeze: 0, invuln: 0, dodge: 0, dodgeCool: 0, dodgeDir: [0, 0], dropping: 0, respawn: 0,
-    act: null, lastBy: null, lastAt: 0, kos: 0, falls: 0, prev: { ...NO_INPUT }, place: 0,
+    act: null, lastBy: null, lastAt: 0, kos: 0, falls: 0, prev: { ...NO_INPUT }, place: 0, hitN: 0,
   };
 }
 
@@ -398,7 +407,15 @@ function strike(match: Match) {
       if (d === a || !alive(d) || d.invuln > 0 || a.act.hit.includes(d.id)) continue;
       if (match.mode !== 'ffa' && d.team === a.team) continue;
       if (!overlap(box, hurtbox(d))) continue;
+      if (match.authority === false) {
+        // a guest: only its own swings, and only the spark and sound; the host's snapshot brings the hit
+        if (a.id !== match.local) continue;
+        a.act.hit.push(d.id);
+        match.events.push({ t: 'hit', id: d.id, by: a.id, x: d.x, y: d.y - BODY_H / 2, dmg: mv.dmg, kb: 0, heavy: a.act.move.endsWith('Heavy') || a.act.move === 'pound' });
+        continue;
+      }
       a.act.hit.push(d.id);
+      d.hitN++;
       d.dmg = Math.min(999, d.dmg + mv.dmg);
       const kb = mv.base + (mv.growth * d.dmg) / 100;
       // the launch angle, mirrored by facing; a hit from behind still sends them away from the attacker
@@ -577,6 +594,7 @@ export function step(match: Match, inputs: Record<string, Input>) {
     physics(match, f);
   }
   strike(match);
+  if (match.authority === false) return;
   for (const f of match.fighters) if (f.stocks > 0 && f.respawn === 0) ko(match, f);
   // the end: one fighter (or one team) left, or the clock ran out
   const left = match.fighters.filter(inPlay);

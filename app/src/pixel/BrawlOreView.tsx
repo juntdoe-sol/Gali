@@ -10,6 +10,8 @@ import { BrawlEngine, type BrawlEvent, type BrawlSetup } from '../engine/brawlor
 export interface BrawlOreRef extends DOMImperativeFactory {
   begin: (...args: any[]) => void;
   quit: (...args: any[]) => void;
+  /** online: a message from the room */
+  feed: (...args: any[]) => void;
 }
 
 export default function BrawlOreView({ ref, onEvent, atlas, touch }: { ref: Ref<BrawlOreRef>; onEvent: (e: BrawlEvent) => void; atlas: string; touch: boolean; dom?: DOMProps }) {
@@ -25,6 +27,7 @@ export default function BrawlOreView({ ref, onEvent, atlas, touch }: { ref: Ref<
         else pending.current = s as BrawlSetup;
       },
       quit: () => engine.current?.quit(),
+      feed: (e: any, p: any) => engine.current?.feed(String(e), p),
     }),
     [],
   );

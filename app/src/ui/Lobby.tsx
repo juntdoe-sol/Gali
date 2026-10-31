@@ -31,6 +31,7 @@ import { atlasSource } from '../pixel/atlasSource';
 import LobbyView, { type LobbyRef } from '../pixel/LobbyView';
 import { islandFight, islandJump, myLook } from '../pixel/PixelMine';
 import { useArena } from '../game/arena';
+import { BRAWLORE } from './BrawlOre';
 import { useView } from '../pixel/view';
 import { Bar, Btn, Choice, F, FocusRing, Frame, IconBtn, INPUT, Kbd, MapButton, PixelBox, Scrim, T, Tip, U, Window } from './kit';
 import { GUTTER, LANDSCAPE_APP, RAIL_W, TOP_H, layoutNow, sideWidth, useChrome, useLayout } from './layout';
@@ -256,7 +257,7 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
       } else if (id === 'arena') {
         useLobby.setState({ spawn: 'arena' });
         if (!useName.getState().name) useGame.getState().toast('Pick a name to fight in the arena', 'info');
-        else useArena.getState().show();
+        else useArena.getState().show(BRAWLORE);
       }
     },
     [],
