@@ -16,6 +16,7 @@ import { MILESTONE, MILESTONE_KINDS, useNft, type MilestoneKind, type Milestones
 import { useGame, useLevelXp } from '../game/store';
 import { gearNow, loadGear, type GearBook, type GearItem } from '../game/gear555';
 import { restBase } from '../game/world';
+import { signIn, useDm } from '../game/dm';
 import { CertCard } from './CertClaim';
 import { GearSprite } from './GearSprite';
 import { Bar, Btn, Pill, PixelBox, T } from './kit';
@@ -316,6 +317,8 @@ export function MilestoneQuests() {
   const ms = cert?.milestones;
   const { xp, level } = useLevel(ms);
   const t = useTick(500);
+  const pass = useDm((s) => s.pass);
+  const [signing, setSigning] = useState(false);
   const fmGot = cert?.claim?.status === 'minted';
   const fmBtn = !owner ? 'Wallet' : fmGot ? 'Done' : cert?.eligible ? 'Claim' : cert?.counting ? '...' : 'Beta only';
   const got = [fmGot, ...MILESTONE_KINDS.map((k) => ms?.[k]?.claim?.status === 'minted')];
@@ -349,6 +352,23 @@ export function MilestoneQuests() {
           </T>
         </View>
       </View>
+      {owner && !pass ? (
+        <View style={styles.signNote}>
+          <T style={{ flex: 1, fontSize: 12 }}>Sign in so the XP you earn from fights, quests and moles counts toward your level. Free, no transaction.</T>
+          <Btn
+            small
+            kind="gold"
+            label={signing ? '...' : 'SIGN IN'}
+            disabled={signing}
+            onPress={() => {
+              setSigning(true);
+              signIn()
+                .catch((e: Error) => useGame.getState().toast(e?.message || 'Sign-in failed', 'bad'))
+                .finally(() => setSigning(false));
+            }}
+          />
+        </View>
+      ) : null}
       <View style={styles.pips}>
         {got.map((g, i) => (
           <View key={i} style={[styles.pip, { backgroundColor: g ? COLORS.gold : '#2a2150', borderColor: g ? '#fff1a8' : '#3c3270' }]} />
@@ -462,6 +482,7 @@ const styles = StyleSheet.create({
   showTag: { position: 'absolute', left: 3, top: 2, right: 3 },
   showCount: { position: 'absolute', right: 3, top: 3, paddingHorizontal: 3, paddingVertical: 1 },
   lockBadge: { position: 'absolute', left: 3, bottom: 3, backgroundColor: 'rgba(4,6,15,0.8)', padding: 2 },
+  signNote: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: COLORS.gold, backgroundColor: 'rgba(255,201,60,0.08)', padding: 8 },
   hook: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
   nftTag: { paddingHorizontal: 5, paddingVertical: 2 },
 });

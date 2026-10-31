@@ -1,4 +1,5 @@
 import { addBonusXp, reportRound } from './play';
+import { addPending, loadVerified, useVerified } from './verifiedXp';
 import { create } from 'zustand';
 import { FEATURE_GALI_PROGRAM } from '../config/features';
 import type { Keypair, PublicKey } from '@solana/web3.js';
@@ -1078,6 +1079,7 @@ export const useGame = create<GameState>((set, get) => {
         questProgress: { ...s.questProgress, mole3: (s.questProgress.mole3 ?? 0) + 1 },
       }));
       addBonusXp(3);
+      addPending(3);
       get().toast('Bonk! +3 XP', 'good');
     },
 
@@ -1111,6 +1113,7 @@ export const useGame = create<GameState>((set, get) => {
         updateSave((s) => ({ ...s, xp: s.xp + add, bonusXp: s.bonusXp + add }));
         announceXp(add);
         addBonusXp(add);
+        addPending(add);
       }
     },
 
@@ -1126,6 +1129,9 @@ export const useGame = create<GameState>((set, get) => {
       play('claim');
       haptic.win();
       updateSave((sv) => ({ ...sv, xp: sv.xp + q.rewardXp, bonusXp: sv.bonusXp + q.rewardXp, questClaimed: [...sv.questClaimed, id] }));
+      // the server counts quest XP too (it used to stay on this device only)
+      addBonusXp(q.rewardXp);
+      addPending(q.rewardXp);
       get().toast(`Quest done: +${q.rewardXp} XP`, 'good');
     },
 
@@ -1558,8 +1564,28 @@ export const useGame = create<GameState>((set, get) => {
 });
 
 /** helpers for UI */
-export const useLevelXp = () =>
-  useGame((s) => (s.wallet.player ? s.wallet.player.xp + s.save.bonusXp : s.save.xp));
+/**
+ * The XP the game shows. With a wallet: the server's count (game/verifiedXp.ts), plus what was earned since it was
+ * last read, so the top bar, the Quest tab, the ranks and the certificate mint all agree. Without one, or until the
+ * server answers: this device's own count.
+ */
+export const useLevelXp = () => {
+  const local = useGame((s) => (s.wallet.player ? s.wallet.player.xp + s.save.bonusXp : s.save.xp));
+  const owner = useGame((s) => s.wallet.owner);
+  const v = useVerified();
+  return owner && v.wallet === owner && v.xp !== null ? v.xp + v.pending : local;
+};
+/** useLevelXp outside React. */
+export function levelXpNow(): number {
+  const g = useGame.getState();
+  const v = useVerified.getState();
+  const local = g.wallet.player ? g.wallet.player.xp + g.save.bonusXp : g.save.xp;
+  return g.wallet.owner && v.wallet === g.wallet.owner && v.xp !== null ? v.xp + v.pending : local;
+}
+// the server's XP follows the connected wallet
+useGame.subscribe((s, prev) => {
+  if (s.wallet.owner !== prev.wallet.owner) void loadVerified(s.wallet.owner);
+});
 export const usePoints = () => useGame((s) => (s.wallet.player ? s.wallet.player.points : s.save.points));
 /** An item's price in whole ORE at the config's rate, or null before the rates are known. */
 export function orePrice(g: Gear, shop: ShopConfig | null): number | null {
