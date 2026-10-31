@@ -18,7 +18,7 @@ import { ACTIVES, MEND_HP, PASSIVES, POWERS, POWER_KEY, baseDamage, unlocked, ty
 import { PERIOD_WORDS, useRanks, type Period } from '../game/ranks';
 import { PeriodPicker } from './Clans';
 import { haptic, play, type Sound } from '../game/sfx';
-import { useGame } from '../game/store';
+import { levelXpNow, useGame } from '../game/store';
 import type { ArenaEvent, ArenaSnap } from '../engine/arena';
 import { atlasSource } from '../pixel/atlasSource';
 import ArenaView, { type ArenaRef } from '../pixel/ArenaView';
@@ -39,7 +39,7 @@ const SHORT: Record<ActiveId, string> = { dash: 'DASH', guard: 'GUARD', slam: 'S
 const SFX: Record<string, Sound> = { swing: 'dig', hit: 'bonk', pop: 'pop', slam: 'crack', throw: 'select', pick: 'claim', cheer: 'win', ko: 'lose' };
 const myLvl = () => {
   const g = useGame.getState();
-  return levelFromXp(g.wallet.player ? g.wallet.player.xp + g.save.bonusXp : g.save.xp);
+  return levelFromXp(levelXpNow());
 };
 
 /** The arena's snapshot for the canvas. */
