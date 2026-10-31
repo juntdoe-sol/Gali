@@ -2,14 +2,15 @@
  * Milestone certificates for Levels 3, 6, 10, 15, 20 and 30: each claims that level's gear when the market opens
  * (one item, or one of several at random; Level 30 a full outfit). See MILESTONE in game/nft.ts.
  *
- *  - MilestoneQuests: the Quest tab's "Milestones" list: Founding Miner, Reach Level 10, Reach Level 20, each with
- *    its progress and a claim button for the certificate NFT
- *  - MilestoneVault: the Bag's level certificates, only the ones this wallet owns
+ *  - MilestoneQuests: the Quest tab's collection: Founding Miner and every level milestone, each showing the gear it
+ *    gives (animated), its progress and a claim button for the certificate NFT
+ *  - MilestoneVault: the Bag's level certificates, only the ones this wallet owns, as a short list (CertRow);
+ *    hover a row (tap on a phone) for the card, its details and save and share buttons
  *
  * The level is the one the server worked out from verified XP, so what the quest shows is what the mint checks.
  */
 import { useEffect, useState, type ReactNode } from 'react';
-import { Image, Linking, Platform, Share, StyleSheet, View, type ImageStyle } from 'react-native';
+import { Image, Linking, Platform, Pressable, Share, StyleSheet, View, type ImageStyle } from 'react-native';
 import { COLORS, levelFromXp, xpForLevel } from '../game/constants';
 import { MILESTONE, MILESTONE_KINDS, useNft, type MilestoneKind, type Milestones } from '../game/nft';
 import { useGame, useLevelXp } from '../game/store';
@@ -23,14 +24,6 @@ import { alpha, Corners, Readout, TECH, TechBtn, useTick } from './tech';
 
 const PIX = { imageRendering: 'pixelated' } as ImageStyle;
 const web = Platform.OS === 'web';
-const GIF: Record<MilestoneKind, number> = {
-  lv3: require('../../assets/market/level-3.gif'),
-  lv6: require('../../assets/market/level-6.gif'),
-  lv10: require('../../assets/market/level-10.gif'),
-  lv15: require('../../assets/market/level-15.gif'),
-  lv20: require('../../assets/market/level-20.gif'),
-  lv30: require('../../assets/market/level-30.gif'),
-};
 const STILL: Record<MilestoneKind, number> = {
   lv3: require('../../assets/market/level-3.png'),
   lv6: require('../../assets/market/level-6.png'),
@@ -39,7 +32,16 @@ const STILL: Record<MilestoneKind, number> = {
   lv20: require('../../assets/market/level-20.png'),
   lv30: require('../../assets/market/level-30.png'),
 };
-const ART: Record<MilestoneKind, number> = web ? GIF : STILL;
+// Inline Platform.OS check so Metro drops the GIFs from native bundles; Android
+// rejects level-3.gif and level-3.png as duplicate resources (like CertClaim).
+const ART: Record<MilestoneKind, number> = Platform.OS === 'web' ? {
+  lv3: require('../../assets/market/level-3.gif'),
+  lv6: require('../../assets/market/level-6.gif'),
+  lv10: require('../../assets/market/level-10.gif'),
+  lv15: require('../../assets/market/level-15.gif'),
+  lv20: require('../../assets/market/level-20.gif'),
+  lv30: require('../../assets/market/level-30.gif'),
+} : STILL;
 const HUE: Record<MilestoneKind, string> = { lv3: '#6ad46f', lv6: '#6ad46f', lv10: '#5ab8ff', lv15: '#5ab8ff', lv20: COLORS.gold, lv30: '#d682ff' };
 const BAR: Record<MilestoneKind, [string, string]> = {
   lv3: ['#2f8a3a', '#6ad46f'],
@@ -154,6 +156,113 @@ function Rewards({ ids, hue, random }: { ids: string[]; hue: string; random: boo
   );
 }
 
+/**
+ * What a milestone gives, shown big and animated in place of the certificate card: the item bobs and glows, and a
+ * certificate that rolls between several items flips through them.
+ */
+function ItemShow({ ids, hue, locked }: { ids: string[]; hue: string; locked: boolean }) {
+  const items = useGearItems(ids);
+  const t = useTick(450);
+  if (!items.length) return <View style={styles.artBox} />;
+  const g = items[Math.floor(t / 3) % items.length];
+  const bob = t % 2 ? -2 : 0;
+  return (
+    <View style={[styles.artBox, styles.show, { borderColor: alpha(hue, 0.6), backgroundColor: alpha(hue, 0.1) }]}>
+      <View style={[styles.glow, { backgroundColor: alpha(hue, t % 2 ? 0.28 : 0.18) }]} />
+      <View style={{ transform: [{ translateY: bob }], opacity: locked ? 0.75 : 1 }}>
+        <GearSprite item={g} scale={1.6} animate={g.rarity === 'Legendary'} />
+      </View>
+      <View style={styles.showTag}>
+        <T v="tiny" style={{ fontSize: 8, color: hue, letterSpacing: 1 }} numberOfLines={1}>
+          {g.name.toUpperCase()}
+        </T>
+      </View>
+      {items.length > 1 ? (
+        <View style={[styles.showCount, { backgroundColor: alpha(hue, 0.85) }]}>
+          <T v="display" style={{ fontSize: 10, lineHeight: 11, color: TECH.ink }}>
+            {`${(Math.floor(t / 3) % items.length) + 1}/${items.length}`}
+          </T>
+        </View>
+      ) : null}
+      {locked ? (
+        <View style={styles.lockBadge}>
+          <PixIcon name="lock" size={14} />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * One certificate in the Bag: a short row (small card, name, what it claims). Hover it (tap on a phone) for the
+ * full card, its details and the save and share buttons.
+ */
+export function CertRow({
+  thumb,
+  art,
+  title,
+  line,
+  hue,
+  details,
+  actions,
+}: {
+  thumb: ReactNode;
+  art: ReactNode;
+  title: string;
+  line: string;
+  hue: string;
+  details: [string, string, string?][];
+  actions: [string, () => void, boolean?][];
+}) {
+  const [hover, setHover] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const open = hover || pinned;
+  return (
+    <View
+      style={{ zIndex: open ? 20 : 0 }}
+      {...({ onMouseEnter: () => setHover(true), onMouseLeave: () => setHover(false) } as object)}
+    >
+      <Pressable onPress={() => setPinned((v) => !v)} accessibilityRole="button" accessibilityLabel={`${title}: details`}>
+        <View style={[styles.certRow, { borderColor: open ? hue : alpha(hue, 0.4), backgroundColor: open ? alpha(hue, 0.12) : 'rgba(4,6,15,0.5)' }]}>
+          <View style={{ width: 80, height: 45, overflow: 'hidden' }}>{thumb}</View>
+          <View style={{ flex: 1, gap: 2 }}>
+            <T v="bold" style={{ fontSize: 13, color: hue }} numberOfLines={1}>
+              {title}
+            </T>
+            <T v="muted" style={{ fontSize: 11 }} numberOfLines={1}>
+              {line}
+            </T>
+          </View>
+          <PixIcon name="lock" size={12} style={{ opacity: 0.6 }} />
+        </View>
+      </Pressable>
+      {open ? (
+        <View style={[styles.pop, { borderColor: hue }]}>
+          <View style={{ alignSelf: 'center' }}>
+            {art}
+            <Corners color={hue} size={8} inset={-6} />
+          </View>
+          <T v="display" style={{ fontSize: 16, lineHeight: 17, color: hue, letterSpacing: 1 }}>
+            {title}
+          </T>
+          <View style={{ gap: 1 }}>
+            {details.map(([k, v, c]) => (
+              <Readout key={k} k={k} v={v} color={c} />
+            ))}
+          </View>
+          <View style={{ flexDirection: 'row', gap: 6 }}>
+            {actions.map(([label, fn, primary]) => (
+              <View key={label} style={{ flex: primary ? 1.3 : 1 }}>
+                <TechBtn small primary={primary} label={label} onPress={fn} />
+              </View>
+            ))}
+          </View>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 const JARL = ['G084'];
 const PILL_BG: Record<string, string> = { Uncommon: 'rgba(106,212,111,0.16)', Rare: 'rgba(90,184,255,0.16)', Legendary: 'rgba(255,201,60,0.16)' };
 
@@ -191,12 +300,7 @@ function CollectRow({
   return (
     <PixelBox fill={got ? alpha(hue, 0.1) : ready ? alpha(hue, 0.07) : 'rgba(9,14,34,0.92)'} hi={got || ready ? hue : '#2a3a72'} lo="#04060f" style={styles.collectRow}>
       <View style={styles.artBox}>
-        <View style={{ opacity: locked ? 0.4 : 1 }}>{art}</View>
-        {locked ? (
-          <View style={styles.lockOver}>
-            <PixIcon name="lock" size={22} />
-          </View>
-        ) : null}
+        {art}
         {got ? (
           <View style={[styles.stamp, { backgroundColor: hue }]}>
             <T v="display" style={{ fontSize: 11, lineHeight: 12, color: TECH.ink, letterSpacing: 1 }}>
@@ -216,7 +320,7 @@ function CollectRow({
         <T v="muted" style={{ fontSize: 12 }}>
           {status}
         </T>
-        <Rewards ids={rewards} hue={hue} random={random} />
+        {random ? <Rewards ids={rewards} hue={hue} random={random} /> : null}
         {extra}
       </View>
       {got ? (
@@ -246,11 +350,20 @@ export function MilestoneQuests() {
     <PixelBox fill="rgba(30,16,52,0.95)" hi={t % 2 ? COLORS.gold : '#fff1a8'} lo="#04060f" shadow={1} style={styles.collection}>
       <View style={styles.colHead}>
         <PixIcon name="trophy" size={34} />
-        <View style={{ flex: 1, gap: 2 }}>
-          <T v="display" style={{ fontSize: 24, lineHeight: 25, color: COLORS.gold, letterSpacing: 1 }}>
-            CERTIFICATE COLLECTION
+        <View style={{ flex: 1, gap: 3 }}>
+          <View style={styles.hook}>
+            <T v="display" style={{ fontSize: 22, lineHeight: 23, color: t % 2 ? COLORS.gold : '#fff1a8', letterSpacing: 1 }}>
+              COLLECT XP, GET FREE ITEMS
+            </T>
+            <View style={[styles.nftTag, { backgroundColor: COLORS.teal }]}>
+              <T v="display" style={{ fontSize: 12, lineHeight: 13, color: TECH.ink }}>
+                NFT
+              </T>
+            </View>
+          </View>
+          <T style={{ fontSize: 13 }}>
+            {all ? 'You collected them all. Your gear drops when the market opens.' : `Level up and every milestone gives you free gear as an NFT. Collect all ${got.length}.`}
           </T>
-          <T style={{ fontSize: 13 }}>{all ? 'You collected them all. Your gear drops when the market opens.' : `Collect all ${got.length}. Each NFT claims real gear when the market opens.`}</T>
         </View>
         <View style={{ alignItems: 'center' }}>
           <T v="display" style={{ fontSize: 30, lineHeight: 30, color: all ? COLORS.gold : COLORS.text }}>
@@ -267,7 +380,7 @@ export function MilestoneQuests() {
         ))}
       </View>
       <CollectRow
-        art={<CertCard width={128} />}
+        art={<ItemShow ids={JARL} hue={COLORS.gold} locked={!fmGot && !cert?.eligible} />}
         title="Founding Miner"
         rarity="Legendary"
         hue={COLORS.gold}
@@ -290,7 +403,7 @@ export function MilestoneQuests() {
         return (
           <CollectRow
             key={k}
-            art={<MilestoneArt kind={k} width={128} still={!reached} />}
+            art={<ItemShow ids={m.ids} hue={HUE[k]} locked={!reached} />}
             title={`Reach ${m.title}`}
             rarity={m.rarity}
             hue={HUE[k]}
@@ -323,38 +436,35 @@ export function MilestoneVault() {
   const owned = MILESTONE_KINDS.filter((k) => ms?.[k]?.claim?.status === 'minted');
   if (!owner || !owned.length) return null;
   return (
-    <View style={{ gap: 12 }}>
+    <>
       {owned.map((k) => {
         const m = MILESTONE[k];
         const serial = ms![k]!.claim!.serial;
         const hue = HUE[k];
+        const details: [string, string, string?][] = [
+          ['SERIAL', `#${pad4(serial)}`, hue],
+          [m.rewards.length > 1 ? 'ROLLS' : 'CLAIMS', m.reward.toUpperCase(), hue],
+          ...(m.rewards.length > 1 ? ([['ONE OF', m.rewards.join(' · ').toUpperCase()]] as [string, string][]) : []),
+          ['WHEN', 'NFT MARKET OPENS', TECH.dim],
+        ];
         return (
-          <View key={k} style={[styles.vaultCard, { borderColor: hue }]}>
-            <View style={{ alignSelf: 'center' }}>
-              <MilestoneArt kind={k} width={300} />
-              <Corners color={hue} size={8} inset={-6} />
-            </View>
-            <T v="display" style={{ fontSize: 20, lineHeight: 21, color: hue, letterSpacing: 1 }}>
-              {`Gali ${m.title} Certificate #${pad4(serial)}`}
-            </T>
-            <Readout k={m.rewards.length > 1 ? 'ROLLS' : 'CLAIMS'} v={m.reward.toUpperCase()} color={hue} />
-            {m.rewards.length > 1 ? <Readout k="ONE OF" v={m.rewards.join(' · ').toUpperCase()} /> : null}
-            <Readout k="WHEN" v="NFT MARKET OPENS" color={TECH.dim} />
-            <View style={{ flexDirection: 'row', gap: 6 }}>
-              <View style={{ flex: 1 }}>
-                <TechBtn small label="SAVE GIF" onPress={() => void saveImage(k, 'gif', serial)} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <TechBtn small label="SAVE PNG" onPress={() => void saveImage(k, 'png', serial)} />
-              </View>
-              <View style={{ flex: 1.3 }}>
-                <TechBtn small primary label="POST ON X" onPress={() => postOnX(k, serial)} />
-              </View>
-            </View>
-          </View>
+          <CertRow
+            key={k}
+            thumb={<MilestoneArt kind={k} width={80} still />}
+            art={<MilestoneArt kind={k} width={280} />}
+            title={`Gali ${m.title} Certificate #${pad4(serial)}`}
+            line={`${m.rewards.length > 1 ? 'Rolls' : 'Claims'} ${m.reward}`}
+            hue={hue}
+            details={details}
+            actions={[
+              ['SAVE GIF', () => void saveImage(k, 'gif', serial)],
+              ['SAVE PNG', () => void saveImage(k, 'png', serial)],
+              ['POST ON X', () => postOnX(k, serial), true],
+            ]}
+          />
         );
       })}
-    </View>
+    </>
   );
 }
 
@@ -365,11 +475,18 @@ const styles = StyleSheet.create({
   pip: { flex: 1, height: 8, borderWidth: 1 },
   collectRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10 },
   artBox: { width: 128, height: 72, overflow: 'hidden' },
-  lockOver: { position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   stamp: { position: 'absolute', right: 3, bottom: 3, paddingHorizontal: 4, paddingVertical: 2, transform: [{ rotate: '-6deg' }] },
   rewards: { flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' },
   rewardCell: { width: 40, height: 40, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
   btn: { minWidth: 84, alignSelf: 'center' },
-  vaultCard: { borderWidth: 2, padding: 10, gap: 6, backgroundColor: 'rgba(4,6,15,0.5)' },
+  certRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, padding: 6 },
+  pop: { position: 'absolute', left: 0, right: 0, top: '100%', marginTop: 4, borderWidth: 2, padding: 10, gap: 6, backgroundColor: 'rgba(14,10,30,0.98)', shadowColor: '#000', shadowOpacity: 0.6, shadowRadius: 12, elevation: 12 },
+  show: { borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  glow: { position: 'absolute', width: 56, height: 56, borderRadius: 28 },
+  showTag: { position: 'absolute', left: 3, top: 2, right: 3 },
+  showCount: { position: 'absolute', right: 3, top: 3, paddingHorizontal: 3, paddingVertical: 1 },
+  lockBadge: { position: 'absolute', left: 3, bottom: 3, backgroundColor: 'rgba(4,6,15,0.8)', padding: 2 },
+  hook: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+  nftTag: { paddingHorizontal: 5, paddingVertical: 2 },
 });

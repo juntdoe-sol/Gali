@@ -18,7 +18,7 @@ import { play } from '../game/sfx';
 import { useGame, useOwnedMask } from '../game/store';
 import { useName } from '../game/username';
 import { CertCard, postOnX, saveCert } from './CertClaim';
-import { MilestoneVault } from './Milestones';
+import { CertRow, MilestoneVault } from './Milestones';
 import { T, U } from './kit';
 import { PixIcon } from './PixIcon';
 import type { PixName } from './pixIcons';
@@ -384,41 +384,33 @@ function Certificates() {
       {!owner ? (
         <T v="muted">Connect a wallet to open the vault.</T>
       ) : has ? (
-        <View style={{ gap: 10 }}>
-          <Measure>
-            {(w) => (
-              <View style={{ alignSelf: 'center' }}>
-                <CertCard width={Math.min(w, 420)} />
-                <Corners color={COLORS.gold} size={10} inset={-U * 3} />
-              </View>
-            )}
-          </Measure>
-          <T v="display" style={{ fontSize: 24, lineHeight: 25, color: COLORS.gold, letterSpacing: 1 }}>
-            {foundingName ?? `Gali Founding Miner #${String(cert?.claim?.serial ?? 0).padStart(4, '0')}`}
-          </T>
-          {cert ? (
-            <View style={{ gap: 2 }}>
-              <Readout k="SERIAL" v={`#${String(cert.claim?.serial ?? 0).padStart(4, '0')}`} color={COLORS.gold} />
-              <Readout k="BETA ROUNDS" v={cert.rounds.toLocaleString()} />
-              <Readout k="FIRST DIG" v={fmtDay(cert.firstAt).toUpperCase()} />
-              <Readout k="UNLOCKS" v="LEGENDARY JARL HELMET" color={COLORS.gold} />
-              <Readout k="WHEN" v="NFT MARKET OPENS" color={TECH.dim} />
-            </View>
-          ) : null}
-          {cert ? (
-            <View style={{ flexDirection: 'row', gap: 6 }}>
-              <View style={{ flex: 1 }}>
-                <TechBtn small label="SAVE GIF" onPress={() => void saveCert('gif', cert)} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <TechBtn small label="SAVE PNG" onPress={() => void saveCert('png', cert)} />
-              </View>
-              <View style={{ flex: 1.3 }}>
-                <TechBtn small primary label="POST ON X" onPress={() => void postOnX(cert)} />
-              </View>
-            </View>
-          ) : null}
-        </View>
+        <CertRow
+          thumb={<CertCard width={80} />}
+          art={<CertCard width={280} />}
+          title={foundingName ?? `Gali Founding Miner #${String(cert?.claim?.serial ?? 0).padStart(4, '0')}`}
+          line="Claims the Legendary Jarl Helmet"
+          hue={COLORS.gold}
+          details={
+            cert
+              ? [
+                  ['SERIAL', `#${String(cert.claim?.serial ?? 0).padStart(4, '0')}`, COLORS.gold],
+                  ['BETA ROUNDS', cert.rounds.toLocaleString()],
+                  ['FIRST DIG', fmtDay(cert.firstAt).toUpperCase()],
+                  ['UNLOCKS', 'LEGENDARY JARL HELMET', COLORS.gold],
+                  ['WHEN', 'NFT MARKET OPENS', TECH.dim],
+                ]
+              : [['UNLOCKS', 'LEGENDARY JARL HELMET', COLORS.gold]]
+          }
+          actions={
+            cert
+              ? [
+                  ['SAVE GIF', () => void saveCert('gif', cert)],
+                  ['SAVE PNG', () => void saveCert('png', cert)],
+                  ['POST ON X', () => void postOnX(cert), true],
+                ]
+              : []
+          }
+        />
       ) : loading && !cert ? (
         <T v="muted">Opening the vault...</T>
       ) : null}
