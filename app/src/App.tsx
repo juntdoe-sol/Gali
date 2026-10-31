@@ -44,6 +44,7 @@ import { Splash } from './ui/Splash';
 import { PeerCard } from './ui/World';
 import { CaveScreen } from './ui/Cave';
 import { ArenaScreen } from './ui/Arena';
+import { BRAWLORE, BrawlOreScreen } from './ui/BrawlOre';
 import { useArena } from './game/arena';
 import { LobbyBack, LobbyScreen, SharedChat } from './ui/Lobby';
 import { useLobby } from './game/lobby';
@@ -321,7 +322,7 @@ function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTa
         <WalletPicker />
         <LiveNotice />
         {!guest && <CaveScreen />}
-        <ArenaScreen />
+        {BRAWLORE ? <BrawlOreScreen /> : <ArenaScreen />}
         <DmSheet />
         <MotherlodeAlert />
         <GlobalHosts />
