@@ -170,6 +170,20 @@ export const useMinerRanks = create<MinersState>((set, get) => ({
       let rows = r && !allOnly ? ((await r.json()) as Partial<MinerRow>[]).filter((x) => x && typeof x.wallet === 'string').map(toRow).map((x) => ({ ...x, oreBase: baseOf.get(x.wallet)?.oreBase ?? null, solBase: baseOf.get(x.wallet)?.solBase ?? null })) : everyone;
       if (get().period !== p) return;
       set({ rows, everyone, allOnly, at: Date.now(), status: 'ok' });
+      // ORE: worked out on the server from every wallet's counter, saved every 5 minutes (supabase/sql/gali-ore-ranks.sql)
+      const or = await rpc(base, 'gali_ore_ranks', { p_period: allOnly ? 'all' : p, p_limit: 200 }).catch(() => null);
+      if (or && or.ok) {
+        const list = (await or.json()) as { wallet: string; name: string; level: number; ore: number | string }[];
+        const gain = new Map((Array.isArray(list) ? list : []).map((x) => [x.wallet, Number(x.ore) || 0]));
+        const known = new Set(everyone.map((x) => x.wallet));
+        const extra = (Array.isArray(list) ? list : []).filter((x) => !known.has(x.wallet)).map((x) => toRow({ wallet: x.wallet, name: x.name, level: x.level }));
+        const withGain = (x: MinerRow): MinerRow => ({ ...x, ore: gain.get(x.wallet) ?? 0, oreGain: gain.get(x.wallet) ?? 0 });
+        everyone = [...everyone, ...extra].map(withGain);
+        rows = rows.map(withGain);
+        if (get().period === p) set({ rows, everyone });
+        return;
+      }
+      // an older server (gali-ore-ranks.sql not run): read each wallet from the chain here
       if (lifetimes && everyone.length) {
         const life = await lifetimes(everyone.map((x) => x.wallet)).catch(() => ({}) as Record<string, { ore: number; deployed: number }>);
         markOre(life);
