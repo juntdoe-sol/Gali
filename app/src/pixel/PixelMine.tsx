@@ -13,7 +13,7 @@ import { StyleSheet, View } from 'react-native';
 import { BLOCKS, CAVE_IN_EVERY, GEAR, LOCK_MS, gearByKey, levelFromXp, type Gear } from '../game/constants';
 import { play, playDirt, type Sound } from '../game/sfx';
 import { oreLive } from '../chain/light';
-import { isLive, isOnChain, LIVE_LOCK_MS, roundEndsAt, soloOf, useGame } from '../game/store';
+import { isLive, isOnChain, levelXpNow, LIVE_LOCK_MS, roundEndsAt, soloOf, useGame } from '../game/store';
 import { clearBots, ensureBots, EMOTES, publishMe, startWorld, stopWorld, thinkBots, useWorld, type Avatar } from '../game/world';
 import { CLAIMS, openSpot } from '../engine/island';
 import { useDomZones, zoneEvent } from '../ui/zones';
@@ -191,7 +191,7 @@ export default function PixelMine() {
       busy: () => Boolean(useGame.getState().wallet.busy),
       level: () => {
         const g = useGame.getState();
-        return levelFromXp(g.wallet.player ? g.wallet.player.xp + g.save.bonusXp : g.save.xp);
+        return levelFromXp(levelXpNow());
       },
       canFight: (scope) => {
         if (scope === 'lobby') return useLobby.getState().status === 'online' && Boolean(useName.getState().name);
@@ -206,7 +206,7 @@ export default function PixelMine() {
     initArena({
       level: () => {
         const g = useGame.getState();
-        return levelFromXp(g.wallet.player ? g.wallet.player.xp + g.save.bonusXp : g.save.xp);
+        return levelFromXp(levelXpNow());
       },
       look: myLook,
       wallet: () => useGame.getState().wallet.owner,
@@ -313,7 +313,7 @@ export default function PixelMine() {
         const { pick, hat, fit, pet } = myGear();
         const session = st.session();
         const player = st.wallet.player;
-        const lvl = levelFromXp(player ? player.xp + st.save.bonusXp : st.save.xp);
+        const lvl = levelFromXp(levelXpNow());
         const pose = e.pose === 'walk' || e.pose === 'swing' ? e.pose : 'idle';
         // walking or swinging stops a dance, as in the lobby
         if (pose !== 'idle' && useLobby.getState().myDance) useLobby.getState().setDance(0);

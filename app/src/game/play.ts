@@ -4,6 +4,7 @@
  * the wallet that signed in. Without a pass nothing is saved; a few reports wait for the sign-in.
  */
 import { publicKey, restBase } from './world';
+import { readSoon } from './verifiedXp';
 
 let pass: string | null = null;
 let passWallet: string | null = null;
@@ -42,7 +43,12 @@ function send(a: string, body: Record<string, unknown>) {
     method: 'POST',
     headers: { apikey: publicKey(), authorization: `Bearer ${publicKey()}`, 'content-type': 'application/json' },
     body: JSON.stringify({ ...body, a, pass }),
-  }).catch(() => undefined);
+  })
+    .then(() => {
+      // XP reports change the server's count: read it again
+      if (a === 'bonus' || a === 'round' || a === 'seen') readSoon();
+    })
+    .catch(() => undefined);
 }
 
 /** Fire and forget. `keep` holds the report (up to 20) until the player signs in. */
