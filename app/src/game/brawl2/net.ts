@@ -9,7 +9,7 @@
  *    except while the miner is reeling from a hit or dead: then the host's own physics decide.
  *  - Damage, knockback, KOs and the result only ever come from the host.
  */
-import { MOVES, type Fighter, type Input, type Match, type MatchEvent, type MoveId } from './sim';
+import { METER_FULL, MOVES, type Fighter, type Input, type Match, type MatchEvent, type MoveId } from './sim';
 
 export const MOVE_LIST = Object.keys(MOVES.pick) as MoveId[];
 const r1 = (n: number) => Math.round(n * 10) / 10;
@@ -20,6 +20,8 @@ export interface NetPlayer {
   name: string;
   look: unknown;
   weapon: string;
+  /** the special move their weapon gives (specials.ts) */
+  sp?: string;
 }
 
 /* ---------- a guest's own state, guest -> host ('boi') ---------- */
@@ -53,7 +55,12 @@ export function applySelf(f: Fighter, p: SelfPack, input: Input): boolean {
   f.dodgeCool = p[11] | 0;
   f.dodgeDir = [p[12], p[13]];
   f.dropping = p[14] | 0;
-  const mv = MOVE_LIST[p[15]];
+  let mv = MOVE_LIST[p[15]];
+  // a special costs a full meter, and the host keeps the meter
+  if (mv === 'special' && f.act?.move !== 'special') {
+    if (f.meter >= METER_FULL) f.meter = 0;
+    else mv = undefined as unknown as MoveId;
+  }
   if (!mv) f.act = null;
   else if (f.act && f.act.move === mv && Math.abs(f.act.f - p[16]) < 8) {
     /* the same swing: keep the host's own count, and who it already hit */
@@ -78,7 +85,7 @@ export function packFighter(f: Fighter, i: Input | undefined): number[] {
     f.airJumps, f.recoveryUsed ? 1 : 0, f.airDodgeUsed ? 1 : 0, f.dodge, f.dodgeCool, f.dodgeDir[0], f.dodgeDir[1], f.dropping,
     f.act ? MOVE_LIST.indexOf(f.act.move) : -1, f.act ? f.act.f : 0,
     f.hitN, f.falls, r1(i?.mx ?? 0), r1(i?.my ?? 0),
-    r1(f.dmg), f.stocks, f.hitstun, f.freeze, f.invuln, f.respawn, f.kos, f.place, f.bot ? 1 : 0,
+    r1(f.dmg), f.stocks, f.hitstun, f.freeze, f.invuln, f.respawn, f.kos, f.place, f.bot ? 1 : 0, Math.round(f.meter),
   ];
 }
 /** Set a fighter from the snapshot: everything (another fighter), or only the score (your own, see adoptSelf). */
@@ -88,6 +95,7 @@ export function setFighter(f: Fighter, p: number[], all: boolean) {
   f.stocks = p[22];
   f.kos = p[27];
   f.place = p[28];
+  if (typeof p[30] === 'number') f.meter = p[30];
   if (!all) return;
   setPhys(f, p);
   f.hitN = p[17];

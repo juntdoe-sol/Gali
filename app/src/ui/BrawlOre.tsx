@@ -1,33 +1,45 @@
 /**
- * BrawlOre: the new Brawl Arena (plan: project doc claude/gali-brawl-arena-v2.md). A simple platform fighter:
- * knock miners off the stage, 3 lives each. 1v1 or a 4-miner free-for-all, online with other miners
- * (game/brawl2/online.ts) or against bots.
+ * Gali Fightclub: the new Brawl Arena (plan: project doc claude/gali-brawl-arena-v2.md). A simple platform fighter
+ * in a fight pit under the mine: knock miners off the ring, 3 lives each. 1v1 or a 4-miner free-for-all, online
+ * with other miners (game/brawl2/online.ts) or against bots. Each weapon brings a special move
+ * (game/brawl2/specials.ts), used when the meter is full.
  *
  * The fight runs in the canvas (pixel/BrawlOreView, engine/brawlore.ts); this screen is the menu around it and
- * the results. It opens where the old arena opened (useArena.open) while the `?brawlore=1` test flag is on.
+ * the results. It opens where the old arena opened (useArena.open) while the test flag is on
+ * (`?fightclub=1`, or the older `?brawlore=1`).
  */
 import { useEffect, useRef, useState } from 'react';
-import { Modal, Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { COLORS } from '../game/constants';
+import { COLORS, gearByKey } from '../game/constants';
 import { useArena } from '../game/arena';
 import { play, type Sound } from '../game/sfx';
 import { useName } from '../game/username';
 import { useGame } from '../game/store';
 import { cancel, endMatch, FFA_WAIT_MS, leaveOnline, onNet, queueList, search, sendNet, SOLO_WAIT_MS, startRoom, useOnline, type Queue } from '../game/brawl2/online';
 import { cleanCode, newCode } from '../game/brawl2/net';
+import { SPECIAL_INFO, specialOf } from '../game/brawl2/specials';
 import type { BrawlEvent, BrawlResult } from '../engine/brawlore';
 import type { Difficulty, Mode } from '../game/brawl2/sim';
 import { atlasSource } from '../pixel/atlasSource';
 import BrawlOreView, { type BrawlOreRef } from '../pixel/BrawlOreView';
 import { myLook } from '../pixel/PixelMine';
 import { Btn, Choice, PixelBox, T } from './kit';
+import { MineAnywhere, useMinePanel } from './MineAnywhere';
 import { LANDSCAPE_APP, useLayout } from './layout';
 
-/** On while BrawlOre is being tested: `?brawlore=1` on the web. */
-export const BRAWLORE = Platform.OS === 'web' && typeof window !== 'undefined' && /[?&]brawlore=1\b/.test(window.location?.search ?? '');
+/** On while Gali Fightclub is being tested: `?fightclub=1` (or the older `?brawlore=1`) on the web. */
+export const BRAWLORE = Platform.OS === 'web' && typeof window !== 'undefined' && /[?&](fightclub|brawlore)=1\b/.test(window.location?.search ?? '');
 
-const SFX: Record<string, Sound> = { swing: 'dig', hit: 'bonk', slam: 'crack', ko: 'ko', cheer: 'win', pop: 'pop', pick: 'pop', throw: 'dig' };
+const SFX: Record<string, Sound> = { swing: 'dig', hit: 'bonk', slam: 'crack', ko: 'ko', cheer: 'win', pop: 'pop', pick: 'pop', throw: 'dig', special: 'crack', ready: 'pop' };
+
+/** Your weapon and the special it gives. */
+function myWeapon() {
+  const g = gearByKey(useGame.getState().save.pickaxe);
+  const item = g ? { key: g.key, name: g.name } : { key: 'pick-wood', name: 'Kayu Pick' };
+  const sp = specialOf(item);
+  return { item, sp, info: SPECIAL_INFO[sp] };
+}
 const ORD = ['', '1ST', '2ND', '3RD', '4TH'];
 const DIFF: [Difficulty, string, string][] = [
   ['easy', 'EASY', 'Slow bots, good to learn'],
@@ -78,7 +90,7 @@ export function BrawlOreScreen() {
     setResult(null);
     setSoloNote(false);
     setStage('fight');
-    ref.current?.begin({ mode: omatch.mode, diff: 'normal', name: name || 'You', look: myLook(), weapon: 'pick', seed: omatch.seed, net: { role: omatch.host === me ? 'host' : 'guest', me, mid: omatch.mid, host: omatch.host, players: omatch.players } });
+    ref.current?.begin({ mode: omatch.mode, diff: 'normal', name: name || 'You', look: myLook(), weapon: 'pick', special: myWeapon().sp, seed: omatch.seed, net: { role: omatch.host === me ? 'host' : 'guest', me, mid: omatch.mid, host: omatch.host, players: omatch.players } });
   }, [phase, omatch, stage, name]);
 
   // nobody came: bots instead
@@ -88,20 +100,20 @@ export function BrawlOreScreen() {
     setSoloNote(true);
     setResult(null);
     setStage('fight');
-    ref.current?.begin({ mode: lastQ.current === 'ffa' ? 'ffa' : '1v1', diff: 'normal', name: name || 'You', look: myLook(), weapon: 'pick' });
+    ref.current?.begin({ mode: lastQ.current === 'ffa' ? 'ffa' : '1v1', diff: 'normal', name: name || 'You', look: myLook(), weapon: 'pick', special: myWeapon().sp });
   }, [solo, stage, name]);
 
   const fight = () => {
     setResult(null);
     setSoloNote(false);
     setStage('fight');
-    ref.current?.begin({ mode, diff, name: name || 'You', look: myLook(), weapon: 'pick' });
+    ref.current?.begin({ mode, diff, name: name || 'You', look: myLook(), weapon: 'pick', special: myWeapon().sp });
   };
   const find = (q: Queue) => {
     lastQ.current = q;
     setResult(null);
     setStage('search');
-    search(q, { name: name || 'Miner', look: myLook(), weapon: 'pick' }, useGame.getState().wallet.owner);
+    search(q, { name: name || 'Miner', look: myLook(), weapon: 'pick', sp: myWeapon().sp }, useGame.getState().wallet.owner);
   };
   const onEvent = (e: BrawlEvent) => {
     if (e.t === 'sfx') play(SFX[e.name] ?? 'pop');
@@ -111,6 +123,8 @@ export function BrawlOreScreen() {
       setResult(e.result);
       setStage('done');
     } else if (e.t === 'menu') {
+      // Escape with the mining drawer out closes the drawer, not the match
+      if (useMinePanel.getState().open) return;
       ref.current?.quit();
       if (useOnline.getState().phase === 'match') endMatch(true);
       setStage('menu');
@@ -123,6 +137,7 @@ export function BrawlOreScreen() {
     useArena.getState().close();
   };
   const again = () => (result?.online || soloNote ? find(lastQ.current) : fight());
+  const wpn = myWeapon();
 
   return (
     <Modal visible transparent={false} animationType="fade" statusBarTranslucent onRequestClose={exit}>
@@ -142,14 +157,24 @@ export function BrawlOreScreen() {
         </View>
         {stage === 'menu' ? (
           <ScrollView style={styles.scroll} contentContainerStyle={[styles.center, { paddingVertical: short ? 6 : 12 }]}>
-            <PixelBox fill="rgba(12,8,24,0.94)" hi={COLORS.gold} lo="#04060f" shadow={1} style={[styles.card, short && { gap: 6, padding: 10 }]}>
-              <T v="display" style={[styles.logo, short && { fontSize: 26, lineHeight: 28 }]}>
-                BRAWLORE
-              </T>
-              {short ? null : <T style={{ textAlign: 'center', fontSize: 13 }}>Knock miners off the stage. Hits raise their damage %, and the higher it is, the further they fly. 3 lives each.</T>}
-              <View style={styles.row}>
-                <Choice label="ONLINE" sub="Fight other miners" on={tab === 'online'} onPress={() => setTab('online')} />
-                <Choice label="VS BOTS" sub="Practice" on={tab === 'bots'} onPress={() => setTab('bots')} />
+            <PixelBox fill="rgba(20,12,14,0.95)" hi={COLORS.gold} lo="#04060f" shadow={1} style={[styles.card, short && { gap: 6, padding: 10 }]}>
+              <View style={styles.head}>
+                <T v="label" style={{ color: COLORS.teal, letterSpacing: 3, fontSize: short ? 9 : 11 }}>
+                  UNDER THE MINE
+                </T>
+                <T v="display" style={[styles.logo, short && { fontSize: 24, lineHeight: 26 }]}>
+                  GALI FIGHTCLUB
+                </T>
+                {short ? null : (
+                  <T v="muted" style={{ textAlign: 'center', fontSize: 12 }}>
+                    Knock miners out of the ring. Every hit raises their %, and the higher it gets, the further they fly. 3 lives each.
+                  </T>
+                )}
+              </View>
+              <SpecialCard name={wpn.info.name} line={wpn.info.line} item={wpn.item.name} color={wpn.info.color} keyHint={touch ? 'SP button' : 'I or E'} short={short} />
+              <View style={styles.tabs}>
+                <Tab label="FIGHT ONLINE" on={tab === 'online'} onPress={() => setTab('online')} />
+                <Tab label="PRACTICE VS BOTS" on={tab === 'bots'} onPress={() => setTab('bots')} />
               </View>
               <T v="label" style={styles.lbl}>
                 MATCH
@@ -194,12 +219,14 @@ export function BrawlOreScreen() {
               )}
               <T v="muted" style={{ fontSize: 11, textAlign: 'center' }}>
                 {touch
-                  ? 'Left thumb: move. Right: JUMP, LIGHT, HEAVY, DODGE. Hold down + a button to aim down. HEAVY in the air without down flies you up.'
-                  : 'A/D move · W or Space jump · S down · J or left click light · K or right click heavy · L or Shift dodge. Heavy in the air flies you up; down + heavy slams.'}
+                  ? 'Left thumb: move. Right: JUMP, LIGHT, HEAVY, DODGE, SP. Hold down + a button to aim down. HEAVY in the air without down flies you up.'
+                  : 'A/D move · W or Space jump · S down · J light · K heavy · L or Shift dodge · I or E special. Heavy in the air flies you up; down + heavy slams.'}
               </T>
             </PixelBox>
           </ScrollView>
         ) : null}
+        {/* mine while you fight: the round chip and the DEPLOY drawer, hideable like everywhere else */}
+        <MineAnywhere at="arena" />
         {stage === 'search' ? <Searching q={lastQ.current} onCancel={() => { cancel(); setStage('menu'); }} /> : null}
         {stage === 'done' && result ? (
           <View style={styles.centerAbs} pointerEvents="box-none">
@@ -243,11 +270,16 @@ const styles = StyleSheet.create({
   scroll: { position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 },
   center: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 12 },
   centerAbs: { position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', padding: 12 },
-  card: { width: 460, maxWidth: '100%', padding: 16, gap: 10 },
-  logo: { fontSize: 36, lineHeight: 38, color: COLORS.gold, textAlign: 'center', letterSpacing: 2 },
+  card: { width: 500, maxWidth: '100%', padding: 16, gap: 10 },
+  logo: { fontSize: 32, lineHeight: 34, color: COLORS.gold, textAlign: 'center', letterSpacing: 2 },
   lbl: { color: COLORS.teal, marginTop: 2 },
   row: { flexDirection: 'row', gap: 8 },
   res: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4, paddingHorizontal: 6 },
+  head: { alignItems: 'center', gap: 2 },
+  tabs: { flexDirection: 'row', borderWidth: 2, borderColor: '#3a2414', backgroundColor: '#140a08' },
+  tab: { flex: 1, paddingVertical: 8, alignItems: 'center' },
+  sp: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 2, paddingVertical: 8, paddingHorizontal: 10, backgroundColor: 'rgba(255,255,255,0.03)' },
+  spBadge: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderWidth: 2, transform: [{ rotate: '45deg' }] },
   code: { width: 86, minHeight: 40, borderWidth: 2, borderColor: '#2d4282', backgroundColor: '#0b1430', color: COLORS.text, textAlign: 'center', fontSize: 18, letterSpacing: 4, paddingHorizontal: 6 },
 });
 
@@ -295,6 +327,43 @@ function Searching({ q, onCancel }: { q: Queue; onCancel: () => void }) {
           <Btn kind="plain" label="CANCEL" onPress={onCancel} style={{ flex: 1 }} />
         </View>
       </PixelBox>
+    </View>
+  );
+}
+
+/** A tab in the menu's top switch. */
+function Tab({ label, on, onPress }: { label: string; on: boolean; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={label} style={[styles.tab, on && { backgroundColor: COLORS.gold }]}>
+      <T v="bold" style={{ fontSize: 12, color: on ? '#1a0e08' : COLORS.muted, letterSpacing: 1 }}>
+        {label}
+      </T>
+    </Pressable>
+  );
+}
+
+/** Your special move: what your weapon brings to the fight. */
+function SpecialCard({ name, line, item, color, keyHint, short }: { name: string; line: string; item: string; color: string; keyHint: string; short: boolean }) {
+  return (
+    <View style={[styles.sp, { borderColor: color }]}>
+      <View style={[styles.spBadge, { borderColor: color, backgroundColor: color + '22' }]}>
+        <T v="display" style={{ color, fontSize: 16, transform: [{ rotate: '-45deg' }] }}>
+          SP
+        </T>
+      </View>
+      <View style={{ flex: 1, gap: 1 }}>
+        <T v="label" style={{ color: COLORS.muted, fontSize: 9 }}>
+          YOUR SPECIAL · FROM {item.toUpperCase()}
+        </T>
+        <T v="display" style={{ color, fontSize: 16, lineHeight: 18 }}>
+          {name}
+        </T>
+        {short ? null : (
+          <T v="muted" style={{ fontSize: 11 }}>
+            {line} Fill the meter by landing and taking hits, then press {keyHint}.
+          </T>
+        )}
+      </View>
     </View>
   );
 }
