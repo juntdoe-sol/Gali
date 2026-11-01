@@ -54,7 +54,21 @@ const HP_SEND_MS = 700;
 
 /** Damage of an attacker's n-th swing: the same on every client, and not up to the attacker. */
 export const dmgOf = swingDmg;
-const WEAPONS: Weapon[] = ['swing', 'dash', 'slam', 'ore', 'splash', 'pet', 'boss', 'mob', 'sting', 'spin'];
+const WEAPONS: Weapon[] = ['swing', 'dash', 'slam', 'ore', 'splash', 'pet', 'boss', 'mob', 'sting', 'spin', 'prop'];
+/** What can be grabbed and thrown, and how long a throw is in the air (ms). */
+export type PropKind = 'pot' | 'crate' | 'barrel';
+const PROP_KINDS: PropKind[] = ['pot', 'crate', 'barrel'];
+export const THROW_MS = 420;
+/** A throw someone else made, so every screen draws the pot flying: from, to, when it left (wall ms). */
+export interface Throw {
+  by: string;
+  kind: PropKind;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  at: number;
+}
 
 export interface Fighter {
   hp: number;
@@ -89,6 +103,8 @@ interface BrawlState {
   /** arena: blocking with Pickaxe Guard until then, and the passive you picked */
   guardUntil: number;
   passive: 'skin' | 'pet' | null;
+  /** pots, crates and barrels other players threw, still in the air or just landed */
+  throws: Throw[];
   setOff: (off: boolean) => void;
 }
 
@@ -101,6 +117,7 @@ export const useBrawl = create<BrawlState>((set) => ({
   myJumpAt: 0,
   guardUntil: 0,
   passive: null,
+  throws: [],
   setOff: (off) => {
     set({ off });
     saveRecord({ ...rec, off });
@@ -149,7 +166,7 @@ export function hitOk(o: { claim: [number, number]; seen: [number, number] | nul
   const w = o.w ?? 'swing';
   if (o.now - o.lastFrom < GAP[w] - 80) return false;
   if (!o.seen) return false;
-  const thrown = w === 'ore' || w === 'splash';
+  const thrown = w === 'ore' || w === 'splash' || w === 'prop';
   // a melee hit comes from where the attacker stands; a thrown shard from within throwing range of them
   const slack = thrown ? THROW_RANGE + CLAIM_SLACK : CLAIM_SLACK;
   if (Math.hypot(o.claim[0] - o.seen[0], o.claim[1] - o.seen[1]) > slack) return false;
@@ -277,8 +294,8 @@ function onBx(scope: Scope, p: any) {
     const a: string = p.a;
     const room = rooms[scope];
     const w: Weapon = WEAPONS.includes(p.w) ? p.w : 'swing';
-    // powers, thrown ORE and the boss only exist in the arena
-    if (w !== 'swing' && !room?.arena) return;
+    // powers, thrown ORE and the boss only exist in the arena; a thrown pot or crate works anywhere
+    if (w !== 'swing' && w !== 'prop' && !room?.arena) return;
     const boss = a === 'boss';
     // 'boss' is whatever the host runs: the Two-Mouthed and its crawlers
     if (boss && ((w !== 'boss' && w !== 'mob') || !room?.host || typeof p.h !== 'string' || room.host() !== p.h)) return;
@@ -316,6 +333,13 @@ function onBx(scope: Scope, p: any) {
       if (!v || !v.on || v.koAt || now < v.shieldUntil) return;
       useBrawl.setState((s) => ({ peers: { ...s.peers, [p.t]: { ...v, hp: Math.max(1, v.hp - dmg), hitAt: now } } }));
     }
+  } else if (p.k === 'tw' && typeof p.id === 'string' && p.id.length <= 16 && p.id !== me && PROP_KINDS.includes(p.o) && [p.x0, p.y0, p.x1, p.y1].every(Number.isFinite)) {
+    // someone threw a pot: draw it flying. A short throw only, from where they stand.
+    const info = peerInfo(scope, p.id);
+    if (!info || Math.hypot(p.x0 - info.pos[0], p.y0 - info.pos[1]) > CLAIM_SLACK || Math.hypot(p.x1 - p.x0, p.y1 - p.y0) > THROW_RANGE) return;
+    const throws = st.throws.filter((t) => now - t.at < THROW_MS + 400).slice(-12);
+    throws.push({ by: p.id, kind: p.o, x0: p.x0, y0: p.y0, x1: p.x1, y1: p.y1, at: now });
+    useBrawl.setState({ throws });
   } else if (p.k === 'j' && typeof p.id === 'string' && p.id.length <= 16 && p.id !== me) {
     if (now - (st.jumps[p.id] ?? 0) < JUMP_GAP - 150) return;
     const jumps = Object.keys(st.jumps).length > 150 ? {} : { ...st.jumps };
@@ -499,6 +523,30 @@ export function strike(scope: Scope, w: Weapon, target: string, x: number, y: nu
   return true;
 }
 
+/** Tell the room we threw a pot, crate or barrel from (x0, y0) to (x1, y1), so they see it fly. */
+export function sendThrow(scope: Scope, kind: PropKind, x0: number, y0: number, x1: number, y1: number) {
+  if (scope !== useBrawl.getState().scope) return;
+  send(scope, { k: 'tw', id: meId(scope), o: kind, x0: Math.round(x0), y0: Math.round(y0), x1: Math.round(x1), y1: Math.round(y1) });
+}
+
+/**
+ * A thrown pot, crate or barrel landed on `target` at (x, y), lobby or island. Brawl rules as a swing: both have
+ * it on, they are standing and not shielded; the victim checks the landing spot against where we stood.
+ */
+export function throwHit(scope: Scope, target: string, x: number, y: number): boolean {
+  const now = Date.now();
+  const s = useBrawl.getState();
+  if (scope !== s.scope || s.off || busy() || s.me.koAt || !canFight(scope)) return false;
+  const v = s.peers[target];
+  if (!v || !v.on || v.koAt || now < v.shieldUntil) return false;
+  seq += 1;
+  if (!send(scope, { k: 'h', a: meId(scope), t: target, s: seq, x: Math.round(x), y: Math.round(y), w: 'prop' })) return false;
+  myHits.set(target, now);
+  const d = baseDamage('prop', meId(scope), seq, myLevel(), Boolean(rooms[scope]?.arena));
+  useBrawl.setState((st) => ({ peers: { ...st.peers, [target]: { ...v, hp: Math.max(1, v.hp - d), hitAt: now } } }));
+  return true;
+}
+
 /** The arena host's boss hits a player. Only the host calls this. */
 export function bossHit(scope: Scope, target: string, x: number, y: number, host: string, w: 'boss' | 'mob' = 'boss') {
   seq += 1;
@@ -556,6 +604,7 @@ export function brawlSnap(now: number) {
     me: { ...view(s.me), on: !s.off && !busy(), rs: s.me.respawn, hx: s.me.hitFrom[0], hy: s.me.hitFrom[1] },
     peers: Object.fromEntries(Object.entries(s.peers).map(([id, f]) => [id, view(f)])),
     jumps: Object.fromEntries(Object.entries(s.jumps).filter(([, at]) => now - at < JUMP_MS)),
+    throws: s.throws.filter((t) => now - t.at < THROW_MS + 300).map((t) => ({ by: t.by, k: t.kind, x0: t.x0, y0: t.y0, x1: t.x1, y1: t.y1, at: t.at })),
   };
 }
 

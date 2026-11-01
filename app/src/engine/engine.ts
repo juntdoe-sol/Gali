@@ -156,6 +156,7 @@ export class Engine {
   private atUni = false;
   /** your miner is standing by Hardhat Chad: he has a speech bubble up */
   private chadNear = false;
+  private chadAt: [number, number] = [-99, -99];
   private fpsAcc = { n: 0, t: 0 };
   quality = 1;
   private ready = false;
@@ -1320,7 +1321,15 @@ export class Engine {
     }
     // Hardhat Chad's name, once you are close enough to read it
     if (UNI && zoomK > 1.5) textCentered(c, 'HARDHAT CHAD', OX + UNI.chad[0] * S, OY + (UNI.chad[1] - 31 * ACT) * S - 9 * fs, fs, '#ffd84a', 'rgba(2,5,15,0.7)');
-    if (UNI && this.chadNear) chadBubble(c, OX + UNI.chad[0] * S, OY + (UNI.chad[1] - 31 * ACT) * S - 12 * fs, S, now);
+    // while you stand by him, tell the app where his head is: his speech bubble (ui/University.tsx) hangs off it
+    if (UNI && this.chadNear) {
+      const hx = Math.round((OX + UNI.chad[0] * S) / dpr);
+      const hy = Math.round((OY + (UNI.chad[1] - 31 * ACT) * S - 10 * fs) / dpr);
+      if (Math.abs(hx - this.chadAt[0]) > 1 || Math.abs(hy - this.chadAt[1]) > 1) {
+        this.chadAt = [hx, hy];
+        this.emit({ t: 'chadAt', x: hx, y: hy });
+      }
+    }
     const winner = s?.winner ?? null;
     if (s && (el < 0 || el < 2500)) {
       const solo = s.solo;
@@ -1733,35 +1742,6 @@ export class Engine {
 
 export type { Snapshot, EngineEvent, PeerView };
 export { has, drawCanvas };
-
-/**
- * Hardhat Chad's speech bubble, drawn in pixels (the map font has no question mark): a white bubble with a
- * tail and a big ? in it, bobbing a little. The question itself is in the chat card the app opens.
- */
-function chadBubble(c: Ctx, x: number, y: number, S: number, now: number) {
-  const u = Math.max(1, Math.round(S));
-  const bob = Math.round(Math.sin(now / 260)) * u;
-  const w = 11 * u;
-  const h = 11 * u;
-  const x0 = Math.round(x - w / 2);
-  const y0 = Math.round(y - h + bob);
-  c.fillStyle = '#16120e';
-  c.fillRect(x0 - u, y0, w + 2 * u, h);
-  c.fillRect(x0, y0 - u, w, h + 2 * u);
-  c.fillStyle = '#ffffff';
-  c.fillRect(x0, y0, w, h);
-  // the tail, pointing down at Chad
-  c.fillStyle = '#16120e';
-  c.fillRect(x0 + 4 * u, y0 + h + u, 3 * u, u);
-  c.fillRect(x0 + 5 * u, y0 + h + 2 * u, u, u);
-  c.fillStyle = '#ffffff';
-  c.fillRect(x0 + 4 * u, y0 + h, 3 * u, u);
-  c.fillRect(x0 + 5 * u, y0 + h + u, u, u);
-  // the ?
-  c.fillStyle = '#d27a12';
-  const q: [number, number][] = [[4, 2], [5, 2], [6, 2], [3, 3], [7, 3], [7, 4], [6, 5], [5, 6], [5, 8]];
-  for (const [qx, qy] of q) c.fillRect(x0 + qx * u, y0 + qy * u, u, u);
-}
 
 /**
  * Hardhat Chad: a miner like everyone else (the same body, hardhat and overalls), with round yellow shades,

@@ -22,10 +22,12 @@ const CHAD = require('../../assets/ui/chad.png');
 const PIX = { imageRendering: 'pixelated' } as ImageStyle;
 
 type UniTab = 'lessons' | 'tips';
-export const useUni = create<{ open: boolean; start: number; near: boolean; tab: UniTab }>(() => ({ open: false, start: 0, near: false, tab: 'lessons' }));
+export const useUni = create<{ open: boolean; start: number; near: boolean; tab: UniTab; at: [number, number] | null }>(() => ({ open: false, start: 0, near: false, tab: 'lessons', at: null }));
 export const openUni = (start = 0, tab: UniTab = 'lessons') => useUni.setState({ open: true, start, tab });
 /** the engine says your miner walked up to Chad, or away */
-export const nearChad = (near: boolean) => useUni.setState({ near });
+export const nearChad = (near: boolean) => useUni.setState(near ? { near } : { near, at: null });
+/** where Chad's head is on screen (CSS px): his speech bubble hangs above it */
+export const chadAt = (x: number, y: number) => useUni.setState({ at: [x, y] });
 
 const SOURCES = {
   bw: { name: 'Blockworks: ORE dashboard primer', url: 'https://blockworks.com/insights/ore-dashboard-primer' },
@@ -312,7 +314,8 @@ const styles = StyleSheet.create({
 export function ChadChat() {
   const near = useUni((s) => s.near);
   const uniOpen = useUni((s) => s.open);
-  const { w, desktop, rail, side } = useLayout();
+  const { w, h, desktop, rail, side } = useLayout();
+  const at = useUni((s) => s.at);
   const [pick, setPick] = useState<number | null>(null);
   const [shut, setShut] = useState(false);
   useEffect(() => {
@@ -321,27 +324,28 @@ export function ChadChat() {
       setPick(null);
     }
   }, [near]);
-  if (!near || shut || uniOpen) return null;
+  if (!near || shut || uniOpen || !at) return null;
   const qa = pick != null ? ORE_QNA[pick] : null;
+  // a speech bubble out of Chad's mouth: above his head, its tail pointing down at him, kept on screen
+  const bw = Math.min(desktop ? 520 : 400, w - rail - side - 16);
+  const left = Math.max(rail + 8, Math.min(w - side - bw - 8, at[0] - bw / 2));
+  const room = Math.max(150, at[1] - (desktop ? 70 : 150));
+  const tail = Math.max(18, Math.min(bw - 18, at[0] - left));
   return (
-    <View
-      pointerEvents="box-none"
-      // desktop: in the middle of the map, between the rail and the side panel; a phone: low, above the controls
-      style={[styles.chatWrap, desktop ? { top: 0, bottom: 0, left: rail, right: side, justifyContent: 'center' } : { bottom: 150 }]}
-    >
-      <PixelBox fill="rgba(14,22,50,0.96)" hi="#33498c" lo="#0c1430" style={[styles.chat, { width: Math.min(560, w - rail - side - 24) }]}>
+    <View pointerEvents="box-none" style={[StyleSheet.absoluteFill, { zIndex: 40 }]}>
+      <View pointerEvents="box-none" style={{ position: 'absolute', left, width: bw, bottom: h - at[1] + 14 }}>
+      <PixelBox fill="#fbf6e6" hi="#ffffff" lo="#c9bfa5" edge="#16120e" style={[styles.chat, { width: bw, maxHeight: room }]}>
         <View style={styles.chatHead}>
-          <Image source={CHAD} style={[{ width: 44, height: 44 }, PIX]} fadeDuration={0} accessibilityLabel="Hardhat Chad" />
           <View style={{ flex: 1 }}>
-            <T v="tiny" style={{ fontSize: 9, color: COLORS.gold }}>
+            <T v="tiny" style={{ fontSize: 9, color: '#a8740a' }}>
               HARDHAT CHAD
             </T>
-            <T v="bold" style={{ fontSize: 15, lineHeight: 20 }}>
+            <T v="bold" style={{ fontSize: 15, lineHeight: 20, color: '#1c1820' }}>
               {qa ? qa.a : CHAD_ASK}
             </T>
           </View>
           <Pressable onPress={() => setShut(true)} accessibilityRole="button" accessibilityLabel="Close chat" hitSlop={10}>
-            <T v="display" style={{ fontSize: 20, lineHeight: 20, color: COLORS.muted }}>
+            <T v="display" style={{ fontSize: 20, lineHeight: 20, color: '#8a8070' }}>
               X
             </T>
           </Pressable>
@@ -352,7 +356,7 @@ export function ChadChat() {
             {qa.lesson != null ? <Btn small kind="gold" label="FULL LESSON" onPress={() => openUni(qa.lesson)} /> : null}
           </View>
         ) : (
-          <ScrollView style={{ maxHeight: desktop ? 320 : 170 }} contentContainerStyle={styles.chips} nestedScrollEnabled>
+          <ScrollView style={{ maxHeight: Math.max(90, room - 70) }} contentContainerStyle={styles.chips} nestedScrollEnabled>
             {ORE_QNA.map((x, i) => (
               <Pressable key={x.q} onPress={() => setPick(i)} accessibilityRole="button">
                 {(st) => (
@@ -375,6 +379,19 @@ export function ChadChat() {
           </ScrollView>
         )}
       </PixelBox>
+      {/* the tail, pointing down at Chad */}
+      <View pointerEvents="none" style={{ position: 'absolute', bottom: -16, left: tail - 12, width: 24, height: 18 }}>
+        {[
+          [0, 24],
+          [4, 18],
+          [8, 12],
+          [12, 6],
+        ].map(([y, wd]) => (
+          <View key={y} style={{ position: 'absolute', top: y, left: (24 - wd) / 2, width: wd, height: 4, backgroundColor: '#fbf6e6', borderLeftWidth: 2, borderRightWidth: 2, borderColor: '#16120e' }} />
+        ))}
+        <View style={{ position: 'absolute', top: 16, left: 10, width: 4, height: 2, backgroundColor: '#16120e' }} />
+      </View>
+      </View>
     </View>
   );
 }
