@@ -5,20 +5,25 @@
  * tap the University's door, or walk up its steps. The facts come from two write-ups, linked at the bottom:
  * Blockworks' ORE dashboard primer and QuickNode's ORE mining guide. Numbers are as those sources gave them.
  */
-import { useEffect, useState } from 'react';
-import { Image, Linking, Pressable, ScrollView, StyleSheet, View, type ImageStyle } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { Image, Linking, Pressable, ScrollView, StyleSheet, TextInput, View, type ImageStyle } from 'react-native';
 import { create } from 'zustand';
 import { COLORS } from '../game/constants';
 import { CHAD_ASK, ORE_QNA } from '../game/oreQna';
+import { signIn, useDm } from '../game/dm';
+import { playAsk } from '../game/play';
 import { loadJson, saveJson } from '../game/storage';
-import { Btn, PixelBox, Scrim, T, Window } from './kit';
+import { useGame } from '../game/store';
+import { publicKey, restBase } from '../game/world';
+import { Btn, INPUT, PixelBox, Scrim, T, Window } from './kit';
 import { useLayout } from './layout';
 
 const CHAD = require('../../assets/ui/chad.png');
 const PIX = { imageRendering: 'pixelated' } as ImageStyle;
 
-export const useUni = create<{ open: boolean; start: number; near: boolean }>(() => ({ open: false, start: 0, near: false }));
-export const openUni = (start = 0) => useUni.setState({ open: true, start });
+type UniTab = 'lessons' | 'tips';
+export const useUni = create<{ open: boolean; start: number; near: boolean; tab: UniTab }>(() => ({ open: false, start: 0, near: false, tab: 'lessons' }));
+export const openUni = (start = 0, tab: UniTab = 'lessons') => useUni.setState({ open: true, start, tab });
 /** the engine says your miner walked up to Chad, or away */
 export const nearChad = (near: boolean) => useUni.setState({ near });
 
@@ -142,6 +147,8 @@ const READ_KEY = 'gali-uni-read-v1';
 export function University() {
   const open = useUni((s) => s.open);
   const start = useUni((s) => s.start);
+  const tab = useUni((s) => s.tab);
+  const setTab = (t: UniTab) => useUni.setState({ tab: t });
   const { w } = useLayout();
   const wide = w >= 700;
   const [sel, setSel] = useState<number | null>(null);
@@ -234,8 +241,15 @@ export function University() {
 
   return (
     <Scrim onPress={close}>
-      <Window title="UNIVERSITY OF ORE" sub={`Lessons from Hardhat Chad  ·  ${read.length}/${LESSONS.length} read`} onClose={close} width={880} style={{ maxHeight: '92%' }}>
-        {wide ? (
+      <Window title="UNIVERSITY OF ORE" sub={tab === 'tips' ? 'Tips and strategies from Gali miners' : `Lessons from Hardhat Chad  ·  ${read.length}/${LESSONS.length} read`} onClose={close} width={880} style={{ maxHeight: '92%' }}>
+        <View style={styles.tabs}>
+          {(['lessons', 'tips'] as UniTab[]).map((t) => (
+            <Btn key={t} small kind={tab === t ? 'gold' : 'ghost'} label={t === 'lessons' ? "CHAD'S LESSONS" : "MINERS' TIPS"} onPress={() => setTab(t)} />
+          ))}
+        </View>
+        {tab === 'tips' ? (
+          <TipsBoard />
+        ) : wide ? (
           <View style={styles.body}>
             <View style={styles.side}>
               <View style={styles.hello}>
@@ -278,6 +292,10 @@ const styles = StyleSheet.create({
   hello: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   say: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10 },
   nav: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
+  tabs: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+  tip: { padding: 10, gap: 6 },
+  tipFoot: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  input: { ...INPUT, position: 'relative', zIndex: 1, height: 64, paddingTop: 8, textAlignVertical: 'top', color: '#ffffff' },
   chatWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center', zIndex: 40 },
   chat: { padding: 10, gap: 8 },
   chatHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
@@ -345,9 +363,159 @@ export function ChadChat() {
                 <T style={{ fontSize: 13, lineHeight: 16, color: COLORS.gold }}>Open the University lessons</T>
               </PixelBox>
             </Pressable>
+            <Pressable onPress={() => openUni(0, 'tips')} accessibilityRole="button">
+              <PixelBox fill="rgba(47,199,221,0.14)" hi="#2fc7dd" lo="#04060f" style={styles.chip}>
+                <T style={{ fontSize: 13, lineHeight: 16, color: '#2fc7dd' }}>Read tips from other miners</T>
+              </PixelBox>
+            </Pressable>
           </ScrollView>
         )}
       </PixelBox>
+    </View>
+  );
+}
+
+/* ---------------- miners' tips ---------------- */
+
+interface Tip {
+  id: number;
+  name: string;
+  body: string;
+  ups: number;
+  at: string;
+}
+const VOTED_KEY = 'gali-uni-voted-v1';
+const TIP_MAX = 200;
+
+function ago(at: string) {
+  const s = Math.max(0, (Date.now() - Date.parse(at)) / 1000);
+  if (s < 3600) return `${Math.max(1, Math.round(s / 60))}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
+}
+
+/**
+ * Tips and strategies shared by Gali miners: the best first (or the newest), an upvote and a report on each.
+ * Signed-in miners with a Gali name can share 3 a day. A tip with 3 reports hides itself (sql/uni-tips.sql).
+ */
+function TipsBoard() {
+  const me = useDm((s) => s.me);
+  const owner = useGame((s) => s.wallet.owner);
+  const [sort, setSort] = useState<'top' | 'new'>('top');
+  const [tips, setTips] = useState<Tip[] | null>(null);
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [voted, setVoted] = useState<Record<string, true>>({});
+  useEffect(() => {
+    void loadJson<Record<string, true>>(VOTED_KEY, {}).then((v) => setVoted(v && typeof v === 'object' ? v : {}));
+  }, []);
+  const load = useCallback(async () => {
+    const base = restBase();
+    if (!base) return setTips([]);
+    const order = sort === 'top' ? 'ups.desc,at.desc' : 'at.desc';
+    try {
+      const r = await fetch(`${base}/rest/v1/gali_uni_tips?select=id,name,body,ups,at&order=${order}&limit=60`, { headers: { apikey: publicKey(), authorization: `Bearer ${publicKey()}` } });
+      setTips(r.ok ? ((await r.json()) as Tip[]) : []);
+    } catch {
+      setTips([]);
+    }
+  }, [sort]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const share = async () => {
+    const body = draft.trim();
+    if (body.length < 8) return setNote('Write a bit more: at least 8 characters.');
+    setBusy(true);
+    setNote(null);
+    const r = await playAsk<{ id: number }>('tip', { body });
+    setBusy(false);
+    if (!r.ok) return setNote(r.error);
+    setDraft('');
+    setNote('Shared. Thanks for teaching the island.');
+    setSort('new');
+    void load();
+  };
+  const vote = async (t: Tip, kind: 'up' | 'report') => {
+    const k = `${t.id}:${kind}`;
+    if (voted[k]) return;
+    const next = { ...voted, [k]: true as const };
+    setVoted(next);
+    saveJson(VOTED_KEY, next, 0);
+    if (kind === 'up') setTips((l) => l?.map((x) => (x.id === t.id ? { ...x, ups: x.ups + 1 } : x)) ?? l);
+    else setTips((l) => l?.filter((x) => x.id !== t.id) ?? l);
+    const r = await playAsk('tipvote', { id: t.id, kind });
+    if (!r.ok) setNote(r.error);
+  };
+
+  return (
+    <View style={{ flexShrink: 1, gap: 10, minHeight: 360 }}>
+      {me ? (
+        <View style={{ gap: 6 }}>
+          <TextInput
+            value={draft}
+            onChangeText={(v) => setDraft(v.slice(0, TIP_MAX))}
+            placeholder="Share a mining tip or strategy. What works for you?"
+            placeholderTextColor="#6f7fae"
+            multiline
+            maxLength={TIP_MAX}
+            style={styles.input}
+          />
+          <View style={styles.tipFoot}>
+            <T v="muted" style={{ fontSize: 12, flex: 1 }}>
+              {draft.length}/{TIP_MAX} · 3 tips a day · no links
+            </T>
+            <Btn small kind="gold" label={busy ? 'SHARING' : 'SHARE TIP'} disabled={busy || draft.trim().length < 8} onPress={() => void share()} />
+          </View>
+        </View>
+      ) : (
+        <PixelBox fill="#0b1430" hi="#22356f" lo="#04060f" style={[styles.tip, { flexDirection: 'row', alignItems: 'center' }]}>
+          <T style={{ flex: 1, fontSize: 13, color: COLORS.muted }}>{owner ? 'Sign in to share your own tips and vote on others.' : 'Connect a wallet and sign in to share your own tips.'}</T>
+          {owner ? <Btn small kind="gold" label="SIGN IN" onPress={() => void signIn().catch((e) => setNote((e as Error).message))} /> : null}
+        </PixelBox>
+      )}
+      {note ? (
+        <T v="bold" style={{ fontSize: 13, color: COLORS.gold }}>
+          {note}
+        </T>
+      ) : null}
+      <View style={styles.tabs}>
+        <Btn small kind={sort === 'top' ? 'teal' : 'ghost'} label="TOP" onPress={() => setSort('top')} />
+        <Btn small kind={sort === 'new' ? 'teal' : 'ghost'} label="NEW" onPress={() => setSort('new')} />
+      </View>
+      <ScrollView style={{ flexShrink: 1, maxHeight: 460 }} contentContainerStyle={{ gap: 6 }}>
+        {tips === null ? (
+          <T v="muted">Loading tips...</T>
+        ) : tips.length === 0 ? (
+          <T v="muted">No tips yet. Be the first to share one.</T>
+        ) : (
+          tips.map((t) => {
+            const up = voted[`${t.id}:up`];
+            return (
+              <PixelBox key={t.id} fill="#0b1430" hi="#22356f" lo="#04060f" style={styles.tip}>
+                <T style={{ fontSize: 14, lineHeight: 19 }}>{t.body}</T>
+                <View style={styles.tipFoot}>
+                  <T v="tiny" style={{ fontSize: 9, color: COLORS.gold, flex: 1 }}>
+                    {t.name.toUpperCase()} · {ago(t.at)}
+                  </T>
+                  <Pressable onPress={() => (me ? void vote(t, 'up') : setNote('Sign in to vote.'))} accessibilityRole="button" accessibilityLabel="Upvote" hitSlop={8}>
+                    <T v="display" style={{ fontSize: 16, color: up ? COLORS.green : COLORS.text }}>
+                      +{t.ups} USEFUL
+                    </T>
+                  </Pressable>
+                  <Pressable onPress={() => (me ? void vote(t, 'report') : setNote('Sign in to report.'))} accessibilityRole="button" accessibilityLabel="Report" hitSlop={8}>
+                    <T v="tiny" style={{ fontSize: 9, color: COLORS.muted }}>
+                      REPORT
+                    </T>
+                  </Pressable>
+                </View>
+              </PixelBox>
+            );
+          })
+        )}
+      </ScrollView>
     </View>
   );
 }

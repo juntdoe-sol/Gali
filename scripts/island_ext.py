@@ -33,6 +33,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PAD_X, PAD_Y = OFF_X + 395, OFF_Y + 152
 PAD = 72
 PEN = (PAD_X, PAD_Y + 6, 100, 68)       # peninsula ellipse: cx, cy, rx, ry
+# the lobby's big digital signboard, also on the island: its feet, on the beach west of the pad, facing the arrivals.
+# The engine draws it (engine/marketArt.ts drawBillboard) at the miners' scale: about 74x48 here.
+BILLBOARD = (495, 291)
 
 
 def rgb(s):
@@ -422,7 +425,8 @@ def extend(I, ground, sprites):
     near_pad[y0 - 14:y0 + PAD + 14, x0 - 14:x0 + PAD + 14] = True
     near_walk = np.zeros((EH, EW), bool)
     near_walk[PAD_Y:walk_y1 + 6, bx0 - 22:bx1 + 22] = True
-    okmask = sand & ~near_pad & ~near_walk & (sd >= 4) & (D >= 7) & ~U.keep_clear(xx, yy)
+    bb = (np.abs(xx - BILLBOARD[0]) < 46) & (yy > BILLBOARD[1] - 54) & (yy < BILLBOARD[1] + 12)
+    okmask = sand & ~near_pad & ~near_walk & (sd >= 4) & (D >= 7) & ~U.keep_clear(xx, yy) & ~bb
 
     def sites(lo, hi, extra=None):
         m = okmask & (sd >= lo) & (sd <= hi)
@@ -545,6 +549,7 @@ def extend(I, ground, sprites):
         'ships': ships,
         'pad': {'x': PAD_X, 'y': PAD_Y, 'size': PAD},
         'uni': U.meta(),
+        'billboard': list(BILLBOARD),
         'walkable_px': int(walkable.sum()),
         'ring_px': int(ring.sum()),
     }
@@ -561,6 +566,7 @@ def shift_meta(meta, ext):
     meta['ships'] = ext['ships']
     meta['pad'] = ext['pad']
     meta['uni'] = ext['uni']
+    meta['billboard'] = ext['billboard']
     for c in meta['claims']:
         c['cx'] += ox
         c['cy'] += oy
@@ -576,4 +582,46 @@ def shift_meta(meta, ext):
     meta['smoke'] = [[x + ox, y + oy] for x, y in meta['smoke']] + ext['smoke']
     meta['lighthouse'] = {'x': meta['lighthouse']['x'] + ox, 'y': meta['lighthouse']['y'] + oy}
     meta['islets'] = [dict(i, x=i['x'] + ox, y=i['y'] + oy) for i in meta['islets']]
+    meta['solid'] = solid_blocks(meta)
     return meta
+
+
+# Buildings you cannot walk through: (x0, x1, y0, y1) in px from each prop's foot, its footprint on the ground.
+# The tall parts above stay see-through to walk behind, the way the lobby's buildings work.
+FOOTPRINTS = {
+    'university': [(-25, 25, -26, -8)],
+    'library': [(-13, 13, -12, -1)],
+    'observatory': [(-9, 9, -14, -1)],
+    'uni-statue': [(-5, 5, -4, 0)],
+    'uni-gate': [(-26, -20, -9, 0), (19, 25, -9, 0)],
+    'notice': [(-6, 6, -2, 0)],
+    'smelter': [(-8, 8, -9, 0)],
+    'windmill': [(-6, 6, -8, 0)],
+    'lighthouse': [(-5, 5, -8, 0)],
+    'hut-a': [(-6, 7, -6, 0)], 'hut-b': [(-6, 7, -6, 0)], 'hut-c': [(-6, 7, -6, 0)],
+    'helicopter': [(-18, 16, -9, 0)],
+}
+
+
+def solid_blocks(meta):
+    """The walking-grid blocks under a building's footprint, as [col, row] pairs. The engine keeps them out of
+    walking and paths (engine/island.ts), but they still belong to whatever claim they sit on."""
+    out = set()
+    for p in meta['props']:
+        for x0, x1, y0, y1 in FOOTPRINTS.get(p['s'][len('prop-'):], ()):
+            for by in range((p['y'] + y0) // B, (p['y'] + y1) // B + 1):
+                for bx in range((p['x'] + x0) // B, (p['x'] + x1) // B + 1):
+                    out.add((bx, by))
+    # the signboard's legs
+    bx, by = meta.get('billboard', (None, None))
+    if bx is not None:
+        for y in range(by - 5, by + 1):
+            for x in range(bx - 36, bx + 37):
+                out.add((x // B, y // B))
+    # never wall in the places miners are put: claim stands, home, the pad
+    keep = [c['stand'] for c in meta['claims']] + [meta['home'], [meta['pad']['x'], meta['pad']['y'] + 12]]
+    for x, y in keep:
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                out.discard((int(x) // B + dx, int(y) // B + dy))
+    return sorted([list(b) for b in out])

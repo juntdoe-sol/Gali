@@ -36,6 +36,24 @@ export async function playCall<T>(a: 'ticket' | 'fight', body: Record<string, un
   }
 }
 
+/** A call whose error message the player should see (University tips): { ok } or { error }. */
+export async function playAsk<T>(a: 'tip' | 'tipvote', body: Record<string, unknown>): Promise<(T & { ok: true }) | { ok?: false; error: string }> {
+  const base = restBase();
+  if (!base || !pass) return { error: 'Sign in first.' };
+  try {
+    const r = await fetch(`${base}/functions/v1/play`, {
+      method: 'POST',
+      headers: { apikey: publicKey(), authorization: `Bearer ${publicKey()}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ ...body, a, pass }),
+    });
+    const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+    if (r.ok && j.ok) return j as T & { ok: true };
+    return { error: typeof j.error === 'string' ? j.error : 'Could not send. Try again.' };
+  } catch {
+    return { error: 'No connection. Try again.' };
+  }
+}
+
 function send(a: string, body: Record<string, unknown>) {
   const base = restBase();
   if (!base || !pass) return;

@@ -310,7 +310,7 @@ export default function PixelMine() {
         useTutorial.getState().arrived();
         break;
       case 'uni':
-        openUni();
+        openUni(0, e.tab ?? 'lessons');
         break;
       case 'chad':
         nearChad(e.near);

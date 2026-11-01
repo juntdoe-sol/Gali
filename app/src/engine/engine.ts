@@ -23,6 +23,7 @@ import { drawPumpkin, flicker, PUMPKIN_LIGHT } from './hollow';
 import { IS_HOLLOW } from '../game/season';
 import type { EngineEvent, Look, PeerView, Pose, Snapshot } from './types';
 import { Water } from './water';
+import { drawBillboard } from './marketArt';
 import { drawHp, drawKo, drawShield, FightFx, hitFlash, jumpLift, koAge, pickTarget, swingTilt } from './brawlfx';
 import type { BrawlSnap } from './types';
 
@@ -33,7 +34,20 @@ const HOME = ISLE.home as [number, number];
 const PAD = (ISLE as unknown as { pad?: { x: number; y: number; size: number } }).pad;
 const LANDING: [number, number] = PAD ? [PAD.x, PAD.y + 12] : HOME;
 /** the University of ORE: where Hardhat Chad stands, the tip of his cigarette, the hall's door */
-const UNI = (ISLE as unknown as { uni?: { chad: [number, number]; cig: [number, number]; door: [number, number] } }).uni;
+/** the lobby's big digital signboard, on the beach by the pad (scripts/island_ext.py BILLBOARD): its feet */
+const BILLBOARD = (ISLE as unknown as { billboard?: [number, number] }).billboard;
+const UNI = (ISLE as unknown as { uni?: { chad: [number, number]; board: [number, number]; door: [number, number] } }).uni;
+/** Hardhat Chad wears the miners' own body: the default yellow hardhat and blue overalls (shades, smoke and logo on top) */
+const CHAD_LOOK: Look = { hat: 'hat-yellow', fit: '#2f5fd0', pick: '#c9c9c9', handle: '#9b6b43', pet: null, glow: 'none' };
+/** he faces the path, to his left */
+const CHAD_FACING = -1;
+/** the tip of his cigarette, in the miner frame (20x26, feet at 10,25; scripts/actors_miner.py) */
+const CHAD_EMBER: [number, number] = [16, 12];
+/** a miner-frame pixel (facing right) to map px from the feet, for Chad */
+const chadPx = (fx: number, fy: number, bob: number): [number, number] => {
+  const dx = fx - 10;
+  return [(CHAD_FACING < 0 ? -dx - 1 : dx) * ACT, (fy - 25 + bob) * ACT];
+};
 /**
  * Miners, pets and everything on them are drawn at this fraction of the map's scale, the way the lobby draws
  * its world at twice the miners' scale: so a tree stands taller than a miner and a building towers over one.
@@ -893,7 +907,10 @@ export class Engine {
     if (this.mode === 'island') {
       for (const [sx, sy] of ISLE.smoke as number[][]) if (Math.random() < dt * 3) this.parts.spawn('smoke', sx + Math.random() * 2, sy, { vx: 1, vz: 6 + Math.random() * 4, life: 2.6, c: '#d8d4cc' });
       // Hardhat Chad never puts it out
-      if (UNI && Math.random() < dt * 1.4) this.parts.spawn('smoke', UNI.cig[0] + 1, UNI.cig[1] - 1, { vx: 2, vz: 3 + Math.random() * 2, life: 1.6, c: '#ecebe6' });
+      if (UNI && Math.random() < dt * 1.4) {
+        const [ex, ey] = chadPx(CHAD_EMBER[0], CHAD_EMBER[1], 0);
+        this.parts.spawn('smoke', UNI.chad[0] + ex, UNI.chad[1] + ey - 0.5, { vx: CHAD_FACING * 1.5, vz: 2 + Math.random() * 2, life: 1.4, c: '#ecebe6' });
+      }
       if (this.sky.night > 0.5 && Math.random() < dt * 2) {
         const pr = this.props[Math.floor(Math.random() * this.props.length)];
         if (pr) this.parts.spawn('fly', pr.x + (Math.random() - 0.5) * 16, pr.y - 4 - Math.random() * 6, { vx: Math.random() * 9, vy: Math.random() * 9, life: 5, c: '#e6ff9a' });
@@ -1124,6 +1141,17 @@ export class Engine {
         if (ko < 0) drawHp(c, v, X, Y, A, wall, mine);
       }
     };
+    // the big digital signboard, at the miners' scale (the lobby draws it at theirs too)
+    const bbLights: { x: number; y: number; r: number; c: string; k: number }[] = [];
+    if (BILLBOARD && on(BILLBOARD[0], BILLBOARD[1], 80)) {
+      const [bx, by] = BILLBOARD;
+      items.push({ z: by, f: () => drawBillboard(c, OX + bx * S, OY + by * S, A, now, bbLights, 1) });
+    }
+    // Hardhat Chad, in the middle of the campus, smoking
+    if (UNI && on(UNI.chad[0], UNI.chad[1])) {
+      const [hx, hy] = UNI.chad;
+      items.push({ z: hy, f: () => drawChad(c, OX + hx * S, OY + hy * S, A, frameAt('idle', 0, now), now) });
+    }
     // a dance (AURA FARMING) plays while standing; walking or swinging stops it
     const myDance = s?.me.dance ?? 0;
     const knocked = (v: Parameters<typeof koAge>[0]) => koAge(v, wall) >= 0;
@@ -1192,6 +1220,7 @@ export class Engine {
         if (pl) L(x - 11 * facing, y - 12, 16, pl);
       };
       addLamp(look, me.pose, mf, me.x, me.y, me.facing);
+      lights.push(...bbLights);
       for (const p of s?.peers ?? []) {
         const d = this.peers.get(p.id);
         if (d) addLamp(p.look, d.pose, frameAt(d.pose, d.since, now), d.x, d.y, p.facing);
@@ -1290,8 +1319,8 @@ export class Engine {
       c.globalAlpha = 1;
     }
     // Hardhat Chad's name, once you are close enough to read it
-    if (UNI && zoomK > 1.5) textCentered(c, 'HARDHAT CHAD', OX + UNI.chad[0] * S, OY + (UNI.chad[1] - 22) * S, fs, '#ffd84a', 'rgba(2,5,15,0.7)');
-    if (UNI && this.chadNear) chadBubble(c, OX + UNI.chad[0] * S, OY + (UNI.chad[1] - 26) * S, S, now);
+    if (UNI && zoomK > 1.5) textCentered(c, 'HARDHAT CHAD', OX + UNI.chad[0] * S, OY + (UNI.chad[1] - 31 * ACT) * S - 9 * fs, fs, '#ffd84a', 'rgba(2,5,15,0.7)');
+    if (UNI && this.chadNear) chadBubble(c, OX + UNI.chad[0] * S, OY + (UNI.chad[1] - 31 * ACT) * S - 12 * fs, S, now);
     const winner = s?.winner ?? null;
     if (s && (el < 0 || el < 2500)) {
       const solo = s.solo;
@@ -1667,7 +1696,9 @@ export class Engine {
       if (d && Math.abs(mx - d.x) < 8 * ACT && my < d.y + 2 && my > d.y - 24 * ACT) return this.emit({ t: 'peer', id: p.id });
     }
     // Hardhat Chad, or the University's door
-    if (UNI && ((Math.abs(mx - UNI.chad[0]) < 8 && my < UNI.chad[1] + 3 && my > UNI.chad[1] - 20) || (Math.abs(mx - UNI.door[0]) < 6 && my < UNI.door[1] + 2 && my > UNI.door[1] - 14))) return this.emit({ t: 'uni' });
+    if (UNI && ((Math.abs(mx - UNI.chad[0]) < 7 && my < UNI.chad[1] + 3 && my > UNI.chad[1] - 16) || (Math.abs(mx - UNI.door[0]) < 6 && my < UNI.door[1] + 2 && my > UNI.door[1] - 14))) return this.emit({ t: 'uni' });
+    // the notice board beside him: the miners' tips
+    if (UNI && Math.abs(mx - UNI.board[0]) < 8 && my < UNI.board[1] + 2 && my > UNI.board[1] - 14) return this.emit({ t: 'uni', tab: 'tips' });
     const hit = claimForTap(mx, my);
     const el = this.revealEl(now);
     if (hit >= 0) {
@@ -1730,4 +1761,34 @@ function chadBubble(c: Ctx, x: number, y: number, S: number, now: number) {
   c.fillStyle = '#d27a12';
   const q: [number, number][] = [[4, 2], [5, 2], [6, 2], [3, 3], [7, 3], [7, 4], [6, 5], [5, 6], [5, 8]];
   for (const [qx, qy] of q) c.fillRect(x0 + qx * u, y0 + qy * u, u, u);
+}
+
+/**
+ * Hardhat Chad: a miner like everyone else (the same body, hardhat and overalls), with round yellow shades,
+ * a cigarette he never puts out and the ORE logo on his bib. `u` is the miners' scale; `f` the idle frame.
+ */
+function drawChad(c: Ctx, X: number, Y: number, u: number, f: number, now: number) {
+  drawMiner(c, CHAD_LOOK, 'idle', f, X, Y, u, CHAD_FACING);
+  // the idle breath drops the head and body a pixel on frames 2 and 3
+  const bob = f >= 2 ? 1 : 0;
+  const px = (fx: number, fy: number, col: string) => {
+    const dx = fx - 10;
+    const x = CHAD_FACING < 0 ? -dx - 1 : dx;
+    c.fillStyle = col;
+    c.fillRect(Math.round(X + x * u), Math.round(Y + (fy - 25 + bob) * u), Math.ceil(u), Math.ceil(u));
+  };
+  // shades: two round yellow lenses on a dark bridge
+  px(11, 9, '#2a2410');
+  for (const lx of [9, 12]) {
+    px(lx, 9, '#ffd84a');
+    px(lx + 1, 9, '#f0c020');
+    px(lx, 10, '#c89a10');
+    px(lx + 1, 10, '#a07a10');
+  }
+  // the cigarette, from the corner of his mouth
+  px(14, 12, '#f4f0e6');
+  px(15, 12, '#f4f0e6');
+  px(CHAD_EMBER[0], CHAD_EMBER[1], Math.sin(now / 340) > 0.2 ? '#ffb040' : '#e0601e');
+  // the ORE logo on his bib: a ring with a slash
+  for (const [lx, ly] of [[10, 17], [11, 17], [9, 18], [11, 18], [12, 18], [9, 19], [10, 19], [12, 19], [10, 20], [11, 20]] as [number, number][]) px(lx, ly, '#ffffff');
 }
