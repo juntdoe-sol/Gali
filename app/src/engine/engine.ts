@@ -23,6 +23,7 @@ import { drawPumpkin, flicker, PUMPKIN_LIGHT } from './hollow';
 import { IS_HOLLOW } from '../game/season';
 import type { EngineEvent, Look, PeerView, Pose, Snapshot } from './types';
 import { Water } from './water';
+import { drawBillboard } from './marketArt';
 import { drawHp, drawKo, drawShield, FightFx, hitFlash, jumpLift, koAge, pickTarget, swingTilt } from './brawlfx';
 import type { BrawlSnap } from './types';
 
@@ -33,6 +34,8 @@ const HOME = ISLE.home as [number, number];
 const PAD = (ISLE as unknown as { pad?: { x: number; y: number; size: number } }).pad;
 const LANDING: [number, number] = PAD ? [PAD.x, PAD.y + 12] : HOME;
 /** the University of ORE: where Hardhat Chad stands, the tip of his cigarette, the hall's door */
+/** the lobby's big digital signboard, on the beach by the pad (scripts/island_ext.py BILLBOARD): its feet */
+const BILLBOARD = (ISLE as unknown as { billboard?: [number, number] }).billboard;
 const UNI = (ISLE as unknown as { uni?: { chad: [number, number]; board: [number, number]; door: [number, number] } }).uni;
 /** Hardhat Chad wears the miners' own body: the default yellow hardhat and blue overalls (shades, smoke and logo on top) */
 const CHAD_LOOK: Look = { hat: 'hat-yellow', fit: '#2f5fd0', pick: '#c9c9c9', handle: '#9b6b43', pet: null, glow: 'none' };
@@ -1138,7 +1141,13 @@ export class Engine {
         if (ko < 0) drawHp(c, v, X, Y, A, wall, mine);
       }
     };
-    // Hardhat Chad, at the University's steps, smoking
+    // the big digital signboard, at the miners' scale (the lobby draws it at theirs too)
+    const bbLights: { x: number; y: number; r: number; c: string; k: number }[] = [];
+    if (BILLBOARD && on(BILLBOARD[0], BILLBOARD[1], 80)) {
+      const [bx, by] = BILLBOARD;
+      items.push({ z: by, f: () => drawBillboard(c, OX + bx * S, OY + by * S, A, now, bbLights, 1) });
+    }
+    // Hardhat Chad, in the middle of the campus, smoking
     if (UNI && on(UNI.chad[0], UNI.chad[1])) {
       const [hx, hy] = UNI.chad;
       items.push({ z: hy, f: () => drawChad(c, OX + hx * S, OY + hy * S, A, frameAt('idle', 0, now), now) });
@@ -1211,6 +1220,7 @@ export class Engine {
         if (pl) L(x - 11 * facing, y - 12, 16, pl);
       };
       addLamp(look, me.pose, mf, me.x, me.y, me.facing);
+      lights.push(...bbLights);
       for (const p of s?.peers ?? []) {
         const d = this.peers.get(p.id);
         if (d) addLamp(p.look, d.pose, frameAt(d.pose, d.since, now), d.x, d.y, p.facing);
