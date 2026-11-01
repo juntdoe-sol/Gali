@@ -878,6 +878,7 @@ describe('gali on ORE', () => {
 
     it('pays a round only once per player', async () => {
       const p = await fundedPlayer();
+      await fundJackpot(10_000); // its own pool, not what earlier tests left behind
       const roundId = 2_030;
       const deployed = zeros25();
       deployed[14] = LAMPORTS_PER_SOL;
