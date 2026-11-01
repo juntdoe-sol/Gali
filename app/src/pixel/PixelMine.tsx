@@ -23,6 +23,7 @@ import { GUTTER, layoutNow, TOP_H } from '../ui/layout';
 import { atlasSource } from './atlasSource';
 import GameView, { type GameRef } from './GameView';
 import { useView } from './view';
+import { openUni } from '../ui/University';
 import { useLobby } from '../game/lobby';
 import { brawlSnap, enterScope, initBrawl, jump, setMyPos, swing } from '../game/brawl';
 import { initArena, useArena } from '../game/arena';
@@ -306,6 +307,9 @@ export default function PixelMine() {
         break;
       case 'arrived':
         useTutorial.getState().arrived();
+        break;
+      case 'uni':
+        openUni();
         break;
       case 'me': {
         setMyPos('island', e.x, e.y);
