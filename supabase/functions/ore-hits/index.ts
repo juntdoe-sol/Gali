@@ -148,7 +148,8 @@ Deno.serve(async (req) => {
     for (let id = from; id <= to; id++) ids.push(id);
     const raws = await accounts(await Promise.all(ids.map(roundPda)));
 
-    const { data: miners, error: mErr } = await db.from('gali_miners').select('wallet, ore_base, sol_in_base, sol_back_base');
+    // Gali miners: wallets that joined Gali (checked in with a name). Not anyone Gali's autopilot happened to run for.
+    const { data: miners, error: mErr } = await db.from('gali_miners').select('wallet, ore_base, sol_in_base, sol_back_base').neq('name', '');
     if (mErr) throw mErr;
     const bases = new Map((miners ?? []).map((m) => [m.wallet, m]));
     const gali = new Set((miners ?? []).map((m) => m.wallet));

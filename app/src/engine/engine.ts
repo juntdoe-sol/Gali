@@ -32,8 +32,17 @@ const HOME = ISLE.home as [number, number];
 /** where a miner lands on arrival: the middle of the ORE helipad, a step south of the logo's centre */
 const PAD = (ISLE as unknown as { pad?: { x: number; y: number; size: number } }).pad;
 const LANDING: [number, number] = PAD ? [PAD.x, PAD.y + 12] : HOME;
-/** keyboard walking speed, map px a second (a tap walk is 52) */
-const KEY_SPEED = 56;
+/** the University of ORE: where Hardhat Chad stands, the tip of his cigarette, the hall's door */
+const UNI = (ISLE as unknown as { uni?: { chad: [number, number]; cig: [number, number]; door: [number, number] } }).uni;
+/**
+ * Miners, pets and everything on them are drawn at this fraction of the map's scale, the way the lobby draws
+ * its world at twice the miners' scale: so a tree stands taller than a miner and a building towers over one.
+ * The camera follows at twice the lobby's zoom to make up for it (camera.ts followZ).
+ */
+const ACT = 0.5;
+/** walking speed, map px a second: about the lobby's pace for a miner this size */
+const WALK_SPEED = 38;
+const KEY_SPEED = 40;
 const standOf = (i: number) => CLAIMS[i].stand as [number, number];
 const [FIT_X, FIT_Y, FIT_W, FIT_H] = ISLE.fit as [number, number, number, number];
 /** where the island's original frame sits inside the wider map */
@@ -66,7 +75,10 @@ const FAR_ISLETS: [string, number, number][] = (
     ['islet-palm', -90, 225],
     ['islet-rock', 460, 265],
   ] as [string, number, number][]
-).map(([n, x, y]) => [n, x + OFF_X, y + OFF_Y] as [string, number, number]);
+)
+  .map(([n, x, y]) => [n, x + OFF_X, y + OFF_Y] as [string, number, number])
+  // the wider map grew over some of them (the campus is where one used to be)
+  .filter(([, x, y]) => !isLand(x, y) && !isLand(x, y - 8));
 
 type Mode = 'island' | 'enter' | 'closeup' | 'exit';
 
@@ -126,6 +138,10 @@ export class Engine {
   private last = 0;
   private raf = 0;
   private lastMe = 0;
+  /** standing at the University door: the lessons opened, and wait until you step off before it opens again */
+  private atUni = false;
+  /** your miner is standing by Hardhat Chad: he has a speech bubble up */
+  private chadNear = false;
   private fpsAcc = { n: 0, t: 0 };
   quality = 1;
   private ready = false;
@@ -208,6 +224,7 @@ export class Engine {
     if (!on) this.keys.clear();
     this.onIsland = on;
     if (s.brawl) this.brawlEvents(s.brawl);
+    this.cam.setMode(s.mapView ? 'map' : 'follow');
   }
 
   /** Brawl: react to what changed (a hit taken, standing up after a knockdown, a hit landing on someone). */
@@ -318,7 +335,7 @@ export class Engine {
     me.facing = -1;
     // stand a moment on the pad before heading off to any spots you have picked
     me.manualUntil = now + 2500;
-    this.petPos.x = me.x + 11;
+    this.petPos.x = me.x + 11 * ACT;
     this.petPos.y = me.y;
     this.parts.burst('dust', me.x, me.y, 10, 22, 14, ['#f2e6c8', '#d8c8a8'], 0.7);
   }
@@ -445,21 +462,14 @@ export class Engine {
    */
   private followMe() {
     const cam = this.cam;
-    if (this.mode !== 'island') {
+    if (this.mode !== 'island' || cam.mode === 'map') {
       cam.follow = false;
       return;
     }
     if (cam.flying || cam.hold || cam.manual) return;
-    const me = this.me;
-    const inside = (pad: number) => me.x > FIT_X + pad && me.x < FIT_X + FIT_W - pad && me.y > FIT_Y + pad && me.y < FIT_Y + FIT_H - pad;
-    if (cam.follow) {
-      cam.setFocus(me.x, me.y - 6);
-      // walking back in among the mining spots zooms out to show all 25, even after a pinch
-      if (inside(6)) cam.home(520);
-    } else if (!inside(-4)) {
-      cam.follow = true;
-      cam.setFocus(me.x, me.y - 6);
-    }
+    // like the lobby: the camera stays on your miner wherever they walk
+    cam.follow = true;
+    cam.setFocus(this.me.x, this.me.y - 6 * ACT);
   }
 
   /** WASD and the arrows walk the miner on the island, as they do in the lobby (web only). */
@@ -690,7 +700,7 @@ export class Engine {
     }
     const w = s?.winner ?? null;
     // the camera leans in on the strike, and eases back out when the next round opens
-    if (w !== null && el > 2450 && this.punched !== s!.roundId && this.mode === 'island' && !this.cam.userZoomed) {
+    if (w !== null && el > 2450 && this.punched !== s!.roundId && this.mode === 'island' && !this.cam.userZoomed && this.cam.mode === 'map') {
       this.punched = s!.roundId;
       const cl = CLAIMS[w];
       const z = this.cam.fitZ * 1.7;
@@ -748,7 +758,7 @@ export class Engine {
         this.lastStep = now;
         this.parts.spawn('dust', me.x - 2 * me.facing, me.y, { vx: -6 * me.facing, vz: 8, life: 0.45, c: '#e8d4b0' });
       }
-      const arrived = stepBody(me, dt, won ? 40 : 52, now);
+      const arrived = stepBody(me, dt, won ? 30 : WALK_SPEED, now);
       if (won && me.pose === 'walk') me.pose = 'carry';
       if (me.target >= 0 && !work.includes(me.target)) {
         me.path = [];
@@ -799,10 +809,24 @@ export class Engine {
     // pet follows at heel
     const pk = s?.me.look.pet ?? null;
     if (pk) {
-      const tx = me.x - 11 * me.facing;
-      const ty = me.y + (petFlies(pk) ? -14 : 2);
+      const tx = me.x - 11 * ACT * me.facing;
+      const ty = me.y + (petFlies(pk) ? -14 : 2) * ACT;
       this.petPos.x += (tx - this.petPos.x) * Math.min(1, dt * 3);
       this.petPos.y += (ty - this.petPos.y) * Math.min(1, dt * 3);
+    }
+
+    // walk up the University's steps and the lessons open (once, until you step away)
+    if (UNI && this.mode === 'island') {
+      const at = Math.abs(me.x - UNI.door[0]) < 7 && Math.abs(me.y - UNI.door[1]) < 5;
+      if (at && !this.atUni) this.emit({ t: 'uni' });
+      this.atUni = at;
+      // walk up to Chad and he asks if you have questions; a little slack so it doesn't flicker at the edge
+      const d = Math.hypot(me.x - UNI.chad[0], (me.y - UNI.chad[1]) * 1.3);
+      const near = this.chadNear ? d < 34 : d < 24;
+      if (near !== this.chadNear) {
+        this.chadNear = near;
+        this.emit({ t: 'chad', near });
+      }
     }
 
     // tell the app where we are, a few times a second
@@ -868,6 +892,8 @@ export class Engine {
     // smoke from chimneys and the campfire, the odd firefly after dark
     if (this.mode === 'island') {
       for (const [sx, sy] of ISLE.smoke as number[][]) if (Math.random() < dt * 3) this.parts.spawn('smoke', sx + Math.random() * 2, sy, { vx: 1, vz: 6 + Math.random() * 4, life: 2.6, c: '#d8d4cc' });
+      // Hardhat Chad never puts it out
+      if (UNI && Math.random() < dt * 1.4) this.parts.spawn('smoke', UNI.cig[0] + 1, UNI.cig[1] - 1, { vx: 2, vz: 3 + Math.random() * 2, life: 1.6, c: '#ecebe6' });
       if (this.sky.night > 0.5 && Math.random() < dt * 2) {
         const pr = this.props[Math.floor(Math.random() * this.props.length)];
         if (pr) this.parts.spawn('fly', pr.x + (Math.random() - 0.5) * 16, pr.y - 4 - Math.random() * 6, { vx: Math.random() * 9, vy: Math.random() * 9, life: 5, c: '#e6ff9a' });
@@ -1080,41 +1106,43 @@ export class Engine {
     const bs = s?.brawl;
     const wall = Date.now();
     /** a miner in a brawl: knocked down, flashing from a hit, with its shield and HP bar */
+    /** the scale miners are drawn at: half the map's (see ACT) */
+    const A = S * ACT;
     const fighter = (lk: Look, pose: Pose, f: number, x: number, y: number, facing: number, v: BrawlSnap['me'] | BrawlSnap['peers'][string] | undefined, mine: boolean, jumpAt?: number) => {
       const X = OX + x * S;
       const Y = OY + y * S;
       const ko = v ? koAge(v, wall) : -1;
       const lift = ko >= 0 ? 0 : jumpLift(jumpAt, wall);
-      if (ko < 0 || !drawKo(c, lk, X, Y, S, facing, ko, wall)) {
+      if (ko < 0 || !drawKo(c, lk, X, Y, A, facing, ko, wall)) {
         const sw = !mine && v && v.sw && wall - v.sw < 540 ? wall - v.sw : -1;
         const air = lift > 0 && pose !== 'walk' && sw < 0;
         const swAge = sw >= 0 ? sw : mine && wall - this.lastSwingWall < 540 ? wall - this.lastSwingWall : -1;
-        drawMiner(c, lk, sw >= 0 ? 'swing' : air ? 'walk' : pose, sw >= 0 ? Math.min(5, Math.floor(sw / 90)) : air ? 2 : f, X, Y, S, facing, hitFlash(v, wall) ? 0.45 : 1, lift, swingTilt(swAge, facing));
+        drawMiner(c, lk, sw >= 0 ? 'swing' : air ? 'walk' : pose, sw >= 0 ? Math.min(5, Math.floor(sw / 90)) : air ? 2 : f, X, Y, A, facing, hitFlash(v, wall) ? 0.45 : 1, lift, swingTilt(swAge, facing));
       }
       if (bs?.on && v?.on && this.mode === 'island') {
-        if (v.sh) drawShield(c, X, Y - lift * S, S, wall, v.sh);
-        if (ko < 0) drawHp(c, v, X, Y, S, wall, mine);
+        if (v.sh) drawShield(c, X, Y - lift * A, A, wall, v.sh);
+        if (ko < 0) drawHp(c, v, X, Y, A, wall, mine);
       }
     };
     // a dance (AURA FARMING) plays while standing; walking or swinging stops it
     const myDance = s?.me.dance ?? 0;
     const knocked = (v: Parameters<typeof koAge>[0]) => koAge(v, wall) >= 0;
-    if (myDance && me.pose === 'idle' && !me.path.length && !knocked(bs?.me)) items.push({ z: me.y, f: () => drawDancer(c, look, myDance, now, OX + me.x * S, OY + me.y * S, S, me.facing) });
+    if (myDance && me.pose === 'idle' && !me.path.length && !knocked(bs?.me)) items.push({ z: me.y, f: () => drawDancer(c, look, myDance, now, OX + me.x * S, OY + me.y * S, A, me.facing) });
     else items.push({ z: me.y, f: () => fighter(look, me.pose, mf, me.x, me.y, me.facing, bs?.me, true, this.myJumpAt) });
-    items.push({ z: me.y + 1000, f: () => { if (!s?.pending && !s?.selected.length) draw(c, 'fx-sparkle-' + (Math.floor(now / 120) % 3), OX + me.x * S, OY + (me.y - 30 + Math.sin(now / 220) * 2) * S, S * 0.55, false, 0.8); } });
-    if (look.pet) items.push({ z: this.petPos.y + (petFlies(look.pet) ? 16 : 0), f: () => drawPet(c, look.pet!, now, OX + this.petPos.x * S, OY + this.petPos.y * S, S, me.facing) });
+    items.push({ z: me.y + 1000, f: () => { if (!s?.pending && !s?.selected.length) draw(c, 'fx-sparkle-' + (Math.floor(now / 120) % 3), OX + me.x * S, OY + (me.y + (-30 + Math.sin(now / 220) * 2) * ACT) * S, A * 0.55, false, 0.8); } });
+    if (look.pet) items.push({ z: this.petPos.y + (petFlies(look.pet) ? 16 * ACT : 0), f: () => drawPet(c, look.pet!, now, OX + this.petPos.x * S, OY + this.petPos.y * S, A, me.facing) });
     for (const p of s?.peers ?? []) {
       const d = this.peers.get(p.id);
       if (!d) continue;
       const pf = frameAt(d.pose, d.since, now);
       const pd = p.dance ?? 0;
-      if (pd && d.pose === 'idle' && !knocked(bs?.peers[p.id])) items.push({ z: d.y, f: () => drawDancer(c, p.look, pd, now, OX + d.x * S, OY + d.y * S, S, p.facing) });
+      if (pd && d.pose === 'idle' && !knocked(bs?.peers[p.id])) items.push({ z: d.y, f: () => drawDancer(c, p.look, pd, now, OX + d.x * S, OY + d.y * S, A, p.facing) });
       else items.push({ z: d.y, f: () => fighter(p.look, d.pose, pf, d.x, d.y, p.facing, bs?.peers[p.id], false, bs?.jumps?.[p.id]) });
       if (p.look.pet) {
         const fly = petFlies(p.look.pet);
-        const px = d.x - 11 * p.facing;
-        const py = d.y + (fly ? -14 : 2);
-        items.push({ z: py + (fly ? 16 : 0), f: () => drawPet(c, p.look.pet!, now, OX + px * S, OY + py * S, S, p.facing) });
+        const px = d.x - 11 * ACT * p.facing;
+        const py = d.y + (fly ? -14 : 2) * ACT;
+        items.push({ z: py + (fly ? 16 * ACT : 0), f: () => drawPet(c, p.look.pet!, now, OX + px * S, OY + py * S, A, p.facing) });
       }
     }
     items.sort((a, b) => a.z - b.z);
@@ -1261,6 +1289,9 @@ export class Engine {
       for (const [name, x, y] of REGIONS) textCentered(c, name, OX + x * S, OY + y * S, fs, '#eef4ff', 'rgba(2,5,15,0.6)');
       c.globalAlpha = 1;
     }
+    // Hardhat Chad's name, once you are close enough to read it
+    if (UNI && zoomK > 1.5) textCentered(c, 'HARDHAT CHAD', OX + UNI.chad[0] * S, OY + (UNI.chad[1] - 22) * S, fs, '#ffd84a', 'rgba(2,5,15,0.7)');
+    if (UNI && this.chadNear) chadBubble(c, OX + UNI.chad[0] * S, OY + (UNI.chad[1] - 26) * S, S, now);
     const winner = s?.winner ?? null;
     if (s && (el < 0 || el < 2500)) {
       const solo = s.solo;
@@ -1311,7 +1342,7 @@ export class Engine {
     const tag = (label: string, x: number, y: number, col: string, emoji: string | null, lift = false) => {
       const w = (textWidth(label) + 4) * fs;
       const X = Math.round(OX + x * S - w / 2);
-      const Y = Math.round(OY + (y - (lift ? 34 : 31)) * S - 9 * fs);
+      const Y = Math.round(OY + (y - (lift ? 34 : 31) * ACT) * S - 9 * fs);
       c.fillStyle = 'rgba(7,13,32,0.85)';
       c.fillRect(X, Y, w, 8 * fs);
       c.fillStyle = col;
@@ -1617,24 +1648,26 @@ export class Engine {
     if (this.mode !== 'island') return;
     const [mx, my] = this.cam.toMap(x, y);
     // double tap on open ground zooms in or back out. On a spot it is just two taps: no dive.
-    if (!this.mouseTap && now - this.lastTap.t < 280 && this.lastTap.hit < 0 && Math.hypot(x - this.lastTap.x, y - this.lastTap.y) < 24) {
+    if (this.cam.mode === 'map' && !this.mouseTap && now - this.lastTap.t < 280 && this.lastTap.hit < 0 && Math.hypot(x - this.lastTap.x, y - this.lastTap.y) < 24) {
       this.lastTap.t = 0;
       this.cancelTap();
       if (this.cam.userZoomed) this.cam.home(360);
       else {
         this.cam.userZoomed = true;
-        this.cam.flyTo(mx, my, this.cam.fitZ * 2.4, 360);
+        this.cam.flyTo(mx, my, Math.max(this.cam.fitZ * 2.4, this.cam.z * 1.6), 360);
       }
       return;
     }
     this.lastTap = { t: now, x, y, hit: -1 };
     const hitR = 11;
     // you, then other miners
-    if (Math.abs(mx - this.me.x) < 8 && my < this.me.y + 2 && my > this.me.y - 24) return this.emit({ t: 'emote' });
+    if (Math.abs(mx - this.me.x) < 8 * ACT && my < this.me.y + 2 && my > this.me.y - 24 * ACT) return this.emit({ t: 'emote' });
     for (const p of s?.peers ?? []) {
       const d = this.peers.get(p.id);
-      if (d && Math.abs(mx - d.x) < 8 && my < d.y + 2 && my > d.y - 24) return this.emit({ t: 'peer', id: p.id });
+      if (d && Math.abs(mx - d.x) < 8 * ACT && my < d.y + 2 && my > d.y - 24 * ACT) return this.emit({ t: 'peer', id: p.id });
     }
+    // Hardhat Chad, or the University's door
+    if (UNI && ((Math.abs(mx - UNI.chad[0]) < 8 && my < UNI.chad[1] + 3 && my > UNI.chad[1] - 20) || (Math.abs(mx - UNI.door[0]) < 6 && my < UNI.door[1] + 2 && my > UNI.door[1] - 14))) return this.emit({ t: 'uni' });
     const hit = claimForTap(mx, my);
     const el = this.revealEl(now);
     if (hit >= 0) {
@@ -1669,3 +1702,32 @@ export class Engine {
 
 export type { Snapshot, EngineEvent, PeerView };
 export { has, drawCanvas };
+
+/**
+ * Hardhat Chad's speech bubble, drawn in pixels (the map font has no question mark): a white bubble with a
+ * tail and a big ? in it, bobbing a little. The question itself is in the chat card the app opens.
+ */
+function chadBubble(c: Ctx, x: number, y: number, S: number, now: number) {
+  const u = Math.max(1, Math.round(S));
+  const bob = Math.round(Math.sin(now / 260)) * u;
+  const w = 11 * u;
+  const h = 11 * u;
+  const x0 = Math.round(x - w / 2);
+  const y0 = Math.round(y - h + bob);
+  c.fillStyle = '#16120e';
+  c.fillRect(x0 - u, y0, w + 2 * u, h);
+  c.fillRect(x0, y0 - u, w, h + 2 * u);
+  c.fillStyle = '#ffffff';
+  c.fillRect(x0, y0, w, h);
+  // the tail, pointing down at Chad
+  c.fillStyle = '#16120e';
+  c.fillRect(x0 + 4 * u, y0 + h + u, 3 * u, u);
+  c.fillRect(x0 + 5 * u, y0 + h + 2 * u, u, u);
+  c.fillStyle = '#ffffff';
+  c.fillRect(x0 + 4 * u, y0 + h, 3 * u, u);
+  c.fillRect(x0 + 5 * u, y0 + h + u, u, u);
+  // the ?
+  c.fillStyle = '#d27a12';
+  const q: [number, number][] = [[4, 2], [5, 2], [6, 2], [3, 3], [7, 3], [7, 4], [6, 5], [5, 6], [5, 8]];
+  for (const [qx, qy] of q) c.fillRect(x0 + qx * u, y0 + qy * u, u, u);
+}

@@ -21,6 +21,7 @@ import numpy as np
 from PIL import Image
 
 import island_props as IP
+import island_uni as U
 
 OFF_X, OFF_Y = 180, 105          # where the old 360x210 frame sits inside the new one
 EW, EH = 720, 420
@@ -241,6 +242,7 @@ def new_sprites():
     add('crate', crate())
     add('barrel', barrel())
     add('helicopter', helicopter(), ms=55)
+    out.update(U.sprites())
     return out
 
 
@@ -287,6 +289,11 @@ def extend(I, ground, sprites):
     ring[:12, :] = ring[-12:, :] = False
     ring &= ~base
 
+    # the University of ORE: new land in the north-east sea, joined to the beach (island_uni.py)
+    campus, _ = U.mask(xx, yy, noise_field(I, 57, 11))
+    campus &= ~base
+    ring |= campus
+
     # --- the pad, the boardwalk and the dock ---
     pad = np.zeros((EH, EW), bool)
     pad[PAD_Y - PAD // 2:PAD_Y + PAD // 2, PAD_X - PAD // 2:PAD_X + PAD // 2] = True
@@ -326,6 +333,7 @@ def extend(I, ground, sprites):
     colors[(hv > 0.9915) & (hv <= 0.9965) & sand] = rgb('#a39a8c')
     out[sand, :3] = colors[sand].round().astype(np.uint8)
     out[sand, 3] = 255
+    U.paint(out, xx, yy, campus, sd, hv, bay)
 
     # pad: hazard stripes, concrete, then the ORE mark copied 1:1 from the logo
     x0, y0 = PAD_X - PAD // 2, PAD_Y - PAD // 2
@@ -389,7 +397,8 @@ def extend(I, ground, sprites):
     rows, cols = EH // B, EW // B
     grid = np.full((rows, cols), '~', dtype='<U1')
     og = np.array(list(old), dtype='<U1').reshape(I.ROWS, I.COLS)
-    cover = walkable.reshape(rows, B, cols, B).mean(axis=(1, 3)) >= 0.5
+    # anything painted is ground: the old islets the beach grew over and the cliff lip are sand you can stand on
+    cover = (walkable | base).reshape(rows, B, cols, B).mean(axis=(1, 3)) >= 0.5
     grid[cover] = '.'
     grid[OFF_ROW:OFF_ROW + I.ROWS, OFF_COL:OFF_COL + I.COLS] = np.where(
         og != '~', og, np.where(cover[OFF_ROW:OFF_ROW + I.ROWS, OFF_COL:OFF_COL + I.COLS], '.', '~'))
@@ -413,7 +422,7 @@ def extend(I, ground, sprites):
     near_pad[y0 - 14:y0 + PAD + 14, x0 - 14:x0 + PAD + 14] = True
     near_walk = np.zeros((EH, EW), bool)
     near_walk[PAD_Y:walk_y1 + 6, bx0 - 22:bx1 + 22] = True
-    okmask = sand & ~near_pad & ~near_walk & (sd >= 4) & (D >= 7)
+    okmask = sand & ~near_pad & ~near_walk & (sd >= 4) & (D >= 7) & ~U.keep_clear(xx, yy)
 
     def sites(lo, hi, extra=None):
         m = okmask & (sd >= lo) & (sd <= hi)
@@ -458,6 +467,11 @@ def extend(I, ground, sprites):
     # the helicopter, parked beside the pad
     hx, hy = PAD_X + PAD // 2 + 30, PAD_Y + 8
     add('helicopter', hx, hy, 18)
+
+    # the campus
+    def uni_light(x, y, r, c, f):
+        lights.append({'x': int(x), 'y': int(y), 'r': r, 'c': c, 'f': f})
+    U.place(lambda n, x, y: add(n, x, y, 10), uni_light, smoke, allsp)
 
     # umbrellas with a towel beside each, spread along the beaches
     n_umb = 0
@@ -530,6 +544,7 @@ def extend(I, ground, sprites):
         'smoke': smoke,
         'ships': ships,
         'pad': {'x': PAD_X, 'y': PAD_Y, 'size': PAD},
+        'uni': U.meta(),
         'walkable_px': int(walkable.sum()),
         'ring_px': int(ring.sum()),
     }
@@ -545,12 +560,13 @@ def shift_meta(meta, ext):
     meta['grid'] = ext['grid']
     meta['ships'] = ext['ships']
     meta['pad'] = ext['pad']
+    meta['uni'] = ext['uni']
     for c in meta['claims']:
         c['cx'] += ox
         c['cy'] += oy
         c['box'] = [c['box'][0] + ox, c['box'][1] + oy, c['box'][2], c['box'][3]]
         c['stand'] = [c['stand'][0] + ox, c['stand'][1] + oy]
-    meta['regions'] = [[n, x + ox, y + oy] for n, x, y in meta['regions']]
+    meta['regions'] = [[n, x + ox, y + oy] for n, x, y in meta['regions']] + [ext['uni']['label']]
     f = meta['fit']
     meta['fit'] = [f[0] + ox, f[1] + oy, f[2], f[3]]
     meta['home'] = [meta['home'][0] + ox, meta['home'][1] + oy]
