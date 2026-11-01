@@ -1147,6 +1147,7 @@ export function LobbyBack() {
     <>
       <View style={[styles.backWrap, styles.backRow, { left: ch.left, bottom }]} pointerEvents="box-none">
         <BackPill kbd={ch.desktop ? 'L' : undefined} />
+        <MapToggle />
       </View>
       {ch.desktop && !LANDSCAPE_APP ? <IslandAuraBar left={RAIL_W + GUTTER} right={ch.right} bottom={bottom} /> : null}
       {LANDSCAPE_APP ? <FightPad zone="island" small right={ch.right} bottom={bottom + 54} hit={brawlOn} onHit={islandFight} onJump={islandJump} /> : null}
@@ -1164,6 +1165,19 @@ export function LobbyBack() {
         </View>
       )}
     </>
+  );
+}
+
+/** ORE Island: MAP shows the whole board (to pick spots and watch the round), FOLLOW goes back to your miner. */
+function MapToggle() {
+  const on = useView((v) => v.mapView);
+  return (
+    <MapButton
+      label={on ? 'FOLLOW' : 'MAP'}
+      icon={<PixIcon name={on ? 'user' : 'map'} size={20} />}
+      accessibilityLabel={on ? 'Follow your miner' : 'Show the whole board'}
+      onPress={() => useView.setState({ mapView: !on })}
+    />
   );
 }
 

@@ -23,6 +23,7 @@ import { GUTTER, layoutNow, TOP_H } from '../ui/layout';
 import { atlasSource } from './atlasSource';
 import GameView, { type GameRef } from './GameView';
 import { useView } from './view';
+import { nearChad, openUni } from '../ui/University';
 import { useLobby } from '../game/lobby';
 import { brawlSnap, enterScope, initBrawl, jump, setMyPos, swing } from '../game/brawl';
 import { initArena, useArena } from '../game/arena';
@@ -133,6 +134,7 @@ function snapshot(): Snapshot {
     amounts: st.dockTab === 'pro',
     claimedAt: st.claimedAt,
     onIsland: useLobby.getState().where === 'island',
+    mapView: useView.getState().mapView,
     brawl: brawlSnap(now),
     guide: useTutorial.getState().step === 1 && !useTutorial.getState().desk,
   };
@@ -306,6 +308,12 @@ export default function PixelMine() {
         break;
       case 'arrived':
         useTutorial.getState().arrived();
+        break;
+      case 'uni':
+        openUni();
+        break;
+      case 'chad':
+        nearChad(e.near);
         break;
       case 'me': {
         setMyPos('island', e.x, e.y);

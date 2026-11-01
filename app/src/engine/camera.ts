@@ -30,10 +30,28 @@ export class Camera {
   private focus: [number, number] = [FX + FW / 2, FY + FH / 2];
   /** a pinch or drag by hand pauses the follow until this time (ms, performance clock) */
   manualUntil = 0;
+  /**
+   * 'follow': up close behind your miner at the lobby's zoom (the default). 'map': the whole board, to pick
+   * spots and watch a round. In follow mode `home()` means back to following, not back to the board.
+   */
+  mode: 'follow' | 'map' = 'follow';
+  /** a pinch while following scales the follow zoom by this */
+  userK = 1;
+  private resume = false;
+
+  /**
+   * The follow zoom: what the lobby uses (about 200 art pixels across a phone, up to 520 on a big screen),
+   * doubled, because on the island the miners are drawn at half the map's scale (ACTOR_SCALE in engine.ts).
+   */
+  get followZ() {
+    const span = Math.max(200, Math.min(520, this.vw / 3.2));
+    const lobbyZ = Math.max(1.6, Math.min(5, Math.min(this.vw / span, this.vh / 150)));
+    return Math.max(this.fitZ * 1.2, lobbyZ * 2 * this.userK);
+  }
 
   setView(x: number, y: number, w: number, h: number) {
     const fit = Math.min(w / FW, h / FH);
-    const wasFit = !this.userZoomed && !this.fly && !this.hold && !this.follow && !this.manual;
+    const wasFit = this.mode === 'map' && !this.userZoomed && !this.fly && !this.hold && !this.follow && !this.manual;
     this.vx = x;
     this.vy = y;
     this.vw = w;
@@ -68,13 +86,30 @@ export class Camera {
     this.follow = false;
     this.userZoomed = false;
     this.hold = false;
+    if (this.mode === 'follow') {
+      this.flyTo(this.focus[0], this.focus[1], this.followZ, ms);
+      this.resume = true;
+      return;
+    }
     this.flyTo(FX + FW / 2, FY + FH / 2, this.fitZ, ms);
+  }
+  /** switch between following your miner and the whole board */
+  setMode(m: 'follow' | 'map', ms = 450) {
+    if (m === this.mode) return;
+    this.mode = m;
+    this.manualUntil = 0;
+    this.home(ms);
   }
 
   update(now: number) {
     if (this.follow && !this.fly) {
       this.cx += (this.focus[0] - this.cx) * 0.14;
       this.cy += (this.focus[1] - this.cy) * 0.14;
+      if (this.mode === 'follow') {
+        const tz = this.followZ;
+        this.z += (tz - this.z) * 0.12;
+        if (Math.abs(tz - this.z) < 0.002) this.z = tz;
+      }
       this.clamp();
       return;
     }
@@ -86,7 +121,13 @@ export class Camera {
     this.z = Math.exp(Math.log(a[2]) + (Math.log(b[2]) - Math.log(a[2])) * e);
     this.cx = a[0] + (b[0] - a[0]) * e;
     this.cy = a[1] + (b[1] - a[1]) * e;
-    if (k >= 1) this.fly = null;
+    if (k >= 1) {
+      this.fly = null;
+      if (this.resume) {
+        this.resume = false;
+        this.follow = true;
+      }
+    }
   }
   flyProgress(now: number) {
     return this.fly ? Math.min(1, (now - this.fly.t0) / this.fly.ms) : 1;
@@ -95,8 +136,11 @@ export class Camera {
   /** Zoom by `k` keeping map point under screen (sx, sy) fixed. */
   zoomAt(sx: number, sy: number, k: number) {
     const [mx, my] = this.toMap(sx, sy);
-    const nz = Math.max(this.fitZ * ZOOM_OUT, Math.min(this.fitZ * 4, this.z * k));
+    const prev = this.z;
+    const nz = Math.max(this.fitZ * ZOOM_OUT, Math.min(Math.max(this.fitZ * 4, this.followZ * 1.6), this.z * k));
     this.z = nz;
+    // following: a pinch sets how close the follow sits, the way it does in the lobby
+    if (this.mode === 'follow') this.userK = Math.max(0.4, Math.min(1.6, (this.userK * nz) / prev));
     this.manualUntil = performance.now() + 4000;
     this.follow = false;
     const [nx, ny] = this.toMap(sx, sy);

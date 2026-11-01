@@ -79,6 +79,8 @@ export interface Snapshot {
   claimedAt?: number;
   /** true while the player is on the island (not in the lobby). Arriving lands the miner on the helipad. */
   onIsland?: boolean;
+  /** show the whole board (MAP) rather than follow your miner up close, as the lobby does */
+  mapView?: boolean;
   brawl?: BrawlSnap;
   /** the first-visit tutorial: point the miner at the nearest mining spot */
   guide?: boolean;
@@ -123,4 +125,8 @@ export type EngineEvent =
   /** your miner jumped */
   | { t: 'jump' }
   /** tutorial: your miner reached a mining spot */
-  | { t: 'arrived'; claim: number };
+  | { t: 'arrived'; claim: number }
+  /** Hardhat Chad or the University of ORE's door: open the lessons */
+  | { t: 'uni' }
+  /** your miner walked up to Hardhat Chad (near) or away from him */
+  | { t: 'chad'; near: boolean };
