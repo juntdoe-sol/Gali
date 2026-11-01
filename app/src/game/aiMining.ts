@@ -7,6 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { publicKey, restBase } from './world';
 import { useGame } from './store';
+import { signIn, signOut, useDm } from './dm';
 
 export interface AiStats {
   activeMiners: number;
@@ -21,7 +22,6 @@ export interface AiStats {
   /** ORE in SOL at today's price, 0 while unknown */
   oreSol: number;
   tunedAt: string | null;
-  tuneNote: string | null;
 }
 export interface AiMinerRow {
   wallet: string;
@@ -38,6 +38,8 @@ export interface AiMinerRow {
 }
 export interface AiMe {
   expiresAt: number | null;
+  /** never had a pass: the free week is open */
+  trialOpen: boolean;
   rounds: number;
   wins: number;
   deployedSol: number;
@@ -54,8 +56,22 @@ interface AiState {
   me: AiMe | null;
   /** a pass payment the server has not confirmed yet */
   claiming: boolean;
+  /** what the AI learned each hour, newest first; null until loaded (subscribers only) */
+  log: AiLogEntry[] | null;
+  logBusy: boolean;
 }
-export const useAi = create<AiState>(() => ({ status: 'idle', stats: null, board: [], me: null, claiming: false }));
+export interface AiLogEntry {
+  at: number;
+  learned: string | null;
+  note: string | null;
+  minEdge: number;
+  crowdBuffer: number;
+  maxRoundShare: number;
+  targetSlotsLeft: number;
+  /** plays in the 24 hours before this entry, when known */
+  plays: number | null;
+}
+export const useAi = create<AiState>(() => ({ status: 'idle', stats: null, board: [], me: null, claiming: false, log: null, logBusy: false }));
 
 const headers = () => ({ apikey: publicKey(), authorization: `Bearer ${publicKey()}`, 'content-type': 'application/json' });
 const rpc = async (fn: string, args: Record<string, unknown> = {}) => {
@@ -81,7 +97,7 @@ export async function refreshAi() {
       ? {
           activeMiners: num(r.active_miners), miners: num(r.miners), rounds: num(r.rounds), wins: num(r.wins), motherlodes: num(r.motherlodes),
           deployedSol: num(r.deployed_sol), returnedSol: num(r.returned_sol), ore: num(r.ore), feesSol: num(r.fees_sol),
-          oreSol: num(r.sol_usd) > 0 ? num(r.ore_usd) / num(r.sol_usd) : 0, tunedAt: r.tuned_at ?? null, tuneNote: r.tune_note ?? null,
+          oreSol: num(r.sol_usd) > 0 ? num(r.ore_usd) / num(r.sol_usd) : 0, tunedAt: r.tuned_at ?? null,
         }
       : null;
     const board: AiMinerRow[] = (Array.isArray(b) ? b : []).map((x) => ({
@@ -91,7 +107,7 @@ export async function refreshAi() {
     const mr = Array.isArray(m) ? m[0] : null;
     const me: AiMe | null = mr
       ? {
-          expiresAt: mr.expires_at ? Date.parse(mr.expires_at) : null, rounds: num(mr.rounds), wins: num(mr.wins), deployedSol: num(mr.deployed_sol),
+          expiresAt: mr.expires_at ? Date.parse(mr.expires_at) : null, trialOpen: Boolean(mr.trial_open), rounds: num(mr.rounds), wins: num(mr.wins), deployedSol: num(mr.deployed_sol),
           returnedSol: num(mr.returned_sol), ore: num(mr.ore), feesSol: num(mr.fees_sol), pending: num(mr.pending),
         }
       : null;
@@ -164,4 +180,93 @@ export async function buyPass(): Promise<boolean> {
   g.toast('Gali AI pass active for 7 days', 'good');
   await refreshAi();
   return true;
+}
+
+/* ---------------- the free week and the learning log: both need the wallet's sign-in (one signature, no fee) ---------------- */
+
+async function passCall<T>(body: Record<string, unknown>): Promise<{ status: number; data: T & { error?: string } }> {
+  const base = restBase();
+  if (!base) throw new Error('Gali AI is not set up in this build');
+  const r = await fetch(`${base}/functions/v1/ai-pass`, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
+  return { status: r.status, data: await r.json().catch(() => ({})) };
+}
+
+/** The sign-in pass for the connected wallet, asking the wallet to sign in when there is none. */
+async function signedPass(): Promise<string | null> {
+  const owner = useGame.getState().wallet.owner;
+  const dm = useDm.getState();
+  if (dm.pass && dm.me === owner) return dm.pass;
+  try {
+    await signIn();
+  } catch (e) {
+    useGame.getState().toast(String((e as Error)?.message ?? e).slice(0, 120), 'bad');
+    return null;
+  }
+  return useDm.getState().pass;
+}
+
+/** Start the free week (once per wallet, only for wallets that never had a pass). */
+export async function startTrial(): Promise<boolean> {
+  const g = useGame.getState();
+  if (!g.wallet.owner) {
+    g.toast('Connect a wallet first', 'info');
+    return false;
+  }
+  const pass = await signedPass();
+  if (!pass) return false;
+  try {
+    let r = await passCall<{ expiresAt: string }>({ a: 'trial', pass });
+    if (r.status === 401) {
+      await signOut();
+      const again = await signedPass();
+      if (!again) return false;
+      r = await passCall<{ expiresAt: string }>({ a: 'trial', pass: again });
+    }
+    if (r.status !== 200) {
+      g.toast(r.data.error ?? 'Could not start the free week', 'bad');
+      return false;
+    }
+    g.toast('Your free week of Gali AI has started', 'good');
+    await refreshAi();
+    return true;
+  } catch {
+    g.toast('Could not reach the server. Try again', 'bad');
+    return false;
+  }
+}
+
+/** What the AI learned each hour. Subscribers only: the server checks the sign-in and the pass. */
+export async function loadLog(ask = false): Promise<void> {
+  if (useAi.getState().logBusy) return;
+  const owner = useGame.getState().wallet.owner;
+  const dm = useDm.getState();
+  const pass = dm.pass && dm.me === owner ? dm.pass : ask ? await signedPass() : null;
+  if (!pass) return;
+  useAi.setState({ logBusy: true });
+  try {
+    const r = await passCall<{ log: Record<string, unknown>[] }>({ a: 'log', pass });
+    if (r.status === 401) {
+      await signOut();
+      return;
+    }
+    if (r.status !== 200) {
+      useAi.setState({ log: null });
+      return;
+    }
+    const log: AiLogEntry[] = (r.data.log ?? []).map((x) => {
+      const day = (x.stats as { last24h?: { plays?: number } } | null)?.last24h;
+      return {
+        at: Date.parse(String(x.at)),
+        learned: typeof x.learned === 'string' ? x.learned : null,
+        note: typeof x.note === 'string' ? x.note : null,
+        minEdge: num(x.min_edge), crowdBuffer: num(x.crowd_buffer), maxRoundShare: num(x.max_round_share), targetSlotsLeft: num(x.target_slots_left),
+        plays: day && typeof day.plays === 'number' ? day.plays : null,
+      };
+    });
+    if (useGame.getState().wallet.owner === owner) useAi.setState({ log });
+  } catch {
+    /* keep what we had */
+  } finally {
+    useAi.setState({ logBusy: false });
+  }
 }

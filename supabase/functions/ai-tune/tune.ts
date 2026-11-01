@@ -89,7 +89,10 @@ Your job: from the results below, choose settings that keep players' balances gr
 
 Allowed ranges: minEdge ${BOUNDS.minEdge.join('-')}, crowdBuffer ${BOUNDS.crowdBuffer.join('-')}, maxRoundShare ${BOUNDS.maxRoundShare.join('-')}, targetSlotsLeft ${BOUNDS.targetSlotsLeft.join('-')}. Each hour a setting can move at most a quarter of its range.
 
-In "note", write one or two short plain sentences for players about what you changed and why, or why you kept things as they are. No hype, no promises of profit.`;
+Players with a pass read your answers as an hourly log.
+- "learned": two to four plain sentences on what this hour's numbers show (how often the bot played, how the board filled after it deployed, how real results compared with what it expected) and what you take from it. Use the numbers. Say so when there is too little data to learn anything yet.
+- "note": one short sentence on what you changed and why, or why you kept things as they are.
+No hype, no promises of profit, no jargon a casual player wouldn't follow.`;
 
 export function prompt(current: AiParams, last24h: Summary, last7d: Summary, history: { at: string; note: string | null }[]): string {
   const fmt = (s: Summary) => JSON.stringify(s, (_k, v) => (typeof v === 'number' ? Number(v.toPrecision(5)) : v));
@@ -109,16 +112,18 @@ export const OUTPUT_SCHEMA = {
     crowdBuffer: { type: 'number' },
     maxRoundShare: { type: 'number' },
     targetSlotsLeft: { type: 'integer' },
+    learned: { type: 'string' },
     note: { type: 'string' },
   },
-  required: ['minEdge', 'crowdBuffer', 'maxRoundShare', 'targetSlotsLeft', 'note'],
+  required: ['minEdge', 'crowdBuffer', 'maxRoundShare', 'targetSlotsLeft', 'learned', 'note'],
   additionalProperties: false,
 } as const;
 
+const text = (v: unknown, max: number) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, max) : '');
+
 /** Claude's answer, made safe: inside the bounds and at most a quarter-range step from the current settings. */
-export function apply(answer: unknown, current: AiParams): { params: AiParams; note: string } {
+export function apply(answer: unknown, current: AiParams): { params: AiParams; note: string; learned: string } {
   const a = (answer && typeof answer === 'object' ? answer : {}) as Record<string, unknown>;
   const params = limitStep(clampParams(a, current), current);
-  const note = typeof a.note === 'string' ? a.note.replace(/\s+/g, ' ').trim().slice(0, 280) : '';
-  return { params, note };
+  return { params, note: text(a.note, 280), learned: text(a.learned, 900) };
 }

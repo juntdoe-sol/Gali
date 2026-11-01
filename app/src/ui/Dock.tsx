@@ -3,7 +3,7 @@ import { FEATURE_AI_MINING, FEATURE_GALI_PROGRAM } from '../config/features';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Modal, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CLUSTER, LIVE_AUTOPILOT_MAX_SOL, LIVE_MAX_ROUND_SOL, PLATFORM_FEE_BPS, REFINING_FEE, short } from '../chain/light';
+import { CLUSTER, PLATFORM_FEE_BPS, REFINING_FEE, short } from '../chain/light';
 import { BLOCKS, boostFor, COLORS, pointsFor } from '../game/constants';
 import { watchMotion } from '../game/motion';
 import { DEFAULT_SMART, fmtSol, liveReturn, maskOf, randomPick, MIN_SOL_PER_BLOCK, SMART_COUNTS } from '../game/pot';
@@ -19,7 +19,7 @@ import { useLayout } from './layout';
 import { openScanTv, TV_PAIR } from './TvLink';
 import { evOf } from '../game/ev';
 import { refreshMarket, useOreStats } from '../game/oreStats';
-import { buyPass, netSol, refreshAi, useAi } from '../game/aiMining';
+import { buyPass, loadLog, netSol, refreshAi, startTrial, useAi, type AiLogEntry } from '../game/aiMining';
 
 const SHAKE_G = 2.1;
 const layoutNowDesktop = () => layoutNow().desktop;
@@ -508,10 +508,9 @@ function DeskLite() {
   const total = rounds * LITE_PER_ROUND;
   const need = total + (rounds > 1 ? EXEC_FEE * rounds : 0);
   const enough = need <= balance + 1e-9;
-  const autoCapped = live && rounds > 1 && total > LIVE_AUTOPILOT_MAX_SOL + 1e-9;
-  const ready = rounds > 0 && enough && !autoCapped && !(live && autopilot) && !busy;
+  const ready = rounds > 0 && enough && !(live && autopilot) && !busy;
   const max = () => {
-    const room = Math.min(live ? LIVE_AUTOPILOT_MAX_SOL : Infinity, balance - 0.001);
+    const room = balance - 0.001 - (live ? EXEC_FEE * Math.floor(balance / LITE_PER_ROUND) : 0);
     setAmount(trim(Math.max(0, Math.floor(room / LITE_PER_ROUND + 1e-9)) * LITE_PER_ROUND));
   };
   const label = !amt
@@ -520,11 +519,9 @@ function DeskLite() {
       ? `MIN ${LITE_PER_ROUND} SOL`
       : !enough
         ? 'NOT ENOUGH SOL'
-        : autoCapped
-          ? `AUTOPILOT MAX ${LIVE_AUTOPILOT_MAX_SOL} SOL`
-          : live && autopilot
-            ? 'STOP AUTOPILOT FIRST'
-            : `DEPLOY ${fmtSol(total)} SOL`;
+        : live && autopilot
+          ? 'STOP AUTOPILOT FIRST'
+          : `DEPLOY ${fmtSol(total)} SOL`;
   const lock = Boolean(run);
   return (
     <>
@@ -582,11 +579,63 @@ const AI_INFO =
 const AI_PER_SPOT_DEFAULT = '0.01';
 
 const signed = (v: number, dp = 4) => `${v >= 0 ? '+' : '-'}${fmtSol(Math.abs(v), dp)}`;
-const ago = (iso: string | null) => {
-  if (!iso) return '';
-  const m = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60_000));
-  return m < 60 ? `${m}m ago` : `${Math.round(m / 60)}h ago`;
+
+const pct = (v: number) => `${Math.round(v * 100)}%`;
+/** What changed between two hours' settings, in words a player can follow. */
+function changes(e: AiLogEntry, prev: AiLogEntry | undefined): string {
+  if (!prev) return `Margin ${pct(e.minEdge)}, expects ${pct(e.crowdBuffer)} more SOL after it deploys, up to ${pct(e.maxRoundShare)} of your balance a round, deploys ${e.targetSlotsLeft} slots before the end.`;
+  const out: string[] = [];
+  if (e.minEdge !== prev.minEdge) out.push(`margin ${pct(prev.minEdge)} → ${pct(e.minEdge)}`);
+  if (e.crowdBuffer !== prev.crowdBuffer) out.push(`late SOL expected ${pct(prev.crowdBuffer)} → ${pct(e.crowdBuffer)}`);
+  if (e.maxRoundShare !== prev.maxRoundShare) out.push(`most per round ${pct(prev.maxRoundShare)} → ${pct(e.maxRoundShare)} of balance`);
+  if (e.targetSlotsLeft !== prev.targetSlotsLeft) out.push(`deploys ${prev.targetSlotsLeft} → ${e.targetSlotsLeft} slots before the end`);
+  return out.length ? `Changed: ${out.join(', ')}.` : '';
+}
+const when = (t: number) => {
+  const m = Math.max(0, Math.round((Date.now() - t) / 60_000));
+  if (m < 60) return `${m}m ago`;
+  if (m < 24 * 60) return `${Math.round(m / 60)}h ago`;
+  return new Date(t).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
 };
+
+/** Subscribers only: what Gali AI learned each hour, newest first. */
+function AiLog({ log, busy }: { log: AiLogEntry[] | null; busy: boolean }) {
+  const [all, setAll] = useState(false);
+  return (
+    <View style={{ marginTop: 12 }}>
+      <T v="label" style={{ color: COLORS.gold, marginBottom: 4 }}>
+        WHAT GALI AI LEARNED
+      </T>
+      {log === null ? (
+        <Btn kind="plain" label={busy ? 'LOADING…' : 'READ THE LEARNING LOG'} sub="Sign in once with your wallet. No fee" onPress={() => void loadLog(true)} disabled={busy} />
+      ) : !log.length ? (
+        <T v="num" style={styles.evNote}>
+          Nothing yet. The first entry lands at the next hourly review.
+        </T>
+      ) : (
+        <>
+          {(all ? log : log.slice(0, 6)).map((e, i, shown) => (
+            <View key={e.at} style={[styles.aiLog, i === shown.length - 1 && { borderBottomWidth: 0 }]}>
+              <T v="num" style={{ fontSize: 13, color: COLORS.muted }}>
+                {when(e.at)}
+                {e.plays !== null ? ` · ${e.plays} plays in the 24h before` : ''}
+              </T>
+              {e.learned ? (
+                <T v="num" style={{ fontSize: 15, color: COLORS.text, lineHeight: 18 }}>
+                  {e.learned}
+                </T>
+              ) : null}
+              <T v="num" style={{ fontSize: 13, color: COLORS.teal, lineHeight: 16 }}>
+                {[e.note, changes(e, log[log.indexOf(e) + 1]) || (e.note ? '' : 'No changes.')].filter(Boolean).join(' ')}
+              </T>
+            </View>
+          ))}
+          {log.length > 6 ? <Chip label={all ? 'SHOW LESS' : `SHOW ALL ${log.length}`} onPress={() => setAll(!all)} /> : null}
+        </>
+      )}
+    </View>
+  );
+}
 
 function AiPanel() {
   const { balance, live } = useBalance();
@@ -595,7 +644,7 @@ function AiPanel() {
   const owner = useGame((s) => s.wallet.owner);
   const startAi = useGame((s) => s.startAiMining);
   const stopAutopilot = useGame((s) => s.stopAutopilot);
-  const { status, stats, board, me, claiming } = useAi();
+  const { status, stats, board, me, claiming, log, logBusy } = useAi();
   const [amount, setAmount] = useState('');
   const [perSpot, setPerSpot] = useState(AI_PER_SPOT_DEFAULT);
   useEffect(() => {
@@ -608,6 +657,12 @@ function AiPanel() {
   const allNet = stats ? netSol(stats, oreSol) : 0;
   const myNet = me ? netSol(me, oreSol) : 0;
   const passOn = Boolean(me?.expiresAt && me.expiresAt > Date.now());
+  useEffect(() => {
+    if (!passOn) return;
+    void loadLog(false);
+    const id = setInterval(() => void loadLog(false), 10 * 60_000);
+    return () => clearInterval(id);
+  }, [passOn, owner]);
   const aiOn = Boolean(autopilot?.ai);
   const amt = Number(amount) || 0;
   const spot = Number(perSpot) || 0;
@@ -648,11 +703,6 @@ function AiPanel() {
           </T>
         }
       />
-      {stats?.tuneNote ? (
-        <T v="num" style={styles.evNote}>
-          AI note ({ago(stats.tunedAt)}): {stats.tuneNote}
-        </T>
-      ) : null}
 
       {owner ? (
         <Row
@@ -734,14 +784,29 @@ function AiPanel() {
           />
         </>
       ) : null}
+      {!aiOn && owner && me?.trialOpen ? (
+        <Btn
+          kind="gold"
+          label={busy ?? 'TRY GALI AI FREE · 7 DAYS'}
+          sub="First time only. One signature, no fee"
+          onPress={() => void startTrial()}
+          disabled={Boolean(busy) || !live}
+          style={{ marginTop: 10 }}
+        />
+      ) : null}
       {!aiOn && owner ? (
         <Btn
-          kind={passOn ? 'plain' : 'gold'}
+          kind={passOn || me?.trialOpen ? 'plain' : 'gold'}
           label={busy ?? (passOn ? 'ADD 7 DAYS · 0.1 SOL' : 'GET GALI AI · 0.1 SOL / 7 DAYS')}
           onPress={() => void buyPass()}
           disabled={Boolean(busy) || claiming || !live}
           style={{ marginTop: 10 }}
         />
+      ) : null}
+      {passOn ? <AiLog log={log} busy={logBusy} /> : owner ? (
+        <T v="num" style={[styles.evNote, { marginTop: 8 }]}>
+          With a pass you also get Gali AI's learning log: every hour, what it saw on the board and what it changed.
+        </T>
       ) : null}
 
       {board.length ? (
@@ -813,15 +878,13 @@ function DeskPro() {
     }
   };
   const max = () => {
-    const room = Math.min(balance - 0.001, live && rounds > 1 ? LIVE_AUTOPILOT_MAX_SOL : Infinity) / Math.max(1, rounds);
-    setPer(trim(Math.max(0, Math.min(room, live ? LIVE_MAX_ROUND_SOL : Infinity))));
+    const room = (balance - 0.001 - (live && rounds > 1 ? EXEC_FEE * rounds : 0)) / Math.max(1, rounds);
+    setPer(trim(Math.max(0, room)));
   };
 
   const need = per * rounds + (live && rounds > 1 ? EXEC_FEE * rounds : 0);
   const enough = need <= balance + 1e-9;
-  const capped = live && per > LIVE_MAX_ROUND_SOL + 1e-9;
-  const autoCapped = live && rounds > 1 && per * rounds > LIVE_AUTOPILOT_MAX_SOL + 1e-9;
-  const ready = tiles > 0 && per > 0 && perSpot >= MIN_SOL_PER_BLOCK && enough && !pending && !capped && !autoCapped && !(live && autopilot) && !busy;
+  const ready = tiles > 0 && per > 0 && perSpot >= MIN_SOL_PER_BLOCK && enough && !pending && !(live && autopilot) && !busy;
   const label = !per
     ? 'ENTER AMOUNT'
     : !tiles
@@ -830,14 +893,10 @@ function DeskPro() {
         ? `MIN ${trim(MIN_SOL_PER_BLOCK * tiles)} SOL A ROUND`
         : !enough
           ? 'NOT ENOUGH SOL'
-          : capped
-            ? `MAX ${LIVE_MAX_ROUND_SOL} SOL A ROUND`
-            : autoCapped
-              ? `AUTOPILOT MAX ${LIVE_AUTOPILOT_MAX_SOL} SOL`
-              : live && autopilot
-                ? 'STOP AUTOPILOT FIRST'
-                : pending
-                  ? 'WAIT FOR THIS ROUND'
+          : live && autopilot
+            ? 'STOP AUTOPILOT FIRST'
+            : pending
+              ? 'WAIT FOR THIS ROUND'
                   : `DEPLOY ${fmtSol(per * rounds)} SOL`;
   const solo = useGame((s) => soloOf(s, s.roundId));
   const picked = p.blocks === 'all' ? [...Array(BLOCKS).keys()] : selected;
@@ -863,7 +922,7 @@ function DeskPro() {
           <Row
             icon="hourglass"
             label="Rounds"
-            info={live ? `1 = this round only (you approve in your wallet). More = autopilot: one wallet approval funds ORE's automation for every round, then rounds deploy with no pop-up. Up to ${LIVE_AUTOPILOT_MAX_SOL} SOL in total. Stop it any time to get the unused SOL back (the Gali fee is paid up front and not refunded).` : '1 = this round only. More = autopilot repeats the same setup each round.'}
+            info={live ? `1 = this round only (you approve in your wallet). More = autopilot: one wallet approval funds ORE's automation for every round, then rounds deploy with no pop-up. Stop it any time to get the unused SOL back (the Gali fee is paid up front and not refunded).` : '1 = this round only. More = autopilot repeats the same setup each round.'}
             right={<Stepper value={rounds} label="rounds" onMinus={() => editPreset({ rounds: Math.max(1, rounds - 1) })} onPlus={() => editPreset({ rounds: Math.min(100, rounds + 1) })} disabled={lock} />}
           />
           <EvRow squares={picked} perSpot={tiles && per ? perSpot : 0} />
@@ -988,8 +1047,7 @@ function LitePanel({ compact }: { compact: boolean }) {
   const per = spot * n; // SOL this round
   const perBlockOk = spot >= MIN_SOL_PER_BLOCK;
   const enough = per <= balance + 1e-9;
-  const capped = live && per > LIVE_MAX_ROUND_SOL + 1e-9;
-  const ready = n > 0 && per > 0 && perBlockOk && enough && !capped;
+  const ready = n > 0 && per > 0 && perBlockOk && enough;
   const mask = mode === 'all' ? (1 << BLOCKS) - 1 : maskOf(selected);
   const label = !n
     ? 'TAP SPOTS ON THE MAP'
@@ -999,9 +1057,7 @@ function LitePanel({ compact }: { compact: boolean }) {
         ? `MIN ${MIN_SOL_PER_BLOCK} SOL PER SPOT`
         : !enough
           ? 'NOT ENOUGH SOL'
-          : capped
-            ? `MAX ${LIVE_MAX_ROUND_SOL} SOL A ROUND`
-            : `MINE THIS ROUND · ${fmtSol(per)} SOL`;
+          : `MINE THIS ROUND · ${fmtSol(per)} SOL`;
   const back = n && spot > 0 ? liveReturn(n, spot) : null;
   const hint =
     mode === 'pick' && !n
@@ -1087,9 +1143,7 @@ function ProPanel({ compact }: { compact: boolean }) {
   const rounds = p.rounds;
   const need = per * rounds;
   const enough = need <= balance + 1e-9;
-  const capped = live && per > LIVE_MAX_ROUND_SOL + 1e-9;
-  const autoCapped = live && rounds > 1 && need > LIVE_AUTOPILOT_MAX_SOL + 1e-9;
-  const ready = blocks > 0 && per > 0 && perBlock >= MIN_SOL_PER_BLOCK && enough && !pending && !capped && !autoCapped && !(live && autopilot) && !busy;
+  const ready = blocks > 0 && per > 0 && perBlock >= MIN_SOL_PER_BLOCK && enough && !pending && !(live && autopilot) && !busy;
   const label = !blocks
     ? 'NO CLAIMS SELECTED'
     : !per
@@ -1098,12 +1152,8 @@ function ProPanel({ compact }: { compact: boolean }) {
         ? `MIN ${MIN_SOL_PER_BLOCK} SOL PER SPOT`
         : !enough
           ? 'NOT ENOUGH SOL'
-          : capped
-            ? `MAX ${LIVE_MAX_ROUND_SOL} SOL A ROUND`
-            : autoCapped
-              ? `AUTOPILOT MAX ${LIVE_AUTOPILOT_MAX_SOL} SOL`
-              : live && autopilot
-                ? 'STOP AUTOPILOT FIRST'
+          : live && autopilot
+            ? 'STOP AUTOPILOT FIRST'
             : pending
               ? 'WAIT FOR THIS ROUND'
               : `DEPLOY ${fmtSol(per)} SOL${rounds > 1 ? ` × ${rounds}` : ''}`;
@@ -1123,7 +1173,7 @@ function ProPanel({ compact }: { compact: boolean }) {
           </View>
           <BalanceRow
             onHalf={() => editPreset({ perSpot: trim((balance - RESERVE) / 2 / Math.max(1, rounds) / Math.max(1, blocks)) })}
-            onAll={() => editPreset({ perSpot: trim((Math.min(balance - RESERVE, live ? LIVE_MAX_ROUND_SOL : Infinity)) / Math.max(1, rounds) / Math.max(1, blocks)) })}
+            onAll={() => editPreset({ perSpot: trim((balance - RESERVE) / Math.max(1, rounds) / Math.max(1, blocks)) })}
           />
           <AmountBox value={perSpotStr} onChange={(v) => editPreset({ perSpot: v })} hint="SOL per spot" suffix="per spot" />
           <Row
@@ -1146,7 +1196,7 @@ function ProPanel({ compact }: { compact: boolean }) {
           <Row
             icon="hourglass"
             label="Rounds"
-            info={live ? `1 = this round only (you approve in your wallet). More = autopilot: one wallet approval funds ORE's automation with SOL for every round, then rounds deploy with no pop-up while the app stays open. Smart re-picks every round. Up to ${LIVE_AUTOPILOT_MAX_SOL} SOL in total. Stop it any time to get the unused SOL back (the Gali fee is paid up front and not refunded).` : '1 = this round only. More = autopilot repeats the same setup each round (Smart re-picks every round).'}
+            info={live ? `1 = this round only (you approve in your wallet). More = autopilot: one wallet approval funds ORE's automation with SOL for every round, then rounds deploy with no pop-up while the app stays open. Smart re-picks every round. Stop it any time to get the unused SOL back (the Gali fee is paid up front and not refunded).` : '1 = this round only. More = autopilot repeats the same setup each round (Smart re-picks every round).'}
             right={
               <>
                 <View style={[styles.tag, p.rounds > 1 && { borderColor: COLORS.teal }]}>
@@ -1243,6 +1293,7 @@ const styles = StyleSheet.create({
   aiSpot: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, height: 34, width: 120 },
   aiSpotInput: { position: 'relative', width: 64, height: 30, textAlign: 'right', color: COLORS.gold, fontFamily: F.display, fontSize: 18, paddingVertical: 0, paddingHorizontal: 0, ...WEB_NO_OUTLINE },
   aiDot: { width: 8, height: 8, borderWidth: 1.5 },
+  aiLog: { gap: 3, paddingVertical: 8, borderBottomWidth: U, borderColor: 'rgba(34,53,111,0.6)', borderStyle: 'dashed' },
   info: { width: 18, height: 18, alignItems: 'center', justifyContent: 'center' },
   chip: { paddingHorizontal: 10, paddingVertical: 6, minHeight: 32, justifyContent: 'center' },
   chipGrow: { flex: 1, minWidth: 0 },

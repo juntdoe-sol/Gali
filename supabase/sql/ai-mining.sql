@@ -56,6 +56,16 @@ create table if not exists public.gali_ai_rounds (
   board_after bigint,                 -- lamports on the chosen squares when the round closed
   primary key (wallet, round_id)
 );
+-- the free first week: one per wallet, and only for a wallet that never had a pass
+create table if not exists public.gali_ai_trials (
+  wallet text primary key,
+  at timestamptz not null default now()
+);
+
+-- what Claude learned each hour (subscribers only; read through ai-pass)
+alter table public.gali_ai_params add column if not exists learned text;
+alter table public.gali_ai_params add column if not exists stats jsonb;
+
 create index if not exists gali_ai_rounds_pending on public.gali_ai_rounds (round_id) where settled_at is null;
 create index if not exists gali_ai_rounds_settled on public.gali_ai_rounds (settled_at desc) where settled_at is not null;
 
@@ -63,7 +73,8 @@ alter table public.gali_ai_passes enable row level security;
 alter table public.gali_ai_payments enable row level security;
 alter table public.gali_ai_params enable row level security;
 alter table public.gali_ai_rounds enable row level security;
-revoke all on public.gali_ai_passes, public.gali_ai_payments, public.gali_ai_params, public.gali_ai_rounds from anon, authenticated;
+alter table public.gali_ai_trials enable row level security;
+revoke all on public.gali_ai_passes, public.gali_ai_payments, public.gali_ai_params, public.gali_ai_rounds, public.gali_ai_trials from anon, authenticated;
 
 insert into public.gali_ai_params (min_edge, crowd_buffer, max_round_share, target_slots_left, source, note)
 select 0.08, 0.25, 0.05, 22, 'default', 'Starting settings'
@@ -89,10 +100,29 @@ end $$;
 revoke all on function public.gali_ai_pass_add(text, text, bigint) from public;
 grant execute on function public.gali_ai_pass_add(text, text, bigint) to service_role;
 
--- Everyone: how many miners use Gali AI and what it made them, all together.
+-- ai-pass calls this for a signed-in wallet. 7 free days, once, and only if the wallet never had a pass.
+create or replace function public.gali_ai_trial(p_wallet text)
+returns timestamptz
+language plpgsql security definer set search_path = public as $$
+declare v_exp timestamptz;
+begin
+  if exists (select 1 from gali_ai_passes where wallet = p_wallet) then raise exception 'trial not available'; end if;
+  insert into gali_ai_trials (wallet) values (p_wallet);
+  insert into gali_ai_passes (wallet, expires_at, paid_lamports) values (p_wallet, now() + interval '7 days', 0)
+  returning expires_at into v_exp;
+  return v_exp;
+exception when unique_violation then
+  raise exception 'trial not available';
+end $$;
+revoke all on function public.gali_ai_trial(text) from public;
+grant execute on function public.gali_ai_trial(text) to service_role;
+
+-- Everyone: how many miners use Gali AI and what it made them, all together. What the AI learned each hour is
+-- for subscribers only: ai-pass serves it to signed-in wallets with a live pass.
+drop function if exists public.gali_ai_stats();
 create or replace function public.gali_ai_stats()
 returns table (active_miners int, miners int, rounds bigint, wins bigint, motherlodes bigint, deployed_sol numeric, returned_sol numeric,
-               ore numeric, fees_sol numeric, sol_usd numeric, ore_usd numeric, tuned_at timestamptz, tune_note text)
+               ore numeric, fees_sol numeric, sol_usd numeric, ore_usd numeric, tuned_at timestamptz)
 language sql stable security definer set search_path = public as $$
   select
     (select count(*)::int from gali_ai_passes where expires_at > now()),
@@ -100,7 +130,7 @@ language sql stable security definer set search_path = public as $$
     count(*), count(*) filter (where r.won), count(*) filter (where r.motherlode),
     coalesce(sum(r.total), 0) / 1e9, coalesce(sum(r.sol_back), 0) / 1e9, coalesce(sum(r.ore_grams), 0) / 1e11, coalesce(sum(r.fee), 0) / 1e9,
     (select sol_usd from gali_ore_market where id = 1), (select ore_usd from gali_ore_market where id = 1),
-    (select at from gali_ai_params order by id desc limit 1), (select note from gali_ai_params order by id desc limit 1)
+    (select at from gali_ai_params order by id desc limit 1)
   from gali_ai_rounds r where r.settled_at is not null and not r.void
 $$;
 
@@ -123,11 +153,13 @@ language sql stable security definer set search_path = public as $$
   limit least(greatest(p_limit, 1), 200)
 $$;
 
+drop function if exists public.gali_ai_me(text);
 -- Everyone: one wallet's pass and results (wallets and rounds are public on chain anyway).
 create or replace function public.gali_ai_me(p_wallet text)
-returns table (expires_at timestamptz, rounds bigint, wins bigint, deployed_sol numeric, returned_sol numeric, ore numeric, fees_sol numeric, pending bigint)
+returns table (expires_at timestamptz, trial_open boolean, rounds bigint, wins bigint, deployed_sol numeric, returned_sol numeric, ore numeric, fees_sol numeric, pending bigint)
 language sql stable security definer set search_path = public as $$
   select (select expires_at from gali_ai_passes where wallet = p_wallet),
+         not exists (select 1 from gali_ai_passes where wallet = p_wallet),
          count(*) filter (where settled_at is not null and not void),
          count(*) filter (where won),
          coalesce(sum(total) filter (where settled_at is not null and not void), 0) / 1e9,

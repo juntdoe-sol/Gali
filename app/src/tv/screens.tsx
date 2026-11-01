@@ -76,7 +76,6 @@ export function Splash({ onDone }: { onDone: () => void }) {
 
 /* ---------------- Home ---------------- */
 
-const SOL_CAP = 1; // LIVE_AUTOPILOT_MAX_SOL on the phone
 const ROUND_CHOICES = [1, 2, 5, 10, 25, 50, 100];
 
 export interface Setup {
@@ -116,7 +115,7 @@ export function Home({ live, setup, setSetup, onWatch, onStart, onFocusKey, note
 }) {
   const left = useCountdown(live);
   const perRound = setup.amount / setup.rounds;
-  const set = (amount: number) => setSetup({ ...setup, amount: Math.min(SOL_CAP, Math.round(amount * 1000) / 1000) });
+  const set = (amount: number) => setSetup({ ...setup, amount: Math.round(amount * 1000) / 1000 });
   return (
     <View style={{ flex: 1 }}>
       <Wallpaper />
@@ -140,10 +139,9 @@ export function Home({ live, setup, setSetup, onWatch, onStart, onFocusKey, note
             </View>
             <View style={{ flexDirection: 'row', gap: 18, marginTop: 16, height: 64 }}>
               <Btn label="-0.01" size={28} style={{ flex: 1 }} onFocus={() => onFocusKey('amount')} onPress={() => set(Math.max(0.001, setup.amount - 0.01))} />
-              {[0.01, 0.1, 1].map((v) => (
+              {[0.01, 0.1, 1, 5].map((v) => (
                 <Btn key={v} label={`+${v}`} size={28} style={{ flex: 1 }} onFocus={() => onFocusKey('amount')} onPress={() => set(setup.amount + v)} />
               ))}
-              <Btn label="MAX" size={28} style={{ flex: 1 }} onFocus={() => onFocusKey('amount')} onPress={() => set(SOL_CAP)} />
             </View>
             <RoundsRow rounds={setup.rounds} onFocus={() => onFocusKey('rounds')} />
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, borderTopWidth: 4, borderTopColor: C.bevelLo, paddingTop: 10 }}>

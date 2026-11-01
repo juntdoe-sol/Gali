@@ -16,7 +16,7 @@ import '../polyfill-web';
 import { getSecret, setSecret } from '../secure';
 import { ComputeBudgetProgram, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, TransactionInstruction } from '@solana/web3.js';
 import { connection, galiRoundIxs, sendWithKey, sendWithWallet, simulates } from '../client';
-import { LIVE_AUTOPILOT_MAX_SOL, LIVE_MAX_ROUND_SOL, platformFee, REVENUE_WALLET } from '../light';
+import { platformFee, REVENUE_WALLET } from '../light';
 import { AUTOMATION_STRATEGY, EXECUTOR_ADDRESS } from './consts';
 import { automateIx, checkpointIx, claimOreIx, claimSolIx, deployIx } from './ix';
 import { fetchClock, fetchOreAutomation, fetchOreMiner, needsCheckpoint } from './read';
@@ -281,10 +281,8 @@ export async function startLiveAutomation(args: {
   const mask = squaresToMask(args.squares);
   const n = maskToSquares(mask).length;
   if (n < 1 || n !== args.maxSquares) throw new Error('Bad autopilot setup');
-  if (Number(args.lamportsPerSquare * BigInt(n)) / LAMPORTS_PER_SOL > LIVE_MAX_ROUND_SOL + 1e-9) throw new Error(`A round is capped at ${LIVE_MAX_ROUND_SOL} SOL`);
   const perRound = args.lamportsPerSquare * BigInt(n) + AUTOPILOT_FEE_LAMPORTS;
   const deposit = perRound * BigInt(args.rounds);
-  if (Number(deposit) / LAMPORTS_PER_SOL > LIVE_AUTOPILOT_MAX_SOL + 1e-9) throw new Error(`Autopilot is capped at ${LIVE_AUTOPILOT_MAX_SOL} SOL`);
   await sendWithWallet(async (owner) => {
     if (await fetchOreAutomation(connection, owner)) throw new Error('Autopilot is already on. Stop it first');
     const exec = (await loadExecutor(owner, true)) as Keypair;

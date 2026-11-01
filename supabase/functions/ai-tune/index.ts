@@ -65,11 +65,11 @@ Deno.serve(async (req) => {
     throw e;
   }
 
-  const { params, note } = apply(answer, current);
+  const { params, note, learned } = apply(answer, current);
   const ins = await fetch(`${base}/rest/v1/gali_ai_params`, {
     method: 'POST',
     headers: h,
-    body: JSON.stringify({ min_edge: params.minEdge, crowd_buffer: params.crowdBuffer, max_round_share: params.maxRoundShare, target_slots_left: params.targetSlotsLeft, source: 'claude', note: note || null }),
+    body: JSON.stringify({ min_edge: params.minEdge, crowd_buffer: params.crowdBuffer, max_round_share: params.maxRoundShare, target_slots_left: params.targetSlotsLeft, source: 'claude', note: note || null, learned: learned || null, stats: { last24h, last7d } }),
   });
   if (!ins.ok) return json(500, { error: `save failed: ${ins.status}` });
   return json(200, { from: current, to: params, note, plays24h: last24h.plays, plays7d: last7d.plays });
