@@ -33,6 +33,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PAD_X, PAD_Y = OFF_X + 395, OFF_Y + 152
 PAD = 72
 PEN = (PAD_X, PAD_Y + 6, 100, 68)       # peninsula ellipse: cx, cy, rx, ry
+# the lobby's big digital signboard, also on the island: its feet, on the beach west of the pad, facing the arrivals.
+# The engine draws it (engine/marketArt.ts drawBillboard) at the miners' scale: about 74x48 here.
+BILLBOARD = (495, 291)
 
 
 def rgb(s):
@@ -422,7 +425,8 @@ def extend(I, ground, sprites):
     near_pad[y0 - 14:y0 + PAD + 14, x0 - 14:x0 + PAD + 14] = True
     near_walk = np.zeros((EH, EW), bool)
     near_walk[PAD_Y:walk_y1 + 6, bx0 - 22:bx1 + 22] = True
-    okmask = sand & ~near_pad & ~near_walk & (sd >= 4) & (D >= 7) & ~U.keep_clear(xx, yy)
+    bb = (np.abs(xx - BILLBOARD[0]) < 46) & (yy > BILLBOARD[1] - 54) & (yy < BILLBOARD[1] + 12)
+    okmask = sand & ~near_pad & ~near_walk & (sd >= 4) & (D >= 7) & ~U.keep_clear(xx, yy) & ~bb
 
     def sites(lo, hi, extra=None):
         m = okmask & (sd >= lo) & (sd <= hi)
@@ -545,6 +549,7 @@ def extend(I, ground, sprites):
         'ships': ships,
         'pad': {'x': PAD_X, 'y': PAD_Y, 'size': PAD},
         'uni': U.meta(),
+        'billboard': list(BILLBOARD),
         'walkable_px': int(walkable.sum()),
         'ring_px': int(ring.sum()),
     }
@@ -561,6 +566,7 @@ def shift_meta(meta, ext):
     meta['ships'] = ext['ships']
     meta['pad'] = ext['pad']
     meta['uni'] = ext['uni']
+    meta['billboard'] = ext['billboard']
     for c in meta['claims']:
         c['cx'] += ox
         c['cy'] += oy
@@ -606,6 +612,12 @@ def solid_blocks(meta):
             for by in range((p['y'] + y0) // B, (p['y'] + y1) // B + 1):
                 for bx in range((p['x'] + x0) // B, (p['x'] + x1) // B + 1):
                     out.add((bx, by))
+    # the signboard's legs
+    bx, by = meta.get('billboard', (None, None))
+    if bx is not None:
+        for y in range(by - 5, by + 1):
+            for x in range(bx - 36, bx + 37):
+                out.add((x // B, y // B))
     # never wall in the places miners are put: claim stands, home, the pad
     keep = [c['stand'] for c in meta['claims']] + [meta['home'], [meta['pad']['x'], meta['pad']['y'] + 12]]
     for x, y in keep:
