@@ -1898,13 +1898,22 @@ export class Engine {
       // his name, and under it the note: this one is the Darkweb Version
       const nx = OX + this.chad.x * S;
       const ny = OY + (this.chad.y - 31 * ACT) * S;
-      textCentered(c, 'HARDHAT CHAD', nx, ny - 16 * fs, fs, this.chad.angry ? '#ff6a5e' : '#ffd84a', 'rgba(2,5,15,0.7)');
-      textCentered(c, 'DARKWEB VERSION', nx, ny - 9 * fs, Math.max(1, fs - 1 || 1), '#b98cff', 'rgba(2,5,15,0.7)');
+      // a dark plate behind both lines, like the YOU tag, so they read on grass, stone or a crowd
+      const col = this.chad.angry ? '#ff6a5e' : '#ffd84a';
+      const w = (Math.max(textWidth('HARDHAT CHAD'), textWidth('DARKWEB VERSION')) + 4) * fs;
+      const X = Math.round(nx - w / 2);
+      const Y = Math.round(ny - 18 * fs);
+      c.fillStyle = 'rgba(7,13,32,0.88)';
+      c.fillRect(X, Y, w, 16 * fs);
+      c.fillStyle = col;
+      c.fillRect(X, Y + 16 * fs, w, Math.max(1, fs / 2));
+      textCentered(c, 'HARDHAT CHAD', nx, Y + 2 * fs, fs, col);
+      textCentered(c, 'DARKWEB VERSION', nx, Y + 9 * fs, fs, '#c9a4ff');
     }
     // while you stand by him, tell the app where his head is: his speech bubble (ui/University.tsx) hangs off it
     if (UNI && this.chadNear) {
       const hx = Math.round((OX + this.chad.x * S) / dpr);
-      const hy = Math.round((OY + (this.chad.y - 31 * ACT) * S - 18 * fs) / dpr);
+      const hy = Math.round((OY + (this.chad.y - 31 * ACT) * S - 20 * fs) / dpr);
       if (Math.abs(hx - this.chadAt[0]) > 1 || Math.abs(hy - this.chadAt[1]) > 1) {
         this.chadAt = [hx, hy];
         this.emit({ t: 'chadAt', x: hx, y: hy });
