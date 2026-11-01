@@ -14,6 +14,9 @@
 //   ticket { id }                       a signed arena ticket for this wallet and player id (see below)
 //   fight  { mid, mode, ord }           Gali Fightclub: this wallet's view of an online match's finishing order
 //                                       (wallets, 1st first). Ranks change once every wallet in it agrees (below).
+//   tip     { body }                    University of ORE: share a mining tip (8-200 characters, 3 a day, no links;
+//                                       needs a Gali name). sql/uni-tips.sql
+//   tipvote { id, kind }                upvote ('up') or report ('report') someone else's tip, once each
 // Deploy: npx supabase functions deploy play
 // Secrets: DM_SECRET (shared with dm), SOLANA_RPC, TICKET_KEY (32-byte ed25519 seed, hex; see scripts/ticket-key.mjs)
 //
@@ -183,6 +186,28 @@ Deno.serve(async (req) => {
       if (!m.settled) await settleFight(mid, players).catch((e) => console.error('settle', (e as Error)?.message ?? e));
       const { data: mine } = await db.from('fc_results').select('delta, rating, place').eq('mid', mid).eq('wallet', me).maybeSingle();
       return reply(200, { ok: true, settled: Boolean(mine), ...(mine ?? {}) });
+    }
+    if (a === 'tip') {
+      const body = String(q.body ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+      if (body.length < 8 || body.length > 200) return reply(400, { error: 'Tips are 8 to 200 characters.' });
+      if (/https?:|www\.|\.(com|io|xyz|gg|lol|app|net|org)\b|t\.me\//i.test(body)) return reply(400, { error: 'No links in tips.' });
+      const { data: miner } = await db.from('gali_miners').select('name').eq('wallet', me).maybeSingle();
+      const name = cleanName(miner?.name);
+      if (!name) return reply(403, { error: 'Pick a Gali name first.' });
+      const { count } = await db.from('gali_uni_tips').select('id', { count: 'exact', head: true }).eq('wallet', me).gt('at', new Date(Date.now() - 86_400_000).toISOString());
+      if ((count ?? 0) >= 3) return reply(429, { error: 'That is 3 tips today. Share more tomorrow.' });
+      const { data, error } = await db.from('gali_uni_tips').insert({ wallet: me, name, body }).select('id').single();
+      return error ? fail(error) : reply(200, { ok: true, id: data.id });
+    }
+    if (a === 'tipvote') {
+      const id = int(q.id, 1, Number.MAX_SAFE_INTEGER);
+      const kind = q.kind === 'up' || q.kind === 'report' ? q.kind : null;
+      if (!kind) return reply(400, { error: 'bad vote' });
+      const { data: tip } = await db.from('gali_uni_tips').select('wallet').eq('id', id).maybeSingle();
+      if (!tip) return reply(404, { error: 'That tip is gone.' });
+      if (tip.wallet === me) return reply(400, { error: 'That one is yours.' });
+      const { data, error } = await db.rpc('gali_tip_vote', { p_tip: id, p_wallet: me, p_kind: kind });
+      return error ? fail(error) : reply(200, { ok: true, counted: data === true });
     }
     if (a === 'chat') {
       const mid = String(q.mid ?? '');
