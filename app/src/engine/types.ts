@@ -108,6 +108,8 @@ export interface BrawlSnap {
   peers: Record<string, BrawlView>;
   /** when each player last jumped (wall ms), so everyone sees the hop */
   jumps?: Record<string, number>;
+  /** pots, crates and barrels other players threw: from, to, when (wall ms) */
+  throws?: { by: string; k: 'pot' | 'crate' | 'barrel'; x0: number; y0: number; x1: number; y1: number; at: number }[];
 }
 
 export type EngineEvent =
@@ -129,4 +131,6 @@ export type EngineEvent =
   /** Hardhat Chad or the University of ORE's door: open the lessons */
   | { t: 'uni'; tab?: 'tips' }
   /** your miner walked up to Hardhat Chad (near) or away from him */
-  | { t: 'chad'; near: boolean };
+  | { t: 'chad'; near: boolean }
+  /** where Hardhat Chad's head is on screen (CSS px), while you stand by him: his speech bubble hangs there */
+  | { t: 'chadAt'; x: number; y: number };
