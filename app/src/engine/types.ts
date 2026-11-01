@@ -79,6 +79,8 @@ export interface Snapshot {
   claimedAt?: number;
   /** true while the player is on the island (not in the lobby). Arriving lands the miner on the helipad. */
   onIsland?: boolean;
+  /** show the whole board (MAP) rather than follow your miner up close, as the lobby does */
+  mapView?: boolean;
   brawl?: BrawlSnap;
   /** the first-visit tutorial: point the miner at the nearest mining spot */
   guide?: boolean;
