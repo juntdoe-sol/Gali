@@ -312,7 +312,7 @@ const styles = StyleSheet.create({
 export function ChadChat() {
   const near = useUni((s) => s.near);
   const uniOpen = useUni((s) => s.open);
-  const { w, desktop } = useLayout();
+  const { w, desktop, rail, side } = useLayout();
   const [pick, setPick] = useState<number | null>(null);
   const [shut, setShut] = useState(false);
   useEffect(() => {
@@ -324,8 +324,12 @@ export function ChadChat() {
   if (!near || shut || uniOpen) return null;
   const qa = pick != null ? ORE_QNA[pick] : null;
   return (
-    <View pointerEvents="box-none" style={[styles.chatWrap, { bottom: desktop ? 96 : 150 }]}>
-      <PixelBox fill="rgba(14,22,50,0.96)" hi="#33498c" lo="#0c1430" style={[styles.chat, { width: Math.min(520, w - 24) }]}>
+    <View
+      pointerEvents="box-none"
+      // desktop: in the middle of the map, between the rail and the side panel; a phone: low, above the controls
+      style={[styles.chatWrap, desktop ? { top: 0, bottom: 0, left: rail, right: side, justifyContent: 'center' } : { bottom: 150 }]}
+    >
+      <PixelBox fill="rgba(14,22,50,0.96)" hi="#33498c" lo="#0c1430" style={[styles.chat, { width: Math.min(560, w - rail - side - 24) }]}>
         <View style={styles.chatHead}>
           <Image source={CHAD} style={[{ width: 44, height: 44 }, PIX]} fadeDuration={0} accessibilityLabel="Hardhat Chad" />
           <View style={{ flex: 1 }}>
@@ -348,7 +352,7 @@ export function ChadChat() {
             {qa.lesson != null ? <Btn small kind="gold" label="FULL LESSON" onPress={() => openUni(qa.lesson)} /> : null}
           </View>
         ) : (
-          <ScrollView style={{ maxHeight: desktop ? 220 : 170 }} contentContainerStyle={styles.chips} nestedScrollEnabled>
+          <ScrollView style={{ maxHeight: desktop ? 320 : 170 }} contentContainerStyle={styles.chips} nestedScrollEnabled>
             {ORE_QNA.map((x, i) => (
               <Pressable key={x.q} onPress={() => setPick(i)} accessibilityRole="button">
                 {(st) => (
