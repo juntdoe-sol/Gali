@@ -55,7 +55,7 @@ const defaultPresets = (): Preset[] => [
   { amount: '', perSpot: '0.0002', blocks: 'all', smartN: 25, rounds: 20 },
 ];
 
-export type DockTab = 'lite' | 'pro';
+export type DockTab = 'lite' | 'pro' | 'ai';
 export type LiteMode = 'all' | 'smart' | 'pick';
 
 export interface Run {
@@ -227,7 +227,7 @@ interface GameState {
   potAt: number;
   run: Run | null;
   /** live: the player's ORE automation (autopilot), when one exists */
-  autopilot: { balance: number; perSpot: number; runnable: boolean } | null;
+  autopilot: { balance: number; perSpot: number; runnable: boolean; ai?: boolean } | null;
   dockTab: DockTab;
   /** LITE's spot choice: all 25, Smart (random liteSmart spots) or the spots picked by hand. */
   liteMode: LiteMode;
@@ -276,6 +276,10 @@ interface GameState {
   refreshWallet: () => Promise<void>;
   /** live: close the autopilot and take its balance back (one wallet approval) */
   stopAutopilot: () => Promise<void>;
+  /** Gali AI: fund an ORE automation the AI plays. True when it went through. */
+  startAiMining: (depositSol: number, maxPerSpotSol: number) => Promise<boolean>;
+  /** Gali AI: pay 0.1 SOL for a week. The signature, or null when it did not go through. */
+  payAiPass: () => Promise<string | null>;
   /** TV pairing: fund an all-spots autopilot for a TV and top up the TV's fee key, in one approval. Resolves to the owner, or null. */
   startTvAutopilot: (perSpot: number, rounds: number, tv: PublicKey) => Promise<PublicKey | null>;
   airdrop: () => Promise<void>;
@@ -1013,7 +1017,7 @@ export const useGame = create<GameState>((set, get) => {
 
     toggleBlock: (i) => {
       const st = get();
-      if (st.phase !== 'mining' || st.pending || st.run) return;
+      if (st.phase !== 'mining' || st.pending || st.run || st.dockTab === 'ai') return;
       haptic.tap();
       // tapping a spot by hand means "I pick": LITE goes to Pick, the PRO preset to manual
       if (st.dockTab === 'lite') {
@@ -1047,7 +1051,7 @@ export const useGame = create<GameState>((set, get) => {
 
     shakePick: () => {
       const st = get();
-      if (st.phase !== 'mining' || st.pending || st.run || st.wallet.busy) return;
+      if (st.phase !== 'mining' || st.pending || st.run || st.wallet.busy || st.dockTab === 'ai') return;
       if (st.dockTab === 'lite') {
         // LITE stays LITE: shaking switches it to Smart and rolls new spots
         set({ liteMode: 'smart', selected: randomPick(st.liteSmart) });
@@ -1329,7 +1333,7 @@ export const useGame = create<GameState>((set, get) => {
           try {
             const a = await chain.withTimeout(board.readAutopilot(owner));
             if (get().wallet.owner === owner.toBase58()) {
-              set({ autopilot: a ? { balance: a.balance, perSpot: a.perSpot, runnable: a.runnable } : null });
+              set({ autopilot: a ? { balance: a.balance, perSpot: a.perSpot, runnable: a.runnable, ai: a.ai } : null });
               if (a) resumeAutopilot(a);
             }
           } catch {
@@ -1438,6 +1442,47 @@ export const useGame = create<GameState>((set, get) => {
       if (!run) return;
       set({ run: null });
       get().toast(run.automated ? 'Autopilot paused. Funds stay in ORE until you stop autopilot in the wallet panel' : 'Autopilot stopped', 'info');
+    },
+
+    startAiMining: async (depositSol, maxPerSpotSol) => {
+      const st = get();
+      if (st.wallet.busy) return false;
+      if (st.autopilot) {
+        st.toast('Autopilot is already on. Stop it first', 'info');
+        return false;
+      }
+      try {
+        const [board, owner] = await Promise.all([loadBoard(), ownerKey()]);
+        if (!owner) throw new Error('wallet disconnected');
+        setWallet({ busy: 'Approve in your wallet to fund Gali AI' });
+        await board.startAiMining(depositSol, maxPerSpotSol, owner);
+        set({ autopilot: { balance: depositSol, perSpot: maxPerSpotSol, runnable: false, ai: true } });
+        get().toast('Gali AI is on. It plays near the end of each round, and sits out rounds that are not worth it', 'good');
+        return true;
+      } catch (e) {
+        get().toast(errMsg(e), 'bad');
+        return false;
+      } finally {
+        setWallet({ busy: null });
+        void get().refreshWallet();
+      }
+    },
+
+    payAiPass: async () => {
+      const st = get();
+      if (st.wallet.busy) return null;
+      try {
+        const [board, owner] = await Promise.all([loadBoard(), ownerKey()]);
+        if (!owner) throw new Error('wallet disconnected');
+        setWallet({ busy: 'Approve in your wallet: 0.1 SOL for 7 days of Gali AI' });
+        return await board.buyAiPass(owner);
+      } catch (e) {
+        get().toast(errMsg(e), 'bad');
+        return null;
+      } finally {
+        setWallet({ busy: null });
+        void get().refreshWallet();
+      }
     },
 
     stopAutopilot: async () => {
