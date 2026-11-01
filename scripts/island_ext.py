@@ -512,6 +512,23 @@ def extend(I, ground, sprites):
             add('bush-' + 'abc'[n_bush % 3], x, y, 5)
             n_bush += 1
 
+    # --- smashables: pots, crates and barrels a miner can smash, or grab and throw (engine/engine.ts) ---
+    # the crates and barrels by the boardwalk become smashable, and pots go round the beaches and the campus
+    smash = []
+    for p in [p for p in props if p['s'] in ('prop-crate', 'prop-barrel')]:
+        props.remove(p)
+        smash.append({'k': p['s'][len('prop-'):], 'x': p['x'], 'y': p['y']})
+    for x, y in U.POTS:
+        smash.append({'k': 'pot', 'x': x, 'y': y})
+    n_pot = 0
+    for x, y in sites(4, 30):
+        if n_pot >= 12:
+            break
+        if free(x, y, 5) and all(math.hypot(x - q['x'], y - q['y']) > 30 for q in smash):
+            smash.append({'k': ('pot', 'crate', 'barrel', 'pot')[n_pot % 4], 'x': x, 'y': y})
+            placed.append((x, y, 6))
+            n_pot += 1
+
     # --- ships: new circuits that keep clear of the beach and the dock ---
     def sea_course(margin):
         cxx, cyy = EW / 2, EH / 2 - 8
@@ -550,6 +567,7 @@ def extend(I, ground, sprites):
         'pad': {'x': PAD_X, 'y': PAD_Y, 'size': PAD},
         'uni': U.meta(),
         'billboard': list(BILLBOARD),
+        'smash': smash,
         'walkable_px': int(walkable.sum()),
         'ring_px': int(ring.sum()),
     }
@@ -567,6 +585,7 @@ def shift_meta(meta, ext):
     meta['pad'] = ext['pad']
     meta['uni'] = ext['uni']
     meta['billboard'] = ext['billboard']
+    meta['smash'] = ext['smash']
     for c in meta['claims']:
         c['cx'] += ox
         c['cy'] += oy
@@ -583,7 +602,49 @@ def shift_meta(meta, ext):
     meta['lighthouse'] = {'x': meta['lighthouse']['x'] + ox, 'y': meta['lighthouse']['y'] + oy}
     meta['islets'] = [dict(i, x=i['x'] + ox, y=i['y'] + oy) for i in meta['islets']]
     meta['solid'] = solid_blocks(meta)
+    meta['rides'] = ride_homes(meta)
     return meta
+
+
+def ride_homes(meta, n=8):
+    """Where the island's scooters and carts park (engine/game: game/islandRides.ts): open sand round the helipad,
+    off the pad, clear of buildings, props and smashables, spread out. Carts and scooters alternate by id."""
+    cols = meta['cols']
+    grid = meta['grid']
+    solid = set(map(tuple, meta['solid']))
+    px, py, ps = meta['pad']['x'], meta['pad']['y'], meta['pad']['size']
+    things = [(p['x'], p['y']) for p in meta['props']] + [(q['x'], q['y']) for q in meta.get('smash', [])]
+    def ok(x, y):
+        for dy in (-6, 0, 3):
+            for dx in (-9, 0, 9):
+                bx, by = (x + dx) // B, (y + dy) // B
+                if grid[by * cols + bx] != '.' or (bx, by) in solid:
+                    return False
+        if px - ps / 2 - 10 < x < px + ps / 2 + 10 and py - ps / 2 - 10 < y < py + ps / 2 + 10:
+            return False
+        # and keep the boardwalk down to the dock clear
+        if abs(x - px) < 24 and y > py:
+            return False
+        # room round it: no building footprint close by, and well clear of the helicopter and the signboard
+        for dy in range(-12, 7, 3):
+            for dx in range(-15, 16, 3):
+                if ((x + dx) // B, (y + dy) // B) in solid:
+                    return False
+        big = [(p['x'], p['y']) for p in meta['props'] if p['s'] == 'prop-helicopter'] + ([tuple(meta['billboard'])] if meta.get('billboard') else [])
+        if any(math.hypot(x - a, y - b) < 34 for a, b in big):
+            return False
+        bb = meta.get('billboard')
+        if bb and abs(x - bb[0]) < 46 and bb[1] - 56 < y < bb[1] + 10:
+            return False
+        return all(math.hypot(x - a, (y - b) * 1.3) > 12 for a, b in things)
+    cand = sorted(((math.hypot(x - px, y - py), x, y) for y in range(int(py - 90), int(py + 90), 3) for x in range(int(px - 110), int(px + 110), 3) if ok(x, y)))
+    out = []
+    for _, x, y in cand:
+        if all(math.hypot(x - a, y - b) > 16 for a, b in out):
+            out.append((x, y))
+        if len(out) >= n:
+            break
+    return [[x, y] for x, y in out]
 
 
 # Buildings you cannot walk through: (x0, x1, y0, y1) in px from each prop's foot, its footprint on the ground.

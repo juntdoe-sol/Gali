@@ -30,6 +30,8 @@ BOARD = (632, 151)
 LIB = (546, 108)
 OBS = (655, 108)
 GATE = (600, 197)
+# pots round the campus, to smash or throw
+POTS = [(556, 131), (644, 131), (586, 183), (614, 183)]
 
 STONE = ['#3e3a44', '#6a6470', '#9a94a0', '#c8c2cc', '#ece6ee']
 COP = ['#1e4a4a', '#2e7470', '#46a69a', '#7cd8c4']

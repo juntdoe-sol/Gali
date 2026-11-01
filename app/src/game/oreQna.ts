@@ -12,6 +12,9 @@ export interface Qna {
 }
 
 export const CHAD_ASK = 'Do you have any questions about ORE?';
+/** after a yes, and after a no */
+export const CHAD_PICK = 'Good. Ask away, kid.';
+export const CHAD_BYE = 'Suit yourself. I will be right here if you get stuck.';
 
 export const ORE_QNA: Qna[] = [
   {
