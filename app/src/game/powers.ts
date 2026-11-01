@@ -10,7 +10,8 @@
  * weapon's reach and cooldown, applies its own passive and guard, and tells everyone its real HP.
  */
 
-export type Weapon = 'swing' | 'dash' | 'slam' | 'ore' | 'splash' | 'pet' | 'boss' | 'mob' | 'sting' | 'spin';
+/** 'prop': a pot, crate or barrel someone grabbed and threw (lobby and island) */
+export type Weapon = 'swing' | 'dash' | 'slam' | 'ore' | 'splash' | 'pet' | 'boss' | 'mob' | 'sting' | 'spin' | 'prop';
 export type ActiveId = 'dash' | 'slam' | 'guard' | 'splash' | 'spin' | 'mend';
 export type PassiveId = 'skin' | 'pet';
 export type PowerId = ActiveId | PassiveId;
@@ -45,9 +46,9 @@ export const PASSIVES: PassiveId[] = ['skin', 'pet'];
 export const unlocked = (p: PowerId, lvl: number) => lvl >= POWERS[p].lvl;
 
 /** How far each weapon reaches, map px between the attacker (or the shard) and the victim's feet. */
-export const REACH: Record<Weapon, number> = { swing: 22, dash: 52, slam: 34, ore: 26, splash: 26, pet: 30, boss: 40, mob: 30, sting: 40, spin: 30 };
+export const REACH: Record<Weapon, number> = { swing: 22, dash: 52, slam: 34, ore: 26, splash: 26, pet: 30, boss: 40, mob: 30, sting: 40, spin: 30, prop: 22 };
 /** The least time between two hits of the same weapon from one attacker. */
-export const GAP: Record<Weapon, number> = { swing: 420, dash: POWERS.dash.cd - 500, slam: POWERS.slam.cd - 500, ore: 350, splash: 120, pet: POWERS.pet.cd - 300, boss: 900, mob: 900, sting: 300, spin: POWERS.spin.cd - 500 };
+export const GAP: Record<Weapon, number> = { swing: 420, dash: POWERS.dash.cd - 500, slam: POWERS.slam.cd - 500, ore: 350, splash: 120, pet: POWERS.pet.cd - 300, boss: 900, mob: 900, sting: 300, spin: POWERS.spin.cd - 500, prop: 700 };
 
 /** The arena's level bonus: +1% damage per 2 levels above 1, never more than +20%. */
 export const levelBonus = (lvl: number) => 1 + Math.min(0.2, Math.max(0, Math.floor((lvl - 1) / 2)) / 100);
@@ -79,6 +80,7 @@ export function baseDamage(w: Weapon, attacker: string, seq: number, attackerLvl
     : w === 'spin' ? 9
     : w === 'sting' ? GUARD_STING
     : w === 'mob' ? 6
+    : w === 'prop' ? 12
     : 14; // the boss
   return arena && w !== 'boss' && w !== 'mob' && w !== 'sting' ? Math.round(d * levelBonus(attackerLvl)) : d;
 }

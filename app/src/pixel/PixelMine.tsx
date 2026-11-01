@@ -23,7 +23,7 @@ import { GUTTER, layoutNow, TOP_H } from '../ui/layout';
 import { atlasSource } from './atlasSource';
 import GameView, { type GameRef } from './GameView';
 import { useView } from './view';
-import { nearChad, openUni } from '../ui/University';
+import { chadAt, nearChad, openUni } from '../ui/University';
 import { useLobby } from '../game/lobby';
 import { brawlSnap, enterScope, initBrawl, jump, setMyPos, swing } from '../game/brawl';
 import { initArena, useArena } from '../game/arena';
@@ -314,6 +314,9 @@ export default function PixelMine() {
         break;
       case 'chad':
         nearChad(e.near);
+        break;
+      case 'chadAt':
+        chadAt(e.x, e.y);
         break;
       case 'me': {
         setMyPos('island', e.x, e.y);
