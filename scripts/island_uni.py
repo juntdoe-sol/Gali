@@ -24,7 +24,9 @@ CX, CY, RX, RY = 600, 122, 94, 66
 # the University's foot (centre of the bottom step), the plaza, Chad
 UNI = (600, 100)
 PLAZA = (600, 141, 15)
-CHAD = (617, 112)
+CHAD = (614, 152)
+# his notice board: the miners' tips
+BOARD = (632, 151)
 LIB = (546, 108)
 OBS = (655, 108)
 GATE = (600, 197)
@@ -431,9 +433,9 @@ def place(add, light, smoke, sprites):
     add('observatory', *OBS)
     add('uni-statue', PLAZA[0], PLAZA[1] + 2)
     add('uni-gate', *GATE)
-    add('notice', CHAD[0] + 13, CHAD[1] - 2)
-    for dx in (-22, 22):
-        add('bench', PLAZA[0] + dx, PLAZA[1] + 12)
+    add('notice', *BOARD)
+    for dx in (-18, 18):
+        add('bench', PLAZA[0] + dx, 170)
     # lamp posts along the main walk and the cross walk
     for x, y in ((591, 120), (609, 120), (566, 172), (634, 172), (562, 136), (638, 136), (530, 136), (670, 136)):
         add('lamp-post', x, y)
@@ -455,12 +457,13 @@ def place(add, light, smoke, sprites):
     light(LIB[0], LIB[1] - 8, 20, '#ffc98a', 0.1)
     light(OBS[0], OBS[1] - 12, 18, '#c8f0ff', 0.1)
     light(GATE[0], GATE[1] - 22, 16, '#ffb040', 0.3)
-    light(CHAD[0] + 5, CHAD[1] - 11, 5, '#ff8a2a', 0.7)
+    light(CHAD[0] - 3, CHAD[1] - 7, 5, '#ff8a2a', 0.7)
 
 
 def meta():
     return {
         'chad': [CHAD[0], CHAD[1]],
+        'board': [BOARD[0], BOARD[1]],
         'cig': [CHAD[0] + 5, CHAD[1] - 11],
         'door': [UNI[0], UNI[1] - 4],
         'label': ['UNIVERSITY OF ORE', CX, CY - 72],
