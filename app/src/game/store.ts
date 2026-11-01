@@ -8,7 +8,7 @@ import { followOreFeed, freshOre } from './oreFeed';
 import type { OreFeedFrame } from './relay';
 import { announce, announceXp } from './lobby';
 import {
-  chainReady, clockOffsetMs, isPickWalletError, isRateLimited, LIVE_MAX_ROUND_SOL, MAX_SESSION_FUND_SOL, NOTHING_CLAIMABLE,
+  chainReady, clockOffsetMs, isPickWalletError, isRateLimited, MAX_SESSION_FUND_SOL, NOTHING_CLAIMABLE,
   onChainMode, oreLive, PLATFORM_FEE_BPS, REFINING_FEE, short,
   type ChainPlayer, type Claimable, type ShopConfig, type WebWalletInfo,
 } from '../chain/light';
@@ -347,7 +347,6 @@ const errMsg = (e: unknown) => {
   const m = String((e as Error)?.message ?? e);
   if (/RoundLocked/.test(m)) return 'Round is locking. Try next round';
   if (/AutopilotOn/.test(m)) return 'Autopilot is running. Stop it first to pick by hand';
-  if (/LiveCap/.test(m)) return `Live rounds are capped at ${LIVE_MAX_ROUND_SOL} SOL`;
   if (/Paused/.test(m)) return 'Gali is paused for maintenance. Try again soon';
   if (/insufficient|0x1\b/i.test(m)) return 'Not enough balance';
   if (/declined|cancel|rejected/i.test(m)) return 'Cancelled in wallet';
@@ -676,7 +675,6 @@ export const useGame = create<GameState>((set, get) => {
     set({ selected: idx });
     try {
       if (live) {
-        if (total > LIVE_MAX_ROUND_SOL + 1e-9) throw new Error('LiveCap');
         if (!run.automated && st.wallet.sol < total + LIVE_FEE_SOL) throw new Error('insufficient SOL');
         const [board, { maskToSquares }] = await Promise.all([loadBoard(), loadOreTx()]);
         const displayed = await ownerKey();

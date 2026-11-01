@@ -303,7 +303,8 @@ const test = (name, fn) => {
 
   // ---------------- the hourly tune ----------------
   test("Claude's answer is clamped and step-limited; the note is trimmed", () => {
-    const { params, note } = T.apply({ minEdge: 0.9, crowdBuffer: 0.25, maxRoundShare: 1, targetSlotsLeft: 5, note: '  Kept   it safe.\n' }, P);
+    const { params, note, learned } = T.apply({ minEdge: 0.9, crowdBuffer: 0.25, maxRoundShare: 1, targetSlotsLeft: 5, note: '  Kept   it safe.\n', learned: 'x'.repeat(2000) }, P);
+    assert.equal(learned.length, 900, 'the hourly log entry is capped');
     assert.ok(params.minEdge <= P.minEdge + 0.12 + 1e-9);
     assert.ok(params.maxRoundShare <= P.maxRoundShare + 0.06 + 1e-9);
     assert.ok(params.targetSlotsLeft >= S.BOUNDS.targetSlotsLeft[0]);
