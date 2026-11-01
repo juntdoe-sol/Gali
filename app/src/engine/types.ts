@@ -125,4 +125,6 @@ export type EngineEvent =
   /** tutorial: your miner reached a mining spot */
   | { t: 'arrived'; claim: number }
   /** Hardhat Chad or the University of ORE's door: open the lessons */
-  | { t: 'uni' };
+  | { t: 'uni' }
+  /** your miner walked up to Hardhat Chad (near) or away from him */
+  | { t: 'chad'; near: boolean };

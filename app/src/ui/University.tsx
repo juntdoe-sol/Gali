@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react';
 import { Image, Linking, Pressable, ScrollView, StyleSheet, View, type ImageStyle } from 'react-native';
 import { create } from 'zustand';
 import { COLORS } from '../game/constants';
+import { CHAD_ASK, ORE_QNA } from '../game/oreQna';
 import { loadJson, saveJson } from '../game/storage';
 import { Btn, PixelBox, Scrim, T, Window } from './kit';
 import { useLayout } from './layout';
@@ -16,8 +17,10 @@ import { useLayout } from './layout';
 const CHAD = require('../../assets/ui/chad.png');
 const PIX = { imageRendering: 'pixelated' } as ImageStyle;
 
-export const useUni = create<{ open: boolean }>(() => ({ open: false }));
-export const openUni = () => useUni.setState({ open: true });
+export const useUni = create<{ open: boolean; start: number; near: boolean }>(() => ({ open: false, start: 0, near: false }));
+export const openUni = (start = 0) => useUni.setState({ open: true, start });
+/** the engine says your miner walked up to Chad, or away */
+export const nearChad = (near: boolean) => useUni.setState({ near });
 
 const SOURCES = {
   bw: { name: 'Blockworks: ORE dashboard primer', url: 'https://blockworks.com/insights/ore-dashboard-primer' },
@@ -138,6 +141,7 @@ const READ_KEY = 'gali-uni-read-v1';
 
 export function University() {
   const open = useUni((s) => s.open);
+  const start = useUni((s) => s.start);
   const { w } = useLayout();
   const wide = w >= 700;
   const [sel, setSel] = useState<number | null>(null);
@@ -146,8 +150,8 @@ export function University() {
     void loadJson<number[]>(READ_KEY, []).then((r) => setRead(Array.isArray(r) ? r : []));
   }, []);
   useEffect(() => {
-    if (open) setSel(wide ? 0 : null);
-  }, [open, wide]);
+    if (open) setSel(start > 0 ? start : wide ? 0 : null);
+  }, [open, wide, start]);
   useEffect(() => {
     if (sel == null || read.includes(sel)) return;
     const next = [...read, sel];
@@ -274,4 +278,76 @@ const styles = StyleSheet.create({
   hello: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   say: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10 },
   nav: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
+  chatWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center', zIndex: 40 },
+  chat: { padding: 10, gap: 8 },
+  chatHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  chatBtns: { flexDirection: 'row', gap: 8, justifyContent: 'flex-end' },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  chip: { paddingHorizontal: 9, paddingVertical: 6 },
 });
+
+/**
+ * Walk up to Hardhat Chad and he asks if you have questions: a chat card with ready questions about ORE.
+ * Pick one and he answers; from an answer you can ask another or open the full lesson in the University.
+ * Closing it keeps it shut until you walk away from him and back.
+ */
+export function ChadChat() {
+  const near = useUni((s) => s.near);
+  const uniOpen = useUni((s) => s.open);
+  const { w, desktop } = useLayout();
+  const [pick, setPick] = useState<number | null>(null);
+  const [shut, setShut] = useState(false);
+  useEffect(() => {
+    if (!near) {
+      setShut(false);
+      setPick(null);
+    }
+  }, [near]);
+  if (!near || shut || uniOpen) return null;
+  const qa = pick != null ? ORE_QNA[pick] : null;
+  return (
+    <View pointerEvents="box-none" style={[styles.chatWrap, { bottom: desktop ? 96 : 150 }]}>
+      <PixelBox fill="rgba(14,22,50,0.96)" hi="#33498c" lo="#0c1430" style={[styles.chat, { width: Math.min(520, w - 24) }]}>
+        <View style={styles.chatHead}>
+          <Image source={CHAD} style={[{ width: 44, height: 44 }, PIX]} fadeDuration={0} accessibilityLabel="Hardhat Chad" />
+          <View style={{ flex: 1 }}>
+            <T v="tiny" style={{ fontSize: 9, color: COLORS.gold }}>
+              HARDHAT CHAD
+            </T>
+            <T v="bold" style={{ fontSize: 15, lineHeight: 20 }}>
+              {qa ? qa.a : CHAD_ASK}
+            </T>
+          </View>
+          <Pressable onPress={() => setShut(true)} accessibilityRole="button" accessibilityLabel="Close chat" hitSlop={10}>
+            <T v="display" style={{ fontSize: 20, lineHeight: 20, color: COLORS.muted }}>
+              X
+            </T>
+          </Pressable>
+        </View>
+        {qa ? (
+          <View style={styles.chatBtns}>
+            <Btn small label="ASK ANOTHER" onPress={() => setPick(null)} />
+            {qa.lesson != null ? <Btn small kind="gold" label="FULL LESSON" onPress={() => openUni(qa.lesson)} /> : null}
+          </View>
+        ) : (
+          <ScrollView style={{ maxHeight: desktop ? 220 : 170 }} contentContainerStyle={styles.chips} nestedScrollEnabled>
+            {ORE_QNA.map((x, i) => (
+              <Pressable key={x.q} onPress={() => setPick(i)} accessibilityRole="button">
+                {(st) => (
+                  <PixelBox fill={(st as { hovered?: boolean }).hovered ? '#1a2850' : '#0b1430'} hi="#22356f" lo="#04060f" style={styles.chip}>
+                    <T style={{ fontSize: 13, lineHeight: 16 }}>{x.q}</T>
+                  </PixelBox>
+                )}
+              </Pressable>
+            ))}
+            <Pressable onPress={() => openUni(0)} accessibilityRole="button">
+              <PixelBox fill="rgba(255,201,60,0.16)" hi={COLORS.gold} lo="#04060f" style={styles.chip}>
+                <T style={{ fontSize: 13, lineHeight: 16, color: COLORS.gold }}>Open the University lessons</T>
+              </PixelBox>
+            </Pressable>
+          </ScrollView>
+        )}
+      </PixelBox>
+    </View>
+  );
+}

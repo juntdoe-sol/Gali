@@ -45,7 +45,7 @@ import { PeerCard } from './ui/World';
 import { CaveScreen } from './ui/Cave';
 import { ArenaScreen } from './ui/Arena';
 import { BRAWLORE, BrawlOreScreen, CalloutPopup } from './ui/BrawlOre';
-import { University } from './ui/University';
+import { ChadChat, University } from './ui/University';
 import { readFightLink, useCallout } from './game/brawl2/callout';
 import { useArena } from './game/arena';
 import { LobbyBack, LobbyScreen, SharedChat } from './ui/Lobby';
@@ -328,6 +328,7 @@ function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTa
         {!guest && <CaveScreen />}
         {BRAWLORE ? <BrawlOreScreen /> : <ArenaScreen />}
         {BRAWLORE ? <CalloutPopup /> : null}
+        <ChadChat />
         <University />
         <DmSheet />
         <MotherlodeAlert />
