@@ -24,10 +24,12 @@ CX, CY, RX, RY = 600, 122, 94, 66
 # the University's foot (centre of the bottom step), the plaza, Chad
 UNI = (600, 100)
 PLAZA = (600, 141, 15)
-CHAD = (617, 112)
+CHAD = (614, 152)
+# his notice board: the miners' tips
+BOARD = (632, 151)
 LIB = (546, 108)
 OBS = (655, 108)
-GATE = (600, 186)
+GATE = (600, 197)
 
 STONE = ['#3e3a44', '#6a6470', '#9a94a0', '#c8c2cc', '#ece6ee']
 COP = ['#1e4a4a', '#2e7470', '#46a69a', '#7cd8c4']
@@ -85,9 +87,9 @@ def university():
     for k in range(7):
         s.hline(13 + k * 2, 42 - k * 2, 23 - k, STONE[3] if k < 6 else STONE[4])
     s.hline(13, 42, 23, STONE[4])
-    for dx, dy, c in ((0, -1, GLOW[2]), (-1, 0, GLOW[1]), (1, 0, GLOW[1]), (0, 0, GLOW[3]), (0, 1, GLOW[0])):
-        s.set(27 + dx, 20 + dy, c)
-        s.set(28 + dx, 20 + dy, c)
+    # the ORE mark on the gable: white on a dark disc
+    s.ellipse(28, 20.5, 3.6, 3.4, '#14121c')
+    ore_mark(s, 26, 18, 5)
     s.rect(21, 10, 14, 7, STONE[3])
     s.vline(21, 10, 16, STONE[1])
     s.vline(34, 10, 16, STONE[1])
@@ -192,33 +194,66 @@ def statue():
     return [s], 6, 15
 
 
+def ore_mark(s, x0, y0, n=5, col='#ffffff'):
+    """The ORE logo (a ring with a slash) at n x n pixels, read off the real logo file."""
+    import os
+    from PIL import Image
+    here = os.path.dirname(os.path.abspath(__file__))
+    im = Image.open(os.path.join(here, 'ore-logo-60.png')).convert('L').resize((n, n), Image.LANCZOS)
+    for y in range(n):
+        for x in range(n):
+            if im.getpixel((x, y)) > 110:
+                s.set(x0 + x, y0 + y, col)
+
+
+def sign_text(s, text, cx, y, col):
+    """Gali's 5px map font (font.py), centred on cx."""
+    from font import G
+    glyphs = [G.get(ch) for ch in text]
+    w = sum((len(g[0]) if g else 2) + 1 for g in glyphs) - 1
+    x = cx - w // 2
+    for g in glyphs:
+        if not g:
+            x += 3
+            continue
+        for gy, row in enumerate(g):
+            for gx, ch in enumerate(row):
+                if ch == '#':
+                    s.set(x + gx, y + gy, col)
+        x += len(g[0]) + 1
+
+
 def gate():
-    s = Spr(36, 26)
-    s.shadow(4, 25, 3.5, 1)
-    s.shadow(31, 25, 3.5, 1)
-    for px in (1, 29):
-        s.rect(px, 8, 6, 17, STONE[2])
-        s.vline(px, 8, 24, STONE[3])
-        s.vline(px + 5, 8, 24, STONE[1])
-        s.hline(px - 1, px + 6, 7, STONE[4])
-        s.hline(px - 1, px + 6, 8, STONE[1])
-        s.set(px + 2, 5, GLOW[2])
-        s.set(px + 3, 5, GLOW[1])
-        s.set(px + 2, 6, GLOW[1])
-        s.set(px + 3, 6, GLOW[0])
-        s.set(px + 2, 4, GLOW[3])
-    for x in range(7, 29):                     # iron arch
-        y = 7 - round(math.sin((x - 7) / 21 * math.pi) * 5)
+    """Two stone pillars with a signboard across the top: UNIVERSITY OF ORE."""
+    w, h = 64, 36
+    s = Spr(w, h)
+    s.shadow(9.5, 35, 4, 1)
+    s.shadow(54.5, 35, 4, 1)
+    for px in (6, 51):
+        s.rect(px, 15, 7, 20, STONE[2])
+        s.vline(px, 15, 34, STONE[3])
+        s.vline(px + 6, 15, 34, STONE[1])
+        for yy in (20, 26):
+            s.hline(px + 1, px + 5, yy, STONE[1])
+        s.hline(px - 1, px + 7, 34, STONE[1])
+    # an iron arch under the board
+    for x in range(13, 51):
+        y = 22 - round(math.sin((x - 13) / 37 * math.pi) * 4)
         s.set(x, y, '#2a2f3a')
         s.set(x, y + 1, '#4a5260')
-        if x % 3 == 0:
-            s.vline(x, y + 2, 8, '#2a2f3a')
-    s.hline(7, 28, 8, '#2a2f3a')
-    for dx, dy, c in ((0, -1, GLOW[3]), (-1, 0, GLOW[2]), (1, 0, GLOW[1]), (0, 0, GLOW[2]), (0, 1, GLOW[0])):
-        s.set(17 + dx, 1 + dy, c)
-        s.set(18 + dx, 1 + dy, c)
+    # the board: dark wood frame, navy face, gold letters, the ORE mark at each end
+    s.rect(0, 1, 64, 15, '#3a2616')
+    s.hline(1, 62, 1, '#6a4426')
+    s.rect(2, 3, 60, 11, '#1c2a52')
+    s.hline(2, 61, 3, '#2a3c6e')
+    sign_text(s, 'UNIVERSITY', 32, 4, '#ffd84a')
+    sign_text(s, 'OF ORE', 32, 10, '#ffd84a')
+    for mx in (4, 55):
+        s.ellipse(mx + 2.5, 8.5, 3, 3, '#0a0e1c')
+        ore_mark(s, mx, 6, 5)
+    # lamps on the pillar tops
     s.outline(rgb('#1c1820'))
-    return [s], 18, 25
+    return [s], 32, 35
 
 
 def bench():
@@ -329,7 +364,6 @@ def sprites():
     add('hedge', hedge())
     add('lamp-post', lamp_post())
     add('notice', notice_board())
-    add('chad', ([chad(f) for f in range(3)], 5, 17), ms=420)
     return out
 
 
@@ -344,7 +378,7 @@ def mask(xx, yy, noise):
 
 def keep_clear(xx, yy):
     """Where the beach props (palms, umbrellas) must not go: the lawn and a bit round it."""
-    return ((xx - CX) / (RX + 6)) ** 2 + ((yy - CY) / (RY + 6)) ** 2 < 1
+    return (((xx - CX) / (RX + 6)) ** 2 + ((yy - CY) / (RY + 6)) ** 2 < 1) | ((np.abs(xx - GATE[0]) < 40) & (yy > GATE[1] - 40) & (yy < GATE[1] + 14))
 
 
 LAWN = [rgb(c)[:3] for c in ('#3f7a30', '#4c8a38', '#58983f', '#66a849', '#7cbc58')]
@@ -354,7 +388,7 @@ PATH = [rgb(c)[:3] for c in ('#8f8676', '#aaa08e', '#c4baa6', '#d8cfbb')]
 def _paths(xx, yy):
     """The stone paths: the main walk, the cross walk, the plaza, the walks to the side buildings."""
     px, py, pr = PLAZA
-    main = (np.abs(xx - UNI[0]) <= 6) & (yy >= UNI[1] - 2) & (yy <= GATE[1] + 16)
+    main = (np.abs(xx - UNI[0]) <= 6) & (yy >= UNI[1] - 2) & (yy <= GATE[1] + 14)
     cross = (np.abs(yy - py) <= 3) & (np.abs(xx - CX) <= 78)
     plaza = np.hypot(xx - px, (yy - py) * 1.15) <= pr
     lib = (np.abs(xx - LIB[0]) <= 3) & (yy >= LIB[1] - 1) & (yy <= py)
@@ -399,12 +433,11 @@ def place(add, light, smoke, sprites):
     add('observatory', *OBS)
     add('uni-statue', PLAZA[0], PLAZA[1] + 2)
     add('uni-gate', *GATE)
-    add('chad', *CHAD)
-    add('notice', CHAD[0] + 13, CHAD[1] - 2)
-    for dx in (-22, 22):
-        add('bench', PLAZA[0] + dx, PLAZA[1] + 12)
+    add('notice', *BOARD)
+    for dx in (-18, 18):
+        add('bench', PLAZA[0] + dx, 170)
     # lamp posts along the main walk and the cross walk
-    for x, y in ((591, 120), (609, 120), (591, 168), (609, 168), (562, 136), (638, 136), (530, 136), (670, 136)):
+    for x, y in ((591, 120), (609, 120), (566, 172), (634, 172), (562, 136), (638, 136), (530, 136), (670, 136)):
         add('lamp-post', x, y)
         light(x, y - 12, 22, '#ffd98a', 0.15)
     # hedges framing the front lawn
@@ -424,12 +457,13 @@ def place(add, light, smoke, sprites):
     light(LIB[0], LIB[1] - 8, 20, '#ffc98a', 0.1)
     light(OBS[0], OBS[1] - 12, 18, '#c8f0ff', 0.1)
     light(GATE[0], GATE[1] - 22, 16, '#ffb040', 0.3)
-    light(CHAD[0] + 5, CHAD[1] - 11, 5, '#ff8a2a', 0.7)
+    light(CHAD[0] - 3, CHAD[1] - 7, 5, '#ff8a2a', 0.7)
 
 
 def meta():
     return {
         'chad': [CHAD[0], CHAD[1]],
+        'board': [BOARD[0], BOARD[1]],
         'cig': [CHAD[0] + 5, CHAD[1] - 11],
         'door': [UNI[0], UNI[1] - 4],
         'label': ['UNIVERSITY OF ORE', CX, CY - 72],

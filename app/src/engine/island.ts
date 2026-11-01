@@ -27,6 +27,15 @@ const GRID: string = ISLE.grid;
 const cell = (cx: number, cy: number) =>
   cx < 0 || cy < 0 || cx >= COLS || cy >= ROWS ? '~' : GRID[cy * COLS + cx];
 
+/**
+ * Blocks under a building's footprint (scripts/island_ext.py FOOTPRINTS): nobody walks through the University, the
+ * smelter or the lighthouse. They still belong to their claim; they are only closed to feet.
+ */
+const SOLID = new Uint8Array(COLS * ROWS);
+for (const [bx, by] of ((ISLE as unknown as { solid?: number[][] }).solid ?? [])) if (bx >= 0 && by >= 0 && bx < COLS && by < ROWS) SOLID[by * COLS + bx] = 1;
+/** A block a miner may stand on: land, and no building on it. */
+export const walkBlock = (cx: number, cy: number) => cell(cx, cy) !== '~' && !SOLID[cy * COLS + cx];
+
 /** The claim occupying a block, or -1 for open ground and water. */
 export function ownerOf(cx: number, cy: number): number {
   const ch = cell(cx, cy);
@@ -78,8 +87,7 @@ export function claimForTap(x: number, y: number): number {
   return best;
 }
 
-export const isLand = (x: number, y: number) =>
-  cell(Math.floor(x / BLOCK), Math.floor(y / BLOCK)) !== '~';
+export const isLand = (x: number, y: number) => walkBlock(Math.floor(x / BLOCK), Math.floor(y / BLOCK));
 
 /**
  * The closest walkable point to somewhere a player tapped.
@@ -94,8 +102,7 @@ export function toLand(x: number, y: number): [number, number] {
   // Inland by one block, not the first block of shore: standing on the waterline
   // reads as standing in the sea, because the drawn coast overlaps it.
   const solid = (cx: number, cy: number) =>
-    cell(cx, cy) !== '~' && cell(cx - 1, cy) !== '~' && cell(cx + 1, cy) !== '~' &&
-    cell(cx, cy - 1) !== '~' && cell(cx, cy + 1) !== '~';
+    walkBlock(cx, cy) && walkBlock(cx - 1, cy) && walkBlock(cx + 1, cy) && walkBlock(cx, cy - 1) && walkBlock(cx, cy + 1);
   let shore: [number, number] | null = null;
   for (let r = 1; r < Math.max(COLS, ROWS); r++) {
     for (let dy = -r; dy <= r; dy++) {
@@ -103,7 +110,7 @@ export function toLand(x: number, y: number): [number, number] {
         if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
         const cx = gx + dx;
         const cy = gy + dy;
-        if (cell(cx, cy) === '~') continue;
+        if (!walkBlock(cx, cy)) continue;
         const at: [number, number] = [cx * BLOCK + BLOCK / 2, cy * BLOCK + BLOCK / 2];
         if (solid(cx, cy)) return at;
         shore = shore ?? at;
@@ -120,7 +127,7 @@ export function openSpot(): [number, number] {
   for (let tries = 0; tries < 60; tries++) {
     const cx = Math.floor(Math.random() * COLS);
     const cy = Math.floor(Math.random() * ROWS);
-    if (cell(cx, cy) === '.') return [cx * BLOCK + BLOCK / 2, cy * BLOCK + BLOCK / 2];
+    if (cell(cx, cy) === '.' && walkBlock(cx, cy)) return [cx * BLOCK + BLOCK / 2, cy * BLOCK + BLOCK / 2];
   }
   return ISLE.home as [number, number];
 }

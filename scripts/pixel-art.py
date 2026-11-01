@@ -134,7 +134,12 @@ def main():
     os.makedirs(pub, exist_ok=True)
     import shutil
     shutil.copyfile(os.path.join(OUT, 'atlas.png'), os.path.join(pub, 'atlas.png'))
-    art = {'atlas': {'size': size, 'rects': rects}, 'island': island_meta, 'actors': actor_meta, 'font': font_meta}
+    # the atlas's own fingerprint: the web build asks for /pixel/atlas.png?v=<this>, so a browser holding an old
+    # copy fetches the new one the moment new art ships (the file name itself never changes)
+    import hashlib
+    with open(os.path.join(OUT, 'atlas.png'), 'rb') as fh:
+        ver = hashlib.md5(fh.read()).hexdigest()[:10]
+    art = {'atlas': {'size': size, 'rects': rects, 'v': ver}, 'island': island_meta, 'actors': actor_meta, 'font': font_meta}
     os.makedirs(os.path.dirname(ART_JSON), exist_ok=True)
     with open(ART_JSON, 'w') as f:
         json.dump(art, f, separators=(',', ':'))
