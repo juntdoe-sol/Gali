@@ -209,6 +209,8 @@ function wire() {
         useWorld.setState((s) => ({ emotes: { ...s.emotes, [id]: { emoji: e, at: Date.now() } } }));
     })
     .on('broadcast', { event: 'bx' }, ({ payload }) => roomHooks.onBx?.('island', payload))
+    .on('broadcast', { event: 'rd' }, ({ payload }) => islandRideHooks.onRd?.(payload))
+    .on('broadcast', { event: 'rds' }, ({ payload }) => islandRideHooks.onRds?.(payload))
     .on('broadcast', { event: 'bye' }, ({ payload }) => {
       const id = payload?.id;
       if (typeof id !== 'string') return;
@@ -290,6 +292,9 @@ function onState(p: any) {
   };
   useWorld.setState((s) => ({ peers: { ...s.peers, [id]: av } }));
   if (p.bw !== undefined) roomHooks.onBw?.('island', id, p.bw);
+  // the island's rides: someone new (tell them where the rides are), and the ride they are on, if any
+  if (!prev) islandRideHooks.onHi?.(id);
+  islandRideHooks.onPeer?.(id, p.rd, av.x, av.y, av.facing);
   // identity claim: wallet + session key + signature over a fresh timestamp
   if (typeof p.wallet === 'string' && typeof p.session === 'string' && typeof p.sig === 'string' && typeof p.ts === 'number') {
     if (Math.abs(Date.now() - p.ts) > 120_000) return;
@@ -349,6 +354,8 @@ export function publishMe(me: MeState, identity: { wallet: string | null; sessio
   };
   const bw = roomHooks.myBw?.();
   if (bw) payload.bw = bw;
+  const rd = islandRideHooks.myRide?.();
+  if (rd !== undefined) payload.rd = rd;
   const key = JSON.stringify(payload);
   if (now - lastSent < SEND_MS || (key === lastKey && now - lastSent < BEAT_MS)) return;
   // the connected wallet, so others can message it (verified separately below when a session key signs it)
@@ -370,6 +377,24 @@ export function publishMe(me: MeState, identity: { wallet: string | null; sessio
   void channel.send({ type: 'broadcast', event: 'state', payload });
 }
 
+
+/**
+ * The island's scooters and carts (game/islandRides.ts) ride this room: who got on or off ('rd'), a snapshot for
+ * newcomers ('rds'), and the ride id in each position update. Hooks, so this file does not import that one.
+ */
+export const islandRideHooks: {
+  onRd?: (p: unknown) => void;
+  onRds?: (p: unknown) => void;
+  onHi?: (id: string) => void;
+  onPeer?: (id: string, rd: unknown, x: number, y: number, f: 1 | -1) => void;
+  myRide?: () => number | undefined;
+} = {};
+/** Send a ride message to everyone on the island. False when the room is not joined. */
+export function sendWorldRide(event: 'rd' | 'rds', payload: Record<string, unknown>): boolean {
+  if (!channel || useWorld.getState().status !== 'online') return false;
+  void channel.send({ type: 'broadcast', event, payload });
+  return true;
+}
 
 /** Send a Brawl message to everyone on the island. False when the room is not joined. */
 export function sendWorldBx(payload: Record<string, unknown>): boolean {

@@ -24,8 +24,10 @@ import { IS_HOLLOW } from '../game/season';
 import type { EngineEvent, Look, PeerView, Pose, Snapshot } from './types';
 import { Water } from './water';
 import { drawBillboard } from './marketArt';
+import { drawRide, RIDE_LIFT } from './rideArt';
+import { drawFlight, drawProp, SMASH_COLORS, THROW_MS, type Flight, type PropKind } from './carry';
 import { drawHp, drawKo, drawShield, FightFx, hitFlash, jumpLift, koAge, pickTarget, swingTilt } from './brawlfx';
-import type { BrawlSnap } from './types';
+import type { BrawlSnap, RideKindView } from './types';
 
 const BLOCKS = 25;
 const SWING_MS = POSES.swing.n * POSES.swing.ms;
@@ -34,11 +36,38 @@ const HOME = ISLE.home as [number, number];
 const PAD = (ISLE as unknown as { pad?: { x: number; y: number; size: number } }).pad;
 const LANDING: [number, number] = PAD ? [PAD.x, PAD.y + 12] : HOME;
 /** the University of ORE: where Hardhat Chad stands, the tip of his cigarette, the hall's door */
+/** Pots, crates and barrels on the island (scripts/island_ext.py): smash them, or grab and throw them. */
+interface IsleProp {
+  kind: PropKind;
+  x: number;
+  y: number;
+  hp: number;
+  maxHp: number;
+  broke: number;
+  hitAt: number;
+  dir: number;
+  held: boolean;
+  away: boolean;
+}
+const PROP_HP: Record<PropKind, number> = { pot: 1, crate: 2, barrel: 2 };
+const PROP_HEAL: Record<PropKind, number> = { pot: 10, crate: 15, barrel: 15 };
+/** how long a broken one stays rubble before it grows back (ms), as in the lobby */
+const PROP_BACK_MS = 18000;
+const islandProps = (): IsleProp[] =>
+  ((ISLE as unknown as { smash?: { k: PropKind; x: number; y: number }[] }).smash ?? []).map((q) => ({ kind: q.k, x: q.x, y: q.y, hp: PROP_HP[q.k], maxHp: PROP_HP[q.k], broke: 0, hitAt: 0, dir: 1, held: false, away: false }));
+
 /** the lobby's big digital signboard, on the beach by the pad (scripts/island_ext.py BILLBOARD): its feet */
 const BILLBOARD = (ISLE as unknown as { billboard?: [number, number] }).billboard;
 const UNI = (ISLE as unknown as { uni?: { chad: [number, number]; board: [number, number]; door: [number, number] } }).uni;
 /** Hardhat Chad wears the miners' own body: the default yellow hardhat and blue overalls (shades, smoke and logo on top) */
 const CHAD_LOOK: Look = { hat: 'hat-yellow', fit: '#2f5fd0', pick: '#c9c9c9', handle: '#9b6b43', pet: null, glow: 'none' };
+/** Hardhat Chad's fight: his moves, and what he shouts when you start it */
+type ChadMove = 'jab' | 'combo' | 'headbutt' | 'spin' | 'slam' | 'smoke' | 'flick' | 'suplex' | 'toss' | 'proptoss';
+// the wrestling ones (suplex, toss, a pot to the head) come round as often as the strikes
+const CHAD_MOVES: ChadMove[] = ['jab', 'combo', 'headbutt', 'suplex', 'spin', 'slam', 'toss', 'smoke', 'proptoss', 'jab', 'flick'];
+const CHAD_TAUNTS = ['OI!', 'CLASS IS IN SESSION', 'WRONG MINER, KID', 'LESSON ONE: RESPECT'];
+/** his blows, scaled so a fight runs through a good many moves (about 15 seconds from full HP) */
+const CHAD_DMG = 0.65;
 /** he faces the path, to his left */
 const CHAD_FACING = -1;
 /** the tip of his cigarette, in the miner frame (20x26, feet at 10,25; scripts/actors_miner.py) */
@@ -57,6 +86,8 @@ const ACT = 0.5;
 /** walking speed, map px a second: about the lobby's pace for a miner this size */
 const WALK_SPEED = 38;
 const KEY_SPEED = 40;
+/** riding: a cart rolls at 1.9x walking, a scooter 2.1x, as in the lobby (game/rideRules.ts RIDE_SPEED) */
+const RIDE_K: Record<RideKindView, number> = { cart: 1.9, scoot: 2.1 };
 const standOf = (i: number) => CLAIMS[i].stand as [number, number];
 const [FIT_X, FIT_Y, FIT_W, FIT_H] = ISLE.fit as [number, number, number, number];
 /** where the island's original frame sits inside the wider map */
@@ -157,6 +188,51 @@ export class Engine {
   /** your miner is standing by Hardhat Chad: he has a speech bubble up */
   private chadNear = false;
   private chadAt: [number, number] = [-99, -99];
+  /** pots, crates and barrels: their state on this phone, what we hold, swings landing, throws in the air */
+  private props2 = islandProps();
+  /**
+   * Hardhat Chad as a body: he stands at his spot, and if you hit him he fights back until you are knocked out (you
+   * cannot walk away meanwhile), then walks back. Only on this phone: everyone else's Chad is calm unless they start it.
+   */
+  private chad: Body & {
+    home: [number, number];
+    angry: boolean;
+    swingAt: number;
+    struckDue: number;
+    pathAt: number;
+    calmAt: number;
+    /** a move plays until then; the gap before the next; the last move (never twice running) */
+    busyUntil: number;
+    gap: number;
+    last: ChadMove | null;
+    lungeUntil: number;
+    /** blows still to land: when, how hard, how far they reach, and what you see when they do */
+    hits: { at: number; dmg: number; range: number; fx?: () => void }[];
+  } = {
+    x: UNI?.chad[0] ?? 0,
+    y: UNI?.chad[1] ?? 0,
+    path: [],
+    pose: 'idle',
+    since: 0,
+    facing: CHAD_FACING,
+    home: UNI ? [UNI.chad[0], UNI.chad[1]] : [0, 0],
+    angry: false,
+    swingAt: 0,
+    struckDue: 0,
+    pathAt: 0,
+    calmAt: 0,
+    busyUntil: 0,
+    gap: 900,
+    last: null,
+    lungeUntil: 0,
+    hits: [],
+  };
+  private held: number | null = null;
+  private propDue: { i: number; at: number; dir: number }[] = [];
+  private flights: Flight[] = [];
+  private seenThrows = new Set<string>();
+  private carryShown = '';
+  private carryCheck = 0;
   private fpsAcc = { n: 0, t: 0 };
   quality = 1;
   private ready = false;
@@ -187,7 +263,8 @@ export class Engine {
   /** when our own jump started (wall ms) */
   private myJumpAt = 0;
   /** fight effects, the lunge of a swing, and what HP and swings we last saw */
-  private fx = new FightFx();
+  /** hits, slashes and SMASH!: at the miners' size, which is half the map's here */
+  private fx = Object.assign(new FightFx(), { size: ACT });
   private lungeUntil = 0;
   private lungeDir = 0;
   private myHp = 100;
@@ -307,9 +384,424 @@ export class Engine {
   }
 
   /** Swing your pickaxe at whoever is in reach (F, or the FIGHT button). */
-  attack() {
+  /** The scooter or cart we are on, if any. */
+  private myRideKind(): RideKindView | null {
+    const id = this.snap?.myRide;
+    if (id === null || id === undefined) return null;
+    return this.snap?.rides?.find((r) => r.id === id)?.k ?? null;
+  }
+  /** E or the RIDE button: the app decides (it knows which ride is free and near). */
+  ride() {
+    if (!this.onIsland || this.mode !== 'island' || this.chad.angry || this.held !== null) return;
+    this.emit({ t: 'ride' });
+  }
+
+  /** T or the GRAB button: pick up the pot, crate or barrel in reach, or throw the one you hold. */
+  grab() {
+    if (!this.onIsland || this.mode !== 'island' || this.myRideKind()) return;
+    if (this.held !== null) return this.throwHeld();
+    const i = this.grabTarget();
+    if (i < 0) return;
+    const q = this.props2[i];
+    q.held = true;
+    q.away = true;
+    this.held = i;
+    const dx = q.x - this.me.x;
+    if (Math.abs(dx) > 1) this.me.facing = dx > 0 ? 1 : -1;
+    this.parts.burst('dust', q.x, q.y, 4, 7, 4, ['#f2e6c8', '#d8c8a8'], 0.4);
+    this.emit({ t: 'sfx', name: 'pop' });
+  }
+  /** The nearest whole pot, crate or barrel within `reach` (map px), or -1. */
+  private grabTarget(reach = 14): number {
+    const me = this.me;
+    const now = Date.now();
+    let best = -1;
+    let bd = reach;
+    this.props2.forEach((q, i) => {
+      if (q.held || (q.broke > 0 && now < q.broke + PROP_BACK_MS)) return;
+      const d = Math.hypot(q.x - me.x, (q.y - 1 - me.y) * 1.4);
+      if (d < bd) {
+        bd = d;
+        best = i;
+      }
+    });
+    return best;
+  }
+  /** Throw what we hold: at the nearest miner ahead within range, or a few steps the way we face. */
+  private throwHeld() {
+    const i = this.held;
+    if (i === null) return;
+    const q = this.props2[i];
+    const me = this.me;
+    const wall = Date.now();
     const b = this.snap?.brawl;
-    if (!b || !b.on || !this.onIsland || this.mode !== 'island') return;
+    let x1 = me.x + me.facing * 32;
+    let y1 = me.y + 1;
+    let bd = 48;
+    for (const [id, p] of this.peers) {
+      const v = b?.peers[id];
+      if (!b?.on || !v?.on || koAge(v, wall) >= 0) continue;
+      const dx = p.x - me.x;
+      const dy = p.y - me.y;
+      if (Math.sign(dx) !== me.facing || Math.abs(dy) > 17) continue;
+      const d = Math.hypot(dx, dy);
+      if (d < bd) {
+        bd = d;
+        x1 = p.x;
+        y1 = p.y;
+      }
+    }
+    this.held = null;
+    q.held = false;
+    q.broke = wall + THROW_MS;
+    this.flights.push({ kind: q.kind, x0: me.x, y0: me.y, x1, y1, at: wall, mine: true, done: false });
+    const now = performance.now();
+    me.path = [];
+    me.pose = 'swing';
+    me.since = now;
+    this.swingUntil = now + 360;
+    this.emit({ t: 'throw', kind: q.kind, x0: me.x, y0: me.y, x1, y1 });
+    this.emit({ t: 'sfx', name: 'whoosh' });
+  }
+  /** A swing lands on a pot, crate or barrel: it wobbles, and the last hit breaks it and heals you. */
+  private propHit(i: number, dir: number) {
+    const q = this.props2[i];
+    const now = Date.now();
+    if (q.held || (q.broke > 0 && now < q.broke + PROP_BACK_MS)) return;
+    q.hitAt = now;
+    q.dir = dir;
+    q.hp--;
+    this.fx.impact(q.x, q.y - 3, now, '#ffe9a0', 0.5);
+    if (q.hp > 0) {
+      this.parts.burst('chip', q.x, q.y - 2, 4, 11, 9, SMASH_COLORS[q.kind], 0.5);
+      this.emit({ t: 'sfx', name: 'pop' });
+      return;
+    }
+    q.broke = now;
+    q.hp = q.maxHp;
+    this.breakFx(q.kind, q.x, q.y, true);
+  }
+  private breakFx(kind: PropKind, x: number, y: number, mine: boolean) {
+    const now = Date.now();
+    this.parts.burst('chip', x, y - 3, 14, 23, 17, SMASH_COLORS[kind], 0.8);
+    this.parts.burst('dust', x, y, 6, 11, 5, ['#f2e6c8', '#d8c8a8'], 0.6);
+    if (kind === 'pot' && mine && Math.random() < 0.5) this.parts.burst('coin', x, y - 3, 3, 9, 15, ['#ffd24a', '#ffe27a'], 0.9);
+    this.emit({ t: 'sfx', name: 'pop' });
+    if (!mine) return;
+    this.fx.say(x, y - 12, 'SMASH!', '#ffcf4a', now);
+    this.emit({ t: 'smash' });
+    this.emit({ t: 'heal', hp: PROP_HEAL[kind] });
+  }
+  /** We hit Chad (a swing or a thrown pot): he shows it, and if he was calm he is not any more. */
+  private chadStruck() {
+    const wall = Date.now();
+    const c = this.chad;
+    this.fx.hit(c.x, c.y, 10 + Math.floor(Math.random() * 6), wall, false);
+    this.emit({ t: 'sfx', name: 'bonk' });
+    if (c.angry) return;
+    c.angry = true;
+    c.swingAt = wall;
+    c.busyUntil = wall + 500;
+    this.fx.say(c.x, c.y - 30 * ACT, CHAD_TAUNTS[Math.floor(Math.random() * CHAD_TAUNTS.length)], '#ff6a5e', wall);
+    if (this.chadNear) {
+      this.chadNear = false;
+      this.emit({ t: 'chad', near: false });
+    }
+  }
+  /** One of Chad's moves: its name pops over him, it plays out, and its blows are booked to land. */
+  private chadMove(m: ChadMove): void {
+    const c = this.chad;
+    const me = this.me;
+    const wall = Date.now();
+    const now = performance.now();
+    const say = (t: string) => this.fx.say(c.x, c.y - 34 * ACT, t, '#ffcf4a', wall);
+    const swing = (at: number, big = true, col = '#ffd84a') => {
+      c.hits.push({ at: wall + at - 10, dmg: 0, range: 0, fx: () => this.fx.slash(c.x, c.y, c.facing, Date.now(), big, col) });
+    };
+    c.last = m;
+    c.swingAt = wall;
+    c.pose = 'swing';
+    c.since = now;
+    c.facing = me.x >= c.x ? 1 : -1;
+    c.gap = 700 + Math.random() * 500;
+    if (m === 'jab') {
+      swing(0, false);
+      c.hits.push({ at: wall + 210, dmg: 6 + Math.floor(Math.random() * 3), range: 13 });
+      c.busyUntil = wall + 450;
+    } else if (m === 'combo') {
+      say('THREE-HIT COMBO');
+      for (const k of [0, 1, 2]) {
+        swing(k * 220, k === 2, k === 2 ? '#ff8a3d' : '#ffd84a');
+        c.hits.push({ at: wall + 180 + k * 220, dmg: k === 2 ? 6 : 4, range: 14, fx: () => { c.pose = 'swing'; c.since = performance.now(); } });
+      }
+      c.busyUntil = wall + 820;
+    } else if (m === 'headbutt') {
+      say('HARDHAT HEADBUTT');
+      c.lungeUntil = wall + 220;
+      c.hits.push({ at: wall + 230, dmg: 10, range: 14, fx: () => { this.fx.impact(c.x + c.facing * 5, c.y - 8, Date.now(), '#ffd84a', 1.3); this.fx.shake(160, 1.6, Date.now()); } });
+      c.busyUntil = wall + 600;
+    } else if (m === 'spin') {
+      say('PICKAXE SPIN');
+      for (const k of [0, 1, 2, 3]) {
+        c.hits.push({ at: wall + k * 130, dmg: 0, range: 0, fx: () => { c.facing = c.facing === 1 ? -1 : 1; this.fx.slash(c.x, c.y, c.facing, Date.now(), true, '#9fd6ee'); } });
+      }
+      c.hits.push({ at: wall + 420, dmg: 9, range: 17 });
+      c.busyUntil = wall + 700;
+    } else if (m === 'slam') {
+      say('ORE QUAKE');
+      c.pose = 'cheer';
+      c.hits.push({
+        at: wall + 420,
+        dmg: 12,
+        range: 20,
+        fx: () => {
+          const t = Date.now();
+          c.pose = 'swing';
+          c.since = performance.now();
+          this.fx.shake(300, 2.4, t);
+          this.fx.impact(c.x, c.y - 2, t, '#ffd84a', 1.8);
+          this.parts.burst('dust', c.x, c.y, 16, 26, 10, ['#f2e6c8', '#d8c8a8', '#ffd84a'], 0.8);
+          this.parts.burst('chip', c.x, c.y - 2, 10, 24, 18, ['#ffd84a', '#c9a24e', '#8a8a96'], 0.7);
+        },
+      });
+      c.busyUntil = wall + 900;
+    } else if (m === 'smoke') {
+      say('SMOKE BREAK');
+      c.pose = 'idle';
+      for (let k = 0; k < 14; k++) this.parts.spawn('smoke', c.x + (Math.random() - 0.5) * 16, c.y - 4 - Math.random() * 8, { vx: (Math.random() - 0.5) * 10, vz: 3 + Math.random() * 4, life: 1.6, c: '#dcdad4' });
+      c.hits.push({ at: wall + 380, dmg: 5, range: 18 });
+      c.busyUntil = wall + 650;
+    } else if (m === 'suplex' || m === 'toss') {
+      // a wrestler's grab: up over his head, then down behind him (suplex) or flung ahead (toss)
+      const lift = { x0: me.x, y0: me.y, x1: c.x + c.facing * 2, y1: c.y - 0.5, at: wall + 120, ms: 260, peak: 0 };
+      const [lx, ly] = this.landing(m === 'suplex' ? -c.facing : c.facing, m === 'suplex' ? 13 : 28);
+      const down = { x0: lift.x1, y0: lift.y1, x1: lx, y1: ly, at: wall + 380, ms: m === 'suplex' ? 360 : 460, peak: m === 'suplex' ? -6 : -16 };
+      this.grip = [lift, down];
+      say(m === 'suplex' ? 'HARDHAT SUPLEX' : 'BODY SLAM TOSS');
+      c.pose = 'cheer';
+      c.hits.push({ at: wall + 120, dmg: 0, range: 0, fx: () => this.fx.impact(me.x, me.y - 8, Date.now(), '#ffffff', 0.7) });
+      c.hits.push({
+        at: down.at + down.ms,
+        dmg: m === 'suplex' ? 14 : 12,
+        range: 99,
+        fx: () => {
+          const t = Date.now();
+          c.pose = 'swing';
+          c.since = performance.now();
+          if (m === 'suplex') c.facing = c.facing === 1 ? -1 : 1;
+          this.fx.shake(m === 'suplex' ? 380 : 260, m === 'suplex' ? 2.8 : 2, t);
+          this.fx.impact(lx, ly - 2, t, '#ffd84a', 1.7);
+          this.parts.burst('dust', lx, ly, 18, 26, 10, ['#f2e6c8', '#d8c8a8'], 0.8);
+          this.emit({ t: 'sfx', name: 'bonk' });
+        },
+      });
+      c.busyUntil = down.at + down.ms + 350;
+    } else if (m === 'proptoss') {
+      // the nearest pot, crate or barrel within a few steps: up over his head, then at you
+      let pi = -1;
+      let pd = 36;
+      this.props2.forEach((q, i) => {
+        if (q.held || (q.broke > 0 && wall < q.broke + PROP_BACK_MS)) return;
+        const d = Math.hypot(q.x - c.x, q.y - c.y);
+        if (d < pd) {
+          pd = d;
+          pi = i;
+        }
+      });
+      if (pi < 0) return this.chadMove('combo');
+      const q = this.props2[pi];
+      q.away = true;
+      q.broke = wall + 380 + THROW_MS;
+      say(q.kind === 'barrel' ? 'BARREL TO THE FACE' : q.kind === 'crate' ? 'SPECIAL DELIVERY' : 'POTTERY CLASS');
+      c.pose = 'cheer';
+      this.chadHolds = { kind: q.kind, until: wall + 380 };
+      const tx = me.x;
+      const ty = me.y;
+      c.hits.push({ at: wall + 380, dmg: 0, range: 0, fx: () => { c.pose = 'swing'; c.since = performance.now(); this.flights.push({ kind: q.kind, x0: c.x, y0: c.y, x1: tx, y1: ty, at: Date.now(), mine: false, done: false }); } });
+      c.hits.push({ at: wall + 380 + THROW_MS, dmg: q.kind === 'pot' ? 8 : 10, range: 0, fx: () => { if (Math.hypot(me.x - tx, (me.y - ty) * 1.4) < 12) this.emit({ t: 'npcHit', dmg: Math.max(1, Math.round((q.kind === 'pot' ? 8 : 10) * CHAD_DMG)), x: tx, y: ty }); } });
+      c.busyUntil = wall + 380 + THROW_MS + 200;
+    } else {
+      // the flick: an ember straight at you, from a distance
+      say('CIG FLICK');
+      const tx = me.x;
+      const ty = me.y - 6 * ACT;
+      for (let k = 0; k < 6; k++) this.parts.spawn('spark', c.x + c.facing * 3, c.y - 7, { vx: (tx - c.x) * 2.6, vy: (ty - c.y) * 2.6, life: 0.35, c: k % 2 ? '#ffb040' : '#ff6a1e' });
+      c.hits.push({ at: wall + 360, dmg: 5, range: 50, fx: () => this.fx.impact(me.x, me.y - 6, Date.now(), '#ff8a2a', 0.8) });
+      c.busyUntil = wall + 500;
+    }
+  }
+
+  /**
+   * Chad's own minute: calm, he stands at his spot (or walks back to it); angry, he closes in on you and swings
+   * every 0.9 s until you are knocked out, then says his piece and walks home.
+   */
+  private chadTick(dt: number, now: number) {
+    const c = this.chad;
+    if (!UNI) return;
+    const wall = Date.now();
+    const me = this.me;
+    if (c.struckDue && wall >= c.struckDue) {
+      c.struckDue = 0;
+      this.chadStruck();
+    }
+    if (c.angry) {
+      const b = this.snap?.brawl;
+      const down = b ? koAge(b.me, wall) >= 0 : true;
+      if (down || !b?.on || !this.onIsland || this.mode !== 'island') {
+        c.angry = false;
+        c.calmAt = wall;
+        c.hits = [];
+        c.path = [];
+        this.grip = [];
+        this.chadHolds = null;
+        if (down) this.fx.say(c.x, c.y - 30 * ACT, 'CLASS DISMISSED', '#ffd84a', wall);
+      } else {
+        const d = Math.hypot(me.x - c.x, (me.y - c.y) * 1.4);
+        const busy = wall < c.busyUntil;
+        // a headbutt carries him in
+        if (wall < c.lungeUntil) {
+          const nx = c.x + c.facing * 70 * dt;
+          if (isLand(nx, c.y) && Math.abs(me.x - nx) > 5) c.x = nx;
+        }
+        if (!busy && d > 11) {
+          // out of reach: the odd cigarette flick from range, otherwise walk in
+          if (d < 45 && wall - c.swingAt > 2200 && Math.random() < dt * 1.2) this.chadMove('flick');
+          else {
+            if (wall - c.pathAt > 400 || !c.path.length) {
+              c.pathAt = wall;
+              c.path = findPath(c.x, c.y, me.x - Math.sign(me.x - c.x || 1) * 7, me.y);
+            }
+            stepBody(c, dt, 36, now);
+          }
+        } else if (!busy) {
+          c.path = [];
+          c.facing = me.x >= c.x ? 1 : -1;
+          if (wall - c.swingAt > c.gap) {
+            // never the same move twice running: a fight, not a loop
+            const pool = CHAD_MOVES.filter((m) => m !== c.last);
+            this.chadMove(pool[Math.floor(Math.random() * pool.length)]);
+          }
+        }
+        // the blows land when their moment comes, if you are still in range of them
+        const due = c.hits.filter((h) => wall >= h.at);
+        c.hits = c.hits.filter((h) => wall < h.at);
+        for (const h of due) {
+          if (h.fx) h.fx();
+          if (Math.hypot(me.x - c.x, (me.y - c.y) * 1.4) < h.range) this.emit({ t: 'npcHit', dmg: Math.max(1, Math.round(h.dmg * CHAD_DMG)), x: c.x, y: c.y });
+        }
+      }
+    } else if (Math.hypot(c.x - c.home[0], c.y - c.home[1]) > 1) {
+      // back to his spot, a few seconds after
+      if (wall - c.calmAt > 1500) {
+        if (!c.path.length) c.path = findPath(c.x, c.y, c.home[0], c.home[1]);
+        if (stepBody(c, dt, 22, now)) c.facing = CHAD_FACING;
+      }
+    } else c.facing = CHAD_FACING;
+    // his pose: a swing plays out, walking while he has a path, otherwise standing
+    if (c.pose === 'swing' && wall - c.swingAt < 540) return;
+    const want: Pose = c.path.length ? 'walk' : 'idle';
+    if (c.pose !== want) {
+      c.pose = want;
+      c.since = now;
+    }
+  }
+
+  /** Where Chad's grip has us right now (a suplex or a toss): segments of a carry, each an arc. */
+  private grip: { x0: number; y0: number; x1: number; y1: number; at: number; ms: number; peak: number }[] = [];
+  /** the pot, crate or barrel Chad is holding up before he throws it */
+  private chadHolds: { kind: PropKind; until: number } | null = null;
+  private gripTick(wall: number) {
+    if (!this.grip.length) return;
+    const g = this.grip.find((q) => wall >= q.at && wall < q.at + q.ms) ?? null;
+    const last = this.grip[this.grip.length - 1];
+    if (wall >= last.at + last.ms) {
+      this.me.x = last.x1;
+      this.me.y = last.y1;
+      this.grip = [];
+      return;
+    }
+    if (!g) return;
+    const t = (wall - g.at) / g.ms;
+    this.me.x = g.x0 + (g.x1 - g.x0) * t;
+    this.me.y = g.y0 + (g.y1 - g.y0) * t;
+    this.me.path = [];
+  }
+  /** how high Chad has us off the ground (miner px), for drawing */
+  private gripLift(wall: number): number {
+    const g = this.grip.find((q) => wall >= q.at && wall < q.at + q.ms);
+    if (!g) return 0;
+    const t = (wall - g.at) / g.ms;
+    // a carry up keeps you high at the end; a throw comes back down
+    return g.peak >= 0 ? Math.sin(t * Math.PI) * g.peak + (g.peak === 0 ? 14 * t : 0) : 14 * (1 - t) + Math.sin(t * Math.PI) * -g.peak;
+  }
+  /** a spot on dry land, `dist` px from Chad the way `dir` points, or as near as there is */
+  private landing(dir: number, dist: number): [number, number] {
+    const c = this.chad;
+    for (let d = dist; d >= 4; d -= 3) {
+      const x = c.x + dir * d;
+      if (isLand(x, c.y) && isLand(x, c.y + 2)) return [x, c.y + 1];
+    }
+    return [c.x + dir * 4, c.y + 1];
+  }
+
+  /** Swings due, throws landing (ours may hit a miner), other players' throws, and the GRAB / THROW button. */
+  private propsTick() {
+    const wall = Date.now();
+    if (this.propDue.length) {
+      const due = this.propDue.filter((h) => wall >= h.at);
+      this.propDue = this.propDue.filter((h) => wall < h.at);
+      for (const h of due) this.propHit(h.i, h.dir);
+    }
+    for (const t of this.snap?.brawl?.throws ?? []) {
+      const key = `${t.by}:${t.at}`;
+      if (this.seenThrows.has(key)) continue;
+      this.seenThrows.add(key);
+      if (this.seenThrows.size > 200) this.seenThrows.clear();
+      this.flights.push({ kind: t.k, x0: t.x0, y0: t.y0, x1: t.x1, y1: t.y1, at: t.at, mine: false, done: false });
+    }
+    for (const f of this.flights) {
+      if (f.done || wall < f.at + THROW_MS) continue;
+      f.done = true;
+      this.fx.impact(f.x1, f.y1 - 3, wall, '#ffe9a0', 0.6);
+      this.breakFx(f.kind, f.x1, f.y1, f.mine);
+      if (!f.mine) continue;
+      if (UNI && Math.hypot(this.chad.x - f.x1, (this.chad.y - f.y1) * 1.6) < 10) this.chadStruck();
+      const b = this.snap?.brawl;
+      let hit: string | null = null;
+      let hd = 10;
+      for (const [id, p] of this.peers) {
+        const v = b?.peers[id];
+        if (!b?.on || !v?.on || koAge(v, wall) >= 0) continue;
+        const d = Math.hypot(p.x - f.x1, (p.y - f.y1) * 1.6);
+        if (d < hd) {
+          hd = d;
+          hit = id;
+        }
+      }
+      if (hit) {
+        this.fx.shake(140, 1.4, wall);
+        this.emit({ t: 'throwHit', target: hit, x: f.x1, y: f.y1 });
+      }
+    }
+    this.flights = this.flights.filter((f) => !f.done || wall < f.at + THROW_MS + 200);
+    if (wall - this.carryCheck > 200) {
+      this.carryCheck = wall;
+      const held = this.held !== null;
+      const near = !held && this.onIsland && this.mode === 'island' && this.grabTarget() >= 0;
+      const k = `${near}:${held}`;
+      if (k !== this.carryShown) {
+        this.carryShown = k;
+        this.emit({ t: 'carry', near, held });
+      }
+    }
+  }
+
+  attack() {
+    // holding something: the swing throws it
+    if (this.held !== null) return this.throwHeld();
+    const b = this.snap?.brawl;
+    // no swinging from a scooter or cart
+    if (!b || !b.on || !this.onIsland || this.mode !== 'island' || this.myRideKind()) return;
     const wall = Date.now();
     if (koAge(b.me, wall) >= 0 || wall - this.lastSwingWall < 450) return;
     this.lastSwingWall = wall;
@@ -317,6 +809,19 @@ export class Engine {
     const others = [...this.peers.entries()].map(([id, p]) => ({ id, x: p.x, y: p.y, v: b.peers[id] }));
     const t = pickTarget(me, others, wall);
     if (t) me.facing = t.facing;
+    // Hardhat Chad in reach (nobody else to hit): he takes it, and he will not take it lying down
+    const chadHere = !t && UNI && Math.hypot(this.chad.x - me.x, (this.chad.y - me.y) * 1.4) < 13;
+    if (chadHere) {
+      me.facing = this.chad.x >= me.x ? 1 : -1;
+      this.chad.struckDue = wall + 210;
+    }
+    // nobody to hit: a pot, crate or barrel in reach takes it
+    const prop = t || chadHere ? -1 : this.grabTarget(15);
+    if (prop >= 0) {
+      const dx = this.props2[prop].x - me.x;
+      if (Math.abs(dx) > 1) me.facing = dx > 0 ? 1 : -1;
+      this.propDue.push({ i: prop, at: wall + 210, dir: me.facing });
+    }
     const now = performance.now();
     me.path = [];
     me.target = -1;
@@ -503,6 +1008,16 @@ export class Engine {
         e.preventDefault();
         return;
       }
+      if (k === 'e' && !e.repeat && this.onIsland && this.mode === 'island') {
+        this.ride();
+        e.preventDefault();
+        return;
+      }
+      if (k === 't' && !e.repeat && this.onIsland && this.mode === 'island') {
+        this.grab();
+        e.preventDefault();
+        return;
+      }
       if (k === ' ' && this.onIsland && this.mode === 'island') {
         if (!e.repeat) this.jump();
         e.preventDefault();
@@ -546,8 +1061,10 @@ export class Engine {
     const uy = dy / n;
     const me = this.me;
     const ok = (x: number, y: number) => isLand(x, y) && isLand(x - 4, y) && isLand(x + 4, y);
-    const nx = me.x + ux * KEY_SPEED * pace * dt;
-    const ny = me.y + uy * KEY_SPEED * pace * dt;
+    const rk = this.myRideKind();
+    const sp = KEY_SPEED * (rk ? RIDE_K[rk] : 1);
+    const nx = me.x + ux * sp * pace * dt;
+    const ny = me.y + uy * sp * pace * dt;
     if (ok(nx, ny)) {
       me.x = nx;
       me.y = ny;
@@ -747,7 +1264,9 @@ export class Engine {
     const won = winner !== null && pend & (1 << winner) && el > 2600;
     // knocked down in a brawl: lie there until you stand up
     const downed = s?.brawl ? koAge(s.brawl.me, Date.now()) >= 0 : false;
-    const keyed = !downed && this.keyStep(dt, now);
+    // Hardhat Chad has you: no walking off until he puts you down
+    const held = downed || this.chad.angry;
+    const keyed = !held && this.keyStep(dt, now);
     if (!keyed && this.keyWalk && me.pose === 'walk' && !me.path.length) {
       me.pose = 'idle';
       me.since = now;
@@ -762,7 +1281,7 @@ export class Engine {
       me.pose = 'idle';
       me.since = now;
     }
-    if (downed) {
+    if (held) {
       me.path = [];
       me.target = -1;
       me.manualUntil = now + 1500;
@@ -773,7 +1292,8 @@ export class Engine {
         this.lastStep = now;
         this.parts.spawn('dust', me.x - 2 * me.facing, me.y, { vx: -6 * me.facing, vz: 8, life: 0.45, c: '#e8d4b0' });
       }
-      const arrived = stepBody(me, dt, won ? 30 : WALK_SPEED, now);
+      const rk = this.myRideKind();
+      const arrived = stepBody(me, dt, won ? 30 : WALK_SPEED * (rk ? RIDE_K[rk] : 1), now);
       if (won && me.pose === 'walk') me.pose = 'carry';
       if (me.target >= 0 && !work.includes(me.target)) {
         me.path = [];
@@ -836,8 +1356,11 @@ export class Engine {
       if (at && !this.atUni) this.emit({ t: 'uni' });
       this.atUni = at;
       // walk up to Chad and he asks if you have questions; a little slack so it doesn't flicker at the edge
-      const d = Math.hypot(me.x - UNI.chad[0], (me.y - UNI.chad[1]) * 1.3);
-      const near = this.chadNear ? d < 34 : d < 24;
+      const d = Math.hypot(me.x - this.chad.x, (me.y - this.chad.y) * 1.3);
+      // no chat while he is fighting you, or walking back
+      const downNow = s?.brawl ? koAge(s.brawl.me, Date.now()) >= 0 : false;
+      const calm = !this.chad.angry && !this.chad.path.length && !downNow && Date.now() - this.chad.calmAt > 6000;
+      const near = calm && (this.chadNear ? d < 34 : d < 24);
       if (near !== this.chadNear) {
         this.chadNear = near;
         this.emit({ t: 'chad', near });
@@ -904,13 +1427,17 @@ export class Engine {
       }
     }
 
+    this.propsTick();
+    this.chadTick(dt, now);
+    this.gripTick(Date.now());
     // smoke from chimneys and the campfire, the odd firefly after dark
     if (this.mode === 'island') {
       for (const [sx, sy] of ISLE.smoke as number[][]) if (Math.random() < dt * 3) this.parts.spawn('smoke', sx + Math.random() * 2, sy, { vx: 1, vz: 6 + Math.random() * 4, life: 2.6, c: '#d8d4cc' });
       // Hardhat Chad never puts it out
       if (UNI && Math.random() < dt * 1.4) {
         const [ex, ey] = chadPx(CHAD_EMBER[0], CHAD_EMBER[1], 0);
-        this.parts.spawn('smoke', UNI.chad[0] + ex, UNI.chad[1] + ey - 0.5, { vx: CHAD_FACING * 1.5, vz: 2 + Math.random() * 2, life: 1.4, c: '#ecebe6' });
+        const k = this.chad.facing === CHAD_FACING ? 1 : -1;
+        this.parts.spawn('smoke', this.chad.x + ex * k, this.chad.y + ey - 0.5, { vx: this.chad.facing * -1.5, vz: 2 + Math.random() * 2, life: 1.4, c: '#ecebe6' });
       }
       if (this.sky.night > 0.5 && Math.random() < dt * 2) {
         const pr = this.props[Math.floor(Math.random() * this.props.length)];
@@ -1126,12 +1653,19 @@ export class Engine {
     /** a miner in a brawl: knocked down, flashing from a hit, with its shield and HP bar */
     /** the scale miners are drawn at: half the map's (see ACT) */
     const A = S * ACT;
-    const fighter = (lk: Look, pose: Pose, f: number, x: number, y: number, facing: number, v: BrawlSnap['me'] | BrawlSnap['peers'][string] | undefined, mine: boolean, jumpAt?: number) => {
+    const fighter = (lk: Look, pose: Pose, f: number, x: number, y: number, facing: number, v: BrawlSnap['me'] | BrawlSnap['peers'][string] | undefined, mine: boolean, jumpAt?: number, ride?: { k: RideKindView; id: number } | null) => {
       const X = OX + x * S;
       const Y = OY + y * S;
       const ko = v ? koAge(v, wall) : -1;
-      const lift = ko >= 0 ? 0 : jumpLift(jumpAt, wall);
-      if (ko < 0 || !drawKo(c, lk, X, Y, A, facing, ko, wall)) {
+      const lift = ko >= 0 ? 0 : jumpLift(jumpAt, wall) + (mine ? this.gripLift(wall) : 0);
+      if (ride && ko < 0) {
+        // on a ride: the scooter under the miner, or the miner sitting in the cart
+        const rolling = pose === 'walk';
+        const up = lift + RIDE_LIFT[ride.k];
+        if (ride.k === 'scoot') drawRide(c, ride.k, ride.id, X, Y - lift * A, A, facing, rolling, now, false);
+        drawMiner(c, lk, 'idle', 0, X, Y, A, facing, hitFlash(v, wall) ? 0.45 : 1, up, 0);
+        if (ride.k === 'cart') drawRide(c, ride.k, ride.id, X, Y - lift * A, A, facing, rolling, now, false);
+      } else if (ko < 0 || !drawKo(c, lk, X, Y, A, facing, ko, wall)) {
         const sw = !mine && v && v.sw && wall - v.sw < 540 ? wall - v.sw : -1;
         const air = lift > 0 && pose !== 'walk' && sw < 0;
         const swAge = sw >= 0 ? sw : mine && wall - this.lastSwingWall < 540 ? wall - this.lastSwingWall : -1;
@@ -1148,16 +1682,53 @@ export class Engine {
       const [bx, by] = BILLBOARD;
       items.push({ z: by, f: () => drawBillboard(c, OX + bx * S, OY + by * S, A, now, bbLights, 1) });
     }
+    // pots, crates and barrels (at the miners' scale), the ones in the air, and the one we hold
+    for (let i = 0; i < this.props2.length; i++) {
+      const q = this.props2[i];
+      if (q.held || !on(q.x, q.y)) continue;
+      const wallNow = Date.now();
+      const broken = q.broke > 0 && wallNow < q.broke + PROP_BACK_MS;
+      if (q.away) {
+        if (broken) continue;
+        q.away = false;
+      }
+      const w = wallNow - q.hitAt;
+      const rot = !broken && w >= 0 && w < 260 ? Math.sin(w / 26) * 0.18 * (1 - w / 260) * q.dir : 0;
+      items.push({ z: q.y, f: () => drawProp(c, q.kind, OX + q.x * S, OY + q.y * S, A, rot, broken) });
+    }
+    for (const fl of this.flights) {
+      if (fl.done) continue;
+      items.push({ z: fl.y0 + (fl.y1 - fl.y0) * Math.min(1, (Date.now() - fl.at) / THROW_MS) + 1, f: () => drawFlight(c, fl, Date.now(), (x) => OX + x * S, (y) => OY + y * S, A, 13) });
+    }
+    if (this.held !== null) {
+      const hk = this.props2[this.held].kind;
+      const me = this.me;
+      items.push({ z: me.y + 0.5, f: () => drawProp(c, hk, OX + me.x * S, OY + (me.y - 27 * ACT) * S, A) });
+    }
     // Hardhat Chad, in the middle of the campus, smoking
-    if (UNI && on(UNI.chad[0], UNI.chad[1])) {
-      const [hx, hy] = UNI.chad;
-      items.push({ z: hy, f: () => drawChad(c, OX + hx * S, OY + hy * S, A, frameAt('idle', 0, now), now) });
+    if (this.chadHolds && Date.now() < this.chadHolds.until) {
+      const ch = this.chad;
+      const hk = this.chadHolds.kind;
+      items.push({ z: ch.y + 0.5, f: () => drawProp(c, hk, OX + ch.x * S, OY + (ch.y - 28 * ACT) * S, A) });
+    }
+    if (UNI && on(this.chad.x, this.chad.y)) {
+      const ch = this.chad;
+      items.push({ z: ch.y, f: () => drawChad(c, OX + ch.x * S, OY + ch.y * S, A, ch.pose, frameAt(ch.pose, ch.since, now), now, ch.facing) });
     }
     // a dance (AURA FARMING) plays while standing; walking or swinging stops it
     const myDance = s?.me.dance ?? 0;
     const knocked = (v: Parameters<typeof koAge>[0]) => koAge(v, wall) >= 0;
     if (myDance && me.pose === 'idle' && !me.path.length && !knocked(bs?.me)) items.push({ z: me.y, f: () => drawDancer(c, look, myDance, now, OX + me.x * S, OY + me.y * S, A, me.facing) });
-    else items.push({ z: me.y, f: () => fighter(look, me.pose, mf, me.x, me.y, me.facing, bs?.me, true, this.myJumpAt) });
+    else {
+      const rk = this.myRideKind();
+      const myRide = rk ? { k: rk, id: s?.myRide ?? 0 } : null;
+      items.push({ z: me.y, f: () => fighter(look, me.pose, mf, me.x, me.y, me.facing, bs?.me, true, this.myJumpAt, myRide) });
+    }
+    // parked scooters and carts (a ridden one is drawn under its rider)
+    for (const r of s?.rides ?? []) {
+      if (r.rider !== null || !on(r.x, r.y)) continue;
+      items.push({ z: r.y, f: () => drawRide(c, r.k, r.id, OX + r.x * S, OY + r.y * S, A, r.f, false, now, r.id === s?.nearRide) });
+    }
     items.push({ z: me.y + 1000, f: () => { if (!s?.pending && !s?.selected.length) draw(c, 'fx-sparkle-' + (Math.floor(now / 120) % 3), OX + me.x * S, OY + (me.y + (-30 + Math.sin(now / 220) * 2) * ACT) * S, A * 0.55, false, 0.8); } });
     if (look.pet) items.push({ z: this.petPos.y + (petFlies(look.pet) ? 16 * ACT : 0), f: () => drawPet(c, look.pet!, now, OX + this.petPos.x * S, OY + this.petPos.y * S, A, me.facing) });
     for (const p of s?.peers ?? []) {
@@ -1166,7 +1737,10 @@ export class Engine {
       const pf = frameAt(d.pose, d.since, now);
       const pd = p.dance ?? 0;
       if (pd && d.pose === 'idle' && !knocked(bs?.peers[p.id])) items.push({ z: d.y, f: () => drawDancer(c, p.look, pd, now, OX + d.x * S, OY + d.y * S, A, p.facing) });
-      else items.push({ z: d.y, f: () => fighter(p.look, d.pose, pf, d.x, d.y, p.facing, bs?.peers[p.id], false, bs?.jumps?.[p.id]) });
+      else {
+        const pr = s?.rides?.find((r) => r.rider === p.id);
+        items.push({ z: d.y, f: () => fighter(p.look, d.pose, pf, d.x, d.y, p.facing, bs?.peers[p.id], false, bs?.jumps?.[p.id], pr ? { k: pr.k, id: pr.id } : null) });
+      }
       if (p.look.pet) {
         const fly = petFlies(p.look.pet);
         const px = d.x - 11 * ACT * p.facing;
@@ -1320,11 +1894,17 @@ export class Engine {
       c.globalAlpha = 1;
     }
     // Hardhat Chad's name, once you are close enough to read it
-    if (UNI && zoomK > 1.5) textCentered(c, 'HARDHAT CHAD', OX + UNI.chad[0] * S, OY + (UNI.chad[1] - 31 * ACT) * S - 9 * fs, fs, '#ffd84a', 'rgba(2,5,15,0.7)');
+    if (UNI && (zoomK > 1.5 || this.chad.angry)) {
+      // his name, and under it the note: this one is the Darkweb Version
+      const nx = OX + this.chad.x * S;
+      const ny = OY + (this.chad.y - 31 * ACT) * S;
+      textCentered(c, 'HARDHAT CHAD', nx, ny - 16 * fs, fs, this.chad.angry ? '#ff6a5e' : '#ffd84a', 'rgba(2,5,15,0.7)');
+      textCentered(c, 'DARKWEB VERSION', nx, ny - 9 * fs, Math.max(1, fs - 1 || 1), '#b98cff', 'rgba(2,5,15,0.7)');
+    }
     // while you stand by him, tell the app where his head is: his speech bubble (ui/University.tsx) hangs off it
     if (UNI && this.chadNear) {
-      const hx = Math.round((OX + UNI.chad[0] * S) / dpr);
-      const hy = Math.round((OY + (UNI.chad[1] - 31 * ACT) * S - 10 * fs) / dpr);
+      const hx = Math.round((OX + this.chad.x * S) / dpr);
+      const hy = Math.round((OY + (this.chad.y - 31 * ACT) * S - 18 * fs) / dpr);
       if (Math.abs(hx - this.chadAt[0]) > 1 || Math.abs(hy - this.chadAt[1]) > 1) {
         this.chadAt = [hx, hy];
         this.emit({ t: 'chadAt', x: hx, y: hy });
@@ -1705,7 +2285,7 @@ export class Engine {
       if (d && Math.abs(mx - d.x) < 8 * ACT && my < d.y + 2 && my > d.y - 24 * ACT) return this.emit({ t: 'peer', id: p.id });
     }
     // Hardhat Chad, or the University's door
-    if (UNI && ((Math.abs(mx - UNI.chad[0]) < 7 && my < UNI.chad[1] + 3 && my > UNI.chad[1] - 16) || (Math.abs(mx - UNI.door[0]) < 6 && my < UNI.door[1] + 2 && my > UNI.door[1] - 14))) return this.emit({ t: 'uni' });
+    if (UNI && ((!this.chad.angry && Math.abs(mx - this.chad.x) < 7 && my < this.chad.y + 3 && my > this.chad.y - 16) || (Math.abs(mx - UNI.door[0]) < 6 && my < UNI.door[1] + 2 && my > UNI.door[1] - 14))) return this.emit({ t: 'uni' });
     // the notice board beside him: the miners' tips
     if (UNI && Math.abs(mx - UNI.board[0]) < 8 && my < UNI.board[1] + 2 && my > UNI.board[1] - 14) return this.emit({ t: 'uni', tab: 'tips' });
     const hit = claimForTap(mx, my);
@@ -1730,6 +2310,7 @@ export class Engine {
     // open ground or sea: walk to the nearest dry land (a tap on a phone). On PC you walk with WASD and a
     // left click there swings.
     if (this.mouseTap) return this.attack();
+    if (this.chad.angry) return;
     const [gx, gy] = toLand(mx, my);
     this.me.path = findPath(this.me.x, this.me.y, gx, gy);
     this.me.target = -1;
@@ -1747,13 +2328,13 @@ export { has, drawCanvas };
  * Hardhat Chad: a miner like everyone else (the same body, hardhat and overalls), with round yellow shades,
  * a cigarette he never puts out and the ORE logo on his bib. `u` is the miners' scale; `f` the idle frame.
  */
-function drawChad(c: Ctx, X: number, Y: number, u: number, f: number, now: number) {
-  drawMiner(c, CHAD_LOOK, 'idle', f, X, Y, u, CHAD_FACING);
+function drawChad(c: Ctx, X: number, Y: number, u: number, pose: Pose, f: number, now: number, facing: number) {
+  drawMiner(c, CHAD_LOOK, pose, f, X, Y, u, facing);
   // the idle breath drops the head and body a pixel on frames 2 and 3
-  const bob = f >= 2 ? 1 : 0;
+  const bob = pose === 'idle' && f >= 2 ? 1 : 0;
   const px = (fx: number, fy: number, col: string) => {
     const dx = fx - 10;
-    const x = CHAD_FACING < 0 ? -dx - 1 : dx;
+    const x = facing < 0 ? -dx - 1 : dx;
     c.fillStyle = col;
     c.fillRect(Math.round(X + x * u), Math.round(Y + (fy - 25 + bob) * u), Math.ceil(u), Math.ceil(u));
   };

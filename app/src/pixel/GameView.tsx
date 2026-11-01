@@ -16,6 +16,8 @@ export interface GameRef extends DOMImperativeFactory {
   push: (...args: any[]) => void;
   focus: (...args: any[]) => void;
   attack: (...args: any[]) => void;
+  grab: (...args: any[]) => void;
+  ride: (...args: any[]) => void;
   jump: (...args: any[]) => void;
 }
 
@@ -39,6 +41,8 @@ export default function GameView({ ref, onEvent, atlas }: { ref: Ref<GameRef>; o
       },
       focus: (i: any) => engine.current?.setFocus(Number(i)),
       attack: () => engine.current?.attack(),
+      grab: () => engine.current?.grab(),
+      ride: () => engine.current?.ride(),
       jump: () => engine.current?.jump(),
     }),
     [],

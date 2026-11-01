@@ -24,12 +24,13 @@ import { chatWords, cleanName, LOBBY_CAP, STICKERS, stickerOf, type DoorId } fro
 import { isOnChain, useGame, useLevelXp } from '../game/store';
 import { play } from '../game/sfx';
 import { EMOTES, useWorld } from '../game/world';
-import { brawlSnap, heal, jump, setMyPos, swing, useBrawl } from '../game/brawl';
+import { brawlSnap, heal, jump, sendThrow, setMyPos, swing, throwHit, useBrawl } from '../game/brawl';
 import { useName, useRename } from '../game/username';
 import type { LobbyEvent, LobbyPeerView, LobbySnap } from '../engine/lobby';
 import { atlasSource } from '../pixel/atlasSource';
 import LobbyView, { type LobbyRef } from '../pixel/LobbyView';
-import { islandFight, islandJump, myLook } from '../pixel/PixelMine';
+import { islandFight, islandGrab, islandJump, islandRide, myLook } from '../pixel/PixelMine';
+import { useIslandRides } from '../game/islandRides';
 import { useArena } from '../game/arena';
 import { BRAWLORE } from './BrawlOre';
 import { useView } from '../pixel/view';
@@ -97,6 +98,8 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
   const [danceOpen, setDanceOpen] = useState(false);
   const brawlOn = useBrawl((b) => !b.off);
   const riding = useRides((r) => r.mine !== null);
+  /** a pot, crate or barrel in reach (GRAB), or in our hands (THROW) */
+  const [carry, setCarry] = useState<'near' | 'held' | null>(null);
   const nearRide = useRides((r) => r.near !== null);
   const myDance = useLobby((s) => s.myDance);
   const [howTo, setHowTo] = useState(false);
@@ -296,6 +299,15 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
       case 'heal':
         heal(e.hp);
         break;
+      case 'throw':
+        sendThrow('lobby', e.kind, e.x0, e.y0, e.x1, e.y1);
+        break;
+      case 'throwHit':
+        throwHit('lobby', e.target, e.x, e.y);
+        break;
+      case 'carry':
+        setCarry(e.held ? 'held' : e.near ? 'near' : null);
+        break;
       case 'smash':
         useGame.getState().track('smash');
         break;
@@ -432,6 +444,11 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
                 {() => <MapButton instant tone={riding ? 'gold' : 'dark'} label={riding ? 'GET OFF' : 'RIDE'} icon={<PixIcon name="cart" size={20} />} accessibilityLabel={riding ? 'Get off the ride' : 'Ride the cart or scooter'} onPress={() => ref.current?.ride?.()} />}
               </TouchZone>
             ) : null}
+            {carry && !riding ? (
+              <TouchZone group="lobby" onPress={() => ref.current?.grab?.()}>
+                {() => <MapButton instant tone={carry === 'held' ? 'gold' : 'dark'} label={carry === 'held' ? 'THROW' : 'GRAB'} icon={<PixIcon name="pot" size={20} />} accessibilityLabel={carry === 'held' ? 'Throw it' : 'Pick it up'} onPress={() => ref.current?.grab?.()} />}
+              </TouchZone>
+            ) : null}
             {brawlOn && !riding ? (
               <TouchZone group="lobby" onPress={() => ref.current?.attack?.()}>
                 {() => <MapButton instant label="HIT" icon={<PixIcon name="fist" size={20} />} accessibilityLabel="Hit: swing your pickaxe" onPress={() => ref.current?.attack?.()} />}
@@ -447,6 +464,7 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
               <EmoteKey icon="jump" label="Jump" kbd="SPC" onPress={() => ref.current?.jump?.()} />
               {brawlOn && !riding ? <EmoteKey icon="fist" label="Hit: left click or F" kbd="LMB" onPress={() => ref.current?.attack?.()} /> : null}
               {riding || nearRide ? <EmoteKey icon="cart" label={riding ? 'Get off (E)' : 'Ride (E)'} kbd="E" onPress={() => ref.current?.ride?.()} /> : null}
+              {carry && !riding ? <EmoteKey icon="pot" label={carry === 'held' ? 'Throw (T)' : 'Grab (T)'} kbd="T" on={carry === 'held'} onPress={() => ref.current?.grab?.()} /> : null}
             </>
           ) : null}
         </PixelBox>
@@ -605,6 +623,9 @@ const islandEmote = (e: (typeof LOBBY_EMOTES)[number]) => {
 /** On ORE Island (computer): the lobby's bottom bar, AURA FARMING, JUMP and HIT, with the same keys (V, 1-6). */
 function IslandAuraBar({ left, right, bottom }: { left: number; right: number; bottom: number }) {
   const [open, setOpen] = useState(false);
+  const carry = useView((v) => v.carry);
+  const iRiding = useIslandRides((r) => r.mine !== null);
+  const iNear = useIslandRides((r) => r.near !== null);
   const myDance = useLobby((s) => s.myDance);
   const brawlOn = useBrawl((b) => !b.off);
   const { w } = useLayout();
@@ -630,6 +651,8 @@ function IslandAuraBar({ left, right, bottom }: { left: number; right: number; b
         <View style={styles.emoteSep} />
         <EmoteKey icon="jump" label="Jump" kbd="SPC" onPress={islandJump} />
         {brawlOn ? <EmoteKey icon="fist" label="Hit: left click or F" kbd="LMB" onPress={islandFight} /> : null}
+        {carry && !iRiding ? <EmoteKey icon="pot" label={carry === 'held' ? 'Throw (T)' : 'Grab (T)'} kbd="T" on={carry === 'held'} onPress={islandGrab} /> : null}
+        {iRiding || iNear ? <EmoteKey icon="cart" label={iRiding ? 'Get off (E)' : 'Ride (E)'} kbd="E" on={iRiding} onPress={islandRide} /> : null}
       </PixelBox>
     </View>
   );
@@ -710,7 +733,7 @@ const HOWTO: { icon: PixName; title: string; body: string }[] = [
   { icon: 'star', title: 'Walk around', body: 'Joystick or tap on a phone. WASD, the arrow keys or a click on a computer. Scroll or pinch to zoom. Every miner you see is a real player. The board by the fountain points the way to every place.' },
   { icon: 'chat', title: 'Chat and stickers', body: 'Pick a name, then open CHAT to talk to everyone in the lobby and on the island. Tap a sticker to post it: GM, LFG, LET\'S MINE and more. On a computer, C shows or hides the chat.' },
   { icon: 'fist', title: 'Brawl', body: 'HIT (F or a left click) swings at the miner next to you. JUMP (Space) dodges. At 0 HP a miner is knocked down, then stands up with full HP and a shield. A KO gives XP. Nothing real is lost. Turn Brawl off in PROFILE.' },
-  { icon: 'gem', title: 'Smash things', body: 'Hit pots, crates, barrels, bushes and stones to smash them. Breaking one heals you, up to 15 HP. Crack a dark ore vein with 5 hits for 1 to 10 XP. Everything grows back.' },
+  { icon: 'gem', title: 'Smash things', body: 'Hit pots, crates, barrels, bushes and stones to smash them. Breaking one heals you, up to 15 HP. Pick up a pot, crate or barrel with GRAB (T) and throw it: it smashes where it lands and hits a miner it lands on. Crack a dark ore vein with 5 hits for 1 to 10 XP. Everything grows back.' },
   { icon: 'ore', title: 'ORE Island: mine ORE', body: 'Walk down the pier, or tap GO then ORE ISLAND. Pick spots, deploy SOL, and win ORE when your spot is the gold one. Your wallet approves every deploy. Only play with SOL you can afford to lose.' },
   { icon: 'fire', title: 'Autopilot', body: 'On the island, open MINE, then PRO, and set Rounds above 1. One approval funds ORE automation, and your rounds deploy by themselves even with the app closed. STOP returns the unused SOL.' },
   { icon: 'trophy', title: 'Gali Fightclub', body: 'The mine door west of the plaza. Knock miners out of the ring, 1v1 or free for all, online or against bots. Fill your meter and fire your weapon’s special. Online matches move your Fightclub rank.' },
@@ -1134,6 +1157,9 @@ export function LobbyBack() {
   const inside = useView((s) => s.focus >= 0);
   const where = useLobby((s) => s.where);
   const ch = useChrome(insets);
+  const carry = useView((v) => v.carry);
+  const iRiding = useIslandRides((r) => r.mine !== null);
+  const iNear = useIslandRides((r) => r.near !== null);
   const brawlOn = useBrawl((b) => !b.off);
   const bottom = ch.desktop ? ch.bottom : insets.bottom + BAR_H + 46;
   // a touch screen gets a walking stick bottom left, above the LOBBY pill (the canvas draws it)
@@ -1157,6 +1183,16 @@ export function LobbyBack() {
           <TouchZone group="island" onPress={islandJump}>
             {() => <MapButton instant label="JUMP" icon={<PixIcon name="jump" size={20} />} accessibilityLabel="Jump" onPress={islandJump} />}
           </TouchZone>
+          {iRiding || iNear ? (
+            <TouchZone group="island" onPress={islandRide}>
+              {() => <MapButton instant tone={iRiding ? 'gold' : 'dark'} label={iRiding ? 'GET OFF' : 'RIDE'} icon={<PixIcon name="cart" size={20} />} accessibilityLabel={iRiding ? 'Get off the ride' : 'Ride the scooter or cart'} onPress={islandRide} />}
+            </TouchZone>
+          ) : null}
+          {carry && !iRiding ? (
+            <TouchZone group="island" onPress={islandGrab}>
+              {() => <MapButton instant tone={carry === 'held' ? 'gold' : 'dark'} label={carry === 'held' ? 'THROW' : 'GRAB'} icon={<PixIcon name="pot" size={20} />} accessibilityLabel={carry === 'held' ? 'Throw it' : 'Pick it up'} onPress={islandGrab} />}
+            </TouchZone>
+          ) : null}
           {fight ? (
             <TouchZone group="island" onPress={islandFight}>
               {() => fight}

@@ -23,6 +23,7 @@ import { drawPumpkin, flicker, PUMPKIN_LIGHT } from './hollow';
 import { IS_HOLLOW } from '../game/season';
 import type { BrawlSnap, Look, Pose, RideKindView, RideView } from './types';
 import { drawRide, RIDE_LIFT } from './rideArt';
+import { drawFlight, drawProp, isProp, THROW_MS, type Flight, type PropKind } from './carry';
 import { drawBillboard, drawVending } from './marketArt';
 import { drawHp, drawKo, drawShield, FightFx, hitFlash, jumpLift, koAge, pickTarget, swingTilt } from './brawlfx';
 import { FLAG_H, FLAG_W, paintFlag, ARENA_FLAGS, ARENA_TORCHES, FIGHTCLUB_LAMPS, paintColosseum, paintFightclub, paintPotw, paintSign, paintSmash, POTW_H, POTW_W, paintSolBase, paintSolLogo, SIGN_H, SIGN_W, SMASH_COLORS, SMASH_DIM, SOL_BASE, SOL_LOGO } from './lobbyArt';
@@ -46,7 +47,13 @@ export type LobbyEvent =
   /** your miner cracked an ore vein: this much XP */
   | { t: 'xp'; n: number }
   /** E: get on the nearest ride, or off the one you're on */
-  | { t: 'ride' };
+  | { t: 'ride' }
+  /** we threw a pot, crate or barrel (for the room to see it fly) */
+  | { t: 'throw'; kind: PropKind; x0: number; y0: number; x1: number; y1: number }
+  /** our throw landed on a miner */
+  | { t: 'throwHit'; target: string; x: number; y: number }
+  /** something to grab is in reach, or we are holding one: the GRAB / THROW button */
+  | { t: 'carry'; near: boolean; held: boolean };
 
 export interface LobbyPeerView {
   id: string;
@@ -117,6 +124,9 @@ interface Tgt {
   xp: [number, number] | null;
   /** the decor sprite, for bushes and stones */
   decor?: string;
+  /** picked up: in your hands, or away being thrown until it grows back home */
+  held?: boolean;
+  away?: boolean;
   /** the structure's tile, for ore veins */
   sx?: number;
   sy?: number;
@@ -140,6 +150,7 @@ function buildTargets(): Tgt[] {
   return out;
 }
 
+const SMASH_HEAL_OF: Record<PropKind, number> = { pot: SMASH_HEAL.pot, crate: SMASH_HEAL.crate, barrel: SMASH_HEAL.barrel };
 /** how long a smashed pot or crate stays rubble before it grows back (ms) */
 const SMASH_BACK_MS = 18000;
 /** The Gali Fightclub stands where the arena was (`?oldarena=1` on the web brings the colosseum back, see ui/BrawlOre.tsx). */
@@ -227,6 +238,12 @@ export class LobbyEngine {
   /** each smashable's state, only on this phone: hits left, when it last got hit and when it broke */
   private smash: Tgt[] = buildTargets();
   private smashDue: { i: number; at: number; dir: number }[] = [];
+  /** grab and throw: what we hold (an index into smash), throws in the air, and what the button shows */
+  private held: number | null = null;
+  private flights: Flight[] = [];
+  private seenThrows = new Set<string>();
+  private carryShown = '';
+  private carryCheck = 0;
   private lungeUntil = 0;
   private lungeDir = 0;
   private myHp = 100;
@@ -350,7 +367,131 @@ export class LobbyEngine {
     this.emit({ t: 'ride' });
   }
 
+  /** T or the GRAB button: pick up the pot, crate or barrel in reach, or throw the one you hold. */
+  grab() {
+    if (this.leaving || this.opts.away || this.myRideKind()) return;
+    if (this.held !== null) return this.throwHeld();
+    const i = this.grabTarget();
+    if (i < 0) return;
+    const st = this.smash[i];
+    st.held = true;
+    st.away = true;
+    this.held = i;
+    const dx = st.x - this.me.x;
+    if (Math.abs(dx) > 2) this.me.facing = dx > 0 ? 1 : -1;
+    this.parts.burst('dust', st.x, st.y, 5, 14, 8, ['#f2e6c8', '#d8c8a8'], 0.4);
+    this.emit({ t: 'sfx', name: 'pop' });
+  }
+  /** The nearest whole pot, crate or barrel in reach, or -1. */
+  private grabTarget(): number {
+    const me = this.me;
+    const now = Date.now();
+    let best = -1;
+    let bd = 27;
+    this.smash.forEach((st, i) => {
+      if (!isProp(st.kind) || st.held || (st.broke > 0 && now < st.broke + st.back)) return;
+      const d = Math.hypot(st.x - me.x, (st.y - 2 - me.y) * 1.4);
+      if (d < bd) {
+        bd = d;
+        best = i;
+      }
+    });
+    return best;
+  }
+  /** Throw what we hold: at the nearest miner ahead within range, or a few steps the way we face. */
+  private throwHeld() {
+    const i = this.held;
+    if (i === null) return;
+    const st = this.smash[i];
+    const kind = st.kind as PropKind;
+    const me = this.me;
+    const wall = Date.now();
+    const b = this.snap.brawl;
+    let x1 = me.x + me.facing * 64;
+    let y1 = me.y + 2;
+    let bd = 96;
+    for (const p of this.peers.values()) {
+      const v = b?.peers[p.view.id];
+      if (!b?.on || !v?.on || koAge(v, wall) >= 0) continue;
+      const dx = p.x - me.x;
+      const dy = p.y - me.y;
+      if (Math.sign(dx) !== me.facing || Math.abs(dy) > 34) continue;
+      const d = Math.hypot(dx, dy);
+      if (d < bd) {
+        bd = d;
+        x1 = p.x;
+        y1 = p.y;
+      }
+    }
+    x1 = Math.max(8, Math.min(LW - 8, x1));
+    y1 = Math.max(8, Math.min(LH - 8, y1));
+    this.held = null;
+    st.held = false;
+    // it breaks where it lands, then grows back at home after the usual wait
+    st.broke = wall + THROW_MS;
+    this.flights.push({ kind, x0: me.x, y0: me.y, x1, y1, at: wall, mine: true, done: false });
+    me.pose = 'swing';
+    me.since = performance.now();
+    this.swingUntil = performance.now() + 360;
+    this.emit({ t: 'throw', kind, x0: me.x, y0: me.y, x1, y1 });
+    this.emit({ t: 'sfx', name: 'swing' });
+  }
+  /** Throws land: they break, and ours may hit a miner (Brawl rules) and heal us like any smash. */
+  private landFlights() {
+    const wall = Date.now();
+    for (const t of this.snap.brawl?.throws ?? []) {
+      const key = `${t.by}:${t.at}`;
+      if (this.seenThrows.has(key)) continue;
+      this.seenThrows.add(key);
+      if (this.seenThrows.size > 200) this.seenThrows.clear();
+      this.flights.push({ kind: t.k, x0: t.x0, y0: t.y0, x1: t.x1, y1: t.y1, at: t.at, mine: false, done: false });
+    }
+    for (const f of this.flights) {
+      if (f.done || wall < f.at + THROW_MS) continue;
+      f.done = true;
+      this.parts.burst('chip', f.x1, f.y1 - 6, 16, 46, 34, SMASH_COLORS[f.kind], 0.8);
+      this.parts.burst('dust', f.x1, f.y1, 8, 22, 10, ['#f2e6c8', '#d8c8a8'], 0.6);
+      this.fx.impact(f.x1, f.y1 - 6, wall, '#ffe9a0', 0.8);
+      this.emit({ t: 'sfx', name: 'pop' });
+      if (!f.mine) continue;
+      this.fx.say(f.x1, f.y1 - 22, 'SMASH!', '#ffcf4a', wall);
+      this.emit({ t: 'smash' });
+      this.emit({ t: 'heal', hp: SMASH_HEAL_OF[f.kind] });
+      // whoever it lands on takes the hit
+      const b = this.snap.brawl;
+      let hit: string | null = null;
+      let hd = 20;
+      for (const p of this.peers.values()) {
+        const v = b?.peers[p.view.id];
+        if (!b?.on || !v?.on || koAge(v, wall) >= 0) continue;
+        const d = Math.hypot(p.x - f.x1, (p.y - f.y1) * 1.6);
+        if (d < hd) {
+          hd = d;
+          hit = p.view.id;
+        }
+      }
+      if (hit) {
+        this.fx.shake(140, 1.4, wall);
+        this.emit({ t: 'throwHit', target: hit, x: f.x1, y: f.y1 });
+      }
+    }
+    this.flights = this.flights.filter((f) => !f.done || wall < f.at + THROW_MS + 200);
+    // the GRAB / THROW button: only tell the app when it changes
+    if (wall - this.carryCheck > 200) {
+      this.carryCheck = wall;
+      const held = this.held !== null;
+      const near = !held && !this.myRideKind() && this.grabTarget() >= 0;
+      const k = `${near}:${held}`;
+      if (k !== this.carryShown) {
+        this.carryShown = k;
+        this.emit({ t: 'carry', near, held });
+      }
+    }
+  }
+
   attack() {
+    // holding something: the swing throws it
+    if (this.held !== null) return this.throwHeld();
     const b = this.snap.brawl;
     // no swinging from a ride
     if (!b || !b.on || this.leaving || this.myRideKind()) return;
@@ -394,7 +535,7 @@ export class LobbyEngine {
     let best = -1;
     let bd = Infinity;
     this.smash.forEach((st, i) => {
-      if (st.broke > 0 && now < st.broke + st.back) return;
+      if (st.held || (st.broke > 0 && now < st.broke + st.back)) return;
       const dx = st.x - me.x;
       const dy = (st.y - 2 - me.y) * 1.4;
       const reach = st.kind === 'vein' ? 30 : 27;
@@ -1203,6 +1344,11 @@ export class LobbyEngine {
       e.preventDefault();
       return;
     }
+    if (k === 't' && down && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      this.grab();
+      e.preventDefault();
+      return;
+    }
     if (k === ' ' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       if (down && !e.repeat) this.jump();
       e.preventDefault();
@@ -1258,6 +1404,7 @@ export class LobbyEngine {
       this.smashDue = this.smashDue.filter((h) => now < h.at);
       for (const h of due) this.smashHit(h.i, h.dir);
     }
+    this.landFlights();
     this.draw(now);
     if (!this.ready && this.ground) {
       this.ready = true;
@@ -1530,6 +1677,16 @@ export class LobbyEngine {
       if (st.kind === 'vein' || !inView(st.x, st.y)) return;
       items.push({ y: st.y, draw: () => this.drawSmash(c, i, sx(st.x), sy(st.y), z, Date.now()) });
     });
+    // pots in the air, and the one in our hands (over our head)
+    for (const f of this.flights) {
+      if (f.done) continue;
+      items.push({ y: f.y0 + (f.y1 - f.y0) * Math.min(1, (Date.now() - f.at) / THROW_MS) + 2, draw: () => drawFlight(c, f, Date.now(), sx, sy, z, 26) });
+    }
+    if (this.held !== null) {
+      const hk = this.smash[this.held].kind as PropKind;
+      const me = this.me;
+      items.push({ y: me.y + 0.5, draw: () => drawProp(c, hk, sx(me.x), sy(me.y - 27 - (me.pose === 'walk' ? Math.abs(Math.sin(now / 90)) : 0)), z) });
+    }
 
     // parked rides (a ridden one is drawn under its rider)
     for (const r of this.snap.rides ?? []) {
@@ -1793,6 +1950,12 @@ export class LobbyEngine {
   /** A pot, crate, barrel, bush or stone: whole, wobbling from a hit, bits on the ground, or growing back. */
   private drawSmash(c: Ctx, i: number, X: number, Y: number, z: number, now: number) {
     const st = this.smash[i];
+    if (st.held) return;
+    if (st.away) {
+      // thrown: no rubble at home, it just grows back there
+      if (st.broke > 0 && now < st.broke + st.back) return;
+      st.away = false;
+    }
     const q = this.squash(st, now);
     if (q.broken && st.decor) {
       // a few leaves or pebbles where it stood
