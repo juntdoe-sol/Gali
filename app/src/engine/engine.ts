@@ -32,6 +32,8 @@ const HOME = ISLE.home as [number, number];
 /** where a miner lands on arrival: the middle of the ORE helipad, a step south of the logo's centre */
 const PAD = (ISLE as unknown as { pad?: { x: number; y: number; size: number } }).pad;
 const LANDING: [number, number] = PAD ? [PAD.x, PAD.y + 12] : HOME;
+/** the University of ORE: where Hardhat Chad stands, the tip of his cigarette, the hall's door */
+const UNI = (ISLE as unknown as { uni?: { chad: [number, number]; cig: [number, number]; door: [number, number] } }).uni;
 /** keyboard walking speed, map px a second (a tap walk is 52) */
 const KEY_SPEED = 56;
 const standOf = (i: number) => CLAIMS[i].stand as [number, number];
@@ -66,7 +68,10 @@ const FAR_ISLETS: [string, number, number][] = (
     ['islet-palm', -90, 225],
     ['islet-rock', 460, 265],
   ] as [string, number, number][]
-).map(([n, x, y]) => [n, x + OFF_X, y + OFF_Y] as [string, number, number]);
+)
+  .map(([n, x, y]) => [n, x + OFF_X, y + OFF_Y] as [string, number, number])
+  // the wider map grew over some of them (the campus is where one used to be)
+  .filter(([, x, y]) => !isLand(x, y) && !isLand(x, y - 8));
 
 type Mode = 'island' | 'enter' | 'closeup' | 'exit';
 
@@ -126,6 +131,8 @@ export class Engine {
   private last = 0;
   private raf = 0;
   private lastMe = 0;
+  /** standing at the University door: the lessons opened, and wait until you step off before it opens again */
+  private atUni = false;
   private fpsAcc = { n: 0, t: 0 };
   quality = 1;
   private ready = false;
@@ -805,6 +812,13 @@ export class Engine {
       this.petPos.y += (ty - this.petPos.y) * Math.min(1, dt * 3);
     }
 
+    // walk up the University's steps and the lessons open (once, until you step away)
+    if (UNI && this.mode === 'island') {
+      const at = Math.abs(me.x - UNI.door[0]) < 7 && Math.abs(me.y - UNI.door[1]) < 5;
+      if (at && !this.atUni) this.emit({ t: 'uni' });
+      this.atUni = at;
+    }
+
     // tell the app where we are, a few times a second
     if (now - this.lastMe > 250) {
       this.lastMe = now;
@@ -868,6 +882,8 @@ export class Engine {
     // smoke from chimneys and the campfire, the odd firefly after dark
     if (this.mode === 'island') {
       for (const [sx, sy] of ISLE.smoke as number[][]) if (Math.random() < dt * 3) this.parts.spawn('smoke', sx + Math.random() * 2, sy, { vx: 1, vz: 6 + Math.random() * 4, life: 2.6, c: '#d8d4cc' });
+      // Hardhat Chad never puts it out
+      if (UNI && Math.random() < dt * 1.4) this.parts.spawn('smoke', UNI.cig[0] + 1, UNI.cig[1] - 1, { vx: 2, vz: 3 + Math.random() * 2, life: 1.6, c: '#ecebe6' });
       if (this.sky.night > 0.5 && Math.random() < dt * 2) {
         const pr = this.props[Math.floor(Math.random() * this.props.length)];
         if (pr) this.parts.spawn('fly', pr.x + (Math.random() - 0.5) * 16, pr.y - 4 - Math.random() * 6, { vx: Math.random() * 9, vy: Math.random() * 9, life: 5, c: '#e6ff9a' });
@@ -1261,6 +1277,8 @@ export class Engine {
       for (const [name, x, y] of REGIONS) textCentered(c, name, OX + x * S, OY + y * S, fs, '#eef4ff', 'rgba(2,5,15,0.6)');
       c.globalAlpha = 1;
     }
+    // Hardhat Chad's name, once you are close enough to read it
+    if (UNI && zoomK > 1.5) textCentered(c, 'HARDHAT CHAD', OX + UNI.chad[0] * S, OY + (UNI.chad[1] - 22) * S, fs, '#ffd84a', 'rgba(2,5,15,0.7)');
     const winner = s?.winner ?? null;
     if (s && (el < 0 || el < 2500)) {
       const solo = s.solo;
@@ -1635,6 +1653,8 @@ export class Engine {
       const d = this.peers.get(p.id);
       if (d && Math.abs(mx - d.x) < 8 && my < d.y + 2 && my > d.y - 24) return this.emit({ t: 'peer', id: p.id });
     }
+    // Hardhat Chad, or the University's door
+    if (UNI && ((Math.abs(mx - UNI.chad[0]) < 8 && my < UNI.chad[1] + 3 && my > UNI.chad[1] - 20) || (Math.abs(mx - UNI.door[0]) < 6 && my < UNI.door[1] + 2 && my > UNI.door[1] - 14))) return this.emit({ t: 'uni' });
     const hit = claimForTap(mx, my);
     const el = this.revealEl(now);
     if (hit >= 0) {

@@ -123,4 +123,6 @@ export type EngineEvent =
   /** your miner jumped */
   | { t: 'jump' }
   /** tutorial: your miner reached a mining spot */
-  | { t: 'arrived'; claim: number };
+  | { t: 'arrived'; claim: number }
+  /** Hardhat Chad or the University of ORE's door: open the lessons */
+  | { t: 'uni' };
