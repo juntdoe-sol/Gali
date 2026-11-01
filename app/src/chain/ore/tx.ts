@@ -251,6 +251,8 @@ export async function readAutomation(owner: PublicKey) {
     spent: toSol(a.totalSolSpent),
     executor: a.executor,
     runnable: a.executor.equals(EXECUTOR_ADDRESS) || Boolean(mine && a.executor.equals(mine)),
+    /** Gali AI plays this one (it picks the spots each round) */
+    ai: Boolean(AI_EXECUTOR_KEY && a.executor.equals(AI_EXECUTOR_KEY)),
     /** the spots it plays (Preferred), or how many it rolls each round (Random) */
     mask: Number(a.mask & 0x1ffffffn),
     random: Number(a.strategy) === AUTOMATION_STRATEGY.Random,
@@ -340,6 +342,52 @@ export async function closeLiveAutomation(expectedOwner?: PublicKey): Promise<vo
       automateIx({ authority: owner, amount: 0n, deposit: 0n, fee: 0n, mask: 0, strategy: AUTOMATION_STRATEGY.DiscretionaryBps, reload: false, executor: PublicKey.default }),
     ];
   }, expectedOwner);
+}
+
+/* ---------------- Gali AI mining ----------------
+ * The player funds an ORE automation with the Discretionary strategy and names the Gali AI key as its executor.
+ * ORE then lets that key choose the spots and the amount per spot each round (never more than `maxPerSpot`), and
+ * nothing else: it can't withdraw or change the limit. Returned SOL goes back into the automation (reload), so the
+ * balance shows how the AI is doing. STOP is the same as autopilot's: it closes the automation and returns the rest.
+ * No Gali platform fee here: the weekly AI pass is the fee.
+ */
+const AI_EXECUTOR_KEY = (() => {
+  try {
+    return process.env.EXPO_PUBLIC_AI_EXECUTOR ? new PublicKey(process.env.EXPO_PUBLIC_AI_EXECUTOR) : null;
+  } catch {
+    return null;
+  }
+})();
+export const aiReady = () => Boolean(AI_EXECUTOR_KEY);
+/** What each round the AI plays pays its executor: the network fee, no margin. Same as supabase/functions/_shared/aiStrategy.ts. */
+export const AI_EXECUTOR_FEE = 10_000n;
+/** The weekly pass. Same as supabase/functions/ai-pass. */
+export const AI_PASS_LAMPORTS = 100_000_000n;
+
+export async function startAiAutomation(args: { deposit: bigint; maxPerSpot: bigint; expectedOwner?: PublicKey }): Promise<string> {
+  if (!AI_EXECUTOR_KEY) throw new Error('Gali AI is not set up in this build');
+  if (args.deposit <= 0n || args.maxPerSpot <= 0n) throw new Error('Enter an amount');
+  return sendWithWallet(async (owner) => {
+    if (await fetchOreAutomation(connection, owner)) throw new Error('Autopilot is already on. Stop it first');
+    return [
+      priorityIx(),
+      automateIx({
+        authority: owner,
+        amount: args.maxPerSpot,
+        deposit: args.deposit,
+        fee: AI_EXECUTOR_FEE,
+        mask: 0,
+        strategy: AUTOMATION_STRATEGY.Discretionary,
+        reload: true,
+        executor: AI_EXECUTOR_KEY,
+      }),
+    ];
+  }, args.expectedOwner);
+}
+
+/** Pay for one week of Gali AI: 0.1 SOL to Gali's revenue wallet. Returns the signature for the server to check. */
+export async function payAiPass(expectedOwner?: PublicKey): Promise<string> {
+  return sendWithWallet(async (owner) => [priorityIx(), SystemProgram.transfer({ fromPubkey: owner, toPubkey: new PublicKey(REVENUE_WALLET), lamports: AI_PASS_LAMPORTS })], expectedOwner);
 }
 
 /** Lamports to whole SOL, for display. */

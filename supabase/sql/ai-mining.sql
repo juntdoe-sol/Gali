@@ -1,0 +1,168 @@
+-- Gali AI mining. Run once in the Supabase SQL Editor after ore-hits.sql (it reads gali_ore_market for prices) and
+-- after deploying the ai-miner, ai-tune and ai-pass functions. Safe to run again.
+-- Before running, replace the two values in the cron section at the bottom:
+--   <PROJECT_REF>   your Supabase project ref (the part before .supabase.co)
+--   <CRON_SECRET>   the same random string the autopilot cron uses (supabase secrets set CRON_SECRET=...)
+--
+-- Tables are closed to the app. The app reads through the gali_ai_* functions below with the public key; only the
+-- edge functions (service role) write.
+
+create table if not exists public.gali_ai_passes (
+  wallet text primary key,
+  expires_at timestamptz not null,
+  paid_lamports bigint not null default 0,
+  created_at timestamptz not null default now()
+);
+
+-- one row per pass payment, so a transaction can never buy two weeks
+create table if not exists public.gali_ai_payments (
+  signature text primary key,
+  wallet text not null,
+  lamports bigint not null,
+  at timestamptz not null default now()
+);
+
+-- the AI's settings, newest last. ai-tune adds a row an hour; the executor reads the newest.
+create table if not exists public.gali_ai_params (
+  id bigserial primary key,
+  min_edge numeric not null,
+  crowd_buffer numeric not null,
+  max_round_share numeric not null,
+  target_slots_left int not null,
+  source text not null default 'default',
+  note text,
+  at timestamptz not null default now()
+);
+
+-- every round the AI played for a player, and (once drawn) what ORE paid for it
+create table if not exists public.gali_ai_rounds (
+  wallet text not null,
+  round_id bigint not null,
+  stake bigint[] not null,            -- lamports on each of the 25 squares
+  total bigint not null,              -- lamports staked
+  fee bigint not null default 10000,  -- lamports the automation paid the executor
+  ev numeric not null,                -- expected profit in lamports when played (cautious)
+  board_before bigint not null,       -- lamports on the chosen squares when played
+  prize numeric not null,             -- SOL value of one square's prize, lamports
+  signature text not null,
+  played_at timestamptz not null default now(),
+  settled_at timestamptz,
+  void boolean not null default false, -- the deploy never landed
+  sol_back bigint,
+  ore_grams bigint,
+  won boolean,
+  motherlode boolean,
+  exact boolean,
+  board_after bigint,                 -- lamports on the chosen squares when the round closed
+  primary key (wallet, round_id)
+);
+create index if not exists gali_ai_rounds_pending on public.gali_ai_rounds (round_id) where settled_at is null;
+create index if not exists gali_ai_rounds_settled on public.gali_ai_rounds (settled_at desc) where settled_at is not null;
+
+alter table public.gali_ai_passes enable row level security;
+alter table public.gali_ai_payments enable row level security;
+alter table public.gali_ai_params enable row level security;
+alter table public.gali_ai_rounds enable row level security;
+revoke all on public.gali_ai_passes, public.gali_ai_payments, public.gali_ai_params, public.gali_ai_rounds from anon, authenticated;
+
+insert into public.gali_ai_params (min_edge, crowd_buffer, max_round_share, target_slots_left, source, note)
+select 0.08, 0.25, 0.05, 22, 'default', 'Starting settings'
+where not exists (select 1 from public.gali_ai_params);
+
+-- ai-pass calls this after checking the payment on chain. Adds 7 days to the pass (from now, or from when the
+-- current pass runs out, whichever is later). Raises when the payment was already used.
+create or replace function public.gali_ai_pass_add(p_wallet text, p_signature text, p_lamports bigint)
+returns timestamptz
+language plpgsql security definer set search_path = public as $$
+declare v_exp timestamptz;
+begin
+  insert into gali_ai_payments (signature, wallet, lamports) values (p_signature, p_wallet, p_lamports);
+  insert into gali_ai_passes (wallet, expires_at, paid_lamports) values (p_wallet, now() + interval '7 days', p_lamports)
+  on conflict (wallet) do update
+    set expires_at = greatest(gali_ai_passes.expires_at, now()) + interval '7 days',
+        paid_lamports = gali_ai_passes.paid_lamports + excluded.paid_lamports
+  returning expires_at into v_exp;
+  return v_exp;
+exception when unique_violation then
+  raise exception 'payment already used';
+end $$;
+revoke all on function public.gali_ai_pass_add(text, text, bigint) from public;
+grant execute on function public.gali_ai_pass_add(text, text, bigint) to service_role;
+
+-- Everyone: how many miners use Gali AI and what it made them, all together.
+create or replace function public.gali_ai_stats()
+returns table (active_miners int, miners int, rounds bigint, wins bigint, motherlodes bigint, deployed_sol numeric, returned_sol numeric,
+               ore numeric, fees_sol numeric, sol_usd numeric, ore_usd numeric, tuned_at timestamptz, tune_note text)
+language sql stable security definer set search_path = public as $$
+  select
+    (select count(*)::int from gali_ai_passes where expires_at > now()),
+    (select count(distinct wallet)::int from gali_ai_rounds where settled_at is not null and not void),
+    count(*), count(*) filter (where r.won), count(*) filter (where r.motherlode),
+    coalesce(sum(r.total), 0) / 1e9, coalesce(sum(r.sol_back), 0) / 1e9, coalesce(sum(r.ore_grams), 0) / 1e11, coalesce(sum(r.fee), 0) / 1e9,
+    (select sol_usd from gali_ore_market where id = 1), (select ore_usd from gali_ore_market where id = 1),
+    (select at from gali_ai_params order by id desc limit 1), (select note from gali_ai_params order by id desc limit 1)
+  from gali_ai_rounds r where r.settled_at is not null and not r.void
+$$;
+
+-- Everyone: each miner's AI results, best first (ORE valued at today's ORE/SOL price after the 10% claim fee).
+create or replace function public.gali_ai_board(p_limit int default 50)
+returns table (wallet text, name text, active boolean, rounds bigint, wins bigint, deployed_sol numeric, returned_sol numeric, ore numeric, fees_sol numeric, net_sol numeric)
+language sql stable security definer set search_path = public as $$
+  with px as (select coalesce(ore_usd / nullif(sol_usd, 0), 0) as ore_sol from gali_ore_market where id = 1),
+  t as (
+    select r.wallet, count(*) as rounds, count(*) filter (where r.won) as wins,
+           sum(r.total) / 1e9 as deployed_sol, sum(r.sol_back) / 1e9 as returned_sol, sum(r.ore_grams) / 1e11 as ore, sum(r.fee) / 1e9 as fees_sol
+    from gali_ai_rounds r where r.settled_at is not null and not r.void group by r.wallet
+  )
+  select t.wallet, m.name, coalesce(p.expires_at > now(), false), t.rounds, t.wins, t.deployed_sol, t.returned_sol, t.ore, t.fees_sol,
+         t.returned_sol - t.deployed_sol - t.fees_sol + t.ore * 0.9 * coalesce((select ore_sol from px), 0)
+  from t
+  left join gali_miners m on m.wallet = t.wallet
+  left join gali_ai_passes p on p.wallet = t.wallet
+  order by 10 desc
+  limit least(greatest(p_limit, 1), 200)
+$$;
+
+-- Everyone: one wallet's pass and results (wallets and rounds are public on chain anyway).
+create or replace function public.gali_ai_me(p_wallet text)
+returns table (expires_at timestamptz, rounds bigint, wins bigint, deployed_sol numeric, returned_sol numeric, ore numeric, fees_sol numeric, pending bigint)
+language sql stable security definer set search_path = public as $$
+  select (select expires_at from gali_ai_passes where wallet = p_wallet),
+         count(*) filter (where settled_at is not null and not void),
+         count(*) filter (where won),
+         coalesce(sum(total) filter (where settled_at is not null and not void), 0) / 1e9,
+         coalesce(sum(sol_back) filter (where not void), 0) / 1e9,
+         coalesce(sum(ore_grams) filter (where not void), 0) / 1e11,
+         coalesce(sum(fee) filter (where settled_at is not null and not void), 0) / 1e9,
+         count(*) filter (where settled_at is null)
+  from gali_ai_rounds where wallet = p_wallet
+$$;
+
+revoke all on function public.gali_ai_stats(), public.gali_ai_board(int), public.gali_ai_me(text) from public;
+grant execute on function public.gali_ai_stats(), public.gali_ai_board(int), public.gali_ai_me(text) to anon, authenticated, service_role;
+
+-- ---------------- schedules ----------------
+create extension if not exists pg_cron;
+create extension if not exists pg_net;
+
+-- the AI plays every minute; each run covers about 50 seconds
+select cron.unschedule('gali-ai-miner') where exists (select 1 from cron.job where jobname = 'gali-ai-miner');
+select cron.schedule('gali-ai-miner', '* * * * *', $$
+  select net.http_post(
+    url := 'https://<PROJECT_REF>.supabase.co/functions/v1/ai-miner',
+    headers := jsonb_build_object('content-type', 'application/json', 'x-cron-secret', '<CRON_SECRET>'),
+    body := '{}'::jsonb,
+    timeout_milliseconds := 58000
+  );
+$$);
+
+-- Claude reviews the last rounds and retunes the settings once an hour
+select cron.unschedule('gali-ai-tune') where exists (select 1 from cron.job where jobname = 'gali-ai-tune');
+select cron.schedule('gali-ai-tune', '17 * * * *', $$
+  select net.http_post(
+    url := 'https://<PROJECT_REF>.supabase.co/functions/v1/ai-tune',
+    headers := jsonb_build_object('content-type', 'application/json', 'x-cron-secret', '<CRON_SECRET>'),
+    body := '{}'::jsonb,
+    timeout_milliseconds := 120000
+  );
+$$);

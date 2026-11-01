@@ -175,7 +175,7 @@ flowchart LR
 | Stage | What |
 |---|---|
 | **Now** | Mainnet beta on desktop web and Android. Weekly APK releases from tester feedback. APK 1.7 lands this week. |
-| **In development** | The Gali program (`programs/gali`): points, streaks, an SKR jackpot on ORE's motherlode, gear and staking, tested against a mock of ORE. Its screens stay behind `EXPO_PUBLIC_FEATURE_GALI_PROGRAM` until it ships. A Gali app for Android TV (`tv/`) that pairs with a Seeker. One-tap Seeker Connect. |
+| **In development** | The Gali program (`programs/gali`): points, streaks, an SKR jackpot on ORE's motherlode, gear and staking, tested against a mock of ORE. Its screens stay behind `EXPO_PUBLIC_FEATURE_GALI_PROGRAM` until it ships. A Gali app for Android TV (`tv/`) that pairs with a Seeker. One-tap Seeker Connect. Gali AI mining (below), behind `EXPO_PUBLIC_FEATURE_AI_MINING`. |
 | **Planned** | Gear as tradeable NFTs and a player Market. Clans. More seasons. |
 
 Details in [ROADMAP.md](ROADMAP.md).
@@ -205,7 +205,7 @@ ORE is credited as the board Gali plays on. Gali is not affiliated with or endor
 | --- | --- |
 | `app/` | Expo (React Native) app for Android and web. Canvas engines in `app/src/engine`, game state in `app/src/game`, chain code in `app/src/chain` |
 | `app/rpc-backend/` | Read proxy and the arcade server (`functions/games.mjs`) |
-| `supabase/` | Edge functions (`autopilot`, `ore-rate`, `dm`, chat) and SQL for chat, ranks, autopilot and ORE stats |
+| `supabase/` | Edge functions (`autopilot`, `ai-miner`, `ai-tune`, `ai-pass`, `ore-rate`, `dm`, chat) and SQL for chat, ranks, autopilot, AI mining and ORE stats |
 | `programs/gali` | Anchor program, in development |
 | `programs/ore-mock` | Test-only stand-in for ORE's program |
 | `tests/gali.ts` | Program tests against the mock (33 cases) |
@@ -234,7 +234,7 @@ Check it without a browser:
 ```bash
 cd app
 npx tsc --noEmit
-npm test            # 20 suites, no wallet or network needed
+npm test            # 21 suites, no wallet or network needed
 ```
 
 | Variable | Needed | Default when empty |
@@ -246,6 +246,7 @@ npm test            # 20 suites, no wallet or network needed
 | `EXPO_PUBLIC_WORLD_URL`, `EXPO_PUBLIC_WORLD_KEY` | No | Lobby runs solo, Arena off |
 | `EXPO_PUBLIC_TICKET_KEY` | No | Arena tickets off |
 | `EXPO_PUBLIC_FEATURE_GALI_PROGRAM` | No | `0`, program screens hidden |
+| `EXPO_PUBLIC_FEATURE_AI_MINING`, `EXPO_PUBLIC_AI_EXECUTOR` | No | AI tab hidden. Both are needed to show it; the second is the AI key's public key |
 
 Every `EXPO_PUBLIC_` value is bundled into the app. Never put a secret in one.
 
@@ -275,6 +276,19 @@ The script starts a throwaway validator with ORE's mock at ORE's address and Gal
 ### Supabase
 
 The lobby, chat and ranks run on one Supabase project. SQL lives in `supabase/sql/`; each file says what to replace (`<PROJECT_REF>`, `<CRON_SECRET>`) and what to run first. Store the cron key in Supabase Vault, never in a file. Edge functions deploy with `supabase functions deploy <name> --no-verify-jwt`; each one checks its own secret.
+
+### Gali AI mining
+
+An AI tab next to LITE and PRO. A player buys a pass (0.1 SOL for 7 days, paid to the revenue wallet), then funds an ORE automation that names the Gali AI key as its executor. ORE's Discretionary strategy lets that key pick the spots and the amount per spot each round, never more than the player's per-spot limit, and nothing else: it can't withdraw, and STOP returns the balance. Returned SOL goes back into the automation, so the balance shows how it is doing.
+
+- **`ai-miner`** runs every minute. Near the end of each round it reads the board and plays only spots where the ORE a player can expect is worth more than the SOL ORE keeps, with a margin. It sits out every other round. A bigger motherlode makes more spots worth it. After the draw it works out each player's result from ORE's own accounts. The strategy is in `supabase/functions/_shared/aiStrategy.ts`.
+- **`ai-tune`** runs hourly. Claude (Sonnet 5.5) reads the last day and week of results and sets the next hour's settings. Code clamps every value and limits how far one hour can move it, so a bad answer can't push the AI outside safe limits.
+- **`ai-pass`** checks the 0.1 SOL payment on chain before it adds 7 days. A payment counts once.
+- **The app** shows how many miners have a live pass, what Gali AI made all of them and each of them, and your own result.
+
+Setup: create a new key for the AI (not the autopilot key) and keep about 0.05 SOL on it for network fees. Then run `supabase secrets set AI_EXECUTOR_KEY='[...]' ANTHROPIC_API_KEY=...`, deploy the three functions with `--no-verify-jwt`, run `supabase/sql/ai-mining.sql`, and build the app with `EXPO_PUBLIC_FEATURE_AI_MINING=1` and `EXPO_PUBLIC_AI_EXECUTOR=<its public key>`. The AI never plays without a fresh ORE price (under 30 minutes old), so the `ore-hits` job must be running.
+
+What it can't do: ORE's draw is random, so no strategy sees the winning spot. On a busy board, squares already sit close to break-even, so expect the AI to sit out many rounds.
 
 ### Check ORE's layout
 
