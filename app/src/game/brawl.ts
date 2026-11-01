@@ -17,7 +17,7 @@
 import { create } from 'zustand';
 import { announce, sendLobbyBx, useLobby } from './lobby';
 import { announce as say, play } from './sfx';
-import { baseDamage, GAP, GUARD_MS, GUARD_STING, REACH as W_REACH, swingDmg, taken, type Weapon } from './powers';
+import { baseDamage, GAP, GUARD_MS, GUARD_STING, REACH as W_REACH, swingDmg, taken, THROW_MS, type PropKind, type Weapon } from './powers';
 import { roomHooks, type Scope } from './rx';
 import { loadJson, saveJson } from './storage';
 import { sendWorldBx, useWorld } from './world';
@@ -55,10 +55,9 @@ const HP_SEND_MS = 700;
 /** Damage of an attacker's n-th swing: the same on every client, and not up to the attacker. */
 export const dmgOf = swingDmg;
 const WEAPONS: Weapon[] = ['swing', 'dash', 'slam', 'ore', 'splash', 'pet', 'boss', 'mob', 'sting', 'spin', 'prop'];
-/** What can be grabbed and thrown, and how long a throw is in the air (ms). */
-export type PropKind = 'pot' | 'crate' | 'barrel';
 const PROP_KINDS: PropKind[] = ['pot', 'crate', 'barrel'];
-export const THROW_MS = 420;
+export { THROW_MS };
+export type { PropKind };
 /** A throw someone else made, so every screen draws the pot flying: from, to, when it left (wall ms). */
 export interface Throw {
   by: string;
@@ -520,6 +519,28 @@ export function strike(scope: Scope, w: Weapon, target: string, x: number, y: nu
   myHits.set(target, now);
   const d = baseDamage(w, meId(scope), seq, myLevel(), true);
   useBrawl.setState((st) => ({ peers: { ...st.peers, [target]: { ...v, hp: Math.max(1, v.hp - d), hitAt: now } } }));
+  return true;
+}
+
+/**
+ * Someone who is not a player hit us (Hardhat Chad, fighting back on ORE Island): `dmg` straight off our HP, with the
+ * usual safety (Brawl off, deploying, down, shielded or mid-air: no hit). A KO from it is a knockdown like any
+ * other, but it is no player's KO: nothing is reported for it.
+ */
+export function npcHit(scope: Scope, dmg: number, x: number, y: number, name: string): boolean {
+  const now = Date.now();
+  const st = useBrawl.getState();
+  // no canFight here: Chad lives on this phone only, so he needs no room or wallet, only Brawl switched on
+  if (scope !== st.scope || meSafe(now)) return false;
+  const hp = Math.max(0, st.me.hp - Math.max(1, Math.round(dmg)));
+  const ko = hp <= 0;
+  useBrawl.setState((s) => ({ me: { ...s.me, hp, hitAt: now, hitFrom: [x, y], koAt: ko ? now : 0 } }));
+  if (ko) {
+    sendHp(true);
+    // 'boss': the hooks treat it as no player's KO (no report, no foe)
+    brawlHooks.kodBy?.(scope, 'boss', name);
+    if (!brawlHooks.holdKo?.(scope)) setTimeout(standUp, KO_MS);
+  } else sendHp();
   return true;
 }
 

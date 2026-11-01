@@ -24,7 +24,7 @@ const KEYS: Record<string, string[]> = {
   'Walk around': ['W', 'A', 'S', 'D', 'CLICK'],
   'Chat and stickers': ['C', 'ENTER'],
   Brawl: ['F', 'LMB', 'SPC'],
-  'Smash things': ['F', 'LMB'],
+  'Smash things': ['F', 'LMB', 'T'],
   'Carts and scooters': ['E'],
   'Back to the lobby': ['L', 'G'],
 };

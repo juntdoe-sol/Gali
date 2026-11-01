@@ -12,6 +12,9 @@
 
 /** 'prop': a pot, crate or barrel someone grabbed and threw (lobby and island) */
 export type Weapon = 'swing' | 'dash' | 'slam' | 'ore' | 'splash' | 'pet' | 'boss' | 'mob' | 'sting' | 'spin' | 'prop';
+/** What can be grabbed and thrown, and how long a throw is in the air (ms). */
+export type PropKind = 'pot' | 'crate' | 'barrel';
+export const THROW_MS = 420;
 export type ActiveId = 'dash' | 'slam' | 'guard' | 'splash' | 'spin' | 'mend';
 export type PassiveId = 'skin' | 'pet';
 export type PowerId = ActiveId | PassiveId;

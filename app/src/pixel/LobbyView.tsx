@@ -19,6 +19,7 @@ export interface LobbyRef extends DOMImperativeFactory {
   attack: (...args: any[]) => void;
   jump: (...args: any[]) => void;
   ride: (...args: any[]) => void;
+  grab: (...args: any[]) => void;
 }
 
 export default function LobbyView({ ref, onEvent, atlas, look, opts }: { ref: Ref<LobbyRef>; onEvent: (e: LobbyEvent) => void; atlas: string; look: Look; opts: LobbyOpts; dom?: DOMProps }) {
@@ -44,6 +45,7 @@ export default function LobbyView({ ref, onEvent, atlas, look, opts }: { ref: Re
       attack: () => engine.current?.attack(),
       jump: () => engine.current?.jump(),
       ride: () => engine.current?.ride(),
+      grab: () => engine.current?.grab(),
     }),
     [],
   );

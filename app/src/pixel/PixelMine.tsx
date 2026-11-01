@@ -23,9 +23,10 @@ import { GUTTER, layoutNow, TOP_H } from '../ui/layout';
 import { atlasSource } from './atlasSource';
 import GameView, { type GameRef } from './GameView';
 import { useView } from './view';
+import { islandRideMoved, startIslandRides, stopIslandRides, useIslandRides } from '../game/islandRides';
 import { chadAt, nearChad, openUni } from '../ui/University';
 import { useLobby } from '../game/lobby';
-import { brawlSnap, enterScope, initBrawl, jump, setMyPos, swing } from '../game/brawl';
+import { brawlSnap, enterScope, heal, initBrawl, jump, npcHit, sendThrow, setMyPos, swing, throwHit } from '../game/brawl';
 import { initArena, useArena } from '../game/arena';
 import { initFightHooks } from '../game/fightHooks';
 
@@ -74,6 +75,17 @@ function viewBand(focus: number): Snapshot['view'] {
     return { top: TOP_H + GUTTER, bottom: GUTTER, left, right: L.side + GUTTER * 2 };
   }
   return focus >= 0 ? { top: closeupView.top, bottom: closeupView.bottom } : { top: fx.viewTop, bottom: fx.viewBottom };
+}
+
+/** The island's scooters and carts, for the canvas: where they are, who is on them ('me' for us). */
+function islandRideSnap() {
+  const R = useIslandRides.getState();
+  const myId = useWorld.getState().me;
+  return {
+    rides: R.rides.map((r) => ({ id: r.id, k: r.kind, x: Math.round(r.x), y: Math.round(r.y), f: r.f, rider: r.rider === myId ? 'me' : r.rider })),
+    myRide: R.mine,
+    nearRide: R.near,
+  };
 }
 
 function snapshot(): Snapshot {
@@ -135,6 +147,7 @@ function snapshot(): Snapshot {
     claimedAt: st.claimedAt,
     onIsland: useLobby.getState().where === 'island',
     mapView: useView.getState().mapView,
+    ...islandRideSnap(),
     brawl: brawlSnap(now),
     guide: useTutorial.getState().step === 1 && !useTutorial.getState().desk,
   };
@@ -172,6 +185,12 @@ const SFX: Record<string, Sound> = { hit: 'hit', pop: 'pop', crack: 'crack', sel
 
 let fightFn: (() => void) | null = null;
 let jumpFn: (() => void) | null = null;
+let grabFn: (() => void) | null = null;
+let rideFn: (() => void) | null = null;
+/** The island's RIDE / GET OFF button. */
+export const islandRide = () => rideFn?.();
+/** The island's GRAB / THROW button. */
+export const islandGrab = () => grabFn?.();
 /** The island's FIGHT button: swing at whoever is in reach. */
 export const islandFight = () => fightFn?.();
 /** The island's JUMP button. */
@@ -236,14 +255,19 @@ export default function PixelMine() {
   useEffect(() => {
     fightFn = () => ref.current?.attack?.();
     jumpFn = () => ref.current?.jump?.();
+    grabFn = () => ref.current?.grab?.();
+    rideFn = () => ref.current?.ride?.();
     return () => {
       fightFn = null;
       jumpFn = null;
+      grabFn = null;
+      rideFn = null;
     };
   }, []);
 
   useEffect(() => {
     startWorld();
+    startIslandRides();
     let last = Date.now();
     let sent = '';
     const id = setInterval(() => {
@@ -262,6 +286,7 @@ export default function PixelMine() {
     }, 100);
     return () => {
       clearInterval(id);
+      stopIslandRides();
       stopWorld();
     };
   }, []);
@@ -318,8 +343,35 @@ export default function PixelMine() {
       case 'chadAt':
         chadAt(e.x, e.y);
         break;
+      case 'heal':
+        heal(e.hp);
+        break;
+      case 'smash':
+        st.track('smash');
+        break;
+      case 'throw':
+        sendThrow('island', e.kind, e.x0, e.y0, e.x1, e.y1);
+        break;
+      case 'throwHit':
+        throwHit('island', e.target, e.x, e.y);
+        break;
+      case 'ride': {
+        const was = useIslandRides.getState().mine;
+        useIslandRides.getState().toggle();
+        const now = useIslandRides.getState().mine;
+        if (now !== was) play(now !== null ? 'jump' : 'step');
+        else if (was === null) st.toast('Walk up to a scooter or cart by the helipad to ride it', 'info');
+        break;
+      }
+      case 'npcHit':
+        npcHit('island', e.dmg, e.x, e.y, 'Hardhat Chad');
+        break;
+      case 'carry':
+        useView.setState({ carry: e.held ? 'held' : e.near ? 'near' : null });
+        break;
       case 'me': {
         setMyPos('island', e.x, e.y);
+        islandRideMoved(e.x, e.y, e.facing);
         if (oreLive && !st.wallet.owner) break;
         const { pick, hat, fit, pet } = myGear();
         const session = st.session();

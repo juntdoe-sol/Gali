@@ -9,7 +9,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Image, Linking, Pressable, ScrollView, StyleSheet, TextInput, View, type ImageStyle } from 'react-native';
 import { create } from 'zustand';
 import { COLORS } from '../game/constants';
-import { CHAD_ASK, ORE_QNA } from '../game/oreQna';
+import { CHAD_ASK, CHAD_BYE, CHAD_PICK, ORE_QNA } from '../game/oreQna';
 import { signIn, useDm } from '../game/dm';
 import { playAsk } from '../game/play';
 import { loadJson, saveJson } from '../game/storage';
@@ -318,12 +318,21 @@ export function ChadChat() {
   const at = useUni((s) => s.at);
   const [pick, setPick] = useState<number | null>(null);
   const [shut, setShut] = useState(false);
+  /** he asks first: 'ask' until you answer, 'yes' shows the questions, 'no' is his goodbye */
+  const [step, setStep] = useState<'ask' | 'yes' | 'no'>('ask');
   useEffect(() => {
     if (!near) {
       setShut(false);
       setPick(null);
+      setStep('ask');
     }
   }, [near]);
+  // a no: he says his piece, then the bubble goes until you walk away and come back
+  useEffect(() => {
+    if (step !== 'no') return;
+    const t = setTimeout(() => setShut(true), 2600);
+    return () => clearTimeout(t);
+  }, [step]);
   if (!near || shut || uniOpen || !at) return null;
   const qa = pick != null ? ORE_QNA[pick] : null;
   // a speech bubble out of Chad's mouth: above his head, its tail pointing down at him, kept on screen
@@ -340,8 +349,11 @@ export function ChadChat() {
             <T v="tiny" style={{ fontSize: 9, color: '#a8740a' }}>
               HARDHAT CHAD
             </T>
+            <T v="tiny" style={{ fontSize: 8, color: '#7a52c8', marginTop: -2 }}>
+              Darkweb Version
+            </T>
             <T v="bold" style={{ fontSize: 15, lineHeight: 20, color: '#1c1820' }}>
-              {qa ? qa.a : CHAD_ASK}
+              {qa ? qa.a : step === 'no' ? CHAD_BYE : step === 'yes' ? CHAD_PICK : CHAD_ASK}
             </T>
           </View>
           <Pressable onPress={() => setShut(true)} accessibilityRole="button" accessibilityLabel="Close chat" hitSlop={10}>
@@ -350,7 +362,12 @@ export function ChadChat() {
             </T>
           </Pressable>
         </View>
-        {qa ? (
+        {step === 'ask' ? (
+          <View style={styles.chatBtns}>
+            <Btn small label="NO" onPress={() => setStep('no')} />
+            <Btn small kind="gold" label="YES" onPress={() => setStep('yes')} />
+          </View>
+        ) : step === 'no' ? null : qa ? (
           <View style={styles.chatBtns}>
             <Btn small label="ASK ANOTHER" onPress={() => setPick(null)} />
             {qa.lesson != null ? <Btn small kind="gold" label="FULL LESSON" onPress={() => openUni(qa.lesson)} /> : null}
