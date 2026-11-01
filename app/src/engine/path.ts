@@ -2,10 +2,10 @@
  * Walking on the island: A* over the terrain blocks, then string-pulled so a
  * miner cuts straight across open ground and only bends round the sea.
  */
-import { BLOCK, COLS, ROWS, ISLE } from './island';
+import { BLOCK, COLS, ROWS, walkBlock } from './island';
 
-const GRID: string = ISLE.grid;
-const walkable = (x: number, y: number) => x >= 0 && y >= 0 && x < COLS && y < ROWS && GRID[y * COLS + x] !== '~';
+/** land with no building on it (island.ts) */
+const walkable = (x: number, y: number) => x >= 0 && y >= 0 && x < COLS && y < ROWS && walkBlock(x, y);
 
 function lineClear(x0: number, y0: number, x1: number, y1: number) {
   const n = Math.ceil(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) * 2) + 1;

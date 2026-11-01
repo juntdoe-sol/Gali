@@ -33,7 +33,7 @@ const HOME = ISLE.home as [number, number];
 const PAD = (ISLE as unknown as { pad?: { x: number; y: number; size: number } }).pad;
 const LANDING: [number, number] = PAD ? [PAD.x, PAD.y + 12] : HOME;
 /** the University of ORE: where Hardhat Chad stands, the tip of his cigarette, the hall's door */
-const UNI = (ISLE as unknown as { uni?: { chad: [number, number]; door: [number, number] } }).uni;
+const UNI = (ISLE as unknown as { uni?: { chad: [number, number]; board: [number, number]; door: [number, number] } }).uni;
 /** Hardhat Chad wears the miners' own body: the default yellow hardhat and blue overalls (shades, smoke and logo on top) */
 const CHAD_LOOK: Look = { hat: 'hat-yellow', fit: '#2f5fd0', pick: '#c9c9c9', handle: '#9b6b43', pet: null, glow: 'none' };
 /** he faces the path, to his left */
@@ -1688,7 +1688,7 @@ export class Engine {
     // Hardhat Chad, or the University's door
     if (UNI && ((Math.abs(mx - UNI.chad[0]) < 7 && my < UNI.chad[1] + 3 && my > UNI.chad[1] - 16) || (Math.abs(mx - UNI.door[0]) < 6 && my < UNI.door[1] + 2 && my > UNI.door[1] - 14))) return this.emit({ t: 'uni' });
     // the notice board beside him: the miners' tips
-    if (UNI && Math.abs(mx - (UNI.chad[0] + 13)) < 8 && my < UNI.chad[1] && my > UNI.chad[1] - 15) return this.emit({ t: 'uni', tab: 'tips' });
+    if (UNI && Math.abs(mx - UNI.board[0]) < 8 && my < UNI.board[1] + 2 && my > UNI.board[1] - 14) return this.emit({ t: 'uni', tab: 'tips' });
     const hit = claimForTap(mx, my);
     const el = this.revealEl(now);
     if (hit >= 0) {
