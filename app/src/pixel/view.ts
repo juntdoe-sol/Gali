@@ -11,6 +11,8 @@ interface ViewState {
   go: (i: number) => void;
   /** ORE Island: the whole board (MAP) instead of following your miner up close */
   mapView: boolean;
+  /** a pot, crate or barrel in reach (GRAB) or in our hands (THROW) */
+  carry: 'near' | 'held' | null;
 }
 
 export const useView = create<ViewState>((set) => ({
@@ -19,4 +21,5 @@ export const useView = create<ViewState>((set) => ({
   request: null,
   go: (i) => set({ request: i }),
   mapView: false,
+  carry: null,
 }));

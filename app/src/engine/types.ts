@@ -81,6 +81,10 @@ export interface Snapshot {
   onIsland?: boolean;
   /** show the whole board (MAP) rather than follow your miner up close, as the lobby does */
   mapView?: boolean;
+  /** the island's scooters and carts (rider 'me' for you), the one you are on, and a free one in reach */
+  rides?: RideView[];
+  myRide?: number | null;
+  nearRide?: number | null;
   brawl?: BrawlSnap;
   /** the first-visit tutorial: point the miner at the nearest mining spot */
   guide?: boolean;
@@ -133,4 +137,15 @@ export type EngineEvent =
   /** your miner walked up to Hardhat Chad (near) or away from him */
   | { t: 'chad'; near: boolean }
   /** where Hardhat Chad's head is on screen (CSS px), while you stand by him: his speech bubble hangs there */
-  | { t: 'chadAt'; x: number; y: number };
+  | { t: 'chadAt'; x: number; y: number }
+  /** a pot, crate or barrel broke: heal this much (Brawl HP), and count it for the daily quest */
+  | { t: 'heal'; hp: number }
+  | { t: 'smash' }
+  /** we threw one (for the room to see it fly), it landed on a miner, or the GRAB / THROW button changes */
+  | { t: 'throw'; kind: 'pot' | 'crate' | 'barrel'; x0: number; y0: number; x1: number; y1: number }
+  | { t: 'throwHit'; target: string; x: number; y: number }
+  | { t: 'carry'; near: boolean; held: boolean }
+  /** Hardhat Chad, fighting back, hit us */
+  | { t: 'npcHit'; dmg: number; x: number; y: number }
+  /** E or the RIDE button: get on the scooter or cart in reach, or off the one we are on */
+  | { t: 'ride' };

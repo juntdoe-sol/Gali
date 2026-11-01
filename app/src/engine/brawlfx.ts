@@ -160,6 +160,11 @@ export class FightFx {
   private impacts: Impact[] = [];
   private shakeUntil = 0;
   private shakeK = 0;
+  /**
+   * The miners' size against the map's: 1 in the lobby, 0.5 on ORE Island (engine.ts ACT), where the world is drawn
+   * twice the miners' scale. Offsets above a miner's head and the size of every effect follow it.
+   */
+  size = 1;
 
   /** a pickaxe swing: a white arc in front of the miner; bigger when it connects */
   slash(x: number, y: number, facing: number, at: number, big: boolean, color?: string) {
@@ -169,10 +174,11 @@ export class FightFx {
   /** a hit landed at (x, y): the damage, and now and then a comic word */
   hit(x: number, y: number, dmg: number, at: number, onMe: boolean) {
     const tilt = () => (Math.random() - 0.5) * 0.16;
-    if (dmg > 0) this.pops.push({ x: x + 10 + (Math.random() - 0.5) * 6, y: y - 38, t: `-${dmg}`, c: onMe ? '#ff4f5e' : '#ffffff', at, big: true, tilt: tilt() });
-    if (Math.random() < 0.55) this.pops.push({ x: x - 8 + (Math.random() - 0.5) * 8, y: y - 18, t: WORDS[Math.floor(Math.random() * WORDS.length)], c: '#ffd84a', at, big: true, tilt: tilt() });
+    const z = this.size;
+    if (dmg > 0) this.pops.push({ x: x + (10 + (Math.random() - 0.5) * 6) * z, y: y - 38 * z, t: `-${dmg}`, c: onMe ? '#ff4f5e' : '#ffffff', at, big: true, tilt: tilt() });
+    if (Math.random() < 0.55) this.pops.push({ x: x + (-8 + (Math.random() - 0.5) * 8) * z, y: y - 18 * z, t: WORDS[Math.floor(Math.random() * WORDS.length)], c: '#ffd84a', at, big: true, tilt: tilt() });
     if (this.pops.length > 40) this.pops.splice(0, this.pops.length - 40);
-    this.impact(x, y - 13, at, onMe ? '#ff6a5e' : '#ffd84a', dmg >= 12 ? 1.25 : 1);
+    this.impact(x, y - 13 * z, at, onMe ? '#ff6a5e' : '#ffd84a', dmg >= 12 ? 1.25 : 1);
   }
   /** a burst where a blow lands: a white flash star, a ring and sparks flying out */
   impact(x: number, y: number, at: number, c = '#ffd84a', k = 1) {
@@ -180,8 +186,8 @@ export class FightFx {
     if (this.impacts.length > 24) this.impacts.shift();
   }
   ko(x: number, y: number, at: number) {
-    this.pops.push({ x, y: y - 34, t: 'K.O.!', c: '#ff8a3d', at, big: true, tilt: 0 });
-    this.impact(x, y - 12, at, '#ff8a3d', 1.6);
+    this.pops.push({ x, y: y - 34 * this.size, t: 'K.O.!', c: '#ff8a3d', at, big: true, tilt: 0 });
+    this.impact(x, y - 12 * this.size, at, '#ff8a3d', 1.6);
   }
   /** a word in the air, like a power's name */
   say(x: number, y: number, t: string, c: string, at: number) {
@@ -199,6 +205,8 @@ export class FightFx {
   }
 
   draw(c: Ctx, ox: number, oy: number, s: number, now: number) {
+    /** s places things on the map; m sizes them, at the miners' scale */
+    const m = s * this.size;
     this.slashes = this.slashes.filter((sl) => now - sl.at < 520);
     for (const sl of this.slashes) {
       const a = now - sl.at;
@@ -207,14 +215,14 @@ export class FightFx {
       const t = Math.min(1, (a - 110) / 110);
       const ease = 1 - (1 - t) * (1 - t);
       const fade = a > 300 ? Math.max(0, 1 - (a - 300) / 220) : 1;
-      const r = (sl.big ? 21 : 17) * s;
-      const cx = ox + (sl.x + sl.facing * 4) * s;
-      const cy = oy + (sl.y - 12) * s;
+      const r = (sl.big ? 21 : 17) * m;
+      const cx = ox + sl.x * s + sl.facing * 4 * m;
+      const cy = oy + sl.y * s - 12 * m;
       const start = -Math.PI * 0.7;
       const end = start + Math.PI * 1.02 * ease;
       // the tail trails the tip, so the blade looks like it moves
       const tail = Math.max(start, end - Math.PI * (0.55 + 0.35 * (1 - t)));
-      const thick = (sl.big ? 7 : 4.5) * s * (0.6 + 0.4 * fade);
+      const thick = (sl.big ? 7 : 4.5) * m * (0.6 + 0.4 * fade);
       const col = sl.color === 'rainbow' ? `hsl(${(now / 3) % 360},90%,62%)` : sl.color ?? (sl.big ? '#ffd84a' : '#9fd6ee');
       c.save();
       if (sl.facing < 0) {
@@ -241,7 +249,7 @@ export class FightFx {
       // a soft afterglow, the coloured blade, then a white edge
       c.globalAlpha = 0.25 * fade;
       c.fillStyle = col;
-      crescent(thick * 1.8, r + 2 * s);
+      crescent(thick * 1.8, r + 2 * m);
       c.globalAlpha = 0.9 * fade;
       crescent(thick, r);
       c.globalAlpha = fade;
@@ -249,12 +257,12 @@ export class FightFx {
       crescent(thick * 0.38, r);
       // speed lines just behind the tip
       c.strokeStyle = '#ffffff';
-      c.lineWidth = Math.max(1, 0.9 * s);
+      c.lineWidth = Math.max(1, 0.9 * m);
       c.globalAlpha = 0.7 * fade;
       for (let k = 0; k < 3; k++) {
         const th = end - 0.25 - k * 0.22;
         if (th < tail) break;
-        const r0 = r + (2 + k * 2) * s;
+        const r0 = r + (2 + k * 2) * m;
         c.beginPath();
         c.arc(cx, cy, r0, th - 0.28, th);
         c.stroke();
@@ -268,7 +276,7 @@ export class FightFx {
       const t = a / IMPACT_MS;
       const X = ox + im.x * s;
       const Y = oy + im.y * s;
-      const k = im.k * s;
+      const k = im.k * m;
       c.save();
       // the flash: a white four-point star for the first few frames
       if (a < 90) {
@@ -308,13 +316,13 @@ export class FightFx {
     this.pops = this.pops.filter((p) => now - p.at < 900);
     for (const p of this.pops) {
       const a = (now - p.at) / 900;
-      const k = Math.max(1, Math.round(s * (p.big ? 1.25 : 0.9)));
+      const k = Math.max(1, Math.round(m * (p.big ? 1.25 : 0.9)));
       // punch in big, settle, then drift up and fade
       const pop = a < 0.08 ? 1.7 - a * 6 : a < 0.16 ? 1.22 - (a - 0.08) * 2.7 : 1;
       const fs = Math.max(1, Math.round(k * pop));
       const w = textWidth(p.t) * fs;
       const X = Math.round(ox + p.x * s);
-      const Y = Math.round(oy + (p.y - a * 12) * s);
+      const Y = Math.round(oy + p.y * s - a * 12 * m);
       c.globalAlpha = a > 0.7 ? (1 - a) / 0.3 : 1;
       c.save();
       c.translate(X, Y);
