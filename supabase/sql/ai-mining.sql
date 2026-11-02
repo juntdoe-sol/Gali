@@ -140,6 +140,32 @@ $$;
 revoke all on function public.gali_ai_thoughts(int) from public;
 grant execute on function public.gali_ai_thoughts(int) to anon, authenticated, service_role;
 
+-- the round reviewer's lessons (ai-tune {"kind":"rounds"}, every 15 minutes, Haiku); the review team reads them
+create table if not exists public.gali_ai_lessons (
+  id bigserial primary key,
+  at timestamptz not null default now(),
+  from_round bigint not null,
+  to_round bigint not null,
+  rounds int not null,
+  played int not null,
+  model text not null,
+  lessons text not null,
+  watch text,
+  confidence text
+);
+alter table public.gali_ai_lessons enable row level security;
+revoke all on public.gali_ai_lessons from anon, authenticated;
+
+-- Everyone: the round reviewer's latest lessons, newest first (board-level, nothing per wallet)
+create or replace function public.gali_ai_lessons(p_limit int default 3)
+returns table (at timestamptz, from_round bigint, to_round bigint, rounds int, played int, lessons text, watch text, confidence text)
+language sql stable security definer set search_path = public as $$
+  select at, from_round, to_round, rounds, played, lessons, watch, confidence
+  from gali_ai_lessons order by id desc limit least(greatest(p_limit, 1), 20)
+$$;
+revoke all on function public.gali_ai_lessons(int) from public;
+grant execute on function public.gali_ai_lessons(int) to anon, authenticated, service_role;
+
 -- ai-tune reads the month's Claude spend before each review
 create or replace function public.gali_ai_claude_spent(p_since timestamptz)
 returns numeric
@@ -281,6 +307,17 @@ select cron.schedule('gali-ai-tune', '17 */3 * * *', $$
     url := 'https://<PROJECT_REF>.supabase.co/functions/v1/ai-tune',
     headers := jsonb_build_object('content-type', 'application/json', 'x-cron-secret', '<CRON_SECRET>'),
     body := '{}'::jsonb,
+    timeout_milliseconds := 120000
+  );
+$$);
+
+-- the round reviewer reads every round every 15 minutes (Haiku), a few minutes before each review at :17
+select cron.unschedule('gali-ai-rounds') where exists (select 1 from cron.job where jobname = 'gali-ai-rounds');
+select cron.schedule('gali-ai-rounds', '12,27,42,57 * * * *', $$
+  select net.http_post(
+    url := 'https://<PROJECT_REF>.supabase.co/functions/v1/ai-tune',
+    headers := jsonb_build_object('content-type', 'application/json', 'x-cron-secret', '<CRON_SECRET>'),
+    body := '{"kind":"rounds"}'::jsonb,
     timeout_milliseconds := 120000
   );
 $$);

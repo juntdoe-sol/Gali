@@ -19,7 +19,7 @@ import { useLayout } from './layout';
 import { openScanTv, TV_PAIR } from './TvLink';
 import { evOf } from '../game/ev';
 import { refreshMarket, useOreStats } from '../game/oreStats';
-import { buyPass, loadLog, netSol, refreshAi, sendFeedback, startTrial, useAi, type AiLogEntry, type AiThought, type AiVote } from '../game/aiMining';
+import { buyPass, loadLog, netSol, refreshAi, sendFeedback, startTrial, useAi, type AiLesson, type AiLogEntry, type AiThought, type AiVote } from '../game/aiMining';
 
 const SHAKE_G = 2.1;
 const layoutNowDesktop = () => layoutNow().desktop;
@@ -575,7 +575,7 @@ function DeskLite() {
 
 /* ---------------- GALI AI: an ORE automation the AI plays, with a weekly pass ---------------- */
 const AI_INFO =
-  "ORE's draw is random, so no one can see the winning spot, Gali AI included. What it does: it waits until the last seconds of each round, looks at where everyone's SOL is, and only plays spots where the ORE you can expect is worth more than the SOL ORE keeps, with a safety margin. When nothing is worth it, it sits the round out. A big motherlode makes more spots worth it, so it plays more then. Every 3 hours a team of Claude agents looks at how its rounds went and at subscribers' feedback, and adjusts how careful it is, inside fixed limits. Once a day a deeper review looks at the whole week. Gali's fee is the same 0.25% as LITE and PRO, only on rounds it plays. You can still lose: one spot in 25 wins. Not financial advice.";
+  "ORE's draw is random, so no one can see the winning spot, Gali AI included. What it does: it waits until the last seconds of each round, looks at where everyone's SOL is, and only plays spots where the ORE you can expect is worth more than the SOL ORE keeps, with a safety margin. When nothing is worth it, it sits the round out. A big motherlode makes more spots worth it, so it plays more then. Five Claude agents help it learn: a round reviewer reads every round every 15 minutes, and a team of four looks at how its rounds went and at subscribers' feedback every 3 hours (and more deeply once a day), adjusting how careful it is inside fixed limits. Gali's fee is the same 0.25% as LITE and PRO, only on rounds it plays. You can still lose: one spot in 25 wins. Not financial advice.";
 const AI_PER_SPOT_DEFAULT = '0.01';
 
 const signed = (v: number, dp = 4) => `${v >= 0 ? '+' : '-'}${fmtSol(Math.abs(v), dp)}`;
@@ -608,7 +608,7 @@ const waitText = (ms: number) => {
   return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
 };
 
-/** Subscribers only: tell the hourly review how it is doing. Once every 2 hours. */
+/** Subscribers only: tell the reviews how it is doing. Once every 2 hours. */
 function AiFeedback({ nextAt }: { nextAt: number | null }) {
   const [vote, setVote] = useState<AiVote | null>(null);
   const [comment, setComment] = useState('');
@@ -631,7 +631,7 @@ function AiFeedback({ nextAt }: { nextAt: number | null }) {
       ) : (
         <>
           <T v="num" style={styles.evNote}>
-            How is Gali AI doing for you? The hourly review reads every subscriber's vote. Once every 2 hours.
+            How is Gali AI doing for you? The reviews read every subscriber's vote. Once every 2 hours.
           </T>
           <View style={[styles.lineRight, { marginTop: 2 }]}>
             {VOTES.map((v) => (
@@ -684,15 +684,15 @@ function AiLog({ log, busy }: { log: AiLogEntry[] | null; busy: boolean }) {
         <Btn kind="plain" label={busy ? 'LOADING…' : 'READ THE LEARNING LOG'} sub="Sign in once with your wallet. No fee" onPress={() => void loadLog(true)} disabled={busy} />
       ) : !log.length ? (
         <T v="num" style={styles.evNote}>
-          Nothing yet. The first entry lands at the next review, every 3 hours.
+          Nothing yet. The round reviewer writes what it learned every 15 minutes, and the team reviews the settings every 3 hours and once a day.
         </T>
       ) : (
         <>
           {(all ? log : log.slice(0, 6)).map((e, i, shown) => (
-            <View key={e.at} style={[styles.aiLog, i === shown.length - 1 && { borderBottomWidth: 0 }]}>
+            <View key={`${e.kind}${e.at}`} style={[styles.aiLog, i === shown.length - 1 && { borderBottomWidth: 0 }]}>
               <T v="num" style={{ fontSize: 13, color: COLORS.muted }}>
                 {when(e.at)}
-                {e.daily ? ' · Daily review' : ''}
+                {e.kind === 'rounds' ? ` · Round review · ${e.rounds} rounds, ${e.played} played` : e.kind === 'daily' ? ' · Daily review' : ' · Settings review'}
                 {e.plays !== null ? ` · ${e.plays} plays in the 24h before` : ''}
               </T>
               {e.learned ? (
@@ -700,9 +700,17 @@ function AiLog({ log, busy }: { log: AiLogEntry[] | null; busy: boolean }) {
                   {e.learned}
                 </T>
               ) : null}
-              <T v="num" style={{ fontSize: 13, color: COLORS.teal, lineHeight: 16 }}>
-                {[e.note, changes(e, log[log.indexOf(e) + 1]) || (e.note ? '' : 'No changes.')].filter(Boolean).join(' ')}
-              </T>
+              {e.kind === 'rounds' ? (
+                e.watch ? (
+                  <T v="num" style={{ fontSize: 13, color: COLORS.teal, lineHeight: 16 }}>
+                    Watching: {e.watch}
+                  </T>
+                ) : null
+              ) : (
+                <T v="num" style={{ fontSize: 13, color: COLORS.teal, lineHeight: 16 }}>
+                  {[e.note, changes(e, log.slice(log.indexOf(e) + 1).find((x) => x.kind !== 'rounds')) || (e.note ? '' : 'No changes.')].filter(Boolean).join(' ')}
+                </T>
+              )}
               {e.feedbackReply ? (
                 <T v="num" style={{ fontSize: 13, color: COLORS.gold, lineHeight: 16 }}>
                   Your feedback: {e.feedbackReply}
@@ -725,23 +733,40 @@ function thoughtText(t: AiThought): string {
   return `Sat out. The quietest spot had ${q} SOL, and it only joins spots under ${lim} SOL. With the motherlode at ${t.motherlodeOre.toFixed(1)} ORE, one winning spot is worth ${t.prizeSol.toFixed(2)} SOL, so it waits for a quieter spot or a bigger pool.`;
 }
 
-/** Everyone: what Gali AI saw and decided in the latest rounds, newest first. */
-function AiThinking({ thoughts }: { thoughts: AiThought[] }) {
-  if (!thoughts.length) return null;
+/** Everyone: what Gali AI saw and decided in the latest rounds, newest first, and what the round reviewer took from them. */
+function AiThinking({ thoughts, lesson }: { thoughts: AiThought[]; lesson: AiLesson | null }) {
+  if (!thoughts.length && !lesson) return null;
   const [t, ...rest] = thoughts;
   return (
     <View style={{ marginTop: 12 }}>
       <T v="label" style={{ color: COLORS.gold, marginBottom: 4 }}>
         WHAT GALI AI IS THINKING
       </T>
-      <View style={[styles.aiLog, !rest.length && { borderBottomWidth: 0 }]}>
-        <T v="num" style={{ fontSize: 13, color: COLORS.muted }}>
-          Round {t.round} · {when(t.at)} · {(t.slotsLeft * 0.2).toFixed(0)} s before the end
-        </T>
-        <T v="num" style={{ fontSize: 15, color: COLORS.text, lineHeight: 18 }}>
-          {thoughtText(t)}
-        </T>
-      </View>
+      {lesson ? (
+        <View style={styles.aiLog}>
+          <T v="num" style={{ fontSize: 13, color: COLORS.muted }}>
+            Round reviewer · {when(lesson.at)} · rounds {lesson.fromRound}–{lesson.toRound}, {lesson.played} of {lesson.rounds} played
+          </T>
+          <T v="num" style={{ fontSize: 15, color: COLORS.text, lineHeight: 18 }}>
+            {lesson.lessons}
+          </T>
+          {lesson.watch ? (
+            <T v="num" style={{ fontSize: 13, color: COLORS.teal, lineHeight: 16 }}>
+              Watching: {lesson.watch}
+            </T>
+          ) : null}
+        </View>
+      ) : null}
+      {t ? (
+        <View style={[styles.aiLog, !rest.length && { borderBottomWidth: 0 }]}>
+          <T v="num" style={{ fontSize: 13, color: COLORS.muted }}>
+            Round {t.round} · {when(t.at)} · {(t.slotsLeft * 0.2).toFixed(0)} s before the end
+          </T>
+          <T v="num" style={{ fontSize: 15, color: COLORS.text, lineHeight: 18 }}>
+            {thoughtText(t)}
+          </T>
+        </View>
+      ) : null}
       {rest.slice(0, 4).map((r, i, shown) => (
         <View key={r.round} style={[styles.aiLog, i === shown.length - 1 && { borderBottomWidth: 0 }]}>
           <T v="num" style={{ fontSize: 13, color: r.played ? COLORS.green : COLORS.muted }}>
@@ -760,7 +785,7 @@ function AiPanel() {
   const owner = useGame((s) => s.wallet.owner);
   const startAi = useGame((s) => s.startAiMining);
   const stopAutopilot = useGame((s) => s.stopAutopilot);
-  const { status, stats, board, me, claiming, log, logBusy, thoughts } = useAi();
+  const { status, stats, board, me, claiming, log, logBusy, thoughts, lesson } = useAi();
   const [amount, setAmount] = useState('');
   const [perSpot, setPerSpot] = useState(AI_PER_SPOT_DEFAULT);
   useEffect(() => {
@@ -819,7 +844,17 @@ function AiPanel() {
           </T>
         }
       />
-      <AiThinking thoughts={thoughts} />
+      <Row
+        icon="bot"
+        label="Claude agents"
+        info="Gali AI's betting math runs on its own, every round. Five Claude agents review and improve it. The round reviewer (Haiku) reads every round every 15 minutes and writes what it learned. A team of four, a results analyst, a feedback reader, a risk checker and a lead, reviews the settings every 3 hours on Haiku and once a day on Sonnet, inside fixed limits the code enforces."
+        right={
+          <T v="num" style={{ fontSize: 16, color: COLORS.gold }}>
+            5 · Haiku + Sonnet
+          </T>
+        }
+      />
+      <AiThinking thoughts={thoughts} lesson={lesson} />
 
       {owner ? (
         <Row
@@ -927,7 +962,7 @@ function AiPanel() {
         </>
       ) : owner ? (
         <T v="num" style={[styles.evNote, { marginTop: 8 }]}>
-          With a pass you also get Gali AI's learning log (every 3 hours and daily, what it saw and what it changed) and a vote on how it plays, every 2 hours.
+          With a pass you also get Gali AI's learning log (what it learned from every round, and what each review changed) and a vote on how it plays, every 2 hours.
         </T>
       ) : null}
 
