@@ -107,7 +107,7 @@ const test = (name, fn) => {
     assert.ok(kept / stakes.reduce((n, x) => n + x.a, 0) > 0.85, `kept ${kept}`);
   });
 
-  test('params are clamped and one hour moves each at most a quarter of its range', () => {
+  test('params are clamped and one review moves each at most a quarter of its range', () => {
     const c = S.clampParams({ minEdge: 9, crowdBuffer: -1, maxRoundShare: 'x', targetSlotsLeft: 3.4 });
     assert.equal(c.minEdge, S.BOUNDS.minEdge[1]);
     assert.equal(c.crowdBuffer, 0);
@@ -304,7 +304,7 @@ const test = (name, fn) => {
     assert.equal(h.log.settled.find((x) => x.w === bob.toBase58()).s, null);
   });
 
-  // ---------------- the hourly tune ----------------
+  // ---------------- the review ----------------
   test("Claude's answer is clamped and step-limited; the note is trimmed", () => {
     const { params, note, learned } = T.apply({ minEdge: 0.9, crowdBuffer: 0.25, maxRoundShare: 1, targetSlotsLeft: 5, note: '  Kept   it safe.\n', learned: 'x'.repeat(2000) }, P);
     assert.equal(learned.length, 900, 'the hourly log entry is capped');
@@ -405,6 +405,41 @@ const test = (name, fn) => {
     assert.equal(X.cleanComment('go to scam.xyz/claim\u202e and www.evil.io ok'), 'go to [link] and [link] ok');
     assert.equal(X.cleanComment('x'.repeat(500)).length, 200);
     assert.equal(X.cleanComment(42), '');
+  });
+
+  // ---------------- the Claude budget ----------------
+  test('Claude calls are priced from their usage; an unknown fallback model at the top rate', () => {
+    assert.ok(Math.abs(T.callCost('claude-sonnet-5-5', { input_tokens: 1e6, output_tokens: 1e6 }) - 12) < 1e-9);
+    assert.ok(Math.abs(T.callCost('claude-haiku-5-5', { input_tokens: 2e6, output_tokens: 0 }) - 0.2) < 1e-9);
+    assert.ok(T.callCost('claude-something-new', { input_tokens: 0, output_tokens: 1e6 }) >= 50);
+    assert.ok(Math.abs(T.worstReviewCost('claude-sonnet-5-5', 8000, 8000) - 4 * (0.016 + 0.08)) < 1e-9);
+  });
+
+  test('the monthly budget is never passed, and spending is spread over the month', () => {
+    const mid = new Date('2026-11-16T00:00:00Z'); // half of November
+    assert.deepEqual(T.budgetCheck(3, 8, 0.4, mid), { ok: true });
+    assert.equal(T.budgetCheck(4.5, 8, 0.4, mid).ok, false, 'ahead of pace: $4.50 by the middle of the month');
+    assert.equal(T.budgetCheck(7.8, 8, 0.4, new Date('2026-11-30T23:00:00Z')).ok, false, 'the worst case would pass $8');
+    assert.deepEqual(T.budgetCheck(0, 8, 0.4, new Date('2026-12-01T00:00:00Z')), { ok: true }, 'a new month starts fresh');
+    const [a, b] = T.monthBounds(new Date('2026-12-31T23:59:00Z'));
+    assert.equal(a.toISOString(), '2026-12-01T00:00:00.000Z');
+    assert.equal(b.toISOString(), '2027-01-01T00:00:00.000Z');
+  });
+
+  test('the daily review is told to weigh the week; the 3-hourly one is not', () => {
+    const s = T.summarize([], 0.5);
+    const t = { more: 0, same: 0, safer: 0, wallets: 0 };
+    assert.match(T.leadPrompt(P, s, s, '', '', '', t, true), /daily review: weigh the last 7 days/);
+    assert.doesNotMatch(T.leadPrompt(P, s, s, '', '', '', t), /daily review/);
+    assert.doesNotMatch(T.LEAD + T.RISK + T.ANALYST, /every hour|this hour|next hour/, 'no hourly wording left in the prompts');
+  });
+
+  test('a quiet stretch needs no review', () => {
+    const last = '2026-11-02T10:17:00Z';
+    assert.equal(T.hasNews(last, ['2026-11-02T09:00:00Z'], []), false);
+    assert.equal(T.hasNews(last, ['2026-11-02T10:30:00Z'], []), true, 'a round settled');
+    assert.equal(T.hasNews(last, [], ['2026-11-02T11:00:00Z']), true, 'a vote came in');
+    assert.equal(T.hasNews(null, [], []), true);
   });
 
   console.log(`\n${n} AI mining checks passed`);

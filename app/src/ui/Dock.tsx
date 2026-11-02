@@ -575,13 +575,13 @@ function DeskLite() {
 
 /* ---------------- GALI AI: an ORE automation the AI plays, with a weekly pass ---------------- */
 const AI_INFO =
-  "ORE's draw is random, so no one can see the winning spot, Gali AI included. What it does: it waits until the last seconds of each round, looks at where everyone's SOL is, and only plays spots where the ORE you can expect is worth more than the SOL ORE keeps, with a safety margin. When nothing is worth it, it sits the round out. A big motherlode makes more spots worth it, so it plays more then. Once an hour a team of Claude agents looks at how its rounds went and at subscribers' feedback, and adjusts how careful it is, inside fixed limits. Gali's fee is the same 0.25% as LITE and PRO, only on rounds it plays. You can still lose: one spot in 25 wins. Not financial advice.";
+  "ORE's draw is random, so no one can see the winning spot, Gali AI included. What it does: it waits until the last seconds of each round, looks at where everyone's SOL is, and only plays spots where the ORE you can expect is worth more than the SOL ORE keeps, with a safety margin. When nothing is worth it, it sits the round out. A big motherlode makes more spots worth it, so it plays more then. Every 3 hours a team of Claude agents looks at how its rounds went and at subscribers' feedback, and adjusts how careful it is, inside fixed limits. Once a day a deeper review looks at the whole week. Gali's fee is the same 0.25% as LITE and PRO, only on rounds it plays. You can still lose: one spot in 25 wins. Not financial advice.";
 const AI_PER_SPOT_DEFAULT = '0.01';
 
 const signed = (v: number, dp = 4) => `${v >= 0 ? '+' : '-'}${fmtSol(Math.abs(v), dp)}`;
 
 const pct = (v: number) => `${Math.round(v * 100)}%`;
-/** What changed between two hours' settings, in words a player can follow. */
+/** What changed between two reviews' settings, in words a player can follow. */
 function changes(e: AiLogEntry, prev: AiLogEntry | undefined): string {
   if (!prev) return `Margin ${pct(e.minEdge)}, expects ${pct(e.crowdBuffer)} more SOL after it deploys, up to ${pct(e.maxRoundShare)} of your balance a round, deploys ${e.targetSlotsLeft} slots before the end.`;
   const out: string[] = [];
@@ -626,7 +626,7 @@ function AiFeedback({ nextAt }: { nextAt: number | null }) {
       </T>
       {wait ? (
         <T v="num" style={styles.evNote}>
-          Thanks for your feedback. You can send more in {waitText(wait)}. The team reads it at every hourly review.
+          Thanks for your feedback. You can send more in {waitText(wait)}. The team reads it at every review.
         </T>
       ) : (
         <>
@@ -672,7 +672,7 @@ function AiFeedback({ nextAt }: { nextAt: number | null }) {
   );
 }
 
-/** Subscribers only: what Gali AI learned each hour, newest first. */
+/** Subscribers only: what Gali AI learned at each review, newest first. */
 function AiLog({ log, busy }: { log: AiLogEntry[] | null; busy: boolean }) {
   const [all, setAll] = useState(false);
   return (
@@ -684,7 +684,7 @@ function AiLog({ log, busy }: { log: AiLogEntry[] | null; busy: boolean }) {
         <Btn kind="plain" label={busy ? 'LOADING…' : 'READ THE LEARNING LOG'} sub="Sign in once with your wallet. No fee" onPress={() => void loadLog(true)} disabled={busy} />
       ) : !log.length ? (
         <T v="num" style={styles.evNote}>
-          Nothing yet. The first entry lands at the next hourly review.
+          Nothing yet. The first entry lands at the next review, every 3 hours.
         </T>
       ) : (
         <>
@@ -692,6 +692,7 @@ function AiLog({ log, busy }: { log: AiLogEntry[] | null; busy: boolean }) {
             <View key={e.at} style={[styles.aiLog, i === shown.length - 1 && { borderBottomWidth: 0 }]}>
               <T v="num" style={{ fontSize: 13, color: COLORS.muted }}>
                 {when(e.at)}
+                {e.daily ? ' · Daily review' : ''}
                 {e.plays !== null ? ` · ${e.plays} plays in the 24h before` : ''}
               </T>
               {e.learned ? (

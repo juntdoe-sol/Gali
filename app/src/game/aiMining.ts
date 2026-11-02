@@ -58,15 +58,17 @@ interface AiState {
   me: AiMe | null;
   /** a pass payment the server has not confirmed yet */
   claiming: boolean;
-  /** what the AI learned each hour, newest first; null until loaded (subscribers only) */
+  /** what the AI learned at each review, newest first; null until loaded (subscribers only) */
   log: AiLogEntry[] | null;
   logBusy: boolean;
 }
 export interface AiLogEntry {
   at: number;
+  /** the once-a-day deeper review (Sonnet); the others run every 3 hours (Haiku) */
+  daily: boolean;
   learned: string | null;
   note: string | null;
-  /** how the team used subscribers' feedback that hour */
+  /** how the team used subscribers' feedback in that review */
   feedbackReply: string | null;
   minEdge: number;
   crowdBuffer: number;
@@ -239,7 +241,7 @@ export async function startTrial(): Promise<boolean> {
   }
 }
 
-/** What the AI learned each hour. Subscribers only: the server checks the sign-in and the pass. */
+/** What the AI learned at each review. Subscribers only: the server checks the sign-in and the pass. */
 export async function loadLog(ask = false): Promise<void> {
   if (useAi.getState().logBusy) return;
   const owner = useGame.getState().wallet.owner;
@@ -261,6 +263,7 @@ export async function loadLog(ask = false): Promise<void> {
       const day = (x.stats as { last24h?: { plays?: number } } | null)?.last24h;
       return {
         at: Date.parse(String(x.at)),
+        daily: x.source === 'claude-daily',
         learned: typeof x.learned === 'string' ? x.learned : null,
         note: typeof x.note === 'string' ? x.note : null,
         feedbackReply: typeof x.feedback_reply === 'string' ? x.feedback_reply : null,
@@ -297,7 +300,7 @@ export async function sendFeedback(vote: AiVote, comment: string): Promise<boole
       g.toast(r.data.error ?? 'Could not send your feedback', r.status === 429 ? 'info' : 'bad');
       return false;
     }
-    g.toast('Thanks. The team reads it at the next hourly review', 'good');
+    g.toast('Thanks. The team reads it at the next review', 'good');
     return true;
   } catch {
     g.toast('Could not reach the server. Try again', 'bad');

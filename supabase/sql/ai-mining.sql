@@ -22,7 +22,8 @@ create table if not exists public.gali_ai_payments (
   at timestamptz not null default now()
 );
 
--- the AI's settings, newest last. ai-tune adds a row an hour; the executor reads the newest.
+-- the AI's settings, newest last. ai-tune adds a row every 3 hours (source 'claude') and once a day ('claude-daily');
+-- the executor reads the newest.
 create table if not exists public.gali_ai_params (
   id bigserial primary key,
   min_edge numeric not null,
@@ -91,12 +92,33 @@ end $$;
 revoke all on function public.gali_ai_feedback_add(text, text, text) from public;
 grant execute on function public.gali_ai_feedback_add(text, text, text) to service_role;
 
--- what Claude learned each hour (subscribers only; read through ai-pass)
+-- what Claude learned at each review (subscribers only; read through ai-pass)
 alter table public.gali_ai_params add column if not exists learned text;
 alter table public.gali_ai_params add column if not exists stats jsonb;
--- what each agent of the hourly review said, and how the review used subscribers' feedback
+-- what each agent of a review said, and how the review used subscribers' feedback
 alter table public.gali_ai_params add column if not exists agents jsonb;
 alter table public.gali_ai_params add column if not exists feedback_reply text;
+
+-- what each Claude call of a review cost; ai-tune keeps the month under AI_MONTHLY_BUDGET_USD with it
+create table if not exists public.gali_ai_claude_spend (
+  id bigserial primary key,
+  at timestamptz not null default now(),
+  model text not null,
+  agent text not null,
+  input_tokens int not null,
+  output_tokens int not null,
+  usd numeric not null
+);
+create index if not exists gali_ai_claude_spend_at on public.gali_ai_claude_spend (at desc);
+
+-- ai-tune reads the month's Claude spend before each review
+create or replace function public.gali_ai_claude_spent(p_since timestamptz)
+returns numeric
+language sql stable security definer set search_path = public as $$
+  select coalesce(sum(usd), 0) from gali_ai_claude_spend where at >= p_since
+$$;
+revoke all on function public.gali_ai_claude_spent(timestamptz) from public;
+grant execute on function public.gali_ai_claude_spent(timestamptz) to service_role;
 
 create index if not exists gali_ai_rounds_pending on public.gali_ai_rounds (round_id) where settled_at is null;
 create index if not exists gali_ai_rounds_settled on public.gali_ai_rounds (settled_at desc) where settled_at is not null;
@@ -107,7 +129,8 @@ alter table public.gali_ai_params enable row level security;
 alter table public.gali_ai_rounds enable row level security;
 alter table public.gali_ai_trials enable row level security;
 alter table public.gali_ai_feedback enable row level security;
-revoke all on public.gali_ai_passes, public.gali_ai_payments, public.gali_ai_params, public.gali_ai_rounds, public.gali_ai_trials, public.gali_ai_feedback from anon, authenticated;
+alter table public.gali_ai_claude_spend enable row level security;
+revoke all on public.gali_ai_passes, public.gali_ai_payments, public.gali_ai_params, public.gali_ai_rounds, public.gali_ai_trials, public.gali_ai_feedback, public.gali_ai_claude_spend from anon, authenticated;
 
 insert into public.gali_ai_params (min_edge, crowd_buffer, max_round_share, target_slots_left, source, note)
 select 0.08, 0.25, 0.05, 22, 'default', 'Starting settings'
@@ -150,7 +173,7 @@ end $$;
 revoke all on function public.gali_ai_trial(text) from public;
 grant execute on function public.gali_ai_trial(text) to service_role;
 
--- Everyone: how many miners use Gali AI and what it made them, all together. What the AI learned each hour is
+-- Everyone: how many miners use Gali AI and what it made them, all together. What the AI learned at each review is
 -- for subscribers only: ai-pass serves it to signed-in wallets with a live pass.
 drop function if exists public.gali_ai_stats();
 create or replace function public.gali_ai_stats()
@@ -222,13 +245,24 @@ select cron.schedule('gali-ai-miner', '* * * * *', $$
   );
 $$);
 
--- Claude reviews the last rounds and retunes the settings once an hour
+-- Claude reviews the last rounds and retunes the settings every 3 hours (Haiku)
 select cron.unschedule('gali-ai-tune') where exists (select 1 from cron.job where jobname = 'gali-ai-tune');
-select cron.schedule('gali-ai-tune', '17 * * * *', $$
+select cron.schedule('gali-ai-tune', '17 */3 * * *', $$
   select net.http_post(
     url := 'https://<PROJECT_REF>.supabase.co/functions/v1/ai-tune',
     headers := jsonb_build_object('content-type', 'application/json', 'x-cron-secret', '<CRON_SECRET>'),
     body := '{}'::jsonb,
+    timeout_milliseconds := 120000
+  );
+$$);
+
+-- and once a day a deeper review that weighs the week (Sonnet)
+select cron.unschedule('gali-ai-tune-daily') where exists (select 1 from cron.job where jobname = 'gali-ai-tune-daily');
+select cron.schedule('gali-ai-tune-daily', '47 4 * * *', $$
+  select net.http_post(
+    url := 'https://<PROJECT_REF>.supabase.co/functions/v1/ai-tune',
+    headers := jsonb_build_object('content-type', 'application/json', 'x-cron-secret', '<CRON_SECRET>'),
+    body := '{"kind":"daily"}'::jsonb,
     timeout_milliseconds := 120000
   );
 $$);

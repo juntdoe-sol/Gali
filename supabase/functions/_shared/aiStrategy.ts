@@ -42,7 +42,7 @@ export const aiFee = (lamports: bigint, bps: bigint = AI_FEE_BPS) => (lamports *
 /** Smallest round worth sending: its fee must pay for the transaction (about 7,000 lamports). */
 export const MIN_ROUND = 3_000_000n; // 0.003 SOL
 
-/** The settings Claude tunes once an hour. Code clamps every value to BOUNDS, whatever comes back. */
+/** The settings Claude tunes every 3 hours, and once a day. Code clamps every value to BOUNDS, whatever comes back. */
 export interface AiParams {
   /** Extra return a square must promise on top of breaking even, per SOL staked (0.08 = 8%). */
   minEdge: number;
@@ -77,7 +77,7 @@ export function clampParams(p: unknown, base: AiParams = DEFAULT_PARAMS): AiPara
   return out;
 }
 
-/** Moves each param at most `step` of its range away from `prev`, so one bad hour cannot swing the strategy. */
+/** Moves each param at most `step` of its range away from `prev`, so one bad review cannot swing the strategy. */
 export function limitStep(next: AiParams, prev: AiParams, step = 0.25): AiParams {
   const out = { ...next };
   for (const k of Object.keys(BOUNDS) as (keyof AiParams)[]) {
