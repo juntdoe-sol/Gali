@@ -1,10 +1,14 @@
-// Gali AI tuner, run once an hour by pg_cron (see ../../sql/ai-mining.sql). Claude reads how the AI's recent rounds
-// went and picks the settings for the next hour; tune.ts clamps whatever comes back, so a bad answer cannot push the
-// AI outside safe limits. If Claude is unreachable or refuses, the settings stay as they are.
+// Gali AI tuner, run once an hour by pg_cron (see ../../sql/ai-mining.sql). A team of four Claude agents reviews the
+// last day and week of rounds plus subscribers' feedback and picks the settings for the next hour (who does what:
+// tune.ts). tune.ts clamps whatever comes back, so a bad answer cannot push the AI outside safe limits. If the lead
+// agent is unreachable or refuses, the settings stay as they are.
 // Secrets: ANTHROPIC_API_KEY, CRON_SECRET. SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY come with every edge function.
 import Anthropic from 'npm:@anthropic-ai/sdk@1.3.0';
 import { clampParams, DEFAULT_PARAMS, type AiParams } from '../_shared/aiStrategy.ts';
-import { apply, OUTPUT_SCHEMA, prompt, summarize, SYSTEM, type RoundRow } from './tune.ts';
+import {
+  ANALYST, ANALYST_SCHEMA, analystPrompt, apply, commentBlock, FEEDBACK, FEEDBACK_SCHEMA, feedbackPrompt, LEAD, LEAD_SCHEMA, leadPrompt,
+  RISK, RISK_SCHEMA, riskLimits, riskPrompt, summarize, tally, text, type FeedbackRow, type RoundRow,
+} from './tune.ts';
 
 const MODEL = 'claude-sonnet-5-5';
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -42,35 +46,60 @@ Deno.serve(async (req) => {
   const last24h = summarize(all.filter((_r, i) => Date.parse(rows[i].settled_at) > dayAgo), oreSol);
   const last7d = summarize(all, oreSol);
 
-  const client = new Anthropic();
-  let answer: unknown;
-  try {
-    const res = await client.beta.messages.create({
-      model: MODEL,
-      max_tokens: 16000,
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
-      output_config: { effort: 'medium', format: { type: 'json_schema', schema: OUTPUT_SCHEMA as unknown as Record<string, unknown> } },
-      system: SYSTEM,
-      messages: [{ role: 'user', content: prompt(current, last24h, last7d, paramRows.slice(0, 5).map((r: { at: string; note: string | null }) => ({ at: r.at, note: r.note }))) }],
-    });
-    if (res.stop_reason === 'refusal') return json(200, { kept: current, reason: 'refusal', category: res.stop_details?.category ?? null });
-    if (res.stop_reason === 'max_tokens') return json(200, { kept: current, reason: 'max_tokens' });
-    const text = res.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('');
-    answer = JSON.parse(text);
-  } catch (e) {
-    if (e instanceof Anthropic.RateLimitError) return json(200, { kept: current, reason: 'rate limited' });
-    if (e instanceof Anthropic.APIError) return json(502, { kept: current, reason: `claude ${e.status}`, error: e.message.slice(0, 200) });
-    if (e instanceof SyntaxError) return json(502, { kept: current, reason: 'answer was not JSON' });
-    throw e;
-  }
+  // subscribers' feedback from the last 24 hours
+  const fb: FeedbackRow[] = await get(`gali_ai_feedback?select=wallet,vote,comment,at&at=gt.${encodeURIComponent(new Date(dayAgo).toISOString())}&order=at.desc&limit=2000`).catch(() => []);
+  const votes = tally(fb);
+  const history = paramRows.slice(0, 5).map((r: { at: string; note: string | null }) => ({ at: r.at, note: r.note }));
 
-  const { params, note, learned } = apply(answer, current);
+  const client = new Anthropic();
+  /** One agent's turn: a JSON answer that matches `schema`, or the reason it has none. */
+  const ask = async (system: string, user: string, schema: Record<string, unknown>, effort: 'medium' | 'high' = 'medium'): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; why: string }> => {
+    try {
+      const res = await client.beta.messages.create({
+        model: MODEL,
+        max_tokens: 16000,
+        betas: ['server-side-fallback-2026-07-01'],
+        fallbacks: 'default',
+        output_config: { effort, format: { type: 'json_schema', schema } },
+        system,
+        messages: [{ role: 'user', content: user }],
+      });
+      if (res.stop_reason === 'refusal') return { ok: false, why: `refusal ${res.stop_details?.category ?? ''}`.trim() };
+      if (res.stop_reason === 'max_tokens') return { ok: false, why: 'max_tokens' };
+      return { ok: true, data: JSON.parse(res.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('')) };
+    } catch (e) {
+      if (e instanceof Anthropic.RateLimitError) return { ok: false, why: 'rate limited' };
+      if (e instanceof Anthropic.APIError) return { ok: false, why: `claude ${e.status}` };
+      if (e instanceof SyntaxError) return { ok: false, why: 'answer was not JSON' };
+      throw e;
+    }
+  };
+  const said = (r: Awaited<ReturnType<typeof ask>>) => (r.ok ? JSON.stringify(r.data) : `(unavailable: ${r.why})`);
+
+  // the analyst and the feedback reader work at the same time; the risk checker reads both; the lead decides
+  const [analyst, feedback] = await Promise.all([
+    ask(ANALYST, analystPrompt(current, last24h, last7d, history), ANALYST_SCHEMA),
+    votes.wallets ? ask(FEEDBACK, feedbackPrompt(votes, commentBlock(fb)), FEEDBACK_SCHEMA) : Promise.resolve({ ok: false as const, why: 'no feedback in the last 24 hours' }),
+  ]);
+  const risk = await ask(RISK, riskPrompt(current, last24h, last7d, said(analyst), said(feedback), votes), RISK_SCHEMA);
+  const lead = await ask(LEAD, leadPrompt(current, last24h, last7d, said(analyst), said(feedback), said(risk), votes), LEAD_SCHEMA, 'high');
+  if (!lead.ok) return json(200, { kept: current, reason: `lead: ${lead.why}` });
+
+  const { params, note, learned, feedbackReply } = apply(lead.data, current, risk.ok ? riskLimits(risk.data) : undefined);
+  const agents = {
+    votes,
+    analyst: analyst.ok ? { findings: text(analyst.data.findings, 900), confidence: analyst.data.confidence } : { unavailable: analyst.why },
+    feedback: feedback.ok ? { summary: text(feedback.data.summary, 900), lean: feedback.data.lean } : { unavailable: feedback.why },
+    risk: risk.ok ? { concerns: text(risk.data.concerns, 900), ...riskLimits(risk.data) } : { unavailable: risk.why },
+  };
   const ins = await fetch(`${base}/rest/v1/gali_ai_params`, {
     method: 'POST',
     headers: h,
-    body: JSON.stringify({ min_edge: params.minEdge, crowd_buffer: params.crowdBuffer, max_round_share: params.maxRoundShare, target_slots_left: params.targetSlotsLeft, source: 'claude', note: note || null, learned: learned || null, stats: { last24h, last7d } }),
+    body: JSON.stringify({
+      min_edge: params.minEdge, crowd_buffer: params.crowdBuffer, max_round_share: params.maxRoundShare, target_slots_left: params.targetSlotsLeft,
+      source: 'claude', note: note || null, learned: learned || null, feedback_reply: feedbackReply || null, agents, stats: { last24h, last7d },
+    }),
   });
   if (!ins.ok) return json(500, { error: `save failed: ${ins.status}` });
-  return json(200, { from: current, to: params, note, plays24h: last24h.plays, plays7d: last7d.plays });
+  return json(200, { from: current, to: params, note, plays24h: last24h.plays, plays7d: last7d.plays, voters: votes.wallets, agents: { analyst: analyst.ok, feedback: feedback.ok, risk: risk.ok } });
 });

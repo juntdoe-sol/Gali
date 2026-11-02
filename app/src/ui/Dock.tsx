@@ -19,7 +19,7 @@ import { useLayout } from './layout';
 import { openScanTv, TV_PAIR } from './TvLink';
 import { evOf } from '../game/ev';
 import { refreshMarket, useOreStats } from '../game/oreStats';
-import { buyPass, loadLog, netSol, refreshAi, startTrial, useAi, type AiLogEntry } from '../game/aiMining';
+import { buyPass, loadLog, netSol, refreshAi, sendFeedback, startTrial, useAi, type AiLogEntry, type AiVote } from '../game/aiMining';
 
 const SHAKE_G = 2.1;
 const layoutNowDesktop = () => layoutNow().desktop;
@@ -575,7 +575,7 @@ function DeskLite() {
 
 /* ---------------- GALI AI: an ORE automation the AI plays, with a weekly pass ---------------- */
 const AI_INFO =
-  "ORE's draw is random, so no one can see the winning spot, Gali AI included. What it does: it waits until the last seconds of each round, looks at where everyone's SOL is, and only plays spots where the ORE you can expect is worth more than the SOL ORE keeps, with a safety margin. When nothing is worth it, it sits the round out. A big motherlode makes more spots worth it, so it plays more then. Once an hour Claude looks at how its rounds went and adjusts how careful it is, inside fixed limits. You can still lose: one spot in 25 wins. Not financial advice.";
+  "ORE's draw is random, so no one can see the winning spot, Gali AI included. What it does: it waits until the last seconds of each round, looks at where everyone's SOL is, and only plays spots where the ORE you can expect is worth more than the SOL ORE keeps, with a safety margin. When nothing is worth it, it sits the round out. A big motherlode makes more spots worth it, so it plays more then. Once an hour a team of Claude agents looks at how its rounds went and at subscribers' feedback, and adjusts how careful it is, inside fixed limits. Gali's fee is the same 0.25% as LITE and PRO, only on rounds it plays. You can still lose: one spot in 25 wins. Not financial advice.";
 const AI_PER_SPOT_DEFAULT = '0.01';
 
 const signed = (v: number, dp = 4) => `${v >= 0 ? '+' : '-'}${fmtSol(Math.abs(v), dp)}`;
@@ -597,6 +597,80 @@ const when = (t: number) => {
   if (m < 24 * 60) return `${Math.round(m / 60)}h ago`;
   return new Date(t).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
 };
+
+const VOTES: { id: AiVote; label: string }[] = [
+  { id: 'more', label: 'Play more' },
+  { id: 'same', label: 'Keep it' },
+  { id: 'safer', label: 'Play safer' },
+];
+const waitText = (ms: number) => {
+  const m = Math.max(1, Math.ceil(ms / 60_000));
+  return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
+};
+
+/** Subscribers only: tell the hourly review how it is doing. Once every 2 hours. */
+function AiFeedback({ nextAt }: { nextAt: number | null }) {
+  const [vote, setVote] = useState<AiVote | null>(null);
+  const [comment, setComment] = useState('');
+  const [sending, setSending] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+  const wait = nextAt && nextAt > now ? nextAt - now : 0;
+  return (
+    <View style={{ marginTop: 12, gap: 6 }}>
+      <T v="label" style={{ color: COLORS.gold }}>
+        HELP IT LEARN
+      </T>
+      {wait ? (
+        <T v="num" style={styles.evNote}>
+          Thanks for your feedback. You can send more in {waitText(wait)}. The team reads it at every hourly review.
+        </T>
+      ) : (
+        <>
+          <T v="num" style={styles.evNote}>
+            How is Gali AI doing for you? The hourly review reads every subscriber's vote. Once every 2 hours.
+          </T>
+          <View style={[styles.lineRight, { marginTop: 2 }]}>
+            {VOTES.map((v) => (
+              <Chip key={v.id} grow label={v.label} on={vote === v.id} onPress={() => setVote(v.id)} disabled={sending} />
+            ))}
+          </View>
+          <PixelBox fill="#050817" hi="#02040c" lo="#22356f" edge="#04060f" style={styles.aiComment}>
+            <TextInput
+              value={comment}
+              onChangeText={(t) => setComment(t.slice(0, 200))}
+              placeholder="Anything else? (optional)"
+              placeholderTextColor={COLORS.muted}
+              style={styles.aiCommentInput}
+              accessibilityLabel="Comment for Gali AI's review, optional"
+              maxLength={200}
+              multiline
+            />
+          </PixelBox>
+          <Btn
+            kind={vote ? 'gold' : 'plain'}
+            label={sending ? 'SENDING…' : vote ? 'SEND FEEDBACK' : 'PICK ONE FIRST'}
+            onPress={() => {
+              if (!vote) return;
+              setSending(true);
+              void sendFeedback(vote, comment.trim()).then((ok) => {
+                setSending(false);
+                if (ok) {
+                  setVote(null);
+                  setComment('');
+                }
+              });
+            }}
+            disabled={!vote || sending}
+          />
+        </>
+      )}
+    </View>
+  );
+}
 
 /** Subscribers only: what Gali AI learned each hour, newest first. */
 function AiLog({ log, busy }: { log: AiLogEntry[] | null; busy: boolean }) {
@@ -628,6 +702,11 @@ function AiLog({ log, busy }: { log: AiLogEntry[] | null; busy: boolean }) {
               <T v="num" style={{ fontSize: 13, color: COLORS.teal, lineHeight: 16 }}>
                 {[e.note, changes(e, log[log.indexOf(e) + 1]) || (e.note ? '' : 'No changes.')].filter(Boolean).join(' ')}
               </T>
+              {e.feedbackReply ? (
+                <T v="num" style={{ fontSize: 13, color: COLORS.gold, lineHeight: 16 }}>
+                  Your feedback: {e.feedbackReply}
+                </T>
+              ) : null}
             </View>
           ))}
           {log.length > 6 ? <Chip label={all ? 'SHOW LESS' : `SHOW ALL ${log.length}`} onPress={() => setAll(!all)} /> : null}
@@ -696,7 +775,7 @@ function AiPanel() {
       <Row
         icon="sol"
         label="All AI miners"
-        info="What Gali AI made all its miners together, from ORE's own accounts: SOL back plus ORE mined (valued at today's ORE/SOL price after ORE's 10% claim fee), minus the SOL it played and the network fee per round."
+        info="What Gali AI made all its miners together, from ORE's own accounts: SOL back plus ORE mined (valued at today's ORE/SOL price after ORE's 10% claim fee), minus the SOL it played and Gali's 0.25% fee."
         right={
           <T v="num" style={{ fontSize: 16, color: !stats || !stats.rounds ? COLORS.muted : allNet >= 0 ? COLORS.green : COLORS.red }}>
             {stats && stats.rounds ? `${signed(allNet)} SOL · ${stats.rounds} rounds` : 'no rounds yet'}
@@ -726,7 +805,7 @@ function AiPanel() {
         <Row
           icon="sol"
           label="Your AI result"
-          info={`${me.rounds} rounds played for you, ${me.wins} on the gold spot${me.pending ? `, ${me.pending} still being drawn` : ''}. SOL back plus ORE mined (at today's ORE/SOL price after ORE's 10% claim fee), minus the SOL played and the network fee per round.`}
+          info={`${me.rounds} rounds played for you, ${me.wins} on the gold spot${me.pending ? `, ${me.pending} still being drawn` : ''}. SOL back plus ORE mined (at today's ORE/SOL price after ORE's 10% claim fee), minus the SOL played and Gali's 0.25% fee.`}
           right={
             <T v="num" style={{ fontSize: 15, color: myNet >= 0 ? COLORS.green : COLORS.red }}>
               {signed(myNet)} SOL · {me.ore.toFixed(3)} ORE
@@ -775,7 +854,7 @@ function AiPanel() {
           <Btn
             kind={ready ? 'gold' : 'plain'}
             label={busy ?? label}
-            sub={ready ? 'One approval. Plays near the end of each round, sits out bad ones' : undefined}
+            sub={ready ? 'One approval. 0.25% fee only on rounds it plays' : undefined}
             onPress={() => {
               void startAi(amt, spot).then((ok) => ok && setAmount(''));
             }}
@@ -803,9 +882,14 @@ function AiPanel() {
           style={{ marginTop: 10 }}
         />
       ) : null}
-      {passOn ? <AiLog log={log} busy={logBusy} /> : owner ? (
+      {passOn ? (
+        <>
+          <AiFeedback nextAt={me?.nextFeedbackAt ?? null} />
+          <AiLog log={log} busy={logBusy} />
+        </>
+      ) : owner ? (
         <T v="num" style={[styles.evNote, { marginTop: 8 }]}>
-          With a pass you also get Gali AI's learning log: every hour, what it saw on the board and what it changed.
+          With a pass you also get Gali AI's learning log (every hour, what it saw and what it changed) and a vote on how it plays, every 2 hours.
         </T>
       ) : null}
 
@@ -1293,6 +1377,8 @@ const styles = StyleSheet.create({
   aiSpot: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, height: 34, width: 120 },
   aiSpotInput: { position: 'relative', width: 64, height: 30, textAlign: 'right', color: COLORS.gold, fontFamily: F.display, fontSize: 18, paddingVertical: 0, paddingHorizontal: 0, ...WEB_NO_OUTLINE },
   aiDot: { width: 8, height: 8, borderWidth: 1.5 },
+  aiComment: { minHeight: 56, paddingHorizontal: 10, paddingVertical: 6 },
+  aiCommentInput: { position: 'relative', minHeight: 44, color: COLORS.text, fontFamily: F.body, fontSize: 15, textAlignVertical: 'top', paddingVertical: 0, paddingHorizontal: 0, ...WEB_NO_OUTLINE },
   aiLog: { gap: 3, paddingVertical: 8, borderBottomWidth: U, borderColor: 'rgba(34,53,111,0.6)', borderStyle: 'dashed' },
   info: { width: 18, height: 18, alignItems: 'center', justifyContent: 'center' },
   chip: { paddingHorizontal: 10, paddingVertical: 6, minHeight: 32, justifyContent: 'center' },

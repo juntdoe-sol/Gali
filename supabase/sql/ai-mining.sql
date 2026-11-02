@@ -40,7 +40,7 @@ create table if not exists public.gali_ai_rounds (
   round_id bigint not null,
   stake bigint[] not null,            -- lamports on each of the 25 squares
   total bigint not null,              -- lamports staked
-  fee bigint not null default 10000,  -- lamports the automation paid the executor
+  fee bigint not null default 0,      -- Gali's 0.25% on the round, lamports (ORE pays it to the AI key)
   ev numeric not null,                -- expected profit in lamports when played (cautious)
   board_before bigint not null,       -- lamports on the chosen squares when played
   prize numeric not null,             -- SOL value of one square's prize, lamports
@@ -62,9 +62,41 @@ create table if not exists public.gali_ai_trials (
   at timestamptz not null default now()
 );
 
+-- subscribers' feedback, at most one every 2 hours per wallet (ai-pass enforces it). The hourly review reads it.
+create table if not exists public.gali_ai_feedback (
+  id bigserial primary key,
+  wallet text not null,
+  vote text not null check (vote in ('more', 'same', 'safer')),
+  comment text check (char_length(comment) <= 200),
+  at timestamptz not null default now()
+);
+create index if not exists gali_ai_feedback_wallet on public.gali_ai_feedback (wallet, at desc);
+create index if not exists gali_ai_feedback_at on public.gali_ai_feedback (at desc);
+
+-- ai-pass calls this for a signed-in wallet with a live pass. Refuses a second one inside 2 hours.
+create or replace function public.gali_ai_feedback_add(p_wallet text, p_vote text, p_comment text)
+returns timestamptz
+language plpgsql security definer set search_path = public as $$
+declare v_last timestamptz;
+begin
+  -- one at a time per wallet, so two quick taps can't both get in
+  perform pg_advisory_xact_lock(hashtext('gali_ai_feedback:' || p_wallet));
+  select max(at) into v_last from gali_ai_feedback where wallet = p_wallet;
+  if v_last is not null and v_last > now() - interval '2 hours' then
+    raise exception 'too soon until %', v_last + interval '2 hours';
+  end if;
+  insert into gali_ai_feedback (wallet, vote, comment) values (p_wallet, p_vote, nullif(p_comment, ''));
+  return now() + interval '2 hours';
+end $$;
+revoke all on function public.gali_ai_feedback_add(text, text, text) from public;
+grant execute on function public.gali_ai_feedback_add(text, text, text) to service_role;
+
 -- what Claude learned each hour (subscribers only; read through ai-pass)
 alter table public.gali_ai_params add column if not exists learned text;
 alter table public.gali_ai_params add column if not exists stats jsonb;
+-- what each agent of the hourly review said, and how the review used subscribers' feedback
+alter table public.gali_ai_params add column if not exists agents jsonb;
+alter table public.gali_ai_params add column if not exists feedback_reply text;
 
 create index if not exists gali_ai_rounds_pending on public.gali_ai_rounds (round_id) where settled_at is null;
 create index if not exists gali_ai_rounds_settled on public.gali_ai_rounds (settled_at desc) where settled_at is not null;
@@ -74,7 +106,8 @@ alter table public.gali_ai_payments enable row level security;
 alter table public.gali_ai_params enable row level security;
 alter table public.gali_ai_rounds enable row level security;
 alter table public.gali_ai_trials enable row level security;
-revoke all on public.gali_ai_passes, public.gali_ai_payments, public.gali_ai_params, public.gali_ai_rounds, public.gali_ai_trials from anon, authenticated;
+alter table public.gali_ai_feedback enable row level security;
+revoke all on public.gali_ai_passes, public.gali_ai_payments, public.gali_ai_params, public.gali_ai_rounds, public.gali_ai_trials, public.gali_ai_feedback from anon, authenticated;
 
 insert into public.gali_ai_params (min_edge, crowd_buffer, max_round_share, target_slots_left, source, note)
 select 0.08, 0.25, 0.05, 22, 'default', 'Starting settings'
@@ -156,10 +189,11 @@ $$;
 drop function if exists public.gali_ai_me(text);
 -- Everyone: one wallet's pass and results (wallets and rounds are public on chain anyway).
 create or replace function public.gali_ai_me(p_wallet text)
-returns table (expires_at timestamptz, trial_open boolean, rounds bigint, wins bigint, deployed_sol numeric, returned_sol numeric, ore numeric, fees_sol numeric, pending bigint)
+returns table (expires_at timestamptz, trial_open boolean, next_feedback_at timestamptz, rounds bigint, wins bigint, deployed_sol numeric, returned_sol numeric, ore numeric, fees_sol numeric, pending bigint)
 language sql stable security definer set search_path = public as $$
   select (select expires_at from gali_ai_passes where wallet = p_wallet),
          not exists (select 1 from gali_ai_passes where wallet = p_wallet),
+         (select max(at) + interval '2 hours' from gali_ai_feedback where wallet = p_wallet),
          count(*) filter (where settled_at is not null and not void),
          count(*) filter (where won),
          coalesce(sum(total) filter (where settled_at is not null and not void), 0) / 1e9,

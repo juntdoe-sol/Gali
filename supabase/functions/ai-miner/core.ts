@@ -5,8 +5,9 @@
  * What the key can do is set by ORE, not by us: with a Discretionary automation the executor picks the squares and
  * the amount per square (never more than the player's own per-square limit) and pays from the automation's balance
  * into ORE's round. It cannot withdraw, change the limit or touch anything else. Only the player can close the
- * automation, and closing returns the balance to them. ORE pays the executor the automation's fee (AI_EXECUTOR_FEE)
- * on the first deploy of a round it plays; rounds the AI sits out cost nothing.
+ * automation, and closing returns the balance to them. On each round it plays, ORE pays the executor Gali's fee:
+ * 0.25% of the SOL deployed, the same as LITE and PRO (DiscretionaryBps). Rounds the AI sits out cost nothing. The
+ * fees pile up on the AI key; sweepFees sends everything above a float for network fees to Gali's revenue wallet.
  *
  * Each round it waits until near the end, reads the board, and plays only squares that clear the margin
  * (see ../_shared/aiStrategy.ts). After the round is drawn it works out what each player got back from ORE's own
@@ -14,7 +15,7 @@
  */
 import { Buffer, ComputeBudgetProgram, Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction } from './deps.ts';
 import { decodeAutomation, decodeBoard, LOCK_SLOTS, ORE_PROGRAM_ID, phaseOf, SIZE, STRATEGY, type Auto, type Phase } from '../autopilot/core.ts';
-import { addToBoard, AI_EXECUTOR_FEE, BLOCKS, MIN_STAKE, planRound, prizeLamports, settleRound, type AiParams, type Plan, type Settled } from '../_shared/aiStrategy.ts';
+import { addToBoard, AI_FEE_BPS, aiFee, BLOCKS, MAX_FEE_BPS, MIN_STAKE, planRound, prizeLamports, settleRound, type AiParams, type Plan, type Settled } from '../_shared/aiStrategy.ts';
 
 const ENTROPY_PROGRAM_ID = new PublicKey('3jSkUuYBoJzQPMEzTvkDFXCZUBksPamrVhrnHR9igu2X');
 const BOARD = new PublicKey('BrcSxdp1nXFzou1YyDnQJcPNBNHgoypZmTsyKBSLLXzi');
@@ -96,9 +97,28 @@ function checkpointIx(signer: PublicKey, authority: PublicKey, roundId: bigint):
   });
 }
 
-/** Is this an automation the AI runs, and can it pay for anything? */
+/** Is this an automation the AI runs (Gali's fee set, at most ORE's 1% cap), and can it pay for anything? */
 export function aiRunnable(a: Auto, aiKey: PublicKey): boolean {
-  return a.executor.equals(aiKey) && a.strategy === STRATEGY.Discretionary && a.fee >= AI_EXECUTOR_FEE && a.amount >= MIN_STAKE && a.balance > AI_EXECUTOR_FEE + MIN_STAKE;
+  return a.executor.equals(aiKey) && a.strategy === STRATEGY.DiscretionaryBps && a.fee >= AI_FEE_BPS && a.fee <= MAX_FEE_BPS && a.amount >= MIN_STAKE && a.balance > MIN_STAKE * 2n;
+}
+
+export const REVENUE_WALLET = new PublicKey('HDa2MTDdZXnrjTs6RRUUzEqCcrWMWu1fM673Cg7pzQMw');
+/** SOL kept on the AI key for its own network fees; anything above this plus a margin goes to the revenue wallet. */
+export const FEE_FLOAT = 50_000_000n; // 0.05 SOL
+const SWEEP_MIN = 10_000_000n; // don't bother moving less than 0.01 SOL
+
+/** Sends the fees the AI key collected to Gali's revenue wallet, keeping FEE_FLOAT. Returns lamports sent. */
+export async function sweepFees(conn: Connection, signer: Keypair): Promise<bigint> {
+  const have = BigInt(await conn.getBalance(signer.publicKey, 'confirmed'));
+  const extra = have - FEE_FLOAT;
+  if (extra < SWEEP_MIN) return 0n;
+  const { blockhash } = await conn.getLatestBlockhash('confirmed');
+  const tx = new Transaction({ feePayer: signer.publicKey, recentBlockhash: blockhash }).add(
+    SystemProgram.transfer({ fromPubkey: signer.publicKey, toPubkey: REVENUE_WALLET, lamports: extra }),
+  );
+  tx.sign(signer);
+  await conn.sendRawTransaction(tx.serialize(), { skipPreflight: false, maxRetries: 2 });
+  return extra;
 }
 
 /** The instructions for one player's plan: settle their last round when ORE needs it, then one deploy per stake group. */
@@ -115,6 +135,8 @@ export interface Played {
   /** lamports staked on each square */
   stake: bigint[];
   total: bigint;
+  /** Gali's fee ORE took for the round, lamports */
+  fee: bigint;
   /** expected profit in lamports (cautious) */
   ev: number;
   boardBefore: bigint;
@@ -269,7 +291,7 @@ export async function pass(conn: Connection, signer: Keypair, hooks: Hooks, st: 
       res.skipped++;
       return;
     }
-    const plan = planRound({ onBoard, motherlodeGrams: motherlode, orePriceSol: price, maxPerSquare: a.amount, balance: a.balance, params });
+    const plan = planRound({ onBoard, motherlodeGrams: motherlode, orePriceSol: price, maxPerSquare: a.amount, balance: a.balance, feeBps: a.fee, params });
     if (!plan) {
       res.skipped++;
       return;
@@ -289,7 +311,7 @@ export async function pass(conn: Connection, signer: Keypair, hooks: Hooks, st: 
         res.sent++;
         const stake = Array.from({ length: BLOCKS }, () => 0n);
         for (const g of plan.groups) for (let s = 0; s < BLOCKS; s++) if (g.mask & (1 << s)) stake[s] = g.amount;
-        await hooks.played({ wallet: a.authority.toBase58(), round: board.roundId, stake, total: plan.total, ev: plan.ev, boardBefore: plan.boardBefore, prize, signature }).catch((e) => err('save', e));
+        await hooks.played({ wallet: a.authority.toBase58(), round: board.roundId, stake, total: plan.total, fee: aiFee(plan.total, a.fee), ev: plan.ev, boardBefore: plan.boardBefore, prize, signature }).catch((e) => err('save', e));
       } catch (e) {
         res.failed++;
         err(a.authority.toBase58().slice(0, 6), e);
