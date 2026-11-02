@@ -6,7 +6,7 @@
 //   risk      reads both, sets hard limits the code enforces (a margin floor, a cap on the round share)
 //   lead      decides the settings and writes the log entry, inside the risk limits
 // Whatever comes back, code clamps it to BOUNDS, to the risk limits and to a quarter-range step per review.
-import { AI_FEE_BPS, BOUNDS, clampParams, LOSS, limitStep, type AiParams } from '../_shared/aiStrategy.ts';
+import { AI_FEE_BPS, BOUNDS, clampParams, LOSS, limitStep, ORE_KEEP, type AiParams } from '../_shared/aiStrategy.ts';
 
 export interface RoundRow {
   total: number; // lamports
@@ -27,7 +27,7 @@ export interface Summary {
   stakedSol: number;
   returnedSol: number;
   ore: number;
-  /** after ORE's 10% claim fee, at today's price */
+  /** at today's price, held (the way the bot values it) */
   oreValueSol: number;
   feesSol: number;
   netSol: number;
@@ -57,7 +57,7 @@ export function summarize(rows: (RoundRow & { wallet: string })[], oreSol: numbe
   const returned = sum((r) => r.sol_back ?? 0) / 1e9;
   const ore = sum((r) => r.ore_grams ?? 0) / 1e11;
   const fees = sum((r) => r.fee) / 1e9;
-  const oreValue = ore * 0.9 * oreSol;
+  const oreValue = ore * ORE_KEEP * oreSol;
   const net = returned + oreValue - staked - fees;
   const late = rows
     .filter((r) => r.board_after !== null && r.board_before > 0)
@@ -84,7 +84,7 @@ export function summarize(rows: (RoundRow & { wallet: string })[], oreSol: numbe
 
 const GAME = `Gali AI is a bot that plays ORE's mining board on Solana for players who fund it.
 
-How ORE pays: every round (about 80 seconds) players put SOL on any of 25 squares. One square wins, picked by a fair random draw that nobody can predict. ORE keeps 1% of every square and another 10% of the rest on the 24 squares that miss, and returns the rest. So about ${(LOSS * 100).toFixed(1)}% of every SOL staked is lost on average. The winning square also mines 1 ORE, shared by SOL on it (or, on some squares, all to one miner with odds equal to their share). One round in 500 the winning square also pays the motherlode pool, shared by SOL on it. Claiming ORE costs 10%. Gali takes ${Number(AI_FEE_BPS) / 100}% of the SOL the bot deploys, only on rounds it plays.
+How ORE pays: every round (about 80 seconds) players put SOL on any of 25 squares. One square wins, picked by a fair random draw that nobody can predict. ORE keeps 1% of every square and another 10% of the rest on the 24 squares that miss, and returns the rest. So about ${(LOSS * 100).toFixed(1)}% of every SOL staked is lost on average. The winning square also mines 1 ORE, shared by SOL on it (or, on some squares, all to one miner with odds equal to their share). One round in 500 the winning square also pays the motherlode pool, shared by SOL on it. Players mine to hold ORE and sell when they choose, so the bot values mined ORE at its full price (unclaimed ORE pays no claim fee): it plays when mining costs less SOL per ORE than buying it. Gali takes ${Number(AI_FEE_BPS) / 100}% of the SOL the bot deploys, only on rounds it plays.
 
 How the bot plays: it waits until targetSlotsLeft slots (about 0.2 s each; ORE locks the last 15) before the round ends, reads the board, and stakes only squares where the expected ORE is worth more than the expected SOL loss, Gali's fee and a margin of minEdge per SOL. It assumes crowdBuffer more SOL (as a share of what is already there) will land on each square after it deploys. It plays one stake size per round and never more than maxRoundShare of a player's balance. It sits out rounds where nothing clears the margin. A bigger motherlode raises every square's prize, so the bot plays more when the pool is big: that is how it chases the motherlode without gambling.
 
