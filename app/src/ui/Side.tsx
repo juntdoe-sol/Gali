@@ -36,7 +36,7 @@ export function SidePanel() {
   if (hidden) return <MineTab style={[styles.tabAt, { right: GUTTER, top: GUTTER }]} />;
   return (
     <View pointerEvents="box-none" style={[styles.side, { width: side, right: GUTTER, top: GUTTER, bottom: GUTTER }]}>
-      <MineColumn hint={onIsland ? 'Click spots on the map' : 'LITE covers every spot'} />
+      <MineColumn hint={onIsland ? (LANDSCAPE_APP ? 'Tap spots on the map' : 'Click spots on the map') : 'LITE covers every spot'} />
       {mouse && onIsland ? (
         <View style={styles.keys} accessibilityElementsHidden importantForAccessibility="no">
           <KeyHint k="CLICK" t="pick spot" />

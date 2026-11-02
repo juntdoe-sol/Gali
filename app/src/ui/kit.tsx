@@ -9,7 +9,8 @@
  * The exports keep their old names (Frame, Card, Btn, Pill, Bar, T, Gem), so every screen
  * picks up the look without changing how it is built.
  */
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { create } from 'zustand';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
 import { COLORS } from '../game/constants';
 import { IS_HOLLOW } from '../game/season';
@@ -557,8 +558,26 @@ export function MapButton({ label, onPress, icon, count, kbd, accessibilityLabel
   );
 }
 
+/** Landscape app: how many Scrim windows are open, so the floating round chip can step aside for them. */
+export const useScrims = create<{ n: number }>(() => ({ n: 0 }));
+
+function useScrimOpen() {
+  useEffect(() => {
+    if (!LANDSCAPE_APP) return;
+    useScrims.setState((s) => ({ n: s.n + 1 }));
+    return () => useScrims.setState((s) => ({ n: Math.max(0, s.n - 1) }));
+  }, []);
+}
+
+/** Counts as an open window for useScrims, for a window that brings its own backdrop instead of a Scrim. */
+export function ScrimMark() {
+  useScrimOpen();
+  return null;
+}
+
 /** The dimmed backdrop behind a dialog. Tapping it closes the dialog when `onPress` is given. */
 export function Scrim({ onPress, children, style }: { onPress?: () => void; children?: ReactNode; style?: StyleProp<ViewStyle> }) {
+  useScrimOpen();
   if (LANDSCAPE_APP) {
     // a phone held sideways is short: a tall window scrolls instead of running off the screen
     return (

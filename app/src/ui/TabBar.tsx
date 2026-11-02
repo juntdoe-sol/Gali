@@ -348,7 +348,7 @@ const styles = StyleSheet.create({
   railMineLow: { alignItems: 'center', paddingTop: 8, paddingBottom: 4 },
   railMine: { alignItems: 'center', paddingTop: C ? 16 : 30, marginBottom: C ? 0 : 4 },
   railRule: { alignSelf: 'stretch', height: U, backgroundColor: '#22356f', marginVertical: C ? 4 : 12, marginHorizontal: 6 },
-  railItem: { alignSelf: 'stretch', alignItems: 'center', paddingVertical: C ? 3 : 8, gap: C ? 1 : 3 },
+  railItem: { alignSelf: 'stretch', alignItems: 'center', paddingVertical: C ? 2 : 8, gap: C ? 1 : 3 },
   railLabel: { fontSize: C ? 11 : 14, lineHeight: C ? 12 : 15, letterSpacing: C ? 0.5 : 1 },
   railMark: { position: 'absolute', left: -8, top: 8, bottom: 8, width: U * 2, backgroundColor: COLORS.gold },
   railKbd: { position: 'absolute', right: 4, top: 4 },

@@ -339,7 +339,7 @@ export function LiveNotice() {
   return (
     <Modal transparent visible animationType="fade" onRequestClose={decline}>
       <Scrim>
-        <Window title="REAL SOL, REAL ROUNDS" onClose={decline} width={460} accent={COLORS.gold}>
+        <Window title="REAL SOL, REAL ROUNDS" onClose={decline} width={LANDSCAPE_APP ? 640 : 460} accent={COLORS.gold}>
           <Bullet icon="ore" text="With a wallet connected you play live rounds on ORE's board on Solana mainnet with real SOL. ORE keeps 1% of every spot, plus 10% more of spots that miss. Only the gold spot mines ORE." />
           <Bullet icon="wallet" text={`Your wallet signs every deploy and every claim, and your SOL goes straight to ORE. Gali adds a ${Number(PLATFORM_FEE_BPS) / 100}% fee on SOL you deploy, paid in the same transaction.`} />
           <Bullet icon="warn" text="This is a game of chance with real SOL. Only play with SOL you can afford to lose." muted />

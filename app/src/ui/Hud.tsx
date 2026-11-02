@@ -170,6 +170,10 @@ export function TopBar({ onMenu, place = ISLAND_PLACE, right }: { onMenu: () => 
   const { points, lvl, pct, sol, streak, xp } = useStats();
 
   if (desktop) {
+    // the landscape app's bar beside the island's side panel is short: level and SOL come first, then the name
+    const barW = w - RAIL_W - GUTTER - (right ?? side + GUTTER * 2);
+    const noBadge = LANDSCAPE_APP && barW < 650;
+    const noName = LANDSCAPE_APP && barW < 525;
     return (
       <View style={[styles.deskTop, { left: RAIL_W + GUTTER, right: right ?? side + GUTTER * 2 }, TIGHT && { gap: 6 }]} pointerEvents="box-none">
         {w >= 1180 ? (
@@ -186,10 +190,10 @@ export function TopBar({ onMenu, place = ISLAND_PLACE, right }: { onMenu: () => 
           </View>
         </PixelBox>
         ) : null}
-        <HollowBadge compact={w < 1300} />
+        {noBadge ? null : <HollowBadge compact={w < 1300} />}
         <View style={[styles.chipRow, { flex: 1, maxWidth: 560 }]}>
           {FEATURE_GALI_PROGRAM ? <Stat icon="star" color={COLORS.gold} value={points.toLocaleString()} label="PTS" tip="Points from rounds you mined. They rank you on the season board." /> : null}
-          <NameBtn />
+          {noName ? null : <NameBtn />}
           <LevelStat lvl={lvl} pct={pct} xp={xp} />
           <Stat icon="sol" value={sol.toFixed(sol >= 100 ? 1 : 3)} label="SOL" tip="SOL in your wallet." />
           {FEATURE_GALI_PROGRAM && streak >= 2 ? <Stat icon="fire" color={COLORS.red} value={`x${streak}`} tip={`${streak} rounds in a row on the gold spot.`} /> : null}

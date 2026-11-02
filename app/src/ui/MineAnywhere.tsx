@@ -17,7 +17,7 @@ import { isLive, roundEndsAt, useGame } from '../game/store';
 import { Dock } from './Dock';
 import { MineColumn } from './Side';
 import { RoundCard } from './Hud';
-import { FocusRing, IconBtn, Kbd, PixelBox, T, U } from './kit';
+import { FocusRing, IconBtn, Kbd, PixelBox, T, U, useScrims } from './kit';
 import { GUTTER, LANDSCAPE_APP, RAIL_W, TOP_H, useLayout } from './layout';
 import { PixIcon } from './PixIcon';
 import { alpha, Led, useTick } from './tech';
@@ -270,6 +270,8 @@ export function MineAnywhere({ at = 'lobby' }: { at?: 'lobby' | 'cave' | 'arena'
   const insets = useSafeAreaInsets();
   const open = useMinePanel((s) => s.open);
   const hidden = useMinePanel((s) => s.hidden);
+  // a sideways phone is short: a window over the lobby (name, how to play, travel) would sit under the chip
+  const covered = useScrims((s) => LANDSCAPE_APP && s.n > 0);
   const setOpen = (v: boolean | ((o: boolean) => boolean)) => {
     const st = useMinePanel.getState();
     st.setOpen(typeof v === 'function' ? v(st.open) : v);
@@ -293,7 +295,7 @@ export function MineAnywhere({ at = 'lobby' }: { at?: 'lobby' | 'cave' | 'arena'
     return () => window.removeEventListener('keydown', key, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
-  if (guest) return null;
+  if (guest || covered) return null;
   const top = desktop ? (at === 'lobby' ? TOP_H + GUTTER : GUTTER + 56) : insets.top + (at === 'lobby' ? 108 : 64);
   const left = desktop ? (at === 'lobby' ? RAIL_W + GUTTER : GUTTER) : 12;
   return (
