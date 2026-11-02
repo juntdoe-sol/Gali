@@ -212,13 +212,14 @@ const test = (name, fn) => {
   const minerPda = (a) => PublicKey.findProgramAddressSync([Buffer.from('miner'), a.toBuffer()], ORE)[0];
   function hooks(extra = {}) {
     const h = {
-      log: { played: [], settled: [] },
+      log: { played: [], settled: [], thoughts: [] },
       async params() { return P; },
       async price() { return 0.5; },
       async active() { return new Set(extra.active ?? []); },
       async played(p) { h.log.played.push(p); },
       async pending() { return extra.pending ?? []; },
       async settled(w, r, s, after) { h.log.settled.push({ w, r, s, after }); },
+      async thought(t) { h.log.thoughts.push(t); },
     };
     return h;
   }
@@ -238,6 +239,26 @@ const test = (name, fn) => {
     rounds: new Map([[M.roundPda(77n).toBase58(), roundData({ id: 77, deployed: quiet })]]),
   });
 
+  test('the "joins spots under" limit the AI tab shows matches what the planner does', () => {
+    const prize = S.prizeLamports(245n * 100_000_000_000n, 1.59);
+    const limit = S.joinLimitLamports(prize, P);
+    const base = { motherlodeGrams: 245n * 100_000_000_000n, orePriceSol: 1.59, maxPerSquare: sol(1), balance: sol(100), params: P };
+    assert.ok(S.planRound({ ...base, onBoard: board(BigInt(Math.floor(limit * 0.9))) }), 'plays spots under the limit');
+    assert.equal(S.planRound({ ...base, onBoard: board(BigInt(Math.ceil(limit * 1.02))) }), null, 'sits out spots over it');
+  });
+
+  test('the slot time is measured, so fast slots do not make it oversleep the deploy window', () => {
+    const s = M.newState(400);
+    M.trackSlot(s, 1000, 0);
+    M.trackSlot(s, 1047, 10_000); // 47 slots in 10 s: about 213 ms a slot
+    assert.ok(s.slotMs < 310, `halfway to the measured time: ${s.slotMs}`);
+    M.trackSlot(s, 1094, 20_000);
+    M.trackSlot(s, 1141, 30_000);
+    assert.ok(Math.abs(s.slotMs - 213) < 30, `converges: ${s.slotMs}`);
+    M.trackSlot(s, 1141, 40_000);
+    assert.ok(Math.abs(s.slotMs - 213) < 30, 'a stalled slot read changes nothing');
+  });
+
   await test('waits for the deploy window, then plays only for wallets with a pass', async () => {
     const st = state(80);
     const conn = fakeConn(st);
@@ -245,10 +266,16 @@ const test = (name, fn) => {
     const s = M.newState();
     const early = await M.pass(conn, ai, h, s);
     assert.equal(conn.sent.length, 0, 'nothing sent early');
-    assert.ok(early.waitMs >= (80 - P.targetSlotsLeft) * M.SLOT_MS - 300);
+    assert.ok(early.waitMs > 0 && early.waitMs <= M.MAX_WAIT_MS, 'checks back before the deploy window, whatever the slot estimate');
     st.slot = 1000 - P.targetSlotsLeft;
     const r = await M.pass(conn, ai, h, s);
     assert.equal(r.candidates, 1, 'bob has no pass, carol is on autopilot');
+    assert.equal(h.log.thoughts.length, 1, 'one thought for the round');
+    const t = h.log.thoughts[0];
+    assert.equal(t.round, 77n);
+    assert.equal(t.played, 1);
+    assert.equal(t.quietest, sol(0.01), 'the quietest spot is the board\'s');
+    assert.ok(t.joinLimit > Number(t.quietest), 'it played because a spot was under the limit');
     assert.equal(conn.sent.length, 1);
     const tx = conn.sent[0];
     assert.ok(tx.feePayer.equals(ai.publicKey));
