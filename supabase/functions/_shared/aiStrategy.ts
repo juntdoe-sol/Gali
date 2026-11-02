@@ -28,10 +28,19 @@ export const LOSS = 1 - SOL_BACK;
 export const MIN_STAKE = 100_000n; // 0.0001 SOL
 /** An empty square is treated as holding this much, so the AI does not size against nothing: someone usually lands. */
 export const EMPTY_FLOOR = 1_000_000; // 0.001 SOL
-/** ORE's deploy takes one amount for a set of squares, so stakes are grouped. Keeps the transaction small. */
-export const MAX_GROUPS = 4;
-/** Discretionary automations pay the executor this much per round played. Covers the transaction, no margin. */
-export const AI_EXECUTOR_FEE = 10_000n;
+/**
+ * One stake size per round, in one deploy. ORE charges the executor fee only on the first deploy of a round, so
+ * splitting a round into several deploys would skip the Gali fee on all but the first.
+ */
+export const MAX_GROUPS = 1;
+/** Gali's fee on SOL the AI deploys, the same 0.25% as LITE and PRO. ORE takes it per round (DiscretionaryBps). */
+export const AI_FEE_BPS = 25n;
+/** ORE's cap on a DiscretionaryBps fee (automate.rs: at most 1%). */
+export const MAX_FEE_BPS = 100n;
+/** The fee ORE takes on a round that deploys `lamports` (Automation::min_fee). */
+export const aiFee = (lamports: bigint, bps: bigint = AI_FEE_BPS) => (lamports * bps) / 10_000n;
+/** Smallest round worth sending: its fee must pay for the transaction (about 7,000 lamports). */
+export const MIN_ROUND = 3_000_000n; // 0.003 SOL
 
 /** The settings Claude tunes once an hour. Code clamps every value to BOUNDS, whatever comes back. */
 export interface AiParams {
@@ -100,6 +109,8 @@ export interface PlanInput {
   maxPerSquare: bigint;
   /** The automation's balance. */
   balance: bigint;
+  /** The automation's fee in basis points (Gali's 0.25% unless the player set more). */
+  feeBps?: bigint;
   params: AiParams;
 }
 
@@ -109,7 +120,7 @@ export interface Plan {
   /** Lamports staked in all. */
   total: bigint;
   squares: number[];
-  /** Expected profit in lamports, after the executor fee, with the crowd buffer applied (so on the cautious side). */
+  /** Expected profit in lamports, after Gali's fee, with the crowd buffer applied (so on the cautious side). */
   ev: number;
   /** Lamports already on the chosen squares when the plan was made. */
   boardBefore: bigint;
@@ -120,6 +131,27 @@ export function roundDown2(x: number): number {
   if (!(x >= 1)) return 0;
   const p = 10 ** Math.max(0, Math.floor(Math.log10(x)) - 1);
   return Math.floor(x / p) * p;
+}
+
+/**
+ * One stake size for the whole round: the best of "the top k squares, each at the smallest of their stakes", by
+ * expected profit. No square gets more than its own best stake, so each one still clears the margin.
+ */
+export function bestUniform(stakes: { s: number; a: number }[], ev: (amount: number, square: number) => number): { amount: number; squares: number[] }[] {
+  const xs = [...stakes].sort((x, y) => y.a - x.a);
+  let best: { amount: number; squares: number[] } | null = null;
+  let bestEv = 0;
+  for (let k = 1; k <= xs.length; k++) {
+    const amount = roundDown2(xs[k - 1].a);
+    if (amount < Number(MIN_STAKE)) break;
+    const squares = xs.slice(0, k).map((x) => x.s);
+    const v = squares.reduce((n, sq) => n + ev(amount, sq), 0);
+    if (v > bestEv) {
+      bestEv = v;
+      best = { amount, squares };
+    }
+  }
+  return best ? [best] : [];
 }
 
 /**
@@ -161,11 +193,13 @@ export function planRound(i: PlanInput): Plan | null {
   const p = i.params;
   const prize = prizeLamports(i.motherlodeGrams, i.orePriceSol);
   if (!(prize > 0) || i.onBoard.length !== BLOCKS) return null;
-  const budget = Math.min(Number(i.balance) * p.maxRoundShare, Number(i.balance - AI_EXECUTOR_FEE));
+  const feeRate = Number(i.feeBps ?? AI_FEE_BPS) / 10_000;
+  // the round and ORE's fee on it must both come out of the balance
+  const budget = Math.min(Number(i.balance) * p.maxRoundShare, Number(i.balance) / (1 + feeRate));
   const cap = Number(i.maxPerSquare);
   if (!(budget >= Number(MIN_STAKE)) || !(cap >= Number(MIN_STAKE))) return null;
-  // what a stake must cost us per lamport for the margin to hold
-  const cost = LOSS + p.minEdge;
+  // what a stake must cost us per lamport for the margin to hold: ORE's cut, Gali's fee, and the margin
+  const cost = LOSS + feeRate + p.minEdge;
   const crowd = (s: number) => Math.max(EMPTY_FLOOR, Number(i.onBoard[s]) * (1 + p.crowdBuffer));
 
   // best stake per square: maximise prize/25 x a/(t+a) - cost x a  =>  a = sqrt(t x prize / (25 cost)) - t
@@ -184,21 +218,22 @@ export function planRound(i: PlanInput): Plan | null {
   const groups: Plan['groups'] = [];
   const squares: number[] = [];
   let total = 0n;
-  let ev = -Number(AI_EXECUTOR_FEE);
+  let ev = 0;
   let boardBefore = 0n;
-  for (const { amount, squares: ss } of groupStakes(stakes, MAX_GROUPS)) {
+  for (const { amount, squares: ss } of MAX_GROUPS === 1 ? bestUniform(stakes, (amt, sq) => squareEv(amt, crowd(sq), prize) - amt * feeRate) : groupStakes(stakes, MAX_GROUPS)) {
     if (amount < Number(MIN_STAKE)) continue;
     let mask = 0;
     for (const s of ss) {
       mask |= 1 << s;
       squares.push(s);
-      ev += squareEv(amount, crowd(s), prize);
+      ev += squareEv(amount, crowd(s), prize) - amount * feeRate;
       boardBefore += i.onBoard[s];
     }
     groups.push({ amount: BigInt(amount), mask });
     total += BigInt(amount) * BigInt(ss.length);
   }
-  if (!groups.length || ev <= 0 || total + AI_EXECUTOR_FEE > i.balance) return null;
+  const fee = (total * BigInt(Math.round(feeRate * 10_000))) / 10_000n;
+  if (!groups.length || ev <= 0 || total < MIN_ROUND || total + fee > i.balance) return null;
   squares.sort((a, b) => a - b);
   return { groups, total, squares, ev, boardBefore };
 }

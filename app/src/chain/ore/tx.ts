@@ -16,7 +16,7 @@ import '../polyfill-web';
 import { getSecret, setSecret } from '../secure';
 import { ComputeBudgetProgram, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, TransactionInstruction } from '@solana/web3.js';
 import { connection, galiRoundIxs, sendWithKey, sendWithWallet, simulates } from '../client';
-import { platformFee, REVENUE_WALLET } from '../light';
+import { PLATFORM_FEE_BPS, platformFee, REVENUE_WALLET } from '../light';
 import { AUTOMATION_STRATEGY, EXECUTOR_ADDRESS } from './consts';
 import { automateIx, checkpointIx, claimOreIx, claimSolIx, deployIx } from './ix';
 import { fetchClock, fetchOreAutomation, fetchOreMiner, needsCheckpoint } from './read';
@@ -347,7 +347,8 @@ export async function closeLiveAutomation(expectedOwner?: PublicKey): Promise<vo
  * ORE then lets that key choose the spots and the amount per spot each round (never more than `maxPerSpot`), and
  * nothing else: it can't withdraw or change the limit. Returned SOL goes back into the automation (reload), so the
  * balance shows how the AI is doing. STOP is the same as autopilot's: it closes the automation and returns the rest.
- * No Gali platform fee here: the weekly AI pass is the fee.
+ * Gali's fee is the same 0.25% as LITE and PRO, taken by ORE from each round the AI plays (DiscretionaryBps) and paid
+ * to the AI key, which passes it on to the revenue wallet. Rounds the AI sits out cost nothing.
  */
 const AI_EXECUTOR_KEY = (() => {
   try {
@@ -357,8 +358,8 @@ const AI_EXECUTOR_KEY = (() => {
   }
 })();
 export const aiReady = () => Boolean(AI_EXECUTOR_KEY);
-/** What each round the AI plays pays its executor: the network fee, no margin. Same as supabase/functions/_shared/aiStrategy.ts. */
-export const AI_EXECUTOR_FEE = 10_000n;
+/** Gali's fee on SOL the AI deploys, in basis points: PLATFORM_FEE_BPS, as on LITE and PRO. Same as supabase/functions/_shared/aiStrategy.ts. */
+export const AI_FEE_BPS = PLATFORM_FEE_BPS;
 /** The weekly pass. Same as supabase/functions/ai-pass. */
 export const AI_PASS_LAMPORTS = 100_000_000n;
 
@@ -373,9 +374,9 @@ export async function startAiAutomation(args: { deposit: bigint; maxPerSpot: big
         authority: owner,
         amount: args.maxPerSpot,
         deposit: args.deposit,
-        fee: AI_EXECUTOR_FEE,
+        fee: AI_FEE_BPS,
         mask: 0,
-        strategy: AUTOMATION_STRATEGY.Discretionary,
+        strategy: AUTOMATION_STRATEGY.DiscretionaryBps,
         reload: true,
         executor: AI_EXECUTOR_KEY,
       }),

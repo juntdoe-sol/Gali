@@ -6,7 +6,7 @@
 import { Connection } from './deps.ts';
 import { loadKey } from '../autopilot/core.ts';
 import { clampParams, DEFAULT_PARAMS, type AiParams } from '../_shared/aiStrategy.ts';
-import { run, type Hooks } from './core.ts';
+import { run, sweepFees, type Hooks } from './core.ts';
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 /** Prices older than this and the AI sits out: a stale price could make a bad round look good. */
@@ -53,7 +53,7 @@ function supabaseHooks(base: string, key: string): Hooks {
         method: 'POST',
         headers: { ...h, prefer: 'resolution=ignore-duplicates' },
         body: JSON.stringify({
-          wallet: p.wallet, round_id: p.round.toString(), stake: p.stake.map(String), total: p.total.toString(), ev: p.ev,
+          wallet: p.wallet, round_id: p.round.toString(), stake: p.stake.map(String), total: p.total.toString(), fee: p.fee.toString(), ev: p.ev,
           board_before: p.boardBefore.toString(), prize: p.prize, signature: p.signature,
         }),
       });
@@ -84,7 +84,10 @@ Deno.serve(async (req) => {
   const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   if (!rpc || !raw || !base || !key) return json(500, { error: 'missing RPC_URL, AI_EXECUTOR_KEY or Supabase env' });
   const signer = loadKey(raw);
-  const passes = await run(new Connection(rpc, 'confirmed'), signer, supabaseHooks(base, key), 50_000);
+  const conn = new Connection(rpc, 'confirmed');
+  const passes = await run(conn, signer, supabaseHooks(base, key), 50_000);
+  // Gali's 0.25% collects on the AI key round by round; move it on to the revenue wallet
+  const swept = await sweepFees(conn, signer).catch((e) => (console.log(`sweep: ${String((e as Error)?.message ?? e).slice(0, 160)}`), 0n));
   const report = {
     executor: signer.publicKey.toBase58(),
     passes: passes.length,
@@ -93,6 +96,7 @@ Deno.serve(async (req) => {
     skipped: passes.reduce((n, p) => n + p.skipped, 0),
     failed: passes.reduce((n, p) => n + p.failed, 0),
     settled: passes.reduce((n, p) => n + p.settled, 0),
+    sweptSol: Number(swept) / 1e9,
     errors: passes.flatMap((p) => p.errors).slice(0, 8),
   };
   console.log(JSON.stringify(report));

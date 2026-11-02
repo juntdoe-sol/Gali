@@ -40,6 +40,8 @@ export interface AiMe {
   expiresAt: number | null;
   /** never had a pass: the free week is open */
   trialOpen: boolean;
+  /** when this wallet may send feedback again (null: now) */
+  nextFeedbackAt: number | null;
   rounds: number;
   wins: number;
   deployedSol: number;
@@ -64,6 +66,8 @@ export interface AiLogEntry {
   at: number;
   learned: string | null;
   note: string | null;
+  /** how the team used subscribers' feedback that hour */
+  feedbackReply: string | null;
   minEdge: number;
   crowdBuffer: number;
   maxRoundShare: number;
@@ -107,7 +111,7 @@ export async function refreshAi() {
     const mr = Array.isArray(m) ? m[0] : null;
     const me: AiMe | null = mr
       ? {
-          expiresAt: mr.expires_at ? Date.parse(mr.expires_at) : null, trialOpen: Boolean(mr.trial_open), rounds: num(mr.rounds), wins: num(mr.wins), deployedSol: num(mr.deployed_sol),
+          expiresAt: mr.expires_at ? Date.parse(mr.expires_at) : null, trialOpen: Boolean(mr.trial_open), nextFeedbackAt: mr.next_feedback_at ? Date.parse(mr.next_feedback_at) : null, rounds: num(mr.rounds), wins: num(mr.wins), deployedSol: num(mr.deployed_sol),
           returnedSol: num(mr.returned_sol), ore: num(mr.ore), feesSol: num(mr.fees_sol), pending: num(mr.pending),
         }
       : null;
@@ -259,6 +263,7 @@ export async function loadLog(ask = false): Promise<void> {
         at: Date.parse(String(x.at)),
         learned: typeof x.learned === 'string' ? x.learned : null,
         note: typeof x.note === 'string' ? x.note : null,
+        feedbackReply: typeof x.feedback_reply === 'string' ? x.feedback_reply : null,
         minEdge: num(x.min_edge), crowdBuffer: num(x.crowd_buffer), maxRoundShare: num(x.max_round_share), targetSlotsLeft: num(x.target_slots_left),
         plays: day && typeof day.plays === 'number' ? day.plays : null,
       };
@@ -268,5 +273,34 @@ export async function loadLog(ask = false): Promise<void> {
     /* keep what we had */
   } finally {
     useAi.setState({ logBusy: false });
+  }
+}
+
+export type AiVote = 'more' | 'same' | 'safer';
+
+/** Send feedback to the hourly review: a vote and an optional comment. Subscribers only, once every 2 hours. */
+export async function sendFeedback(vote: AiVote, comment: string): Promise<boolean> {
+  const g = useGame.getState();
+  const pass = await signedPass();
+  if (!pass) return false;
+  try {
+    let r = await passCall<{ nextAt: string }>({ a: 'feedback', pass, vote, comment: comment.slice(0, 200) });
+    if (r.status === 401) {
+      await signOut();
+      const again = await signedPass();
+      if (!again) return false;
+      r = await passCall<{ nextAt: string }>({ a: 'feedback', pass: again, vote, comment: comment.slice(0, 200) });
+    }
+    const next = r.data.nextAt ? Date.parse(r.data.nextAt) : null;
+    if (next) useAi.setState((st) => ({ me: st.me ? { ...st.me, nextFeedbackAt: next } : st.me }));
+    if (r.status !== 200) {
+      g.toast(r.data.error ?? 'Could not send your feedback', r.status === 429 ? 'info' : 'bad');
+      return false;
+    }
+    g.toast('Thanks. The team reads it at the next hourly review', 'good');
+    return true;
+  } catch {
+    g.toast('Could not reach the server. Try again', 'bad');
+    return false;
   }
 }

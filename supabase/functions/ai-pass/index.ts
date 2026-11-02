@@ -4,10 +4,13 @@
 //          repeat), and only the wallet that paid gets the days, so posting someone else's signature does nothing.
 //   trial  7 free days, once per wallet, only for a wallet that never had a pass. Needs the sign-in pass (a signed
 //          message, no fee), so nobody can use up someone else's free week.
-//   log    what the AI learned each hour, for a signed-in wallet with a live pass.
+//   log       what the AI learned each hour, for a signed-in wallet with a live pass.
+//   feedback  a vote (play more / keep it / play safer) and an optional comment, for a signed-in wallet with a live
+//             pass, at most one every 2 hours. The hourly review reads it as players' opinions, never as orders.
 // Secrets: RPC_URL, DM_SECRET (the same one dm and play use for sign-in). SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY
 // come with every edge function.
 import { isWallet, readPass } from '../_shared/pass.ts';
+import { cleanComment } from '../_shared/aiText.ts';
 
 export const PASS_LAMPORTS = 100_000_000; // 0.1 SOL
 export const REVENUE_WALLET = 'HDa2MTDdZXnrjTs6RRUUzEqCcrWMWu1fM673Cg7pzQMw';
@@ -17,6 +20,8 @@ const MAX_AGE_S = 60 * 60;
 const SIG = /^[1-9A-HJ-NP-Za-km-z]{64,90}$/;
 /** How far back the log goes. */
 const LOG_DAYS = 14;
+const VOTES = ['more', 'same', 'safer'] as const;
+
 
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'authorization, apikey, content-type', 'access-control-allow-methods': 'POST, OPTIONS' };
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...cors } });
@@ -45,7 +50,7 @@ Deno.serve(async (req) => {
   const body = await req.json().catch(() => null);
   const a = body?.a ?? 'pay';
 
-  if (a === 'trial' || a === 'log') {
+  if (a === 'trial' || a === 'log' || a === 'feedback') {
     const wallet = await readPass(body?.pass).catch(() => null);
     if (!wallet) return json(401, { error: 'sign in first' });
 
@@ -58,13 +63,26 @@ Deno.serve(async (req) => {
       return json(200, { expiresAt: await r.json() });
     }
 
-    // log: only for a live pass
+    // log and feedback: only for a live pass
     const p = await fetch(`${base}/rest/v1/gali_ai_passes?select=expires_at&wallet=eq.${encodeURIComponent(wallet)}`, { headers: h });
     const rows = p.ok ? await p.json() : [];
-    if (!rows[0] || !(Date.parse(rows[0].expires_at) > Date.now())) return json(403, { error: 'The learning log is for miners with a pass' });
+    if (!rows[0] || !(Date.parse(rows[0].expires_at) > Date.now())) return json(403, { error: a === 'log' ? 'The learning log is for miners with a pass' : 'Feedback is for miners with a pass' });
+
+    if (a === 'feedback') {
+      const vote = body?.vote;
+      if (!VOTES.includes(vote)) return json(400, { error: 'Pick play more, keep it, or play safer' });
+      const r = await fetch(`${base}/rest/v1/rpc/gali_ai_feedback_add`, { method: 'POST', headers: h, body: JSON.stringify({ p_wallet: wallet, p_vote: vote, p_comment: cleanComment(body?.comment) }) });
+      if (!r.ok) {
+        const t = await r.text();
+        const until = t.match(/too soon until ([0-9T:+.\- ]+)/)?.[1];
+        return until ? json(429, { error: 'You can send feedback once every 2 hours', nextAt: until.trim() }) : json(500, { error: 'could not save your feedback' });
+      }
+      return json(200, { nextAt: await r.json() });
+    }
+
     const since = new Date(Date.now() - LOG_DAYS * 86_400_000).toISOString();
     const l = await fetch(
-      `${base}/rest/v1/gali_ai_params?select=at,note,learned,min_edge,crowd_buffer,max_round_share,target_slots_left,stats&source=eq.claude&at=gt.${encodeURIComponent(since)}&order=id.desc&limit=400`,
+      `${base}/rest/v1/gali_ai_params?select=at,note,learned,feedback_reply,min_edge,crowd_buffer,max_round_share,target_slots_left,stats&source=eq.claude&at=gt.${encodeURIComponent(since)}&order=id.desc&limit=400`,
       { headers: h },
     );
     if (!l.ok) return json(500, { error: 'could not read the log' });
