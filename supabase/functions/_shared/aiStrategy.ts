@@ -50,11 +50,11 @@ export interface AiParams {
   crowdBuffer: number;
   /** Most of the automation's balance one round may use (0.05 = 5%). */
   maxRoundShare: number;
-  /** Deploy when this many slots are left in the round (about 0.4 s each). ORE locks the last 15. */
+  /** Deploy when this many slots are left in the round (about 0.2 s each in Nov 2026, so 40 is about 9 s). ORE locks the last 15. */
   targetSlotsLeft: number;
 }
 
-export const DEFAULT_PARAMS: AiParams = { minEdge: 0.08, crowdBuffer: 0.25, maxRoundShare: 0.05, targetSlotsLeft: 22 };
+export const DEFAULT_PARAMS: AiParams = { minEdge: 0.08, crowdBuffer: 0.25, maxRoundShare: 0.05, targetSlotsLeft: 40 };
 
 export const BOUNDS: Record<keyof AiParams, [number, number]> = {
   minEdge: [0.02, 0.5],
@@ -93,6 +93,15 @@ export function prizeLamports(motherlodeGrams: bigint, orePriceSol: number): num
   if (!(orePriceSol > 0)) return 0;
   const ore = 1 + Number(motherlodeGrams) / GRAMS_PER_ORE / MOTHERLODE_ODDS;
   return ore * CLAIM_KEEP * orePriceSol * LAMPORTS_PER_SOL;
+}
+
+/**
+ * The most SOL (lamports) a square can already hold and still be worth joining at these settings: past it, the share
+ * of the prize a small stake wins no longer covers ORE's cut, Gali's fee and the margin, with the late crowd added.
+ * For players' eyes ("joins spots under X"); planRound makes the real decision, stake by stake.
+ */
+export function joinLimitLamports(prize: number, p: AiParams, feeBps: bigint = AI_FEE_BPS): number {
+  return prize / BLOCKS / (LOSS + Number(feeBps) / 10_000 + p.minEdge) / (1 + p.crowdBuffer);
 }
 
 /** Expected profit in lamports of staking `a` on a square holding `t`, for a square prize worth `prize`. */

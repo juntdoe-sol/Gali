@@ -20,7 +20,7 @@ import { useLayout } from './layout';
 import { openScanTv, TV_PAIR } from './TvLink';
 import { evOf } from '../game/ev';
 import { refreshMarket, useOreStats } from '../game/oreStats';
-import { buyPass, loadLog, netSol, refreshAi, sendFeedback, startTrial, useAi, type AiLogEntry, type AiVote } from '../game/aiMining';
+import { buyPass, loadLog, netSol, refreshAi, sendFeedback, startTrial, useAi, type AiLogEntry, type AiThought, type AiVote } from '../game/aiMining';
 
 const SHAKE_G = 2.1;
 const layoutNowDesktop = () => layoutNow().desktop;
@@ -741,6 +741,42 @@ function AiLog({ log, busy }: { log: AiLogEntry[] | null; busy: boolean }) {
   );
 }
 
+/** One round's decision in a sentence. The numbers are the board's, the same for every AI miner. */
+function thoughtText(t: AiThought): string {
+  const q = t.quietestSol.toFixed(3);
+  const lim = t.joinLimitSol.toFixed(3);
+  if (t.played) return `Played for ${t.played === 1 ? '1 miner' : `${t.played} miners`}. The quietest spot had ${q} SOL, under the ${lim} SOL it joins at, with the motherlode at ${t.motherlodeOre.toFixed(1)} ORE.`;
+  return `Sat out. The quietest spot had ${q} SOL, and it only joins spots under ${lim} SOL. With the motherlode at ${t.motherlodeOre.toFixed(1)} ORE, one winning spot is worth ${t.prizeSol.toFixed(2)} SOL, so it waits for a quieter spot or a bigger pool.`;
+}
+
+/** Everyone: what Gali AI saw and decided in the latest rounds, newest first. */
+function AiThinking({ thoughts }: { thoughts: AiThought[] }) {
+  if (!thoughts.length) return null;
+  const [t, ...rest] = thoughts;
+  return (
+    <View style={{ marginTop: 12 }}>
+      <T v="label" style={{ color: COLORS.gold, marginBottom: 4 }}>
+        WHAT GALI AI IS THINKING
+      </T>
+      <View style={[styles.aiLog, !rest.length && { borderBottomWidth: 0 }]}>
+        <T v="num" style={{ fontSize: 13, color: COLORS.muted }}>
+          Round {t.round} · {when(t.at)} · {(t.slotsLeft * 0.2).toFixed(0)} s before the end
+        </T>
+        <T v="num" style={{ fontSize: 15, color: COLORS.text, lineHeight: 18 }}>
+          {thoughtText(t)}
+        </T>
+      </View>
+      {rest.slice(0, 4).map((r, i, shown) => (
+        <View key={r.round} style={[styles.aiLog, i === shown.length - 1 && { borderBottomWidth: 0 }]}>
+          <T v="num" style={{ fontSize: 13, color: r.played ? COLORS.green : COLORS.muted }}>
+            Round {r.round} · {r.played ? 'played' : 'sat out'} · quietest {r.quietestSol.toFixed(3)} / joins under {r.joinLimitSol.toFixed(3)} SOL
+          </T>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 function AiPanel() {
   const { balance, live } = useBalance();
   const autopilot = useGame((s) => s.autopilot);
@@ -748,7 +784,7 @@ function AiPanel() {
   const owner = useGame((s) => s.wallet.owner);
   const startAi = useGame((s) => s.startAiMining);
   const stopAutopilot = useGame((s) => s.stopAutopilot);
-  const { status, stats, board, me, claiming, log, logBusy } = useAi();
+  const { status, stats, board, me, claiming, log, logBusy, thoughts } = useAi();
   const [amount, setAmount] = useState('');
   const [perSpot, setPerSpot] = useState(AI_PER_SPOT_DEFAULT);
   useEffect(() => {
@@ -807,6 +843,7 @@ function AiPanel() {
           </T>
         }
       />
+      <AiThinking thoughts={thoughts} />
 
       {owner ? (
         <Row
@@ -914,7 +951,7 @@ function AiPanel() {
         </>
       ) : owner ? (
         <T v="num" style={[styles.evNote, { marginTop: 8 }]}>
-          With a pass you also get Gali AI's learning log (every hour, what it saw and what it changed) and a vote on how it plays, every 2 hours.
+          With a pass you also get Gali AI's learning log (every 3 hours and daily, what it saw and what it changed) and a vote on how it plays, every 2 hours.
         </T>
       ) : null}
 
