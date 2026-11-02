@@ -102,7 +102,7 @@ const QUEST_STEP = DESK_STEPS.length - 1;
 const WALK_STEP = DESK_STEPS.findIndex((d) => d.icon === 'clock' && d.wait === 'done' && /walk/.test(d.title));
 
 const PRO_TOUR: DeskStep[] = [
-  { icon: 'grid', title: 'PRO: you pick the spots', body: 'Click spots on the map to choose them yourself, or set how many with − and +. ALL covers every spot.', target: 'pro-tiles', at: 0.04 },
+  { icon: 'grid', title: 'PRO: you pick the spots', body: `${LANDSCAPE_APP ? 'Tap' : 'Click'} spots on the map to choose them yourself, or set how many with − and +. ALL covers every spot.`, target: 'pro-tiles', at: 0.04 },
   { icon: 'sol', title: 'SOL a round', body: 'This SOL is split evenly over your spots. Fewer spots: bigger share if one strikes, but you miss more rounds.', target: 'amount', at: 0.04 },
   { icon: 'pick', title: 'Deploy', body: 'Same as LITE: press DEPLOY, approve, wait for the strike. Back to LITE any time.', target: 'deploy', at: 0.04 },
 ];

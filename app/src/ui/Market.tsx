@@ -17,7 +17,7 @@ import { play } from '../game/sfx';
 import { useName } from '../game/username';
 import { GearSprite, TryOnSprite } from './GearSprite';
 import { Frame, IconBtn, T, U } from './kit';
-import { useLayout } from './layout';
+import { LANDSCAPE_APP, useLayout } from './layout';
 import { PixIcon } from './PixIcon';
 import type { PixName } from './pixIcons';
 import { alpha, Corners, HoloStage, Led, Materialize, Meter, Pager, Prompt, Readout, stageGeo, TECH, TechBtn, TechPanel, TechTab, useTick, type PagerRef } from './tech';
@@ -34,13 +34,14 @@ export function MarketWindow() {
   const { desktop, w, h } = useLayout();
   const insets = useSafeAreaInsets();
   if (!open) return null;
-  const width = desktop ? Math.min(1040, w - 48) : w;
-  const height = desktop ? Math.min(780, h - 48) : h - insets.top;
+  // a phone held sideways is short: the landscape app gives the market nearly the whole screen
+  const width = LANDSCAPE_APP ? w - 16 - insets.left - insets.right : desktop ? Math.min(1040, w - 48) : w;
+  const height = LANDSCAPE_APP ? h - 16 : desktop ? Math.min(780, h - 48) : h - insets.top;
   return (
     <Modal visible transparent animationType="fade" onRequestClose={hide}>
       <Pressable style={styles.scrim} onPress={hide} accessibilityLabel="Close the market" />
       <View style={[styles.wrap, desktop ? { alignItems: 'center', justifyContent: 'center' } : { justifyContent: 'flex-end' }]} pointerEvents="box-none">
-        <Frame style={{ width, height, paddingTop: 12, backgroundColor: TECH.deep }}>
+        <Frame style={{ width, height, paddingTop: LANDSCAPE_APP ? 6 : 12, backgroundColor: TECH.deep }}>
           <MarketBody wide={width >= 760} bottomPad={desktop ? 12 : insets.bottom + 12} />
         </Frame>
       </View>
@@ -112,13 +113,13 @@ function MarketBody({ wide, bottomPad }: { wide: boolean; bottomPad: number }) {
           GEAR <T v="display" style={{ fontSize: wide ? 30 : 24, lineHeight: wide ? 30 : 24, color: COLORS.teal }}>MARKET</T>
         </T>
       </View>
-      {wide ? switcher : null}
+      {wide || LANDSCAPE_APP ? switcher : null}
       <IconBtn onPress={hide} label="Close" kbd="ESC">
         <PixIcon name="close" size={18} />
       </IconBtn>
     </View>
   );
-  const headAll = wide ? (
+  const headAll = wide || LANDSCAPE_APP ? (
     head
   ) : (
     <>
@@ -203,7 +204,13 @@ function MarketBody({ wide, bottomPad }: { wide: boolean; bottomPad: number }) {
     <View style={{ flex: 1 }}>
       {headAll}
       {filters}
-      {wide ? (
+      {LANDSCAPE_APP ? (
+        // landscape app: the stage and the item card side by side, no strip, so the stage keeps the height it has
+        <View style={{ flex: 1, flexDirection: 'row', gap: 8, paddingHorizontal: 10, paddingBottom: 8, paddingTop: 4 }}>
+          <Measure style={{ flex: 1 }}>{(w, h) => stageBlock(w, h)}</Measure>
+          {it ? <Spec it={it} tryOn={tryOn} setTryOn={setTryOn} n={idx} of={items.length} style={{ width: 280 }} book={book} onJump={jump} /> : null}
+        </View>
+      ) : wide ? (
         <View style={{ flex: 1, flexDirection: 'row', gap: 12, paddingHorizontal: 16, paddingBottom: bottomPad, paddingTop: 6 }}>
           <Measure style={{ flex: 1 }}>
             {(w, h) => (

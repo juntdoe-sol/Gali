@@ -34,7 +34,7 @@ import { useIslandRides } from '../game/islandRides';
 import { useArena } from '../game/arena';
 import { BRAWLORE } from './BrawlOre';
 import { useView } from '../pixel/view';
-import { Bar, Btn, Choice, F, FocusRing, Frame, IconBtn, INPUT, Kbd, MapButton, PixelBox, Scrim, T, Tip, U, Window } from './kit';
+import { Bar, Btn, Choice, F, FocusRing, Frame, IconBtn, INPUT, Kbd, MapButton, PixelBox, Scrim, ScrimMark, T, Tip, U, Window } from './kit';
 import { GUTTER, LANDSCAPE_APP, RAIL_W, TOP_H, layoutNow, sideWidth, useChrome, useLayout } from './layout';
 import { BAR_H, TabBar, type SheetTab } from './TabBar';
 import { Arcade } from './Arcade';
@@ -474,6 +474,7 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
 
       {navOpen ? (
         <>
+          <ScrimMark />
           <Pressable style={styles.navScrim} onPress={() => setNavOpen(false)} accessibilityLabel="Close travel menu" />
           <View style={[styles.navCol, { top: topH, bottom: bottomInset + BAR_H }, L.desktop && { left: RAIL_W + GUTTER, right: right }]} pointerEvents="box-none">
             <Window title="TRAVEL" sub="Your miner walks there and goes in" onClose={() => setNavOpen(false)} width={580}>
