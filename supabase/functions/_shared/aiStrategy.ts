@@ -18,8 +18,14 @@ export const BLOCKS = 25;
 export const LAMPORTS_PER_SOL = 1_000_000_000;
 export const GRAMS_PER_ORE = 100_000_000_000;
 export const MOTHERLODE_ODDS = 500;
-/** ORE's 10% fee for claiming unrefined ORE. */
+/** ORE's 10% fee for claiming unrefined ORE. Reports that value ORE after a claim use it. */
 export const CLAIM_KEEP = 0.9;
+/**
+ * Share of an ORE's price the AI counts when it decides. Miners mine to hold ORE and sell when they choose: unclaimed
+ * ORE pays no claim fee (and earns a share of other miners' fees), so mined ORE counts at its full price. The AI plays
+ * when mining costs less SOL per ORE than buying it.
+ */
+export const ORE_KEEP = 1;
 /** Average share of each SOL that comes back: 99% on the winning square, 99% x 90% on the 24 that miss. */
 export const SOL_BACK = 0.99 * (1 / BLOCKS + ((BLOCKS - 1) / BLOCKS) * 0.9);
 /** Average share of each SOL that ORE keeps. */
@@ -88,11 +94,11 @@ export function limitStep(next: AiParams, prev: AiParams, step = 0.25): AiParams
   return clampParams(out, prev);
 }
 
-/** The SOL value (in lamports) of one square's whole prize: 1 ORE plus the motherlode's expected share, after the claim fee. */
+/** The SOL value (in lamports) of one square's whole prize: 1 ORE plus the motherlode's expected share, at ORE_KEEP. */
 export function prizeLamports(motherlodeGrams: bigint, orePriceSol: number): number {
   if (!(orePriceSol > 0)) return 0;
   const ore = 1 + Number(motherlodeGrams) / GRAMS_PER_ORE / MOTHERLODE_ODDS;
-  return ore * CLAIM_KEEP * orePriceSol * LAMPORTS_PER_SOL;
+  return ore * ORE_KEEP * orePriceSol * LAMPORTS_PER_SOL;
 }
 
 /**

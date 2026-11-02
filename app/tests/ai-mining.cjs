@@ -43,7 +43,7 @@ const test = (name, fn) => {
   });
 
   test('sits out when every square is too crowded for the prize', () => {
-    // prize 0.45 SOL a square; break-even crowd is under 0.1 SOL a square
+    // prize 0.5 SOL a square (1 ORE held at full price); break-even crowd is about 0.1 SOL a square
     const plan = S.planRound({ onBoard: board(sol(0.5)), motherlodeGrams: 0n, orePriceSol: 0.5, maxPerSquare: sol(0.1), balance: sol(2), params: P });
     assert.equal(plan, null);
   });
@@ -247,6 +247,11 @@ const test = (name, fn) => {
     assert.equal(S.planRound({ ...base, onBoard: board(BigInt(Math.ceil(limit * 1.02))) }), null, 'sits out spots over it');
   });
 
+  test('mined ORE counts at its full price: miners hold it, so no claim fee in the decision', () => {
+    assert.equal(S.prizeLamports(0n, 1.5), 1.5e9);
+    assert.equal(S.prizeLamports(500n * 100_000_000_000n, 1), 2e9, '1 ORE plus a 500 ORE pool at 1 in 500');
+  });
+
   test('the slot time is measured, so fast slots do not make it oversleep the deploy window', () => {
     const s = M.newState(400);
     M.trackSlot(s, 1000, 0);
@@ -353,7 +358,7 @@ const test = (name, fn) => {
     assert.equal(s.winRate, 0.5);
     assert.ok(Math.abs(s.fairWinRate - 0.08) < 1e-12);
     assert.ok(Math.abs(s.lateCrowdP80 - 0.5) < 1e-9);
-    assert.ok(Math.abs(s.oreValueSol - 0.45) < 1e-9);
+    assert.ok(Math.abs(s.oreValueSol - 0.5) < 1e-9, 'held ORE at full price');
   });
 
   test("Gali's 0.25% is part of every decision: a square that only just pays is skipped", () => {
