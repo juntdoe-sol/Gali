@@ -1,26 +1,35 @@
-// Gali AI tuner, run by pg_cron (see ../../sql/ai-mining.sql): every 3 hours on Haiku, and once a day on Sonnet with
-// body {"kind":"daily"}. A team of four Claude agents reviews the last day and week of rounds plus subscribers'
-// feedback and picks the settings until the next review (who does what: tune.ts). tune.ts clamps whatever comes back,
-// so a bad answer cannot push the AI outside safe limits. If the lead agent is unreachable or refuses, the settings
-// stay as they are.
+// Gali AI tuner, run by pg_cron (see ../../sql/ai-mining.sql) in three kinds:
+//   {"kind":"rounds"}  every 15 minutes, Haiku: the round reviewer reads every round since its last look and writes
+//                      lessons (gali_ai_lessons). It changes nothing itself.
+//   {}                 every 3 hours, Haiku: a team of four Claude agents reviews the last day and week of rounds, the
+//                      round reviewer's lessons and subscribers' feedback, and picks the settings until the next review.
+//   {"kind":"daily"}   once a day, Sonnet: the same team, weighing the week.
+// Who does what: tune.ts. tune.ts clamps whatever comes back, so a bad answer cannot push the AI outside safe limits.
+// If the lead agent is unreachable or refuses, the settings stay as they are.
 // Claude spend is capped: every call's cost is recorded in gali_ai_claude_spend, a review is skipped when nothing new
-// happened since the last one of its kind, and none starts unless its worst case fits the month's budget (both kinds
+// happened since the last one of its kind, and none starts unless its worst case fits the month's budget (all kinds
 // together) and spending is on pace.
 // Secrets: ANTHROPIC_API_KEY, CRON_SECRET. SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY come with every edge function.
 // Optional: AI_TUNE_MODEL (3-hourly, default claude-haiku-5-5), AI_DAILY_MODEL (default claude-sonnet-5-5),
-// AI_MONTHLY_BUDGET_USD (default 8).
+// AI_ROUNDS_MODEL (default claude-haiku-5-5), AI_MONTHLY_BUDGET_USD (default 10).
 import Anthropic from 'npm:@anthropic-ai/sdk@1.3.0';
 import { clampParams, DEFAULT_PARAMS, type AiParams } from '../_shared/aiStrategy.ts';
 import {
   ANALYST, ANALYST_SCHEMA, analystPrompt, apply, budgetCheck, callCost, commentBlock, FEEDBACK, FEEDBACK_SCHEMA, feedbackPrompt, hasNews, LEAD,
-  LEAD_SCHEMA, leadPrompt, monthBounds, RISK, RISK_SCHEMA, riskLimits, riskPrompt, summarize, tally, text, worstReviewCost, type FeedbackRow, type RoundRow,
+  LEAD_SCHEMA, leadPrompt, monthBounds, RISK, RISK_SCHEMA, riskLimits, riskPrompt, ROUNDS, ROUNDS_SCHEMA, roundsPrompt, summarize, tally, text,
+  worstReviewCost, type FeedbackRow, type PlayRow, type RoundRow, type ThoughtRow,
 } from './tune.ts';
 
-const REGULAR_MODEL = Deno.env.get('AI_TUNE_MODEL') || 'claude-haiku-5-5';
-const DAILY_MODEL = Deno.env.get('AI_DAILY_MODEL') || 'claude-sonnet-5-5';
-const BUDGET_USD = Number(Deno.env.get('AI_MONTHLY_BUDGET_USD') || 8);
+const MODELS = {
+  regular: Deno.env.get('AI_TUNE_MODEL') || 'claude-haiku-5-5',
+  daily: Deno.env.get('AI_DAILY_MODEL') || 'claude-sonnet-5-5',
+  rounds: Deno.env.get('AI_ROUNDS_MODEL') || 'claude-haiku-5-5',
+};
+const BUDGET_USD = Number(Deno.env.get('AI_MONTHLY_BUDGET_USD') || 10);
 /** The answers are short JSON; this leaves room for thinking and keeps the worst case of a review small. */
 const MAX_TOKENS = 8000;
+/** The round reviewer reads at most this many rounds a look (a little over 3 hours). */
+const ROUNDS_MAX = 200;
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
 Deno.serve(async (req) => {
@@ -29,52 +38,26 @@ Deno.serve(async (req) => {
   const base = Deno.env.get('SUPABASE_URL');
   const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   if (!base || !key || !Deno.env.get('ANTHROPIC_API_KEY')) return json(500, { error: 'missing ANTHROPIC_API_KEY or Supabase env' });
-  const daily = ((await req.json().catch(() => ({}))) as { kind?: string }).kind === 'daily';
-  const MODEL = daily ? DAILY_MODEL : REGULAR_MODEL;
+  const k = ((await req.json().catch(() => ({}))) as { kind?: string }).kind;
+  const kind: keyof typeof MODELS = k === 'daily' || k === 'rounds' ? k : 'regular';
+  const daily = kind === 'daily';
+  const MODEL = MODELS[kind];
   const SOURCE = daily ? 'claude-daily' : 'claude';
-  const h ={ apikey: key, authorization: `Bearer ${key}`, 'content-type': 'application/json' };
+  const h = { apikey: key, authorization: `Bearer ${key}`, 'content-type': 'application/json' };
   const get = async (path: string) => {
     const r = await fetch(`${base}/rest/v1/${path}`, { headers: h });
     if (!r.ok) throw new Error(`${path.split('?')[0]} ${r.status}`);
     return r.json();
   };
 
-  const [paramRows, market, rows] = await Promise.all([
-    get('gali_ai_params?select=min_edge,crowd_buffer,max_round_share,target_slots_left,note,at&order=id.desc&limit=6'),
-    get('gali_ore_market?select=sol_usd,ore_usd&id=eq.1'),
-    get(`gali_ai_rounds?select=wallet,total,fee,ev,board_before,board_after,sol_back,ore_grams,won,motherlode,stake,settled_at&void=eq.false&settled_at=gt.${encodeURIComponent(new Date(Date.now() - 7 * 86_400_000).toISOString())}&order=settled_at.desc&limit=20000`),
-  ]);
-  const p = paramRows[0];
-  const current: AiParams = p ? clampParams({ minEdge: p.min_edge, crowdBuffer: p.crowd_buffer, maxRoundShare: p.max_round_share, targetSlotsLeft: p.target_slots_left }) : DEFAULT_PARAMS;
-  const oreSol = market[0] && Number(market[0].sol_usd) > 0 ? Number(market[0].ore_usd) / Number(market[0].sol_usd) : 0;
-  const toRow = (r: Record<string, unknown>) => ({
-    wallet: String(r.wallet),
-    total: Number(r.total), fee: Number(r.fee), ev: Number(r.ev), board_before: Number(r.board_before),
-    board_after: r.board_after === null ? null : Number(r.board_after), sol_back: r.sol_back === null ? null : Number(r.sol_back),
-    ore_grams: r.ore_grams === null ? null : Number(r.ore_grams), won: r.won as boolean | null, motherlode: r.motherlode as boolean | null,
-    squares: (r.stake as (number | string)[]).filter((x) => Number(x) > 0).length,
-  });
-  const all: (RoundRow & { wallet: string })[] = rows.map(toRow);
-  const dayAgo = Date.now() - 86_400_000;
-  const last24h = summarize(all.filter((_r, i) => Date.parse(rows[i].settled_at) > dayAgo), oreSol);
-  const last7d = summarize(all, oreSol);
-
-  // subscribers' feedback from the last 24 hours
-  const fb: FeedbackRow[] = await get(`gali_ai_feedback?select=wallet,vote,comment,at&at=gt.${encodeURIComponent(new Date(dayAgo).toISOString())}&order=at.desc&limit=2000`).catch(() => []);
-  const votes = tally(fb);
-  const history = paramRows.slice(0, 5).map((r: { at: string; note: string | null }) => ({ at: r.at, note: r.note }));
-
-  // nothing new since the last review of this kind: nothing to learn, so no Claude calls
-  const lastAt = daily ? (await get(`gali_ai_params?select=at&source=eq.${SOURCE}&order=id.desc&limit=1`))[0]?.at : p?.at;
-  if (!hasNews(lastAt, rows.map((r: { settled_at: string }) => r.settled_at), fb.map((f) => f.at))) return json(200, { kept: current, reason: 'nothing new since the last review' });
-  // the month's Claude budget
-  const now = new Date();
-  const spentRes = await fetch(`${base}/rest/v1/rpc/gali_ai_claude_spent`, { method: 'POST', headers: h, body: JSON.stringify({ p_since: monthBounds(now)[0].toISOString() }) });
-  if (!spentRes.ok) return json(500, { error: `could not read Claude spend: ${spentRes.status}` });
-  const spent = Number(await spentRes.json()) || 0;
-  const budget = budgetCheck(spent, BUDGET_USD, worstReviewCost(MODEL, MAX_TOKENS), now);
-  if (!budget.ok) return json(200, { kept: current, reason: budget.why });
-
+  /** The month's Claude budget, before any call: the reason a review may not run, or null. */
+  const overBudget = async (calls: number): Promise<string | null> => {
+    const now = new Date();
+    const r = await fetch(`${base}/rest/v1/rpc/gali_ai_claude_spent`, { method: 'POST', headers: h, body: JSON.stringify({ p_since: monthBounds(now)[0].toISOString() }) });
+    if (!r.ok) throw new Error(`could not read Claude spend: ${r.status}`);
+    const b = budgetCheck(Number(await r.json()) || 0, BUDGET_USD, worstReviewCost(MODEL, MAX_TOKENS, 8000, calls), now);
+    return b.ok ? null : b.why;
+  };
   const client = new Anthropic();
   const spend: { model: string; agent: string; input_tokens: number; output_tokens: number; usd: number }[] = [];
   /** Writes what this review cost so far. Every return after the first call goes through it. */
@@ -85,7 +68,7 @@ Deno.serve(async (req) => {
     if (!r.ok) throw new Error(`could not record Claude spend: ${r.status}`);
   };
   /** One agent's turn: a JSON answer that matches `schema`, or the reason it has none. */
-  const ask = async (agent: string, system: string, user: string, schema: Record<string, unknown>, effort: 'medium' | 'high' = 'medium'): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; why: string }> => {
+  const ask = async (agent: string, system: string, user: string, schema: Record<string, unknown>, effort: 'low' | 'medium' | 'high' = 'medium'): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; why: string }> => {
     try {
       const res = await client.beta.messages.create({
         model: MODEL,
@@ -109,9 +92,75 @@ Deno.serve(async (req) => {
   };
   const said = (r: Awaited<ReturnType<typeof ask>>) => (r.ok ? JSON.stringify(r.data) : `(unavailable: ${r.why})`);
 
+  const paramRows = await get('gali_ai_params?select=min_edge,crowd_buffer,max_round_share,target_slots_left,note,at&order=id.desc&limit=6');
+  const p = paramRows[0];
+  const current: AiParams = p ? clampParams({ minEdge: p.min_edge, crowdBuffer: p.crowd_buffer, maxRoundShare: p.max_round_share, targetSlotsLeft: p.target_slots_left }) : DEFAULT_PARAMS;
+
+  // ---------------- the round reviewer ----------------
+  if (kind === 'rounds') {
+    const last = (await get('gali_ai_lessons?select=to_round&order=id.desc&limit=1'))[0];
+    const thoughts: ThoughtRow[] = await get(`gali_ai_thoughts?select=round_id,slots_left,motherlode_grams,quietest,join_limit,board,played,skipped&round_id=gt.${last?.to_round ?? 0}&order=round_id.asc&limit=${ROUNDS_MAX}`);
+    if (!thoughts.length) return json(200, { kind, reason: 'no new rounds since the last look' });
+    const from = thoughts[0].round_id;
+    const to = thoughts[thoughts.length - 1].round_id;
+    const [plays, market]: [PlayRow[], { sol_usd: number; ore_usd: number }[]] = await Promise.all([
+      get(`gali_ai_rounds?select=round_id,total,sol_back,ore_grams,won,board_before,board_after,stake,settled_at,void&round_id=gte.${from}&round_id=lte.${to}&limit=5000`),
+      get('gali_ore_market?select=sol_usd,ore_usd&id=eq.1').catch(() => []),
+    ]);
+    const oreSol = market[0] && Number(market[0].sol_usd) > 0 ? Number(market[0].ore_usd) / Number(market[0].sol_usd) : 0;
+    const why = await overBudget(1);
+    if (why) return json(200, { kind, reason: why });
+    const r = await ask('rounds', ROUNDS, roundsPrompt(current, thoughts, plays, oreSol), ROUNDS_SCHEMA, 'low');
+    await saveSpend();
+    if (!r.ok) return json(200, { kind, reason: `round reviewer: ${r.why}` });
+    const ins = await fetch(`${base}/rest/v1/gali_ai_lessons`, {
+      method: 'POST',
+      headers: h,
+      body: JSON.stringify({
+        from_round: from, to_round: to, rounds: thoughts.length, played: thoughts.filter((t) => t.played > 0).length, model: MODEL,
+        lessons: text(r.data.lessons, 900), watch: text(r.data.watch, 300), confidence: r.data.confidence,
+      }),
+    });
+    if (!ins.ok) return json(500, { error: `save failed: ${ins.status}` });
+    return json(200, { kind, model: MODEL, from, to, rounds: thoughts.length, lessons: text(r.data.lessons, 900) });
+  }
+
+  // ---------------- the review team ----------------
+  const [market, rows] = await Promise.all([
+    get('gali_ore_market?select=sol_usd,ore_usd&id=eq.1'),
+    get(`gali_ai_rounds?select=wallet,total,fee,ev,board_before,board_after,sol_back,ore_grams,won,motherlode,stake,settled_at&void=eq.false&settled_at=gt.${encodeURIComponent(new Date(Date.now() - 7 * 86_400_000).toISOString())}&order=settled_at.desc&limit=20000`),
+  ]);
+  const oreSol = market[0] && Number(market[0].sol_usd) > 0 ? Number(market[0].ore_usd) / Number(market[0].sol_usd) : 0;
+  const toRow = (r: Record<string, unknown>) => ({
+    wallet: String(r.wallet),
+    total: Number(r.total), fee: Number(r.fee), ev: Number(r.ev), board_before: Number(r.board_before),
+    board_after: r.board_after === null ? null : Number(r.board_after), sol_back: r.sol_back === null ? null : Number(r.sol_back),
+    ore_grams: r.ore_grams === null ? null : Number(r.ore_grams), won: r.won as boolean | null, motherlode: r.motherlode as boolean | null,
+    squares: (r.stake as (number | string)[]).filter((x) => Number(x) > 0).length,
+  });
+  const all: (RoundRow & { wallet: string })[] = rows.map(toRow);
+  const dayAgo = Date.now() - 86_400_000;
+  const last24h = summarize(all.filter((_r, i) => Date.parse(rows[i].settled_at) > dayAgo), oreSol);
+  const last7d = summarize(all, oreSol);
+
+  // subscribers' feedback from the last 24 hours
+  const fb: FeedbackRow[] = await get(`gali_ai_feedback?select=wallet,vote,comment,at&at=gt.${encodeURIComponent(new Date(dayAgo).toISOString())}&order=at.desc&limit=2000`).catch(() => []);
+  const votes = tally(fb);
+  const history = paramRows.slice(0, 5).map((r: { at: string; note: string | null }) => ({ at: r.at, note: r.note }));
+
+  // nothing new since the last review of this kind: nothing to learn, so no Claude calls
+  const lastAt = daily ? (await get(`gali_ai_params?select=at&source=eq.${SOURCE}&order=id.desc&limit=1`))[0]?.at : p?.at;
+  if (!hasNews(lastAt, rows.map((r: { settled_at: string }) => r.settled_at), fb.map((f) => f.at))) return json(200, { kept: current, reason: 'nothing new since the last review' });
+  // the round reviewer's lessons since this kind's last review (the daily one reads its most recent day's worth)
+  const lessons: { at: string; lessons: string }[] = await get(
+    `gali_ai_lessons?select=at,lessons&order=id.desc&limit=${daily ? 24 : 12}${lastAt ? `&at=gt.${encodeURIComponent(lastAt)}` : ''}`,
+  ).catch(() => []);
+  const why = await overBudget(4);
+  if (why) return json(200, { kept: current, reason: why });
+
   // the analyst and the feedback reader work at the same time; the risk checker reads both; the lead decides
   const [analyst, feedback] = await Promise.all([
-    ask('analyst', ANALYST, analystPrompt(current, last24h, last7d, history), ANALYST_SCHEMA),
+    ask('analyst', ANALYST, analystPrompt(current, last24h, last7d, history, lessons), ANALYST_SCHEMA),
     votes.wallets ? ask('feedback', FEEDBACK, feedbackPrompt(votes, commentBlock(fb)), FEEDBACK_SCHEMA) : Promise.resolve({ ok: false as const, why: 'no feedback in the last 24 hours' }),
   ]);
   const risk = await ask('risk', RISK, riskPrompt(current, last24h, last7d, said(analyst), said(feedback), votes), RISK_SCHEMA);
@@ -122,6 +171,7 @@ Deno.serve(async (req) => {
   const { params, note, learned, feedbackReply } = apply(lead.data, current, risk.ok ? riskLimits(risk.data) : undefined);
   const agents = {
     votes,
+    lessons: lessons.length,
     analyst: analyst.ok ? { findings: text(analyst.data.findings, 900), confidence: analyst.data.confidence } : { unavailable: analyst.why },
     feedback: feedback.ok ? { summary: text(feedback.data.summary, 900), lean: feedback.data.lean } : { unavailable: feedback.why },
     risk: risk.ok ? { concerns: text(risk.data.concerns, 900), ...riskLimits(risk.data) } : { unavailable: risk.why },
@@ -135,5 +185,5 @@ Deno.serve(async (req) => {
     }),
   });
   if (!ins.ok) return json(500, { error: `save failed: ${ins.status}` });
-  return json(200, { kind: daily ? 'daily' : '3-hourly', model: MODEL, from: current, to: params, note, plays24h: last24h.plays, plays7d: last7d.plays, voters: votes.wallets, agents: { analyst: analyst.ok, feedback: feedback.ok, risk: risk.ok } });
+  return json(200, { kind: daily ? 'daily' : '3-hourly', model: MODEL, from: current, to: params, note, plays24h: last24h.plays, plays7d: last7d.plays, voters: votes.wallets, lessons: lessons.length, agents: { analyst: analyst.ok, feedback: feedback.ok, risk: risk.ok } });
 });

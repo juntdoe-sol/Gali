@@ -466,6 +466,19 @@ const test = (name, fn) => {
     assert.doesNotMatch(T.LEAD + T.RISK + T.ANALYST, /every hour|this hour|next hour/, 'no hourly wording left in the prompts');
   });
 
+  test('the round reviewer sees one line per round, with results once drawn, and no wallets', () => {
+    const t = (id, played) => ({ round_id: id, slots_left: 40, motherlode_grams: 248e11, quietest: 7e8, join_limit: 7.4e8, board: 18e9, played, skipped: 1 - played });
+    const play = (id, o) => ({ round_id: id, total: 2e7, sol_back: 1.8e7, ore_grams: 0, won: false, board_before: 1.4e10, board_after: 1.68e10, stake: [1e7, 1e7, 0], settled_at: '2026-11-02T03:30:00Z', void: false, wallet: 'PNX9utQBdEs4W7vMNop4wkuzPEsd84dGbMgFeVcoKYa', ...o });
+    const out = T.roundsPrompt(P, [t(3, 1), t(1, 0), t(2, 1)], [play(2, { won: true, ore_grams: 1e11 }), play(3, { settled_at: null })]);
+    const lines = out.split('\n').filter((l) => /^\d+: /.test(l));
+    assert.deepEqual(lines.map((l) => l.split(':')[0]), ['1', '2', '3'], 'oldest first');
+    assert.match(lines[0], /^1: sat out/);
+    assert.match(lines[1], /won ORE on the winning square, back 0\.0180 SOL, ORE 1\.0000, late crowd \+(19|20)%/);
+    assert.match(lines[2], /not drawn yet/);
+    assert.doesNotMatch(out, /PNX9ut/, 'no wallet addresses');
+    assert.ok(Math.abs(T.worstReviewCost('claude-haiku-5-5', 8000, 8000, 1) * 4 - T.worstReviewCost('claude-haiku-5-5', 8000)) < 1e-12, 'one call for the round reviewer');
+  });
+
   test('a quiet stretch needs no review', () => {
     const last = '2026-11-02T10:17:00Z';
     assert.equal(T.hasNews(last, ['2026-11-02T09:00:00Z'], []), false);
