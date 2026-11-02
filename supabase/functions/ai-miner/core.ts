@@ -15,7 +15,7 @@
  */
 import { Buffer, ComputeBudgetProgram, Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction } from './deps.ts';
 import { decodeAutomation, decodeBoard, LOCK_SLOTS, ORE_PROGRAM_ID, phaseOf, SIZE, STRATEGY, type Auto, type Phase } from '../autopilot/core.ts';
-import { addToBoard, AI_FEE_BPS, aiFee, BLOCKS, MAX_FEE_BPS, MIN_STAKE, planRound, prizeLamports, settleRound, type AiParams, type Plan, type Settled } from '../_shared/aiStrategy.ts';
+import { addToBoard, AI_FEE_BPS, aiFee, BLOCKS, joinLimitLamports, MAX_FEE_BPS, MIN_STAKE, planRound, prizeLamports, settleRound, type AiParams, type Plan, type Settled } from '../_shared/aiStrategy.ts';
 
 const ENTROPY_PROGRAM_ID = new PublicKey('3jSkUuYBoJzQPMEzTvkDFXCZUBksPamrVhrnHR9igu2X');
 const BOARD = new PublicKey('BrcSxdp1nXFzou1YyDnQJcPNBNHgoypZmTsyKBSLLXzi');
@@ -157,6 +157,23 @@ export interface Hooks {
   pending(before: bigint): Promise<Pending[]>;
   /** `s` null: the deploy never landed. */
   settled(wallet: string, round: bigint, s: Settled | null, boardAfter: bigint): Promise<void>;
+  /** What the AI saw and decided in a round's deploy window, for the AI tab. */
+  thought?(t: Thought): Promise<void>;
+}
+
+/** One round's decision in numbers a player can follow. Lamports and grams. */
+export interface Thought {
+  round: bigint;
+  slotsLeft: number;
+  motherlode: bigint;
+  prize: number;
+  board: bigint;
+  quietest: bigint;
+  /** a square holding more than this is not worth joining */
+  joinLimit: number;
+  played: number;
+  skipped: number;
+  params: AiParams;
 }
 
 export interface PassResult {
@@ -173,8 +190,24 @@ export interface PassResult {
   waitMs: number;
 }
 
-export interface State { done: Set<string>; settleAt: number }
-export const newState = (): State => ({ done: new Set(), settleAt: 0 });
+/**
+ * slotMs: the measured slot time. Solana's slots run faster than the nominal 400 ms (about 215 ms in Nov 2026), and
+ * sleeping by the nominal figure overshoots the deploy window, so the AI never plays. Each pass refines the estimate.
+ */
+export interface State { done: Set<string>; settleAt: number; slotMs: number; lastSlot?: number; lastAt?: number }
+export const newState = (slotMs = SLOT_MS): State => ({ done: new Set(), settleAt: 0, slotMs });
+/** Never sleep longer than this while waiting for the deploy window, so a wrong slot estimate can't skip it. */
+export const MAX_WAIT_MS = 8000;
+
+/** Folds the slot progress seen since the last pass into the slot-time estimate. */
+export function trackSlot(st: State, slot: number, now: number): void {
+  if (st.lastSlot !== undefined && st.lastAt !== undefined && slot > st.lastSlot && now - st.lastAt >= 1500) {
+    const seen = (now - st.lastAt) / (slot - st.lastSlot);
+    st.slotMs = Math.min(600, Math.max(100, (st.slotMs + seen) / 2));
+  }
+  st.lastSlot = slot;
+  st.lastAt = now;
+}
 
 /** Work out what each played round paid. Runs at most every 10 s. */
 export async function settle(conn: Connection, hooks: Hooks, current: bigint, st: State, now = Date.now()): Promise<number> {
@@ -227,6 +260,7 @@ export async function settle(conn: Connection, hooks: Hooks, current: bigint, st
 export async function pass(conn: Connection, signer: Keypair, hooks: Hooks, st: State, now = Date.now()): Promise<PassResult> {
   const [boardInfo, slot] = await Promise.all([conn.getAccountInfo(BOARD), conn.getSlot('confirmed')]);
   if (!boardInfo) throw new Error('ORE board not found');
+  trackSlot(st, slot, now);
   const board = decodeBoard(Buffer.from(boardInfo.data));
   const phase = phaseOf(board, slot);
   const slotsLeft = phase === 'mining' || phase === 'locked' ? Number(board.endSlot - BigInt(slot)) : 0;
@@ -235,16 +269,16 @@ export async function pass(conn: Connection, signer: Keypair, hooks: Hooks, st: 
 
   if (phase !== 'waiting') res.settled = await settle(conn, hooks, board.roundId, st, now).catch((e) => (err('settle', e), 0));
   if (phase !== 'mining') {
-    if (phase === 'locked') res.waitMs = Math.max(1000, slotsLeft * SLOT_MS + 1500);
+    if (phase === 'locked') res.waitMs = Math.max(1000, slotsLeft * st.slotMs + 1500);
     return res;
   }
   const params = await hooks.params();
   if (slotsLeft > params.targetSlotsLeft) {
-    // sleep until just before the deploy window
-    res.waitMs = Math.max(500, (slotsLeft - params.targetSlotsLeft) * SLOT_MS - 300);
+    // sleep until just before the deploy window, checking back at least every MAX_WAIT_MS
+    res.waitMs = Math.min(MAX_WAIT_MS, Math.max(300, (slotsLeft - params.targetSlotsLeft) * st.slotMs - 300));
     return res;
   }
-  res.waitMs = Math.max(1000, slotsLeft * SLOT_MS + 1500);
+  res.waitMs = Math.max(1000, slotsLeft * st.slotMs + 1500);
   // too close to the lock: anything sent now may land after it
   if (slotsLeft < LOCK_SLOTS + 2) return res;
 
@@ -299,6 +333,14 @@ export async function pass(conn: Connection, signer: Keypair, hooks: Hooks, st: 
     onBoard = addToBoard(onBoard, plan);
     sends.push({ a, plan, ixs: txFor(plan, a, miner, board.roundId, signer.publicKey) });
   });
+  await hooks
+    .thought?.({
+      round: board.roundId, slotsLeft, motherlode, prize,
+      board: round.deployed.reduce((n, x) => n + x, 0n),
+      quietest: round.deployed.reduce((m, x) => (x < m ? x : m), round.deployed[0]),
+      joinLimit: joinLimitLamports(prize, params), played: sends.length, skipped: res.skipped, params,
+    })
+    .catch((e) => err('thought', e));
   if (!sends.length) return res;
 
   const { blockhash } = await conn.getLatestBlockhash('confirmed');
@@ -323,9 +365,12 @@ export async function pass(conn: Connection, signer: Keypair, hooks: Hooks, st: 
 
 /** Passes until `budgetMs` is used up, sleeping between them for as long as nothing needs doing. */
 export async function run(conn: Connection, signer: Keypair, hooks: Hooks, budgetMs: number, now: () => number = Date.now, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))): Promise<PassResult[]> {
-  const st = newState();
-  const out: PassResult[] = [];
   const end = now() + budgetMs;
+  // start from the network's recent slot time rather than the nominal 400 ms
+  const samples = await conn.getRecentPerformanceSamples?.(4).catch(() => []) ?? [];
+  const slots = samples.reduce((n, s) => n + s.numSlots, 0);
+  const st = newState(slots > 0 ? Math.min(600, Math.max(100, (samples.reduce((n, s) => n + s.samplePeriodSecs, 0) * 1000) / slots)) : SLOT_MS);
+  const out: PassResult[] = [];
   while (now() < end) {
     let r: PassResult;
     try {

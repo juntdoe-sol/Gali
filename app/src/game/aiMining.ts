@@ -61,6 +61,23 @@ interface AiState {
   /** what the AI learned at each review, newest first; null until loaded (subscribers only) */
   log: AiLogEntry[] | null;
   logBusy: boolean;
+  /** what the AI saw and decided in the latest rounds, newest first (everyone) */
+  thoughts: AiThought[];
+}
+export interface AiThought {
+  round: number;
+  at: number;
+  /** seconds before the round ended, roughly */
+  slotsLeft: number;
+  motherlodeOre: number;
+  /** one winning spot's prize, motherlode share included */
+  prizeSol: number;
+  boardSol: number;
+  quietestSol: number;
+  /** spots holding more than this were not worth joining */
+  joinLimitSol: number;
+  played: number;
+  skipped: number;
 }
 export interface AiLogEntry {
   at: number;
@@ -77,7 +94,7 @@ export interface AiLogEntry {
   /** plays in the 24 hours before this entry, when known */
   plays: number | null;
 }
-export const useAi = create<AiState>(() => ({ status: 'idle', stats: null, board: [], me: null, claiming: false, log: null, logBusy: false }));
+export const useAi = create<AiState>(() => ({ status: 'idle', stats: null, board: [], me: null, claiming: false, log: null, logBusy: false, thoughts: [] }));
 
 const headers = () => ({ apikey: publicKey(), authorization: `Bearer ${publicKey()}`, 'content-type': 'application/json' });
 const rpc = async (fn: string, args: Record<string, unknown> = {}) => {
@@ -97,7 +114,9 @@ export async function refreshAi() {
   const wallet = useGame.getState().wallet.owner;
   if (useAi.getState().status === 'idle') useAi.setState({ status: 'loading' });
   try {
-    const [s, b, m] = await Promise.all([rpc('gali_ai_stats'), rpc('gali_ai_board', { p_limit: 50 }), wallet ? rpc('gali_ai_me', { p_wallet: wallet }) : Promise.resolve(null)]);
+    const [s, b, m, t] = await Promise.all([
+      rpc('gali_ai_stats'), rpc('gali_ai_board', { p_limit: 50 }), wallet ? rpc('gali_ai_me', { p_wallet: wallet }) : Promise.resolve(null), rpc('gali_ai_thoughts', { p_limit: 8 }).catch(() => []),
+    ]);
     const r = Array.isArray(s) ? s[0] : null;
     const stats: AiStats | null = r
       ? {
@@ -117,8 +136,12 @@ export async function refreshAi() {
           returnedSol: num(mr.returned_sol), ore: num(mr.ore), feesSol: num(mr.fees_sol), pending: num(mr.pending),
         }
       : null;
+    const thoughts: AiThought[] = (Array.isArray(t) ? t : []).map((x) => ({
+      round: num(x.round_id), at: Date.parse(x.at), slotsLeft: num(x.slots_left), motherlodeOre: num(x.motherlode_grams) / 1e11, prizeSol: num(x.prize) / 1e9,
+      boardSol: num(x.board) / 1e9, quietestSol: num(x.quietest) / 1e9, joinLimitSol: num(x.join_limit) / 1e9, played: num(x.played), skipped: num(x.skipped),
+    }));
     if (useGame.getState().wallet.owner !== wallet) return;
-    useAi.setState({ status: 'ok', stats, board, me });
+    useAi.setState({ status: 'ok', stats, board, me, thoughts });
   } catch {
     useAi.setState((st) => ({ status: st.stats ? 'ok' : 'error' }));
   }
