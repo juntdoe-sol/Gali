@@ -63,7 +63,14 @@ interface AiState {
   logBusy: boolean;
   /** what the AI saw and decided in the latest rounds, newest first (everyone) */
   thoughts: AiThought[];
+  /** the round reviewer's latest lessons (everyone) */
+  lesson: AiLesson | null;
 }
+export interface AiLesson { at: number; fromRound: number; toRound: number; rounds: number; played: number; lessons: string; watch: string | null }
+const toLesson = (x: Record<string, unknown>): AiLesson => ({
+  at: Date.parse(String(x.at)), fromRound: num(x.from_round), toRound: num(x.to_round), rounds: num(x.rounds), played: num(x.played),
+  lessons: String(x.lessons ?? ''), watch: typeof x.watch === 'string' ? x.watch : null,
+});
 export interface AiThought {
   round: number;
   at: number;
@@ -81,8 +88,12 @@ export interface AiThought {
 }
 export interface AiLogEntry {
   at: number;
-  /** the once-a-day deeper review (Sonnet); the others run every 3 hours (Haiku) */
-  daily: boolean;
+  /** review: the 3-hourly team (Haiku); daily: the once-a-day team (Sonnet); rounds: the 15-minute round reviewer (Haiku) */
+  kind: 'review' | 'daily' | 'rounds';
+  /** rounds entries: how many rounds it read, how many the AI played, and what it watches next */
+  rounds?: number;
+  played?: number;
+  watch?: string | null;
   learned: string | null;
   note: string | null;
   /** how the team used subscribers' feedback in that review */
@@ -94,7 +105,7 @@ export interface AiLogEntry {
   /** plays in the 24 hours before this entry, when known */
   plays: number | null;
 }
-export const useAi = create<AiState>(() => ({ status: 'idle', stats: null, board: [], me: null, claiming: false, log: null, logBusy: false, thoughts: [] }));
+export const useAi = create<AiState>(() => ({ status: 'idle', stats: null, board: [], me: null, claiming: false, log: null, logBusy: false, thoughts: [], lesson: null }));
 
 const headers = () => ({ apikey: publicKey(), authorization: `Bearer ${publicKey()}`, 'content-type': 'application/json' });
 const rpc = async (fn: string, args: Record<string, unknown> = {}) => {
@@ -114,8 +125,9 @@ export async function refreshAi() {
   const wallet = useGame.getState().wallet.owner;
   if (useAi.getState().status === 'idle') useAi.setState({ status: 'loading' });
   try {
-    const [s, b, m, t] = await Promise.all([
+    const [s, b, m, t, l] = await Promise.all([
       rpc('gali_ai_stats'), rpc('gali_ai_board', { p_limit: 50 }), wallet ? rpc('gali_ai_me', { p_wallet: wallet }) : Promise.resolve(null), rpc('gali_ai_thoughts', { p_limit: 8 }).catch(() => []),
+      rpc('gali_ai_lessons', { p_limit: 1 }).catch(() => []),
     ]);
     const r = Array.isArray(s) ? s[0] : null;
     const stats: AiStats | null = r
@@ -141,7 +153,8 @@ export async function refreshAi() {
       boardSol: num(x.board) / 1e9, quietestSol: num(x.quietest) / 1e9, joinLimitSol: num(x.join_limit) / 1e9, played: num(x.played), skipped: num(x.skipped),
     }));
     if (useGame.getState().wallet.owner !== wallet) return;
-    useAi.setState({ status: 'ok', stats, board, me, thoughts });
+    const lesson = Array.isArray(l) && l[0] ? toLesson(l[0]) : null;
+    useAi.setState({ status: 'ok', stats, board, me, thoughts, lesson });
   } catch {
     useAi.setState((st) => ({ status: st.stats ? 'ok' : 'error' }));
   }
@@ -286,7 +299,7 @@ export async function loadLog(ask = false): Promise<void> {
       const day = (x.stats as { last24h?: { plays?: number } } | null)?.last24h;
       return {
         at: Date.parse(String(x.at)),
-        daily: x.source === 'claude-daily',
+        kind: x.source === 'claude-daily' ? ('daily' as const) : ('review' as const),
         learned: typeof x.learned === 'string' ? x.learned : null,
         note: typeof x.note === 'string' ? x.note : null,
         feedbackReply: typeof x.feedback_reply === 'string' ? x.feedback_reply : null,
@@ -294,6 +307,13 @@ export async function loadLog(ask = false): Promise<void> {
         plays: day && typeof day.plays === 'number' ? day.plays : null,
       };
     });
+    // the round reviewer's lessons go in the same log, so it fills every 15 minutes
+    const lessons = await rpc('gali_ai_lessons', { p_limit: 20 }).catch(() => []);
+    for (const x of Array.isArray(lessons) ? lessons : []) {
+      const ls = toLesson(x);
+      log.push({ at: ls.at, kind: 'rounds', rounds: ls.rounds, played: ls.played, watch: ls.watch, learned: ls.lessons, note: null, feedbackReply: null, minEdge: 0, crowdBuffer: 0, maxRoundShare: 0, targetSlotsLeft: 0, plays: null });
+    }
+    log.sort((a, b) => b.at - a.at);
     if (useGame.getState().wallet.owner === owner) useAi.setState({ log });
   } catch {
     /* keep what we had */
