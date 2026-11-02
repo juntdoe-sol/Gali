@@ -34,6 +34,7 @@ async function rpc(method: string, params: unknown[]) {
   for (let i = 0; i < 2; i++) {
     const r = await fetch(RPC, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
     if (r.status === 429 && i === 0) { await new Promise((ok) => setTimeout(ok, 800)); continue; }
+    if (!r.ok) throw new Error(`${method}: RPC HTTP ${r.status}`);
     const j = await r.json();
     if (j.error) throw new Error(`${method}: ${j.error.message}`);
     return j.result;
@@ -313,6 +314,8 @@ Deno.serve(async (req) => {
     }
     return json(200, { current: String(current), checked: ids.length, through: String(done), hits: hits.length, motherlodes: lodes.length, filled });
   } catch (e) {
-    return json(500, { error: String((e as Error).message ?? e) });
+    const msg = String((e as Error).message ?? e);
+    console.error('ore-hits failed:', msg);
+    return json(/RPC HTTP 429/.test(msg) ? 503 : 500, { error: msg });
   }
 });
