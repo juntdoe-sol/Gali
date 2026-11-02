@@ -111,6 +111,35 @@ create table if not exists public.gali_ai_claude_spend (
 );
 create index if not exists gali_ai_claude_spend_at on public.gali_ai_claude_spend (at desc);
 
+-- what the AI saw and decided in each round's deploy window (ai-miner writes one row a round), for the AI tab
+create table if not exists public.gali_ai_thoughts (
+  round_id bigint primary key,
+  at timestamptz not null default now(),
+  slots_left int not null,
+  motherlode_grams bigint not null,
+  prize bigint not null,       -- lamports: one winning square's prize, motherlode share included
+  board bigint not null,       -- lamports on the whole board
+  quietest bigint not null,    -- lamports on the quietest square
+  join_limit bigint not null,  -- lamports: a square holding more is not worth joining at these settings
+  played int not null,         -- wallets the AI played for
+  skipped int not null,        -- wallets it sat out for
+  min_edge numeric not null,
+  crowd_buffer numeric not null
+);
+create index if not exists gali_ai_thoughts_at on public.gali_ai_thoughts (at desc);
+alter table public.gali_ai_thoughts enable row level security;
+revoke all on public.gali_ai_thoughts from anon, authenticated;
+
+-- Everyone: the AI's latest decisions, newest first (board numbers only, nothing per wallet)
+create or replace function public.gali_ai_thoughts(p_limit int default 10)
+returns table (round_id bigint, at timestamptz, slots_left int, motherlode_grams bigint, prize bigint, board bigint, quietest bigint, join_limit bigint, played int, skipped int, min_edge numeric, crowd_buffer numeric)
+language sql stable security definer set search_path = public as $$
+  select round_id, at, slots_left, motherlode_grams, prize, board, quietest, join_limit, played, skipped, min_edge, crowd_buffer
+  from gali_ai_thoughts order by round_id desc limit least(greatest(p_limit, 1), 50)
+$$;
+revoke all on function public.gali_ai_thoughts(int) from public;
+grant execute on function public.gali_ai_thoughts(int) to anon, authenticated, service_role;
+
 -- ai-tune reads the month's Claude spend before each review
 create or replace function public.gali_ai_claude_spent(p_since timestamptz)
 returns numeric
@@ -133,7 +162,7 @@ alter table public.gali_ai_claude_spend enable row level security;
 revoke all on public.gali_ai_passes, public.gali_ai_payments, public.gali_ai_params, public.gali_ai_rounds, public.gali_ai_trials, public.gali_ai_feedback, public.gali_ai_claude_spend from anon, authenticated;
 
 insert into public.gali_ai_params (min_edge, crowd_buffer, max_round_share, target_slots_left, source, note)
-select 0.08, 0.25, 0.05, 22, 'default', 'Starting settings'
+select 0.08, 0.25, 0.05, 40, 'default', 'Starting settings'
 where not exists (select 1 from public.gali_ai_params);
 
 -- ai-pass calls this after checking the payment on chain. Adds 7 days to the pass (from now, or from when the
@@ -256,9 +285,9 @@ select cron.schedule('gali-ai-tune', '17 */3 * * *', $$
   );
 $$);
 
--- and once a day a deeper review that weighs the week (Sonnet)
+-- and once a day a deeper review that weighs the week (Sonnet), at 04:00 UTC (12:00 noon UTC+8)
 select cron.unschedule('gali-ai-tune-daily') where exists (select 1 from cron.job where jobname = 'gali-ai-tune-daily');
-select cron.schedule('gali-ai-tune-daily', '47 4 * * *', $$
+select cron.schedule('gali-ai-tune-daily', '0 4 * * *', $$
   select net.http_post(
     url := 'https://<PROJECT_REF>.supabase.co/functions/v1/ai-tune',
     headers := jsonb_build_object('content-type', 'application/json', 'x-cron-secret', '<CRON_SECRET>'),
