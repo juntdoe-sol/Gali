@@ -33,10 +33,6 @@ export const chainReady =
 /** Anything on chain at all: Gali's program, or ORE's board in live mode. */
 export const onChainMode = chainReady || oreLive;
 
-/** Most SOL a live player may put on the board in one round. A guard against a slipped finger, not a limit on ORE. */
-export const LIVE_MAX_ROUND_SOL = 0.5;
-/** Most SOL a live autopilot (ORE automation) may be funded with at once. */
-export const LIVE_AUTOPILOT_MAX_SOL = 1;
 /** Gali's platform fee on SOL deployed into ORE, in basis points (25 = 0.25%, beta rate; plan is 50 or 100). */
 export const PLATFORM_FEE_BPS = 25n;
 /** Where the platform fee goes. */

@@ -1,10 +1,10 @@
 import { layoutNow } from './layout';
-import { FEATURE_GALI_PROGRAM } from '../config/features';
+import { FEATURE_AI_MINING, FEATURE_GALI_PROGRAM } from '../config/features';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useTut, useTutTarget } from '../game/tutTargets';
 import { Modal, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CLUSTER, LIVE_AUTOPILOT_MAX_SOL, LIVE_MAX_ROUND_SOL, PLATFORM_FEE_BPS, REFINING_FEE } from '../chain/light';
+import { CLUSTER, PLATFORM_FEE_BPS, REFINING_FEE, short } from '../chain/light';
 import { BLOCKS, boostFor, COLORS, pointsFor } from '../game/constants';
 import { watchMotion } from '../game/motion';
 import { DEFAULT_SMART, fmtSol, liveReturn, maskOf, randomPick, MIN_SOL_PER_BLOCK, SMART_COUNTS } from '../game/pot';
@@ -20,12 +20,14 @@ import { useLayout } from './layout';
 import { openScanTv, TV_PAIR } from './TvLink';
 import { evOf } from '../game/ev';
 import { refreshMarket, useOreStats } from '../game/oreStats';
+import { buyPass, loadLog, netSol, refreshAi, sendFeedback, startTrial, useAi, type AiLogEntry, type AiVote } from '../game/aiMining';
 
 const SHAKE_G = 2.1;
 const layoutNowDesktop = () => layoutNow().desktop;
 const TABS: { id: DockTab; label: string }[] = [
   { id: 'lite', label: 'LITE' },
   { id: 'pro', label: 'PRO' },
+  ...(FEATURE_AI_MINING ? [{ id: 'ai' as const, label: 'AI' }] : []),
 ];
 
 export function Dock({ embedded, noUnclaimed }: { embedded?: boolean; noUnclaimed?: boolean } = {}) {
@@ -99,7 +101,7 @@ export function Dock({ embedded, noUnclaimed }: { embedded?: boolean; noUnclaime
       <View style={styles.embedded}>
         {head}
         {noUnclaimed ? null : <UnclaimedRow />}
-        {tab === 'lite' ? <DeskLite /> : <DeskPro />}
+        {tab === 'lite' ? <DeskLite /> : tab === 'ai' && FEATURE_AI_MINING ? <AiPanel /> : <DeskPro />}
       </View>
     );
   }
@@ -123,7 +125,7 @@ export function Dock({ embedded, noUnclaimed }: { embedded?: boolean; noUnclaime
       </Pressable>
       {head}
       <UnclaimedRow />
-      {tab === 'lite' ? <LitePanel compact={compact} /> : <ProPanel compact={compact} />}
+      {tab === 'lite' ? <LitePanel compact={compact} /> : tab === 'ai' && FEATURE_AI_MINING ? <AiPanel /> : <ProPanel compact={compact} />}
     </View>
   );
 }
@@ -416,8 +418,12 @@ function AutopilotRow() {
   return (
     <Row
       icon="bot"
-      label="Autopilot on"
-      info="Your SOL sits in ORE's automation and is deployed round by round, even with the app closed (0.00001 SOL a round covers the network fee). Stopping closes it and sends what is left back to your wallet."
+      label={autopilot.ai ? 'Gali AI on' : 'Autopilot on'}
+      info={
+        autopilot.ai
+          ? "Your SOL sits in ORE's automation. Gali AI picks the spots and plays them for you, at most your limit per spot, and can't take the SOL out. Stopping closes it and sends what is left back to your wallet."
+          : "Your SOL sits in ORE's automation and is deployed round by round, even with the app closed (0.00001 SOL a round covers the network fee). Stopping closes it and sends what is left back to your wallet."
+      }
       right={
         <>
           <T v="num" style={{ fontSize: 15, color: COLORS.teal, marginRight: 6 }}>
@@ -525,11 +531,10 @@ function DeskLite() {
   const total = rounds * LITE_PER_ROUND;
   const need = total + (rounds > 1 ? EXEC_FEE * rounds : 0);
   const enough = need <= balance + 1e-9;
-  const autoCapped = live && rounds > 1 && total > LIVE_AUTOPILOT_MAX_SOL + 1e-9;
-  const ready = rounds > 0 && enough && !autoCapped && !(live && autopilot) && !busy;
+  const ready = rounds > 0 && enough && !(live && autopilot) && !busy;
   const max = () => {
     useTut.setState({ maxAt: Date.now() });
-    const room = Math.min(live ? LIVE_AUTOPILOT_MAX_SOL : Infinity, balance - 0.001);
+    const room = balance - 0.001 - (live ? EXEC_FEE * Math.floor(balance / LITE_PER_ROUND) : 0);
     setAmount(trim(Math.max(0, Math.floor(room / LITE_PER_ROUND + 1e-9)) * LITE_PER_ROUND));
   };
   const label = !amt
@@ -538,11 +543,9 @@ function DeskLite() {
       ? `MIN ${LITE_PER_ROUND} SOL`
       : !enough
         ? 'NOT ENOUGH SOL'
-        : autoCapped
-          ? `AUTOPILOT MAX ${LIVE_AUTOPILOT_MAX_SOL} SOL`
-          : live && autopilot
-            ? 'STOP AUTOPILOT FIRST'
-            : `DEPLOY ${fmtSol(total)} SOL`;
+        : live && autopilot
+          ? 'STOP AUTOPILOT FIRST'
+          : `DEPLOY ${fmtSol(total)} SOL`;
   const lock = Boolean(run);
   return (
     <>
@@ -594,6 +597,352 @@ function DeskLite() {
   );
 }
 
+/* ---------------- GALI AI: an ORE automation the AI plays, with a weekly pass ---------------- */
+const AI_INFO =
+  "ORE's draw is random, so no one can see the winning spot, Gali AI included. What it does: it waits until the last seconds of each round, looks at where everyone's SOL is, and only plays spots where the ORE you can expect is worth more than the SOL ORE keeps, with a safety margin. When nothing is worth it, it sits the round out. A big motherlode makes more spots worth it, so it plays more then. Every 3 hours a team of Claude agents looks at how its rounds went and at subscribers' feedback, and adjusts how careful it is, inside fixed limits. Once a day a deeper review looks at the whole week. Gali's fee is the same 0.25% as LITE and PRO, only on rounds it plays. You can still lose: one spot in 25 wins. Not financial advice.";
+const AI_PER_SPOT_DEFAULT = '0.01';
+
+const signed = (v: number, dp = 4) => `${v >= 0 ? '+' : '-'}${fmtSol(Math.abs(v), dp)}`;
+
+const pct = (v: number) => `${Math.round(v * 100)}%`;
+/** What changed between two reviews' settings, in words a player can follow. */
+function changes(e: AiLogEntry, prev: AiLogEntry | undefined): string {
+  if (!prev) return `Margin ${pct(e.minEdge)}, expects ${pct(e.crowdBuffer)} more SOL after it deploys, up to ${pct(e.maxRoundShare)} of your balance a round, deploys ${e.targetSlotsLeft} slots before the end.`;
+  const out: string[] = [];
+  if (e.minEdge !== prev.minEdge) out.push(`margin ${pct(prev.minEdge)} → ${pct(e.minEdge)}`);
+  if (e.crowdBuffer !== prev.crowdBuffer) out.push(`late SOL expected ${pct(prev.crowdBuffer)} → ${pct(e.crowdBuffer)}`);
+  if (e.maxRoundShare !== prev.maxRoundShare) out.push(`most per round ${pct(prev.maxRoundShare)} → ${pct(e.maxRoundShare)} of balance`);
+  if (e.targetSlotsLeft !== prev.targetSlotsLeft) out.push(`deploys ${prev.targetSlotsLeft} → ${e.targetSlotsLeft} slots before the end`);
+  return out.length ? `Changed: ${out.join(', ')}.` : '';
+}
+const when = (t: number) => {
+  const m = Math.max(0, Math.round((Date.now() - t) / 60_000));
+  if (m < 60) return `${m}m ago`;
+  if (m < 24 * 60) return `${Math.round(m / 60)}h ago`;
+  return new Date(t).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+};
+
+const VOTES: { id: AiVote; label: string }[] = [
+  { id: 'more', label: 'Play more' },
+  { id: 'same', label: 'Keep it' },
+  { id: 'safer', label: 'Play safer' },
+];
+const waitText = (ms: number) => {
+  const m = Math.max(1, Math.ceil(ms / 60_000));
+  return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
+};
+
+/** Subscribers only: tell the hourly review how it is doing. Once every 2 hours. */
+function AiFeedback({ nextAt }: { nextAt: number | null }) {
+  const [vote, setVote] = useState<AiVote | null>(null);
+  const [comment, setComment] = useState('');
+  const [sending, setSending] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+  const wait = nextAt && nextAt > now ? nextAt - now : 0;
+  return (
+    <View style={{ marginTop: 12, gap: 6 }}>
+      <T v="label" style={{ color: COLORS.gold }}>
+        HELP IT LEARN
+      </T>
+      {wait ? (
+        <T v="num" style={styles.evNote}>
+          Thanks for your feedback. You can send more in {waitText(wait)}. The team reads it at every review.
+        </T>
+      ) : (
+        <>
+          <T v="num" style={styles.evNote}>
+            How is Gali AI doing for you? The hourly review reads every subscriber's vote. Once every 2 hours.
+          </T>
+          <View style={[styles.lineRight, { marginTop: 2 }]}>
+            {VOTES.map((v) => (
+              <Chip key={v.id} grow label={v.label} on={vote === v.id} onPress={() => setVote(v.id)} disabled={sending} />
+            ))}
+          </View>
+          <PixelBox fill="#050817" hi="#02040c" lo="#22356f" edge="#04060f" style={styles.aiComment}>
+            <TextInput
+              value={comment}
+              onChangeText={(t) => setComment(t.slice(0, 200))}
+              placeholder="Anything else? (optional)"
+              placeholderTextColor={COLORS.muted}
+              style={styles.aiCommentInput}
+              accessibilityLabel="Comment for Gali AI's review, optional"
+              maxLength={200}
+              multiline
+            />
+          </PixelBox>
+          <Btn
+            kind={vote ? 'gold' : 'plain'}
+            label={sending ? 'SENDING…' : vote ? 'SEND FEEDBACK' : 'PICK ONE FIRST'}
+            onPress={() => {
+              if (!vote) return;
+              setSending(true);
+              void sendFeedback(vote, comment.trim()).then((ok) => {
+                setSending(false);
+                if (ok) {
+                  setVote(null);
+                  setComment('');
+                }
+              });
+            }}
+            disabled={!vote || sending}
+          />
+        </>
+      )}
+    </View>
+  );
+}
+
+/** Subscribers only: what Gali AI learned at each review, newest first. */
+function AiLog({ log, busy }: { log: AiLogEntry[] | null; busy: boolean }) {
+  const [all, setAll] = useState(false);
+  return (
+    <View style={{ marginTop: 12 }}>
+      <T v="label" style={{ color: COLORS.gold, marginBottom: 4 }}>
+        WHAT GALI AI LEARNED
+      </T>
+      {log === null ? (
+        <Btn kind="plain" label={busy ? 'LOADING…' : 'READ THE LEARNING LOG'} sub="Sign in once with your wallet. No fee" onPress={() => void loadLog(true)} disabled={busy} />
+      ) : !log.length ? (
+        <T v="num" style={styles.evNote}>
+          Nothing yet. The first entry lands at the next review, every 3 hours.
+        </T>
+      ) : (
+        <>
+          {(all ? log : log.slice(0, 6)).map((e, i, shown) => (
+            <View key={e.at} style={[styles.aiLog, i === shown.length - 1 && { borderBottomWidth: 0 }]}>
+              <T v="num" style={{ fontSize: 13, color: COLORS.muted }}>
+                {when(e.at)}
+                {e.daily ? ' · Daily review' : ''}
+                {e.plays !== null ? ` · ${e.plays} plays in the 24h before` : ''}
+              </T>
+              {e.learned ? (
+                <T v="num" style={{ fontSize: 15, color: COLORS.text, lineHeight: 18 }}>
+                  {e.learned}
+                </T>
+              ) : null}
+              <T v="num" style={{ fontSize: 13, color: COLORS.teal, lineHeight: 16 }}>
+                {[e.note, changes(e, log[log.indexOf(e) + 1]) || (e.note ? '' : 'No changes.')].filter(Boolean).join(' ')}
+              </T>
+              {e.feedbackReply ? (
+                <T v="num" style={{ fontSize: 13, color: COLORS.gold, lineHeight: 16 }}>
+                  Your feedback: {e.feedbackReply}
+                </T>
+              ) : null}
+            </View>
+          ))}
+          {log.length > 6 ? <Chip label={all ? 'SHOW LESS' : `SHOW ALL ${log.length}`} onPress={() => setAll(!all)} /> : null}
+        </>
+      )}
+    </View>
+  );
+}
+
+function AiPanel() {
+  const { balance, live } = useBalance();
+  const autopilot = useGame((s) => s.autopilot);
+  const busy = useGame((s) => s.wallet.busy);
+  const owner = useGame((s) => s.wallet.owner);
+  const startAi = useGame((s) => s.startAiMining);
+  const stopAutopilot = useGame((s) => s.stopAutopilot);
+  const { status, stats, board, me, claiming, log, logBusy } = useAi();
+  const [amount, setAmount] = useState('');
+  const [perSpot, setPerSpot] = useState(AI_PER_SPOT_DEFAULT);
+  useEffect(() => {
+    void refreshAi();
+    const id = setInterval(() => void refreshAi(), 60_000);
+    return () => clearInterval(id);
+  }, [owner]);
+
+  const oreSol = stats?.oreSol ?? 0;
+  const allNet = stats ? netSol(stats, oreSol) : 0;
+  const myNet = me ? netSol(me, oreSol) : 0;
+  const passOn = Boolean(me?.expiresAt && me.expiresAt > Date.now());
+  useEffect(() => {
+    if (!passOn) return;
+    void loadLog(false);
+    const id = setInterval(() => void loadLog(false), 10 * 60_000);
+    return () => clearInterval(id);
+  }, [passOn, owner]);
+  const aiOn = Boolean(autopilot?.ai);
+  const amt = Number(amount) || 0;
+  const spot = Number(perSpot) || 0;
+  const ready = live && passOn && !autopilot && amt > 0 && spot >= 0.0001 && spot <= amt && amt <= balance + 1e-9 && !busy;
+  const label = !live
+    ? 'MAINNET WALLET NEEDED'
+    : autopilot && !aiOn
+      ? 'STOP AUTOPILOT FIRST'
+      : !amt
+        ? 'ENTER AMOUNT'
+        : amt > balance + 1e-9
+          ? 'NOT ENOUGH SOL'
+          : !(spot >= 0.0001)
+            ? 'MIN 0.0001 SOL A SPOT'
+            : spot > amt
+              ? 'LIMIT IS OVER THE AMOUNT'
+              : `START GALI AI · ${fmtSol(amt)} SOL`;
+
+  return (
+    <>
+      <Row
+        icon="bot"
+        label="Miners on Gali AI"
+        info={AI_INFO}
+        right={
+          <T v="num" style={{ fontSize: 18, color: COLORS.gold }}>
+            {stats ? stats.activeMiners : status === 'error' ? '—' : '…'}
+          </T>
+        }
+      />
+      <Row
+        icon="sol"
+        label="All AI miners"
+        info="What Gali AI made all its miners together, from ORE's own accounts: SOL back plus ORE mined (valued at today's ORE/SOL price after ORE's 10% claim fee), minus the SOL it played and Gali's 0.25% fee."
+        right={
+          <T v="num" style={{ fontSize: 16, color: !stats || !stats.rounds ? COLORS.muted : allNet >= 0 ? COLORS.green : COLORS.red }}>
+            {stats && stats.rounds ? `${signed(allNet)} SOL · ${stats.rounds} rounds` : 'no rounds yet'}
+          </T>
+        }
+      />
+
+      {owner ? (
+        <Row
+          icon="hourglass"
+          label="Your pass"
+          info="0.1 SOL gives you 7 days of Gali AI, paid to Gali's revenue wallet. Buying again adds 7 more days. The SOL you mine with stays yours, inside ORE."
+          right={
+            passOn ? (
+              <T v="num" style={{ fontSize: 15, color: COLORS.teal }}>
+                until {new Date(me!.expiresAt!).toLocaleDateString()}
+              </T>
+            ) : (
+              <T v="num" style={{ fontSize: 15, color: COLORS.muted }}>
+                {claiming ? 'confirming…' : 'none'}
+              </T>
+            )
+          }
+        />
+      ) : null}
+      {me && me.rounds ? (
+        <Row
+          icon="sol"
+          label="Your AI result"
+          info={`${me.rounds} rounds played for you, ${me.wins} on the gold spot${me.pending ? `, ${me.pending} still being drawn` : ''}. SOL back plus ORE mined (at today's ORE/SOL price after ORE's 10% claim fee), minus the SOL played and Gali's 0.25% fee.`}
+          right={
+            <T v="num" style={{ fontSize: 15, color: myNet >= 0 ? COLORS.green : COLORS.red }}>
+              {signed(myNet)} SOL · {me.ore.toFixed(3)} ORE
+            </T>
+          }
+        />
+      ) : null}
+
+      {aiOn ? (
+        <>
+          <AutopilotRow />
+          {!passOn ? (
+            <T v="num" style={styles.evNote}>
+              Your pass ran out, so Gali AI is not playing. Renew it to carry on, or STOP to take your SOL back.
+            </T>
+          ) : null}
+        </>
+      ) : passOn ? (
+        <>
+          <BigAmount value={amount} onChange={setAmount} hint="SOL for Gali AI to mine with" disabled={Boolean(busy)} />
+          <QuickAdd onAdd={(v) => setAmount((c) => addTo(c, v))} onMax={() => setAmount(trim(balance - 0.001))} disabled={Boolean(busy)} />
+          <Row
+            icon="sol"
+            label="Most per spot"
+            info="The most Gali AI may put on one spot in a round. ORE enforces it: the AI can never go over. It also never uses more than a small share of your balance in one round."
+            right={
+              <PixelBox fill="#050817" hi="#02040c" lo="#22356f" edge="#04060f" style={styles.aiSpot}>
+                <TextInput
+                  value={perSpot}
+                  onChangeText={(t) => setPerSpot(cleanAmt(t))}
+                  keyboardType="decimal-pad"
+                  placeholder="0"
+                  placeholderTextColor={COLORS.line}
+                  style={styles.aiSpotInput}
+                  accessibilityLabel="Most SOL per spot"
+                  numberOfLines={1}
+                />
+                <T v="display" style={{ fontSize: 14, color: COLORS.muted }}>
+                  SOL
+                </T>
+              </PixelBox>
+            }
+            last
+          />
+          {autopilot && !aiOn ? <AutopilotRow /> : null}
+          <Btn
+            kind={ready ? 'gold' : 'plain'}
+            label={busy ?? label}
+            sub={ready ? 'One approval. 0.25% fee only on rounds it plays' : undefined}
+            onPress={() => {
+              void startAi(amt, spot).then((ok) => ok && setAmount(''));
+            }}
+            disabled={!ready}
+            style={{ marginTop: 10, minHeight: 54 }}
+          />
+        </>
+      ) : null}
+      {!aiOn && owner && me?.trialOpen ? (
+        <Btn
+          kind="gold"
+          label={busy ?? 'TRY GALI AI FREE · 7 DAYS'}
+          sub="First time only. One signature, no fee"
+          onPress={() => void startTrial()}
+          disabled={Boolean(busy) || !live}
+          style={{ marginTop: 10 }}
+        />
+      ) : null}
+      {!aiOn && owner ? (
+        <Btn
+          kind={passOn || me?.trialOpen ? 'plain' : 'gold'}
+          label={busy ?? (passOn ? 'ADD 7 DAYS · 0.1 SOL' : 'GET GALI AI · 0.1 SOL / 7 DAYS')}
+          onPress={() => void buyPass()}
+          disabled={Boolean(busy) || claiming || !live}
+          style={{ marginTop: 10 }}
+        />
+      ) : null}
+      {passOn ? (
+        <>
+          <AiFeedback nextAt={me?.nextFeedbackAt ?? null} />
+          <AiLog log={log} busy={logBusy} />
+        </>
+      ) : owner ? (
+        <T v="num" style={[styles.evNote, { marginTop: 8 }]}>
+          With a pass you also get Gali AI's learning log (every hour, what it saw and what it changed) and a vote on how it plays, every 2 hours.
+        </T>
+      ) : null}
+
+      {board.length ? (
+        <View style={{ marginTop: 12 }}>
+          <T v="label" style={{ color: COLORS.gold, marginBottom: 4 }}>
+            EVERY GALI AI MINER
+          </T>
+          {board.slice(0, 20).map((r, i) => (
+            <View key={r.wallet} style={[styles.line, i === Math.min(board.length, 20) - 1 && { borderBottomWidth: 0 }]}>
+              <View style={[styles.aiDot, { backgroundColor: r.active ? COLORS.green : 'transparent', borderColor: r.active ? COLORS.green : COLORS.muted }]} accessibilityLabel={r.active ? 'pass active' : 'pass ended'} />
+              <T v="num" style={{ fontSize: 14, color: r.wallet === owner ? COLORS.gold : COLORS.text, flex: 1 }} numberOfLines={1}>
+                {r.name || short(r.wallet)}
+              </T>
+              <T v="num" style={{ fontSize: 14, color: r.netSol >= 0 ? COLORS.green : COLORS.red }}>
+                {signed(r.netSol)} SOL · {r.ore.toFixed(3)} ORE · {r.rounds}r
+              </T>
+            </View>
+          ))}
+        </View>
+      ) : null}
+      <T v="num" style={[styles.evNote, { marginTop: 8 }]}>
+        The draw is random: Gali AI can't see the winning spot. It only plays spots worth more than they cost on average, and you can still lose. Not financial advice.
+      </T>
+    </>
+  );
+}
+
 /* ---------------- RIGHT BAR PRO, like ORE: SOL a round, how many tiles, how many rounds ---------------- */
 function DeskPro() {
   const tilesRef = useTutTarget('pro-tiles');
@@ -639,15 +988,13 @@ function DeskPro() {
     }
   };
   const max = () => {
-    const room = Math.min(balance - 0.001, live && rounds > 1 ? LIVE_AUTOPILOT_MAX_SOL : Infinity) / Math.max(1, rounds);
-    setPer(trim(Math.max(0, Math.min(room, live ? LIVE_MAX_ROUND_SOL : Infinity))));
+    const room = (balance - 0.001 - (live && rounds > 1 ? EXEC_FEE * rounds : 0)) / Math.max(1, rounds);
+    setPer(trim(Math.max(0, room)));
   };
 
   const need = per * rounds + (live && rounds > 1 ? EXEC_FEE * rounds : 0);
   const enough = need <= balance + 1e-9;
-  const capped = live && per > LIVE_MAX_ROUND_SOL + 1e-9;
-  const autoCapped = live && rounds > 1 && per * rounds > LIVE_AUTOPILOT_MAX_SOL + 1e-9;
-  const ready = tiles > 0 && per > 0 && perSpot >= MIN_SOL_PER_BLOCK && enough && !pending && !capped && !autoCapped && !(live && autopilot) && !busy;
+  const ready = tiles > 0 && per > 0 && perSpot >= MIN_SOL_PER_BLOCK && enough && !pending && !(live && autopilot) && !busy;
   const label = !per
     ? 'ENTER AMOUNT'
     : !tiles
@@ -656,14 +1003,10 @@ function DeskPro() {
         ? `MIN ${trim(MIN_SOL_PER_BLOCK * tiles)} SOL A ROUND`
         : !enough
           ? 'NOT ENOUGH SOL'
-          : capped
-            ? `MAX ${LIVE_MAX_ROUND_SOL} SOL A ROUND`
-            : autoCapped
-              ? `AUTOPILOT MAX ${LIVE_AUTOPILOT_MAX_SOL} SOL`
-              : live && autopilot
-                ? 'STOP AUTOPILOT FIRST'
-                : pending
-                  ? 'WAIT FOR THIS ROUND'
+          : live && autopilot
+            ? 'STOP AUTOPILOT FIRST'
+            : pending
+              ? 'WAIT FOR THIS ROUND'
                   : `DEPLOY ${fmtSol(per * rounds)} SOL`;
   const solo = useGame((s) => soloOf(s, s.roundId));
   const picked = p.blocks === 'all' ? [...Array(BLOCKS).keys()] : selected;
@@ -691,7 +1034,7 @@ function DeskPro() {
           <Row
             icon="hourglass"
             label="Rounds"
-            info={live ? `1 = this round only (you approve in your wallet). More = autopilot: one wallet approval funds ORE's automation for every round, then rounds deploy with no pop-up. Up to ${LIVE_AUTOPILOT_MAX_SOL} SOL in total. Stop it any time to get the unused SOL back (the Gali fee is paid up front and not refunded).` : '1 = this round only. More = autopilot repeats the same setup each round.'}
+            info={live ? `1 = this round only (you approve in your wallet). More = autopilot: one wallet approval funds ORE's automation for every round, then rounds deploy with no pop-up. Stop it any time to get the unused SOL back (the Gali fee is paid up front and not refunded).` : '1 = this round only. More = autopilot repeats the same setup each round.'}
             right={<Stepper value={rounds} label="rounds" onMinus={() => editPreset({ rounds: Math.max(1, rounds - 1) })} onPlus={() => editPreset({ rounds: Math.min(100, rounds + 1) })} disabled={lock} />}
           />
           <EvRow squares={picked} perSpot={tiles && per ? perSpot : 0} />
@@ -816,8 +1159,7 @@ function LitePanel({ compact }: { compact: boolean }) {
   const per = spot * n; // SOL this round
   const perBlockOk = spot >= MIN_SOL_PER_BLOCK;
   const enough = per <= balance + 1e-9;
-  const capped = live && per > LIVE_MAX_ROUND_SOL + 1e-9;
-  const ready = n > 0 && per > 0 && perBlockOk && enough && !capped;
+  const ready = n > 0 && per > 0 && perBlockOk && enough;
   const mask = mode === 'all' ? (1 << BLOCKS) - 1 : maskOf(selected);
   const label = !n
     ? 'TAP SPOTS ON THE MAP'
@@ -827,9 +1169,7 @@ function LitePanel({ compact }: { compact: boolean }) {
         ? `MIN ${MIN_SOL_PER_BLOCK} SOL PER SPOT`
         : !enough
           ? 'NOT ENOUGH SOL'
-          : capped
-            ? `MAX ${LIVE_MAX_ROUND_SOL} SOL A ROUND`
-            : `MINE THIS ROUND · ${fmtSol(per)} SOL`;
+          : `MINE THIS ROUND · ${fmtSol(per)} SOL`;
   const back = n && spot > 0 ? liveReturn(n, spot) : null;
   const hint =
     mode === 'pick' && !n
@@ -915,9 +1255,7 @@ function ProPanel({ compact }: { compact: boolean }) {
   const rounds = p.rounds;
   const need = per * rounds;
   const enough = need <= balance + 1e-9;
-  const capped = live && per > LIVE_MAX_ROUND_SOL + 1e-9;
-  const autoCapped = live && rounds > 1 && need > LIVE_AUTOPILOT_MAX_SOL + 1e-9;
-  const ready = blocks > 0 && per > 0 && perBlock >= MIN_SOL_PER_BLOCK && enough && !pending && !capped && !autoCapped && !(live && autopilot) && !busy;
+  const ready = blocks > 0 && per > 0 && perBlock >= MIN_SOL_PER_BLOCK && enough && !pending && !(live && autopilot) && !busy;
   const label = !blocks
     ? 'NO CLAIMS SELECTED'
     : !per
@@ -926,12 +1264,8 @@ function ProPanel({ compact }: { compact: boolean }) {
         ? `MIN ${MIN_SOL_PER_BLOCK} SOL PER SPOT`
         : !enough
           ? 'NOT ENOUGH SOL'
-          : capped
-            ? `MAX ${LIVE_MAX_ROUND_SOL} SOL A ROUND`
-            : autoCapped
-              ? `AUTOPILOT MAX ${LIVE_AUTOPILOT_MAX_SOL} SOL`
-              : live && autopilot
-                ? 'STOP AUTOPILOT FIRST'
+          : live && autopilot
+            ? 'STOP AUTOPILOT FIRST'
             : pending
               ? 'WAIT FOR THIS ROUND'
               : `DEPLOY ${fmtSol(per)} SOL${rounds > 1 ? ` × ${rounds}` : ''}`;
@@ -951,7 +1285,7 @@ function ProPanel({ compact }: { compact: boolean }) {
           </View>
           <BalanceRow
             onHalf={() => editPreset({ perSpot: trim((balance - RESERVE) / 2 / Math.max(1, rounds) / Math.max(1, blocks)) })}
-            onAll={() => editPreset({ perSpot: trim((Math.min(balance - RESERVE, live ? LIVE_MAX_ROUND_SOL : Infinity)) / Math.max(1, rounds) / Math.max(1, blocks)) })}
+            onAll={() => editPreset({ perSpot: trim((balance - RESERVE) / Math.max(1, rounds) / Math.max(1, blocks)) })}
           />
           <AmountBox value={perSpotStr} onChange={(v) => editPreset({ perSpot: v })} hint="SOL per spot" suffix="per spot" />
           <Row
@@ -974,7 +1308,7 @@ function ProPanel({ compact }: { compact: boolean }) {
           <Row
             icon="hourglass"
             label="Rounds"
-            info={live ? `1 = this round only (you approve in your wallet). More = autopilot: one wallet approval funds ORE's automation with SOL for every round, then rounds deploy with no pop-up while the app stays open. Smart re-picks every round. Up to ${LIVE_AUTOPILOT_MAX_SOL} SOL in total. Stop it any time to get the unused SOL back (the Gali fee is paid up front and not refunded).` : '1 = this round only. More = autopilot repeats the same setup each round (Smart re-picks every round).'}
+            info={live ? `1 = this round only (you approve in your wallet). More = autopilot: one wallet approval funds ORE's automation with SOL for every round, then rounds deploy with no pop-up while the app stays open. Smart re-picks every round. Stop it any time to get the unused SOL back (the Gali fee is paid up front and not refunded).` : '1 = this round only. More = autopilot repeats the same setup each round (Smart re-picks every round).'}
             right={
               <>
                 <View style={[styles.tag, p.rounds > 1 && { borderColor: COLORS.teal }]}>
@@ -1068,6 +1402,12 @@ const styles = StyleSheet.create({
   evPill: { paddingHorizontal: 8, paddingVertical: 3 },
   evNote: { fontSize: 14, lineHeight: 16, color: COLORS.muted, marginTop: -2 },
   lineRight: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1, minWidth: 0 },
+  aiSpot: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, height: 34, width: 120 },
+  aiSpotInput: { position: 'relative', width: 64, height: 30, textAlign: 'right', color: COLORS.gold, fontFamily: F.display, fontSize: 18, paddingVertical: 0, paddingHorizontal: 0, ...WEB_NO_OUTLINE },
+  aiDot: { width: 8, height: 8, borderWidth: 1.5 },
+  aiComment: { minHeight: 56, paddingHorizontal: 10, paddingVertical: 6 },
+  aiCommentInput: { position: 'relative', minHeight: 44, color: COLORS.text, fontFamily: F.body, fontSize: 15, textAlignVertical: 'top', paddingVertical: 0, paddingHorizontal: 0, ...WEB_NO_OUTLINE },
+  aiLog: { gap: 3, paddingVertical: 8, borderBottomWidth: U, borderColor: 'rgba(34,53,111,0.6)', borderStyle: 'dashed' },
   info: { width: 18, height: 18, alignItems: 'center', justifyContent: 'center' },
   chip: { paddingHorizontal: 10, paddingVertical: 6, minHeight: 32, justifyContent: 'center' },
   chipGrow: { flex: 1, minWidth: 0 },

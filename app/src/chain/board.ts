@@ -27,7 +27,7 @@ import {
   ORE_REFINING_BPS,
   readRewards,
 } from './ore/read';
-import { closeLiveAutomation, deployFromAutomation, oreCheckpoint, oreClaimOre, oreClaimSol, oreDeploy, oreDeployWithWallet, prewarmDeploy as prewarmOreDeploy, readAutomation, startLiveAutomation, toOre, toSol } from './ore/tx';
+import { closeLiveAutomation, deployFromAutomation, oreCheckpoint, oreClaimOre, oreClaimSol, oreDeploy, oreDeployWithWallet, payAiPass, prewarmDeploy as prewarmOreDeploy, readAutomation, startAiAutomation, startLiveAutomation, toOre, toSol } from './ore/tx';
 import { decodeBoard, decodeMiner, decodeRound, decodeTreasury, distributionMask, type OreMiner, type OreRound } from './ore/accounts';
 import { minerPda } from './ore/consts';
 
@@ -415,6 +415,11 @@ export const startAutopilot = (perSpotSol: number, squares: number[], random: bo
   startLiveAutomation({ lamportsPerSquare: BigInt(Math.floor(perSpotSol * LAMPORTS_PER_SOL)), maxSquares: squares.length, squares, random, rounds, expectedOwner, topUpKey });
 export const stopAutopilot = (expectedOwner?: PublicKey) => closeLiveAutomation(expectedOwner);
 export const readAutopilot = (owner: PublicKey) => readAutomation(owner);
+/** Gali AI mining: fund an ORE automation the AI plays. One approval. Stopping is stopAutopilot. */
+export const startAiMining = (depositSol: number, maxPerSpotSol: number, expectedOwner?: PublicKey) =>
+  startAiAutomation({ deposit: BigInt(Math.floor(depositSol * LAMPORTS_PER_SOL)), maxPerSpot: BigInt(Math.floor(maxPerSpotSol * LAMPORTS_PER_SOL)), expectedOwner });
+/** Pay 0.1 SOL for a week of Gali AI. Returns the signature. */
+export const buyAiPass = (expectedOwner?: PublicKey) => payAiPass(expectedOwner);
 export async function deployAutopilot(owner: PublicKey, squares: number[], solPerSquare: number): Promise<number> {
   return Number(await deployFromAutomation(owner, squares, BigInt(Math.floor(solPerSquare * LAMPORTS_PER_SOL))));
 }

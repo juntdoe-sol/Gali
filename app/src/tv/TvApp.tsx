@@ -20,9 +20,8 @@ import { Home, Mining, Pair, PairedScreen, Splash, Stats, type Setup } from './s
 import { C } from './theme';
 
 type Screen = 'splash' | 'home' | 'mining' | 'stats' | 'pair' | 'paired';
-/** The phone app's floor (MIN_SOL_PER_BLOCK) and autopilot cap (LIVE_AUTOPILOT_MAX_SOL). */
+/** The phone app's floor (MIN_SOL_PER_BLOCK). */
 const MIN_PER_SPOT = 0.0001;
-const MAX_RUN_SOL = 1;
 const ROUND_CHOICES = [1, 2, 5, 10, 25, 50, 100];
 
 export default function TvApp() {
@@ -60,7 +59,6 @@ export default function TvApp() {
     if (running) return go('mining');
     const perSpot = perSpotLamports(lpr) / 1e9;
     if (perSpot < MIN_PER_SPOT) return setNote(`AT LEAST ${(MIN_PER_SPOT * TV_SPOTS).toFixed(4)} SOL PER ROUND (${MIN_PER_SPOT} PER SPOT)`);
-    if ((perSpot * TV_SPOTS + 0.00001) * setup.rounds > MAX_RUN_SOL) return setNote(`AUTOPILOT IS CAPPED AT ${MAX_RUN_SOL} SOL · LOWER THE AMOUNT`);
     go('pair');
   };
 
