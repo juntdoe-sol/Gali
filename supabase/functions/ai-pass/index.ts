@@ -4,7 +4,7 @@
 //          repeat), and only the wallet that paid gets the days, so posting someone else's signature does nothing.
 //   trial  7 free days, once per wallet, only for a wallet that never had a pass. Needs the sign-in pass (a signed
 //          message, no fee), so nobody can use up someone else's free week.
-//   log       what the AI learned each hour, for a signed-in wallet with a live pass.
+//   log       what the AI learned at each review (every 3 hours, and daily), for a signed-in wallet with a live pass.
 //   feedback  a vote (play more / keep it / play safer) and an optional comment, for a signed-in wallet with a live
 //             pass, at most one every 2 hours. The hourly review reads it as players' opinions, never as orders.
 // Secrets: RPC_URL, DM_SECRET (the same one dm and play use for sign-in). SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY
@@ -82,7 +82,7 @@ Deno.serve(async (req) => {
 
     const since = new Date(Date.now() - LOG_DAYS * 86_400_000).toISOString();
     const l = await fetch(
-      `${base}/rest/v1/gali_ai_params?select=at,note,learned,feedback_reply,min_edge,crowd_buffer,max_round_share,target_slots_left,stats&source=eq.claude&at=gt.${encodeURIComponent(since)}&order=id.desc&limit=400`,
+      `${base}/rest/v1/gali_ai_params?select=at,source,note,learned,feedback_reply,min_edge,crowd_buffer,max_round_share,target_slots_left,stats&source=in.(claude,claude-daily)&at=gt.${encodeURIComponent(since)}&order=id.desc&limit=400`,
       { headers: h },
     );
     if (!l.ok) return json(500, { error: 'could not read the log' });
