@@ -52,7 +52,7 @@ The result: the same ORE round, with a reason to stay for the next one.
 4. In **LITE**, tap **+0.01** and **DEPLOY**. That is one round of 0.01 SOL across all 25 spots, on mainnet.
 5. While it runs, go back to the lobby, hop on a cart with **E** and say hi.
 
-This is real SOL on mainnet. Rounds are capped at 0.5 SOL during the beta, and an 18+ notice shows before any wallet opens.
+This is real SOL on mainnet. There is no cap on how much you deploy, so only mine with SOL you can afford to lose. An 18+ notice shows before any wallet opens.
 
 ---
 
@@ -156,7 +156,6 @@ flowchart LR
 | **20 app test suites** | Wallet safety, live clock, poll budget, lobby and its networking, rides, Brawl, the Arena, Cave Run, the arcade server and the read proxy. `cd app && npm test`, no wallet or network needed. |
 | **33 program tests** | `programs/gali` against `programs/ore-mock` at ORE's address on a local validator. |
 | **CI on every push** | Type checks, all suites, Android and web builds, dependency checks and a secret scan over the source and the built bundles. |
-| **Round caps** | 0.5 SOL a round and 1 SOL per autopilot during the beta. |
 | **Verifiable arcade** | The house publishes a hash before each round and the secret after it, so anyone can check the draw. |
 | **Safe failure** | If ORE moves a field, Gali stops instead of paying from a misread value. |
 
@@ -175,7 +174,7 @@ flowchart LR
 | Stage | What |
 |---|---|
 | **Now** | Mainnet beta on desktop web and Android. Weekly APK releases from tester feedback. APK 1.7 lands this week. |
-| **In development** | The Gali program (`programs/gali`): points, streaks, an SKR jackpot on ORE's motherlode, gear and staking, tested against a mock of ORE. Its screens stay behind `EXPO_PUBLIC_FEATURE_GALI_PROGRAM` until it ships. A Gali app for Android TV (`tv/`) that pairs with a Seeker. One-tap Seeker Connect. |
+| **In development** | The Gali program (`programs/gali`): points, streaks, an SKR jackpot on ORE's motherlode, gear and staking, tested against a mock of ORE. Its screens stay behind `EXPO_PUBLIC_FEATURE_GALI_PROGRAM` until it ships. A Gali app for Android TV (`tv/`) that pairs with a Seeker. One-tap Seeker Connect. Gali AI mining (below), behind `EXPO_PUBLIC_FEATURE_AI_MINING`. |
 | **Planned** | Gear as tradeable NFTs and a player Market. Clans. More seasons. |
 
 Details in [ROADMAP.md](ROADMAP.md).
@@ -205,7 +204,7 @@ ORE is credited as the board Gali plays on. Gali is not affiliated with or endor
 | --- | --- |
 | `app/` | Expo (React Native) app for Android and web. Canvas engines in `app/src/engine`, game state in `app/src/game`, chain code in `app/src/chain` |
 | `app/rpc-backend/` | Read proxy and the arcade server (`functions/games.mjs`) |
-| `supabase/` | Edge functions (`autopilot`, `ore-rate`, `dm`, chat) and SQL for chat, ranks, autopilot and ORE stats |
+| `supabase/` | Edge functions (`autopilot`, `ai-miner`, `ai-tune`, `ai-pass`, `ore-rate`, `dm`, chat) and SQL for chat, ranks, autopilot, AI mining and ORE stats |
 | `programs/gali` | Anchor program, in development |
 | `programs/ore-mock` | Test-only stand-in for ORE's program |
 | `tests/gali.ts` | Program tests against the mock (33 cases) |
@@ -234,7 +233,7 @@ Check it without a browser:
 ```bash
 cd app
 npx tsc --noEmit
-npm test            # 20 suites, no wallet or network needed
+npm test            # 21 suites, no wallet or network needed
 ```
 
 | Variable | Needed | Default when empty |
@@ -246,6 +245,7 @@ npm test            # 20 suites, no wallet or network needed
 | `EXPO_PUBLIC_WORLD_URL`, `EXPO_PUBLIC_WORLD_KEY` | No | Lobby runs solo, Arena off |
 | `EXPO_PUBLIC_TICKET_KEY` | No | Arena tickets off |
 | `EXPO_PUBLIC_FEATURE_GALI_PROGRAM` | No | `0`, program screens hidden |
+| `EXPO_PUBLIC_FEATURE_AI_MINING`, `EXPO_PUBLIC_AI_EXECUTOR` | No | AI tab hidden. Both are needed to show it; the second is the AI key's public key |
 
 Every `EXPO_PUBLIC_` value is bundled into the app. Never put a secret in one.
 
@@ -275,6 +275,19 @@ The script starts a throwaway validator with ORE's mock at ORE's address and Gal
 ### Supabase
 
 The lobby, chat and ranks run on one Supabase project. SQL lives in `supabase/sql/`; each file says what to replace (`<PROJECT_REF>`, `<CRON_SECRET>`) and what to run first. Store the cron key in Supabase Vault, never in a file. Edge functions deploy with `supabase functions deploy <name> --no-verify-jwt`; each one checks its own secret.
+
+### Gali AI mining
+
+An AI tab next to LITE and PRO. A player's first week is free (one per wallet, only for a wallet that never had a pass; it needs a wallet sign-in, no fee). After that a pass is 0.1 SOL for 7 days, paid to the revenue wallet. With a pass the player funds an ORE automation that names the Gali AI key as its executor. ORE's DiscretionaryBps strategy lets that key pick the spots and the amount per spot each round, never more than the player's per-spot limit, and nothing else: it can't withdraw, and STOP returns the balance. Returned SOL goes back into the automation, so the balance shows how it is doing. Gali's fee is the same 0.25% as LITE and PRO, taken by ORE from each round the AI plays and paid to the AI key, which passes it on to the revenue wallet. Rounds it sits out cost nothing. ORE only charges that fee on a round's first deploy, so the AI plays one stake size per round in one deploy.
+
+- **`ai-miner`** runs every minute. Near the end of each round it reads the board and plays only spots where the ORE a player can expect is worth more than the SOL ORE keeps, with a margin. It sits out every other round. A bigger motherlode makes more spots worth it. After the draw it works out each player's result from ORE's own accounts. The strategy is in `supabase/functions/_shared/aiStrategy.ts`.
+- **`ai-tune`** runs every 3 hours with a team of four Claude agents on Haiku 5.5, and once a day on Sonnet 5.5 for a deeper review that weighs the week. Claude spend is capped at `AI_MONTHLY_BUDGET_USD` (default $8) for both together, spread evenly over the month, and quiet stretches with no new rounds or votes make no calls. The team: a results analyst and a feedback reader work in parallel, a risk checker sets hard limits (a minimum margin, a maximum share of balance per round), and a lead decides the settings and writes the learning log entry, including how subscribers' feedback was used. Code clamps every value, enforces the risk limits and limits how far one review can move a setting, so a bad answer can't push the AI outside safe limits.
+- **`ai-pass`** checks the 0.1 SOL payment on chain before it adds 7 days (a payment counts once). It also starts the free week, takes subscribers' feedback (a vote and an optional comment, once every 2 hours, links stripped) and serves the learning log, all for signed-in wallets only, and feedback and the log only for a live pass.
+- **The app** shows how many miners have a live pass, what Gali AI made all of them and each of them, and your own result. Subscribers also see the hourly learning log and can vote on how it plays every 2 hours.
+
+Setup: create a new key for the AI (not the autopilot key) and keep about 0.05 SOL on it for network fees. Then run `supabase secrets set AI_EXECUTOR_KEY='[...]' ANTHROPIC_API_KEY=...` (`ai-pass` also uses the `DM_SECRET` and `RPC_URL` that are already set), deploy the three functions with `--no-verify-jwt`, run `supabase/sql/ai-mining.sql`, and build the app with `EXPO_PUBLIC_FEATURE_AI_MINING=1` and `EXPO_PUBLIC_AI_EXECUTOR=<its public key>`. The AI never plays without a fresh ORE price (under 30 minutes old), so the `ore-hits` job must be running.
+
+What it can't do: ORE's draw is random, so no strategy sees the winning spot. On a busy board, squares already sit close to break-even, so expect the AI to sit out many rounds.
 
 ### Check ORE's layout
 

@@ -8,3 +8,6 @@ const on = (v: string | undefined) => v === '1' || v === 'true';
 
 /** Points, streaks, the SKR jackpot, SKR staking (BOOST) and gear buying. Needs the Gali program. */
 export const FEATURE_GALI_PROGRAM = on(process.env.EXPO_PUBLIC_FEATURE_GALI_PROGRAM);
+
+/** Gali AI mining: an ORE automation the Gali AI executor plays, with a weekly pass. Needs EXPO_PUBLIC_AI_EXECUTOR. */
+export const FEATURE_AI_MINING = on(process.env.EXPO_PUBLIC_FEATURE_AI_MINING) && Boolean(process.env.EXPO_PUBLIC_AI_EXECUTOR);
