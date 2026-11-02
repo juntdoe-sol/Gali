@@ -575,7 +575,7 @@ function DeskLite() {
 
 /* ---------------- GALI AI: an ORE automation the AI plays, with a weekly pass ---------------- */
 const AI_INFO =
-  "ORE's draw is random, so no one can see the winning spot, Gali AI included. What it does: it waits until the last seconds of each round, looks at where everyone's SOL is, and only plays spots where the ORE you can expect is worth more than the SOL ORE keeps, with a safety margin. When nothing is worth it, it sits the round out. A big motherlode makes more spots worth it, so it plays more then. Five Claude agents help it learn: a round reviewer reads every round every 15 minutes, and a team of four looks at how its rounds went and at subscribers' feedback every 3 hours (and more deeply once a day), adjusting how careful it is inside fixed limits. Gali's fee is the same 0.25% as LITE and PRO, only on rounds it plays. You can still lose: one spot in 25 wins. Not financial advice.";
+  "ORE's draw is random, so no one can see the winning spot, Gali AI included. What it does: it waits until the last seconds of each round, looks at where everyone's SOL is, and only plays spots where the ORE you can expect is worth more than the SOL ORE keeps, with a safety margin. When nothing is worth it, it sits the round out. A big motherlode makes more spots worth it, so it plays more then. A team of five AI agents helps it learn: a round reviewer reads every round every 15 minutes, and a team of four looks at how its rounds went and at subscribers' feedback every 3 hours (and more deeply once a day), adjusting how careful it is inside fixed limits. Gali's fee is the same 0.25% as LITE and PRO, only on rounds it plays. You can still lose: one spot in 25 wins. Not financial advice.";
 const AI_PER_SPOT_DEFAULT = '0.01';
 
 const signed = (v: number, dp = 4) => `${v >= 0 ? '+' : '-'}${fmtSol(Math.abs(v), dp)}`;
@@ -846,11 +846,11 @@ function AiPanel() {
       />
       <Row
         icon="bot"
-        label="Claude agents"
-        info="Gali AI's betting math runs on its own, every round. Five Claude agents review and improve it. The round reviewer (Haiku) reads every round every 15 minutes and writes what it learned. A team of four, a results analyst, a feedback reader, a risk checker and a lead, reviews the settings every 3 hours on Haiku and once a day on Sonnet, inside fixed limits the code enforces."
+        label="AI agents reviewing"
+        info="Gali AI's betting math runs on its own, every round. A team of five AI agents reviews and improves it. The round reviewer reads every round every 15 minutes and writes what it learned. A results analyst, a feedback reader, a risk checker and a lead review the settings every 3 hours, and more deeply once a day, inside fixed limits the code enforces."
         right={
           <T v="num" style={{ fontSize: 16, color: COLORS.gold }}>
-            5 · Haiku + Sonnet
+            5 agents
           </T>
         }
       />
