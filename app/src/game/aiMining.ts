@@ -176,6 +176,28 @@ export async function loadRounds(limit = 150): Promise<AiRoundRow[] | null> {
   }));
 }
 
+/** A solo 1 ORE winner or a motherlode on ORE's board (any wallet). */
+export interface BigHit { round: number; at: number; wallet: string | null; name: string | null; mine: boolean; squares: number | null; stakeSol: number | null; squareSol: number | null; share: number | null; ore: number; motherlodeOre: number }
+export async function loadBigHits(limit = 60): Promise<BigHit[] | null> {
+  const wallet = useGame.getState().wallet.owner;
+  const rows = await rpc('gali_big_hits', { p_wallet: wallet ?? null, p_limit: limit }).catch(() => null);
+  if (!Array.isArray(rows)) return null;
+  return rows.map((r) => ({
+    round: num(r.round_id), at: Date.parse(r.at), wallet: r.wallet ?? null, name: r.name || null, mine: Boolean(r.mine), squares: numOrNull(r.squares),
+    stakeSol: numOrNull(r.stake_sol), squareSol: numOrNull(r.square_sol), share: numOrNull(r.share), ore: num(r.ore), motherlodeOre: num(r.motherlode_ore),
+  }));
+}
+
+/** Everyone in the current ORE round, biggest deploy first. */
+export interface RoundNow { round: string; slotsLeft: number; miners: number; sol: number; list: { wallet: string; name: string | null; sol: number; spots: number; perSpot: number }[] }
+export async function loadRoundNow(): Promise<RoundNow | null> {
+  const base = restBase();
+  if (!base) return null;
+  const r = await fetch(`${base}/functions/v1/round-miners`, { headers: headers() }).catch(() => null);
+  if (!r || !r.ok) return null;
+  return (await r.json().catch(() => null)) as RoundNow | null;
+}
+
 export async function refreshAi() {
   const wallet = useGame.getState().wallet.owner;
   if (useAi.getState().status === 'idle') useAi.setState({ status: 'loading' });
