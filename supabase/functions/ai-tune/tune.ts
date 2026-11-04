@@ -153,7 +153,7 @@ export const LEAD_SCHEMA = obj({ ...settings, learned: str, note: str, feedbackR
 export const ROUNDS = `${GAME}
 
 You are the round reviewer. Every 15 minutes you look at each round since your last look: what the bot saw at its decision (the quietest square, the most a square could hold and still be worth joining, the motherlode), what it did (played or sat out, how many squares, how much) and, once drawn, what happened (on the winning square or not, solo or shared, SOL back, ORE mined, how much SOL landed after it played).
-Find patterns a busy team would miss, for example: the board always just over the limit, the late crowd bigger than crowdBuffer, results by number of squares played, near misses. Study how the round's solo 1 ORE winners played (their share of the winning square, squares covered, stake, total SOL) and what that means for the solo hunter and the motherlode chaser, given what a player's balance allows. Results swing a lot over a few rounds: say what the rounds suggest and how sure you can be, never claim a few rounds prove anything.
+Find patterns a busy team would miss, for example: the board always just over the limit, the late crowd bigger than crowdBuffer, results by number of squares played, near misses. Study how the round's solo 1 ORE winners played (their share of the winning square, squares covered, stake, total SOL) and how every miner on the board did by style (squares covered, SOL per square), and what that means for the Aggressive and Balance styles, given what a player's balance allows. When no player uses the bot there are no bot rounds: study the whole board alone and say what the bot's styles should copy. Results swing a lot over a few rounds: say what the rounds suggest and how sure you can be, never claim a few rounds prove anything.
 - "lessons": two to four sentences of plain, specific observations with numbers, for the review team.
 - "watch": one sentence on what to look for in the next rounds.
 ${PLAIN}`;
@@ -189,7 +189,7 @@ export function soloSummary(rows: SoloRow[]): Record<string, unknown> {
 const SOLO_NOTE = 'Solo winners are anyone on the board, not only Gali bots. A solo win goes to one miner on the winning square with odds equal to their share, so a big share is how they win. Wallets that win often are likely bots playing big every round.';
 
 /** Every miner on the board in one round, grouped by style (a gali_board_rounds row). Lamports and grams. */
-export interface BoardRow { round_id: number | string; miners: number; deployed: number | string; seen: number; split: boolean; motherlode: number | string; groups: Record<string, { miners: number; deployed: number; back: number; onWin: number; ore: number; solo: number }> }
+export interface BoardRow { round_id: number | string; at?: string; miners: number; deployed: number | string; seen: number; split: boolean; motherlode: number | string; groups: Record<string, { miners: number; deployed: number; back: number; onWin: number; ore: number; solo: number }> }
 
 /**
  * How every miner on ORE's board did, by style ("<squares covered>|<SOL per square>"), over the given rounds: how often
@@ -264,7 +264,7 @@ export function roundsPrompt(current: AiParams, thoughts: ThoughtRow[], plays: P
   });
   return [
     `Current settings: ${fmt(current)}`,
-    `Rounds since your last look, oldest first:\n${lines.join('\n')}`,
+    `Rounds since your last look, oldest first:\n${lines.join('\n') || '- none: no player uses the bot right now, so study the whole board below'}`,
     `Totals: ${fmt({ rounds: thoughts.length, played, drawn, onWinningSquare: gold, stakedSol: staked, backSol: back, ore, orePriceSol: oreSol, oreValueSol: ore * ORE_KEEP * oreSol, netSol: back + ore * ORE_KEEP * oreSol - staked })}`,
     `How the solo 1 ORE winners in these rounds played (${SOLO_NOTE}): ${fmt(soloSummary(solos))}`,
     `The whole board in these rounds (${BOARD_NOTE}): ${fmt(boardSummary(boards))}`,
