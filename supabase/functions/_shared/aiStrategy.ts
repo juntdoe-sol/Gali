@@ -58,40 +58,66 @@ export interface AiParams {
   maxRoundShare: number;
   /** Deploy when this many slots are left in the round (about 0.2 s each in Nov 2026, so 40 is about 9 s). ORE locks the last 15. */
   targetSlotsLeft: number;
+  /** Motherlode chaser only: play when the motherlode holds at least this much ORE. */
+  minMotherlode: number;
 }
 
-export const DEFAULT_PARAMS: AiParams = { minEdge: 0.08, crowdBuffer: 0.25, maxRoundShare: 0.05, targetSlotsLeft: 40 };
+export const DEFAULT_PARAMS: AiParams = { minEdge: 0.08, crowdBuffer: 0.25, maxRoundShare: 0.05, targetSlotsLeft: 40, minMotherlode: 0 };
 
-export const BOUNDS: Record<keyof AiParams, [number, number]> = {
+export type Bounds = Record<keyof AiParams, [number, number]>;
+export const BOUNDS: Bounds = {
   minEdge: [0.02, 0.5],
   crowdBuffer: [0, 1.5],
   maxRoundShare: [0.01, 0.25],
   targetSlotsLeft: [18, 45],
+  minMotherlode: [0, 0],
 };
 
+/**
+ * How the AI bot plays, picked by each player:
+ *   safe        only squares where the ORE is worth more than the SOL, with a margin (planRound)
+ *   solo        chase the solo 1 ORE: spend the round's budget on the quietest squares, below break-even if the agents
+ *               learn it pays, choosing the cover that gives the best chance of the solo ORE (huntPlan)
+ *   motherlode  the same hunt, only when the motherlode is big, and further below break-even
+ * The review agents tune each style from its own results. The wide bounds below only keep values sane; the limits that
+ * protect a player are the player's own (per-spot limit, enforced by ORE; most per round; stop-loss).
+ */
+export type Style = 'safe' | 'solo' | 'motherlode';
+export const STYLES: Style[] = ['safe', 'solo', 'motherlode'];
+export const STYLE_DEFAULTS: Record<Style, AiParams> = {
+  safe: DEFAULT_PARAMS,
+  solo: { minEdge: -0.05, crowdBuffer: 0.1, maxRoundShare: 0.05, targetSlotsLeft: 30, minMotherlode: 0 },
+  motherlode: { minEdge: -0.2, crowdBuffer: 0.1, maxRoundShare: 0.05, targetSlotsLeft: 30, minMotherlode: 150 },
+};
+export const STYLE_BOUNDS: Record<Style, Bounds> = {
+  safe: BOUNDS,
+  solo: { ...BOUNDS, minEdge: [-0.3, 0.5] },
+  motherlode: { ...BOUNDS, minEdge: [-0.6, 0.5], minMotherlode: [20, 3000] },
+};
+export const isStyle = (x: unknown): x is Style => x === 'safe' || x === 'solo' || x === 'motherlode';
+
 /** Every param inside its bounds, missing or broken values replaced by `base`. */
-export function clampParams(p: unknown, base: AiParams = DEFAULT_PARAMS): AiParams {
+export function clampParams(p: unknown, base: AiParams = DEFAULT_PARAMS, bounds: Bounds = BOUNDS): AiParams {
   const src = (p && typeof p === 'object' ? p : {}) as Record<string, unknown>;
-  const out = { ...base };
-  for (const k of Object.keys(BOUNDS) as (keyof AiParams)[]) {
+  const out = { ...DEFAULT_PARAMS, ...base };
+  for (const k of Object.keys(bounds) as (keyof AiParams)[]) {
     const v = Number(src[k]);
-    if (!Number.isFinite(v)) continue;
-    const [lo, hi] = BOUNDS[k];
-    out[k] = Math.min(hi, Math.max(lo, v));
+    const [lo, hi] = bounds[k];
+    out[k] = Math.min(hi, Math.max(lo, Number.isFinite(v) ? v : out[k]));
   }
   out.targetSlotsLeft = Math.round(out.targetSlotsLeft);
   return out;
 }
 
 /** Moves each param at most `step` of its range away from `prev`, so one bad review cannot swing the strategy. */
-export function limitStep(next: AiParams, prev: AiParams, step = 0.25): AiParams {
+export function limitStep(next: AiParams, prev: AiParams, step = 0.25, bounds: Bounds = BOUNDS): AiParams {
   const out = { ...next };
-  for (const k of Object.keys(BOUNDS) as (keyof AiParams)[]) {
-    const [lo, hi] = BOUNDS[k];
+  for (const k of Object.keys(bounds) as (keyof AiParams)[]) {
+    const [lo, hi] = bounds[k];
     const d = (hi - lo) * step;
     out[k] = Math.min(prev[k] + d, Math.max(prev[k] - d, next[k]));
   }
-  return clampParams(out, prev);
+  return clampParams(out, prev, bounds);
 }
 
 /** The SOL value (in lamports) of one square's whole prize: 1 ORE plus the motherlode's expected share, at ORE_KEEP. */
@@ -251,6 +277,90 @@ export function planRound(i: PlanInput): Plan | null {
   if (!groups.length || ev <= 0 || total < MIN_ROUND || total + fee > i.balance) return null;
   squares.sort((a, b) => a - b);
   return { groups, total, squares, ev, boardBefore };
+}
+
+/** The squares from quietest to busiest. */
+const quietestFirst = (onBoard: bigint[]) => onBoard.map((t, s) => ({ s, t })).sort((x, y) => (x.t < y.t ? -1 : x.t > y.t ? 1 : x.s - y.s));
+
+/** A one-group plan: `amount` on each of `squares`. */
+function uniform(onBoard: bigint[], amount: bigint, squares: number[], ev: number): Plan {
+  let mask = 0;
+  let boardBefore = 0n;
+  for (const s of squares) {
+    mask |= 1 << s;
+    boardBefore += onBoard[s];
+  }
+  return { groups: [{ amount, mask }], total: amount * BigInt(squares.length), squares: [...squares].sort((a, b) => a - b), ev, boardBefore };
+}
+
+/** A player's own rules for Bot mode. SOL amounts in SOL; null means no such rule. */
+export interface Rules {
+  /** play the quietest this many squares (1 to 25) */
+  spots: number;
+  perSpotSol: number;
+  /** skip squares already holding more than this */
+  maxSpotSol: number | null;
+  /** only play when the motherlode holds at least this much ORE */
+  minMotherlodeOre: number | null;
+  /** most SOL in one round */
+  maxRoundSol: number | null;
+}
+
+/** Bot mode: exactly the player's rules, no AI. The quietest squares first; fewer squares when a cap or the balance says so. */
+export function botPlan(i: Omit<PlanInput, 'params'> & { rules: Rules }): Plan | null {
+  const r = i.rules;
+  if (i.onBoard.length !== BLOCKS) return null;
+  if (r.minMotherlodeOre && Number(i.motherlodeGrams) / GRAMS_PER_ORE < r.minMotherlodeOre) return null;
+  const want = BigInt(roundDown2(Math.floor(r.perSpotSol * LAMPORTS_PER_SOL)));
+  const amount = want < i.maxPerSquare ? want : i.maxPerSquare;
+  if (amount < MIN_STAKE) return null;
+  const busiest = r.maxSpotSol ? BigInt(Math.floor(r.maxSpotSol * LAMPORTS_PER_SOL)) : null;
+  const squares = quietestFirst(i.onBoard).filter((x) => busiest === null || x.t <= busiest).slice(0, Math.max(1, Math.min(BLOCKS, Math.floor(r.spots)))).map((x) => x.s);
+  const feeBps = i.feeBps ?? AI_FEE_BPS;
+  const roundCap = r.maxRoundSol ? BigInt(Math.floor(r.maxRoundSol * LAMPORTS_PER_SOL)) : null;
+  while (squares.length) {
+    const total = amount * BigInt(squares.length);
+    if (total + aiFee(total, feeBps) <= i.balance && (roundCap === null || total <= roundCap)) break;
+    squares.pop();
+  }
+  if (amount * BigInt(squares.length) < MIN_ROUND) return null;
+  const prize = prizeLamports(i.motherlodeGrams, i.orePriceSol);
+  const feeRate = Number(feeBps) / 10_000;
+  const ev = prize > 0 ? squares.reduce((n, s) => n + squareEv(Number(amount), Math.max(EMPTY_FLOOR, Number(i.onBoard[s])), prize) - Number(amount) * feeRate, 0) : 0;
+  return uniform(i.onBoard, amount, squares, ev);
+}
+
+/** Chance the solo 1 ORE lands on us this round, for `amount` on each of `squares` (crowd added). */
+export const soloChance = (amount: number, crowds: number[]) => crowds.reduce((n, t) => n + amount / (t + amount), 0) / BLOCKS;
+
+/**
+ * Solo hunter and motherlode chaser: spend the round's budget evenly on the quietest squares, as many as gives the best
+ * chance of winning the solo 1 ORE, keeping only covers where every square clears `minEdge` per SOL (which these styles
+ * may set below zero: a known small loss per round for more ORE). The motherlode chaser only plays big motherlodes.
+ */
+export function huntPlan(i: PlanInput & { style: Style; maxRoundSol?: number | null }): Plan | null {
+  const p = i.params;
+  if (i.onBoard.length !== BLOCKS) return null;
+  if (i.style === 'motherlode' && Number(i.motherlodeGrams) / GRAMS_PER_ORE < p.minMotherlode) return null;
+  const prize = prizeLamports(i.motherlodeGrams, i.orePriceSol);
+  if (!(prize > 0)) return null;
+  const feeRate = Number(i.feeBps ?? AI_FEE_BPS) / 10_000;
+  const budget = Math.min(Number(i.balance) * p.maxRoundShare, Number(i.balance) / (1 + feeRate), i.maxRoundSol ? i.maxRoundSol * LAMPORTS_PER_SOL : Infinity);
+  const crowd = (s: number) => Math.max(EMPTY_FLOOR, Number(i.onBoard[s]) * (1 + p.crowdBuffer));
+  const order = quietestFirst(i.onBoard).map((x) => x.s);
+  let best: { n: number; amount: number; chance: number; ev: number } | null = null;
+  for (let n = 1; n <= BLOCKS; n++) {
+    const amount = roundDown2(Math.min(budget / n, Number(i.maxPerSquare)));
+    if (amount < Number(MIN_STAKE) || amount * n < Number(MIN_ROUND)) continue;
+    const picked = order.slice(0, n);
+    const evs = picked.map((s) => squareEv(amount, crowd(s), prize) - amount * feeRate);
+    if (evs.some((e) => e < p.minEdge * amount)) continue;
+    const chance = soloChance(amount, picked.map(crowd));
+    if (!best || chance > best.chance + 1e-12) best = { n, amount, chance, ev: evs.reduce((a, b) => a + b, 0) };
+  }
+  if (!best) return null;
+  const plan = uniform(i.onBoard, BigInt(best.amount), order.slice(0, best.n), best.ev);
+  return plan.total + aiFee(plan.total, i.feeBps ?? AI_FEE_BPS) <= i.balance ? plan : null;
 }
 
 /** Adds a plan's stakes to the board, so the next automation in the same round sees them. */

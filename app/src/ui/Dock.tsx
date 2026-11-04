@@ -20,14 +20,14 @@ import { useLayout } from './layout';
 import { openScanTv, TV_PAIR } from './TvLink';
 import { evOf } from '../game/ev';
 import { refreshMarket, useOreStats } from '../game/oreStats';
-import { buyPass, loadLog, netSol, refreshAi, sendFeedback, startTrial, useAi, type AiLesson, type AiLogEntry, type AiThought, type AiVote } from '../game/aiMining';
+import { buyPass, DEFAULT_BOT_SETTINGS, loadLog, netSol, refreshAi, saveBotSettings, sendFeedback, startTrial, useAi, type AiLesson, type AiLogEntry, type AiStyle, type AiThought, type AiVote, type BotSettings } from '../game/aiMining';
 
 const SHAKE_G = 2.1;
 const layoutNowDesktop = () => layoutNow().desktop;
 const TABS: { id: DockTab; label: string }[] = [
   { id: 'lite', label: 'LITE' },
   { id: 'pro', label: 'PRO' },
-  ...(FEATURE_AI_MINING ? [{ id: 'ai' as const, label: 'AI' }] : []),
+  ...(FEATURE_AI_MINING ? [{ id: 'ai' as const, label: 'BOT' }] : []),
 ];
 
 export function Dock({ embedded, noUnclaimed }: { embedded?: boolean; noUnclaimed?: boolean } = {}) {
@@ -418,10 +418,10 @@ function AutopilotRow() {
   return (
     <Row
       icon="bot"
-      label={autopilot.ai ? 'Gali AI on' : 'Autopilot on'}
+      label={autopilot.ai ? 'Bot on' : 'Autopilot on'}
       info={
         autopilot.ai
-          ? "Your SOL sits in ORE's automation. Gali AI picks the spots and plays them for you, at most your limit per spot, and can't take the SOL out. Stopping closes it and sends what is left back to your wallet."
+          ? "Your SOL sits in ORE's automation. Your bot picks the spots and plays them for you, at most your limit per spot, and can't take the SOL out. Stopping closes it and sends what is left back to your wallet."
           : "Your SOL sits in ORE's automation and is deployed round by round, even with the app closed (0.00001 SOL a round covers the network fee). Stopping closes it and sends what is left back to your wallet."
       }
       right={
@@ -599,7 +599,7 @@ function DeskLite() {
 
 /* ---------------- GALI AI: an ORE automation the AI plays, with a weekly pass ---------------- */
 const AI_INFO =
-  "ORE's draw is random, so no one can see the winning spot, Gali AI included. What it does: it waits until the last seconds of each round, looks at where everyone's SOL is, and only plays spots where the ORE you can expect is worth more than the SOL ORE keeps, with a safety margin. When nothing is worth it, it sits the round out. A big motherlode makes more spots worth it, so it plays more then. A team of five AI agents helps it learn: a round reviewer reads every round every 15 minutes, and a team of four looks at how its rounds went and at subscribers' feedback every 3 hours (and more deeply once a day), adjusting how careful it is inside fixed limits. Gali's fee is the same 0.25% as LITE and PRO, only on rounds it plays. You can still lose: one spot in 25 wins. Not financial advice.";
+  "ORE's draw is random, so no bot can see the winning spot. Gali's bot plays from your own ORE automation, with the app closed, in one of two ways. BOT: no AI, it plays exactly your rules every round (how many spots, SOL per spot, which spots to skip, a motherlode trigger). AI BOT: you pick a style and a team of five AI agents tunes it from its own results. Safe plays only spots worth more than they cost, with a margin; Solo hunter chases the solo 1 ORE and accepts losing rounds; Motherlode chaser waits for a big motherlode and plays hard for it. Your limits always hold: most per spot (ORE enforces it), most per round and a stop-loss. Gali's fee is the same 0.25% as LITE and PRO, only on rounds the bot plays. You can still lose: one spot in 25 wins. Not financial advice.";
 const AI_PER_SPOT_DEFAULT = '0.01';
 
 const signed = (v: number, dp = 4) => `${v >= 0 ? '+' : '-'}${fmtSol(Math.abs(v), dp)}`;
@@ -655,7 +655,7 @@ function AiFeedback({ nextAt }: { nextAt: number | null }) {
       ) : (
         <>
           <T v="num" style={styles.evNote}>
-            How is Gali AI doing for you? The reviews read every subscriber's vote. Once every 2 hours.
+            How is the AI bot doing for you? The reviews read every subscriber's vote. Once every 2 hours.
           </T>
           <View style={[styles.lineRight, { marginTop: 2 }]}>
             {VOTES.map((v) => (
@@ -669,7 +669,7 @@ function AiFeedback({ nextAt }: { nextAt: number | null }) {
               placeholder="Anything else? (optional)"
               placeholderTextColor={COLORS.muted}
               style={styles.aiCommentInput}
-              accessibilityLabel="Comment for Gali AI's review, optional"
+              accessibilityLabel="Comment for the AI bot's review, optional"
               maxLength={200}
               multiline
             />
@@ -696,13 +696,13 @@ function AiFeedback({ nextAt }: { nextAt: number | null }) {
   );
 }
 
-/** Subscribers only: what Gali AI learned at each review, newest first. */
+/** Subscribers only: what the AI bot learned at each review, newest first. */
 function AiLog({ log, busy }: { log: AiLogEntry[] | null; busy: boolean }) {
   const [all, setAll] = useState(false);
   return (
     <View style={{ marginTop: 12 }}>
       <T v="label" style={{ color: COLORS.gold, marginBottom: 4 }}>
-        WHAT GALI AI LEARNED
+        WHAT THE AI BOT LEARNED
       </T>
       {log === null ? (
         <Btn kind="plain" label={busy ? 'LOADING…' : 'READ THE LEARNING LOG'} sub="Sign in once with your wallet. No fee" onPress={() => void loadLog(true)} disabled={busy} />
@@ -757,14 +757,14 @@ function thoughtText(t: AiThought): string {
   return `Sat out. The quietest spot had ${q} SOL, and it only joins spots under ${lim} SOL. With the motherlode at ${t.motherlodeOre.toFixed(1)} ORE, one winning spot is worth ${t.prizeSol.toFixed(2)} SOL, so it waits for a quieter spot or a bigger pool.`;
 }
 
-/** Everyone: what Gali AI saw and decided in the latest rounds, newest first, and what the round reviewer took from them. */
+/** Everyone: what the AI bot saw and decided in the latest rounds, newest first, and what the round reviewer took from them. */
 function AiThinking({ thoughts, lesson }: { thoughts: AiThought[]; lesson: AiLesson | null }) {
   if (!thoughts.length && !lesson) return null;
   const [t, ...rest] = thoughts;
   return (
     <View style={{ marginTop: 12 }}>
       <T v="label" style={{ color: COLORS.gold, marginBottom: 4 }}>
-        WHAT GALI AI IS THINKING
+        WHAT THE AI BOT IS THINKING
       </T>
       {lesson ? (
         <View style={styles.aiLog}>
@@ -802,6 +802,122 @@ function AiThinking({ thoughts, lesson }: { thoughts: AiThought[]; lesson: AiLes
   );
 }
 
+/** Quick starting points for the Bot's rules; every value stays editable. */
+const BOT_PRESETS: Record<'safe' | 'aggressive', Partial<BotSettings>> = {
+  safe: { spots: 5, perSpotSol: 0.002, maxSpotSol: 0.5, minMotherlodeOre: null, maxRoundSol: 0.01, stopLossSol: 0.05 },
+  aggressive: { spots: 20, perSpotSol: 0.005, maxSpotSol: null, minMotherlodeOre: null, maxRoundSol: 0.1, stopLossSol: 0.3 },
+};
+const AI_STYLES: { id: AiStyle; label: string; about: string }[] = [
+  { id: 'safe', label: 'SAFE', about: 'Plays only when the ORE is worth more than the SOL, with a margin. Sits out crowded rounds.' },
+  { id: 'solo', label: 'SOLO HUNTER', about: 'Chases the solo 1 ORE: spends its round budget on the quietest spots and accepts losing rounds for more ORE.' },
+  { id: 'motherlode', label: 'MOTHERLODE', about: 'Waits for a big motherlode, then plays hard for a share of it. Sits out most rounds.' },
+];
+const numText = (n: number | null) => (n === null ? '' : String(n));
+const numOrNull = (t: string) => (t.trim() === '' || !(Number(t) > 0) ? null : Number(t));
+
+/** One small number box with its label: empty means "no such rule". */
+function NumField({ label, info, value, onChange, unit, last }: { label: string; info: string; value: string; onChange: (v: string) => void; unit: string; last?: boolean }) {
+  return (
+    <Row
+      icon="sol"
+      label={label}
+      info={info}
+      right={
+        <PixelBox fill="#050817" hi="#02040c" lo="#22356f" edge="#04060f" style={styles.aiSpot}>
+          <TextInput
+            value={value}
+            onChangeText={(t) => onChange(cleanAmt(t))}
+            keyboardType="decimal-pad"
+            placeholder="off"
+            placeholderTextColor={COLORS.line}
+            style={styles.aiSpotInput}
+            accessibilityLabel={label}
+            numberOfLines={1}
+          />
+          <T v="display" style={{ fontSize: 14, color: COLORS.muted }}>
+            {unit}
+          </T>
+        </PixelBox>
+      }
+      last={last}
+    />
+  );
+}
+
+/** Subscribers: Bot (their own rules, no AI) or AI bot (a style the agents tune), and their own limits. */
+function BotSettingsPanel({ saved }: { saved: BotSettings | null }) {
+  const start = saved ?? DEFAULT_BOT_SETTINGS;
+  const [mode, setMode] = useState(start.mode);
+  const [style, setStyle] = useState<AiStyle>(start.style);
+  const [f, setF] = useState(() => ({
+    spots: String(start.spots), perSpot: String(start.perSpotSol), maxSpot: numText(start.maxSpotSol), minMotherlode: numText(start.minMotherlodeOre),
+    maxRound: numText(start.maxRoundSol), stopLoss: numText(start.stopLossSol),
+  }));
+  const [saving, setSaving] = useState(false);
+  const set = (k: keyof typeof f) => (v: string) => setF((x) => ({ ...x, [k]: v }));
+  const preset = (p: Partial<BotSettings>) =>
+    setF({ spots: String(p.spots), perSpot: String(p.perSpotSol), maxSpot: numText(p.maxSpotSol ?? null), minMotherlode: numText(p.minMotherlodeOre ?? null), maxRound: numText(p.maxRoundSol ?? null), stopLoss: numText(p.stopLossSol ?? null) });
+  const spots = Math.round(Number(f.spots));
+  const ok = mode === 'ai' || (spots >= 1 && spots <= 25 && Number(f.perSpot) > 0);
+  const save = () => {
+    setSaving(true);
+    void saveBotSettings({
+      mode, style, spots: spots >= 1 && spots <= 25 ? spots : 10, perSpotSol: Number(f.perSpot) > 0 ? Number(f.perSpot) : 0.002,
+      maxSpotSol: numOrNull(f.maxSpot), minMotherlodeOre: numOrNull(f.minMotherlode), maxRoundSol: numOrNull(f.maxRound), stopLossSol: numOrNull(f.stopLoss),
+    }).then(() => setSaving(false));
+  };
+  return (
+    <View style={{ marginTop: 12, gap: 6 }}>
+      <T v="label" style={{ color: COLORS.gold }}>
+        HOW YOUR BOT PLAYS
+      </T>
+      <View style={styles.lineRight}>
+        <Chip grow label="BOT · YOUR RULES" on={mode === 'bot'} onPress={() => setMode('bot')} disabled={saving} />
+        <Chip grow label="AI BOT" on={mode === 'ai'} onPress={() => setMode('ai')} disabled={saving} />
+      </View>
+      {mode === 'bot' ? (
+        <>
+          <T v="num" style={styles.evNote}>
+            No AI: the bot plays exactly your rules every round. Start from a preset, then change anything.
+          </T>
+          <View style={styles.lineRight}>
+            <Chip grow label="SAFE PLAY" onPress={() => preset(BOT_PRESETS.safe)} disabled={saving} />
+            <Chip grow label="AGGRESSIVE" onPress={() => preset(BOT_PRESETS.aggressive)} disabled={saving} />
+          </View>
+          <NumField label="Spots" info="How many spots to play each round, quietest first (1 to 25)." value={f.spots} onChange={set('spots')} unit="of 25" />
+          <NumField label="SOL per spot" info="How much SOL on each spot. Never more than your most per spot, which ORE enforces." value={f.perSpot} onChange={set('perSpot')} unit="SOL" />
+          <NumField label="Skip spots over" info="Never join a spot already holding more than this. Empty: no limit." value={f.maxSpot} onChange={set('maxSpot')} unit="SOL" />
+          <NumField label="Only when motherlode ≥" info="Play only when the motherlode holds at least this much ORE. Empty: every round." value={f.minMotherlode} onChange={set('minMotherlode')} unit="ORE" />
+        </>
+      ) : (
+        <>
+          <T v="num" style={styles.evNote}>
+            Pick how the AI plays. The review agents learn and tune your style from its own results. Your limits below always hold.
+          </T>
+          <View style={styles.lineRight}>
+            {AI_STYLES.map((x) => (
+              <Chip key={x.id} grow label={x.label} on={style === x.id} onPress={() => setStyle(x.id)} disabled={saving} />
+            ))}
+          </View>
+          <T v="num" style={styles.evNote}>
+            {AI_STYLES.find((x) => x.id === style)?.about}
+          </T>
+        </>
+      )}
+      <NumField label="Most per round" info="The most SOL the bot may use in one round. Empty: no extra limit beyond your balance and most per spot." value={f.maxRound} onChange={set('maxRound')} unit="SOL" />
+      <NumField
+        label="Stop-loss"
+        info="Stop once the bot is this much SOL down since you saved these settings (ORE mined counts at today's price). Save again to start counting from zero. Empty: no stop-loss."
+        value={f.stopLoss}
+        onChange={set('stopLoss')}
+        unit="SOL"
+        last
+      />
+      <Btn kind={ok ? 'gold' : 'plain'} label={saving ? 'SAVING…' : ok ? 'SAVE SETTINGS' : 'SPOTS 1 TO 25, SOL ABOVE 0'} sub={ok ? 'Sign in once with your wallet. No fee' : undefined} onPress={save} disabled={!ok || saving} />
+    </View>
+  );
+}
+
 function AiPanel() {
   const { balance, live } = useBalance();
   const autopilot = useGame((s) => s.autopilot);
@@ -809,7 +925,7 @@ function AiPanel() {
   const owner = useGame((s) => s.wallet.owner);
   const startAi = useGame((s) => s.startAiMining);
   const stopAutopilot = useGame((s) => s.stopAutopilot);
-  const { status, stats, board, me, claiming, log, logBusy, thoughts, lesson } = useAi();
+  const { status, stats, board, me, claiming, log, logBusy, thoughts, lesson, settings } = useAi();
   const [amount, setAmount] = useState('');
   const [perSpot, setPerSpot] = useState(AI_PER_SPOT_DEFAULT);
   useEffect(() => {
@@ -844,13 +960,13 @@ function AiPanel() {
             ? 'MIN 0.0001 SOL A SPOT'
             : spot > amt
               ? 'LIMIT IS OVER THE AMOUNT'
-              : `START GALI AI · ${fmtSol(amt)} SOL`;
+              : `START BOT · ${fmtSol(amt)} SOL`;
 
   return (
     <>
       <Row
         icon="bot"
-        label="Miners on Gali AI"
+        label="Miners on Gali bots"
         info={AI_INFO}
         right={
           <T v="num" style={{ fontSize: 18, color: COLORS.gold }}>
@@ -860,8 +976,8 @@ function AiPanel() {
       />
       <Row
         icon="sol"
-        label="All AI miners"
-        info="What Gali AI made all its miners together, from ORE's own accounts: SOL back plus ORE mined (valued at today's ORE/SOL price after ORE's 10% claim fee), minus the SOL it played and Gali's 0.25% fee."
+        label="All bot miners"
+        info="What Gali's bots made all their miners together, from ORE's own accounts: SOL back plus ORE mined (valued at today's ORE/SOL price after ORE's 10% claim fee), minus the SOL it played and Gali's 0.25% fee."
         right={
           <T v="num" style={{ fontSize: 16, color: !stats || !stats.rounds ? COLORS.muted : allNet >= 0 ? COLORS.green : COLORS.red }}>
             {stats && stats.rounds ? `${signed(allNet)} SOL · ${stats.rounds} rounds` : 'no rounds yet'}
@@ -871,7 +987,7 @@ function AiPanel() {
       <Row
         icon="bot"
         label="AI agents reviewing"
-        info="Gali AI's betting math runs on its own, every round. A team of five AI agents reviews and improves it. The round reviewer reads every round every 15 minutes and writes what it learned. A results analyst, a feedback reader, a risk checker and a lead review the settings every 3 hours, and more deeply once a day, inside fixed limits the code enforces."
+        info="The AI bot's betting math runs on its own, every round. A team of five AI agents reviews and improves it. The round reviewer reads every round every 15 minutes and writes what it learned. A results analyst, a feedback reader, a risk checker and a lead review the settings every 3 hours, and more deeply once a day, inside fixed limits the code enforces."
         right={
           <T v="num" style={{ fontSize: 16, color: COLORS.gold }}>
             5 agents
@@ -884,7 +1000,7 @@ function AiPanel() {
         <Row
           icon="hourglass"
           label="Your pass"
-          info="0.1 SOL gives you 7 days of Gali AI, paid to Gali's revenue wallet. Buying again adds 7 more days. The SOL you mine with stays yours, inside ORE."
+          info="0.1 SOL gives you 7 days of Bot and AI bot, paid to Gali's revenue wallet. Buying again adds 7 more days. The SOL you mine with stays yours, inside ORE."
           right={
             passOn ? (
               <T v="num" style={{ fontSize: 15, color: COLORS.teal }}>
@@ -916,18 +1032,18 @@ function AiPanel() {
           <AutopilotRow />
           {!passOn ? (
             <T v="num" style={styles.evNote}>
-              Your pass ran out, so Gali AI is not playing. Renew it to carry on, or STOP to take your SOL back.
+              Your pass ran out, so your bot is not playing. Renew it to carry on, or STOP to take your SOL back.
             </T>
           ) : null}
         </>
       ) : passOn ? (
         <>
-          <BigAmount value={amount} onChange={setAmount} hint="SOL for Gali AI to mine with" disabled={Boolean(busy)} />
+          <BigAmount value={amount} onChange={setAmount} hint="SOL for your bot to mine with" disabled={Boolean(busy)} />
           <QuickAdd onAdd={(v) => setAmount((c) => addTo(c, v))} onMax={() => setAmount(trim(balance - 0.001))} disabled={Boolean(busy)} />
           <Row
             icon="sol"
             label="Most per spot"
-            info="The most Gali AI may put on one spot in a round. ORE enforces it: the AI can never go over. It also never uses more than a small share of your balance in one round."
+            info="The most your bot may put on one spot in a round. ORE enforces it: the bot can never go over, whatever its rules or style."
             right={
               <PixelBox fill="#050817" hi="#02040c" lo="#22356f" edge="#04060f" style={styles.aiSpot}>
                 <TextInput
@@ -963,7 +1079,7 @@ function AiPanel() {
       {!aiOn && owner && me?.trialOpen ? (
         <Btn
           kind="gold"
-          label={busy ?? 'TRY GALI AI FREE · 7 DAYS'}
+          label={busy ?? 'TRY THE BOT FREE · 7 DAYS'}
           sub="First time only. One signature, no fee"
           onPress={() => void startTrial()}
           disabled={Boolean(busy) || !live}
@@ -973,12 +1089,13 @@ function AiPanel() {
       {!aiOn && owner ? (
         <Btn
           kind={passOn || me?.trialOpen ? 'plain' : 'gold'}
-          label={busy ?? (passOn ? 'ADD 7 DAYS · 0.1 SOL' : 'GET GALI AI · 0.1 SOL / 7 DAYS')}
+          label={busy ?? (passOn ? 'ADD 7 DAYS · 0.1 SOL' : 'GET THE BOT PASS · 0.1 SOL / 7 DAYS')}
           onPress={() => void buyPass()}
           disabled={Boolean(busy) || claiming || !live}
           style={{ marginTop: 10 }}
         />
       ) : null}
+      {passOn ? <BotSettingsPanel key={JSON.stringify(settings)} saved={settings} /> : null}
       {passOn ? (
         <>
           <AiFeedback nextAt={me?.nextFeedbackAt ?? null} />
@@ -986,14 +1103,14 @@ function AiPanel() {
         </>
       ) : owner ? (
         <T v="num" style={[styles.evNote, { marginTop: 8 }]}>
-          With a pass you also get Gali AI's learning log (what it learned from every round, and what each review changed) and a vote on how it plays, every 2 hours.
+          With a pass you choose Bot (your own rules) or AI bot (a style the AI agents tune), and get the AI bot's learning log and a vote on how it plays, every 2 hours.
         </T>
       ) : null}
 
       {board.length ? (
         <View style={{ marginTop: 12 }}>
           <T v="label" style={{ color: COLORS.gold, marginBottom: 4 }}>
-            EVERY GALI AI MINER
+            EVERY BOT MINER
           </T>
           {board.slice(0, 20).map((r, i) => (
             <View key={r.wallet} style={[styles.line, i === Math.min(board.length, 20) - 1 && { borderBottomWidth: 0 }]}>
@@ -1009,7 +1126,7 @@ function AiPanel() {
         </View>
       ) : null}
       <T v="num" style={[styles.evNote, { marginTop: 8 }]}>
-        The draw is random: Gali AI can't see the winning spot. It only plays spots worth more than they cost on average, and you can still lose. Not financial advice.
+        The draw is random: no bot can see the winning spot. The Safe AI style only plays spots worth more than they cost on average; your own rules, Solo hunter and Motherlode chaser can play below break-even. You can still lose. Not financial advice.
       </T>
     </>
   );
