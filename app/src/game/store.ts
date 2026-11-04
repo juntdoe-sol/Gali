@@ -276,6 +276,8 @@ interface GameState {
   refreshWallet: () => Promise<void>;
   /** live: close the autopilot and take its balance back (one wallet approval) */
   stopAutopilot: () => Promise<void>;
+  /** Add SOL to the running autopilot or bot without stopping it. */
+  topUpAutopilot: (sol: number) => Promise<boolean>;
   /** Gali AI: fund an ORE automation the AI plays. True when it went through. */
   startAiMining: (depositSol: number, maxPerSpotSol: number) => Promise<boolean>;
   /** Gali AI: pay 0.1 SOL for a week. The signature, or null when it did not go through. */
@@ -1477,6 +1479,25 @@ export const useGame = create<GameState>((set, get) => {
       } catch (e) {
         get().toast(errMsg(e), 'bad');
         return null;
+      } finally {
+        setWallet({ busy: null });
+        void get().refreshWallet();
+      }
+    },
+
+    topUpAutopilot: async (sol) => {
+      const st = get();
+      if (st.wallet.busy || !st.autopilot) return false;
+      try {
+        const [board, owner] = await Promise.all([loadBoard(), ownerKey()]);
+        if (!owner) throw new Error('wallet disconnected');
+        setWallet({ busy: 'Approve in your wallet to top up' });
+        const rounds = await board.topUpAutopilot(sol, owner);
+        get().toast(rounds ? `Topped up: ${rounds} more rounds` : `Topped up ${sol} SOL. Your bot keeps running`, 'good');
+        return true;
+      } catch (e) {
+        get().toast(errMsg(e), 'bad');
+        return false;
       } finally {
         setWallet({ busy: null });
         void get().refreshWallet();

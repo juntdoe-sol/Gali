@@ -424,6 +424,7 @@ function AutopilotRow() {
   const live = useGame(isLive);
   const autopilot = useGame((s) => s.autopilot);
   const busy = useGame((s) => s.wallet.busy);
+  const [top, setTop] = useState(false);
   if (!live || !autopilot) return null;
   return (
     <Row
@@ -439,10 +440,48 @@ function AutopilotRow() {
           <T v="num" style={{ fontSize: 15, color: COLORS.teal, marginRight: 6 }}>
             {fmtSol(autopilot.balance)} SOL left
           </T>
+          {autopilot.ai || autopilot.runnable ? <Chip label="TOP UP" onPress={() => setTop(true)} disabled={Boolean(busy)} /> : null}
           <Chip label="STOP" onPress={() => void useGame.getState().stopAutopilot()} disabled={Boolean(busy)} />
+          <TopUpCard open={top} onClose={() => setTop(false)} ai={Boolean(autopilot.ai)} />
         </>
       }
     />
+  );
+}
+
+/** Add SOL to the running autopilot or bot. It keeps running: no STOP, no new settings. */
+function TopUpCard({ open, onClose, ai }: { open: boolean; onClose: () => void; ai: boolean }) {
+  const { balance } = useBalance();
+  const busy = useGame((s) => s.wallet.busy);
+  const [amount, setAmount] = useState('');
+  const amt = Number(amount) || 0;
+  const ok = amt > 0 && amt <= balance + 1e-9 && !busy;
+  return (
+    <PopCard title={ai ? 'TOP UP YOUR BOT' : 'TOP UP AUTOPILOT'} open={open} onClose={onClose}>
+      <BigAmount value={amount} onChange={setAmount} hint="SOL to add" disabled={Boolean(busy)} />
+      <QuickAdd onAdd={(v) => setAmount((c) => addTo(c, v))} onMax={() => setAmount(trim(balance - 0.001))} disabled={Boolean(busy)} />
+      <T v="num" style={[styles.evNote, { marginVertical: 6 }]}>
+        {ai
+          ? 'Adds SOL to your running bot without stopping it. With a run time set, the AI spreads the new total over the rounds left, so each bet grows.'
+          : 'Adds whole rounds to your running autopilot without stopping it (the 0.25% Gali fee on those rounds is paid now, as at start).'}
+      </T>
+      <Chip
+        grow
+        label={!amt ? 'ENTER AMOUNT' : amt > balance + 1e-9 ? 'NOT ENOUGH SOL' : `TOP UP · ${fmtSol(amt)} SOL`}
+        disabled={!ok}
+        onPress={() =>
+          void useGame
+            .getState()
+            .topUpAutopilot(amt)
+            .then((done) => {
+              if (done) {
+                setAmount('');
+                onClose();
+              }
+            })
+        }
+      />
+    </PopCard>
   );
 }
 
