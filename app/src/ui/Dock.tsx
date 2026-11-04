@@ -19,7 +19,7 @@ import { useLayout } from './layout';
 import { openScanTv, TV_PAIR } from './TvLink';
 import { evOf } from '../game/ev';
 import { refreshMarket, useOreStats } from '../game/oreStats';
-import { botAllowed, buyPass, DEFAULT_BOT_SETTINGS, loadBigHits, loadRoundNow, loadRounds, type AiRoundRow, type BigHit, type RoundNow, loadLog, netSol, refreshAi, saveBotSettings, sendFeedback, startTrial, useAi, type AiLogEntry, type AiStyle, type AiVote, type BotMode, type BotSettings } from '../game/aiMining';
+import { botAllowed, buyPass, DEFAULT_BOT_SETTINGS, loadRoundNow, loadRounds, type AiRoundRow, type RoundNow, loadLog, netSol, refreshAi, saveBotSettings, sendFeedback, startTrial, useAi, type AiLogEntry, type AiStyle, type AiVote, type BotMode, type BotSettings } from '../game/aiMining';
 
 const SHAKE_G = 2.1;
 const layoutNowDesktop = () => layoutNow().desktop;
@@ -1082,8 +1082,8 @@ function AiPanel() {
         Random draw: no bot sees the winning spot. You can lose. Not financial advice.
       </T>
 
-      <PopCard title="ROUNDS" open={pop === 'rounds'} onClose={() => setPop(null)}>
-        <RoundsCard owner={owner} />
+      <PopCard title="YOUR BOT'S ROUNDS" open={pop === 'rounds'} onClose={() => setPop(null)}>
+        <RoundList />
       </PopCard>
       <PopCard title="WHAT THE AI LEARNED" open={pop === 'learned'} onClose={() => setPop(null)}>
         <AiLog log={log} busy={logBusy} />
@@ -1091,21 +1091,6 @@ function AiPanel() {
       <PopCard title="HELP IT LEARN" open={pop === 'feedback'} onClose={() => setPop(null)}>
         <AiFeedback nextAt={me?.nextFeedbackAt ?? null} />
       </PopCard>
-    </View>
-  );
-}
-
-/** The ROUNDS card: your past rounds, big hits on the whole board, and everyone in the round being played now. */
-function RoundsCard({ owner }: { owner: string | null }) {
-  const [tab, setTab] = useState<'past' | 'hits' | 'now'>('past');
-  return (
-    <View style={{ gap: 8 }}>
-      <View style={styles.lineRight}>
-        <Chip grow label="PAST ROUNDS" on={tab === 'past'} onPress={() => setTab('past')} />
-        <Chip grow label="BIG HITS" on={tab === 'hits'} onPress={() => setTab('hits')} />
-        <Chip grow label="CURRENT ROUND" on={tab === 'now'} onPress={() => setTab('now')} />
-      </View>
-      {tab === 'past' ? <RoundList /> : tab === 'hits' ? <BigHits /> : <RoundNowList owner={owner} />}
     </View>
   );
 }
@@ -1127,41 +1112,8 @@ function usePoll<T>(load: () => Promise<T | null>, ms: number): T | null | 'load
 }
 const shortWallet = (w: string) => `${w.slice(0, 4)}…${w.slice(-4)}`;
 
-/** Every solo 1 ORE winner and motherlode on the board, newest first (yours marked). */
-function BigHits() {
-  const rows = usePoll<BigHit[]>(() => loadBigHits(), 60_000);
-  if (rows === 'loading') return <T v="num" style={styles.evNote}>Loading…</T>;
-  if (!rows) return <T v="num" style={styles.evNote}>Could not load big hits. Try again in a moment.</T>;
-  if (!rows.length) return <T v="num" style={styles.evNote}>No big hits recorded yet.</T>;
-  const mine = rows.filter((r) => r.mine).length;
-  return (
-    <View>
-      <T v="num" style={[styles.evNote, { marginBottom: 6 }]}>
-        Solo 1 ORE winners and motherlodes on the whole ORE board, any miner. Yours: {mine}.
-      </T>
-      {rows.map((r, i) => (
-        <View key={r.round} style={[styles.aiLog, { paddingVertical: 5 }, i === rows.length - 1 && { borderBottomWidth: 0 }]}>
-          <T v="num" style={{ fontSize: 12, color: COLORS.muted }}>
-            #{r.round} · {new Date(r.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
-            {r.motherlodeOre > 0 ? ` · MOTHERLODE ${r.motherlodeOre.toFixed(1)} ORE` : ''}
-          </T>
-          {r.wallet ? (
-            <T v="num" style={{ fontSize: 13, lineHeight: 16, color: r.mine ? COLORS.gold : COLORS.text }}>
-              {r.mine ? 'YOU' : r.name || shortWallet(r.wallet)} won {r.ore.toFixed(0)} ORE solo · {r.squares} spots · {(r.stakeSol ?? 0).toFixed(4)} of {(r.squareSol ?? 0).toFixed(3)} SOL on the spot ({((r.share ?? 0) * 100).toFixed(1)}%)
-            </T>
-          ) : (
-            <T v="num" style={{ fontSize: 13, lineHeight: 16, color: COLORS.text }}>
-              Round shared by SOL on the winning spot
-            </T>
-          )}
-        </View>
-      ))}
-    </View>
-  );
-}
-
 /** Everyone who deployed in the round being played now, biggest first; refreshes every 5 seconds. */
-function RoundNowList({ owner }: { owner: string | null }) {
+export function RoundNowList({ owner }: { owner: string | null }) {
   const r = usePoll<RoundNow>(() => loadRoundNow(), 5_000);
   if (r === 'loading') return <T v="num" style={styles.evNote}>Loading…</T>;
   if (!r) return <T v="num" style={styles.evNote}>Could not read the round. Try again in a moment.</T>;

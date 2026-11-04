@@ -22,6 +22,7 @@ import { GUTTER, RAIL_W, useLayout } from './layout';
 import { BAR_H, SHEET_TITLE, TAB_PIX, TabBar, type SheetTab } from './TabBar';
 import { BackPill } from './Lobby';
 import { Inventory } from './Inventory';
+import { RoundNowList } from './Dock';
 import { useOreHits, type OreHit } from '../game/oreHits';
 
 const ORE_PROGRAM_STR = 'oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv';
@@ -414,7 +415,36 @@ function BigHits({ owner }: { owner: string | null }) {
   );
 }
 
+type RoundsTab = 'past' | 'hits' | 'now';
+/** ROUNDS: past rounds, big hits (solo 1 ORE and motherlodes), and everyone in the round being played now. */
 function Rounds() {
+  const owner = useGame((s) => s.wallet.owner);
+  const [tab, setTab] = useState<RoundsTab>('past');
+  return (
+    <>
+      <View style={{ flexDirection: 'row', gap: 6 }}>
+        {(
+          [
+            ['past', 'PAST ROUNDS'],
+            ['hits', 'BIG HITS'],
+            ['now', 'CURRENT ROUND'],
+          ] as [RoundsTab, string][]
+        ).map(([k, label]) => (
+          <Pressable key={k} onPress={() => setTab(k)} accessibilityRole="tab" accessibilityState={{ selected: tab === k }} style={{ flex: 1 }}>
+            <PixelBox fill={tab === k ? 'rgba(255,201,60,0.16)' : 'rgba(9,14,34,0.9)'} hi={tab === k ? COLORS.gold : '#22356f'} lo="#04060f" style={{ paddingVertical: 8, alignItems: 'center' }}>
+              <T v="label" numberOfLines={1} style={{ color: tab === k ? COLORS.gold : COLORS.muted }}>
+                {label}
+              </T>
+            </PixelBox>
+          </Pressable>
+        ))}
+      </View>
+      {tab === 'past' ? <PastRounds /> : tab === 'hits' ? <BigHits owner={owner} /> : <Card><RoundNowList owner={owner} /></Card>}
+    </>
+  );
+}
+
+function PastRounds() {
   const owner = useGame((s) => s.wallet.owner);
   const roundId = useGame((s) => s.roundId);
   const onChain = useGame(isOnChain);
@@ -441,7 +471,6 @@ function Rounds() {
   }, [onChain, at, roundId]);
   return (
     <>
-      {onChain ? <BigHits owner={owner} /> : null}
       <View style={[styles.rowCard, { justifyContent: 'space-between' }]}>
         <T v="display" style={{ fontSize: 20 }}>
           Past rounds{onChain ? '' : ' · practice'}
