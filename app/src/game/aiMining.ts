@@ -51,11 +51,16 @@ export interface AiMe {
   pending: number;
 }
 
+/** One wallet's drawn bot rounds in the last 24 hours. */
+export interface AiDay { rounds: number; wins: number; deployedSol: number; returnedSol: number; ore: number; feesSol: number }
+
 interface AiState {
   status: 'idle' | 'loading' | 'ok' | 'error';
   stats: AiStats | null;
   board: AiMinerRow[];
   me: AiMe | null;
+  /** the last 24 hours of the connected wallet's bot */
+  day: AiDay | null;
   /** a pass payment the server has not confirmed yet */
   claiming: boolean;
   /** what the AI learned at each review, newest first; null until loaded (subscribers only) */
@@ -135,7 +140,7 @@ export interface AiLogEntry {
   /** plays in the 24 hours before this entry, when known */
   plays: number | null;
 }
-export const useAi = create<AiState>(() => ({ status: 'idle', stats: null, board: [], me: null, claiming: false, log: null, logBusy: false, thoughts: [], lesson: null, settings: null, modeDraft: null, draft: null }));
+export const useAi = create<AiState>(() => ({ status: 'idle', stats: null, board: [], me: null, day: null, claiming: false, log: null, logBusy: false, thoughts: [], lesson: null, settings: null, modeDraft: null, draft: null }));
 
 const headers = () => ({ apikey: publicKey(), authorization: `Bearer ${publicKey()}`, 'content-type': 'application/json' });
 const rpc = async (fn: string, args: Record<string, unknown> = {}) => {
@@ -151,14 +156,39 @@ const num = (v: unknown) => Number(v) || 0;
 export const netSol = (x: { deployedSol: number; returnedSol: number; ore: number; feesSol: number }, oreSol: number) =>
   x.returnedSol + x.ore * 0.9 * oreSol - x.deployedSol - x.feesSol;
 
+/** One round for the connected wallet's bot: played (and how it went) or sat out. SOL and ORE. */
+export interface AiRoundRow {
+  round: number; at: number; played: boolean; landed: boolean; squares: number; sol: number; back: number | null; ore: number | null; won: boolean | null; settled: boolean;
+  boardSol: number | null; quietestSol: number | null; joinLimitSol: number | null; motherlodeOre: number | null; botsPlayed: number | null; winSquare: number | null;
+}
+const numOrNull = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+/** The connected wallet's rounds since its bot started, newest first, the sat-out ones included. */
+export async function loadRounds(limit = 150): Promise<AiRoundRow[] | null> {
+  const wallet = useGame.getState().wallet.owner;
+  if (!wallet) return null;
+  const rows = await rpc('gali_ai_my_rounds', { p_wallet: wallet, p_limit: limit }).catch(() => null);
+  if (!Array.isArray(rows)) return null;
+  return rows.map((r) => ({
+    round: num(r.round_id), at: Date.parse(r.at), played: Boolean(r.played), landed: Boolean(r.landed), squares: num(r.squares), sol: num(r.sol),
+    back: numOrNull(r.back), ore: numOrNull(r.ore), won: r.won === null ? null : Boolean(r.won), settled: Boolean(r.settled),
+    boardSol: numOrNull(r.board_sol), quietestSol: numOrNull(r.quietest_sol), joinLimitSol: numOrNull(r.join_limit_sol), motherlodeOre: numOrNull(r.motherlode_ore),
+    botsPlayed: numOrNull(r.bots_played), winSquare: numOrNull(r.win_square),
+  }));
+}
+
 export async function refreshAi() {
   const wallet = useGame.getState().wallet.owner;
   if (useAi.getState().status === 'idle') useAi.setState({ status: 'loading' });
   try {
-    const [s, b, m, cfg] = await Promise.all([
+    const [s, b, m, cfg, d] = await Promise.all([
       rpc('gali_ai_stats'), rpc('gali_ai_board', { p_limit: 50 }), wallet ? rpc('gali_ai_me', { p_wallet: wallet }) : Promise.resolve(null),
       wallet ? rpc('gali_bot_settings_of', { p_wallet: wallet }).catch(() => null) : Promise.resolve(null),
+      wallet ? rpc('gali_ai_day', { p_wallet: wallet }).catch(() => null) : Promise.resolve(null),
     ]);
+    const dr = Array.isArray(d) ? d[0] : null;
+    const day: AiDay | null = dr
+      ? { rounds: num(dr.rounds), wins: num(dr.wins), deployedSol: num(dr.deployed_sol), returnedSol: num(dr.returned_sol), ore: num(dr.ore), feesSol: num(dr.fees_sol) }
+      : null;
     const r = Array.isArray(s) ? s[0] : null;
     const stats: AiStats | null = r
       ? {
@@ -180,7 +210,7 @@ export async function refreshAi() {
       : null;
     if (useGame.getState().wallet.owner !== wallet) return;
     const settings = Array.isArray(cfg) && cfg[0] ? toSettings(cfg[0]) : null;
-    useAi.setState({ status: 'ok', stats, board, me, settings });
+    useAi.setState({ status: 'ok', stats, board, me, settings, day });
   } catch {
     useAi.setState((st) => ({ status: st.stats ? 'ok' : 'error' }));
   }

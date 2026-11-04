@@ -67,13 +67,14 @@ export const DEFAULT_PARAMS: AiParams = { minEdge: 0.08, crowdBuffer: 0.25, maxR
 export type Bounds = Record<keyof AiParams, [number, number]>;
 /**
  * Wide on purpose: the player chose to let the agents tune every style freely. These only keep a value workable (the
- * bot must send before ORE's lock, so targetSlotsLeft stays at 18+; a round never spends more than half the balance).
+ * bot must send early enough to land, so targetSlotsLeft stays at 30+; a round never spends more than half the balance).
  */
 export const BOUNDS: Bounds = {
   minEdge: [-0.6, 0.5],
   crowdBuffer: [0, 3],
   maxRoundShare: [0.01, 0.5],
-  targetSlotsLeft: [18, 60],
+  // sent with under 27 slots left, a quarter to a third of bets landed after the round ended (Nov 2026): 30 is the floor
+  targetSlotsLeft: [30, 60],
   minMotherlode: [0, 0],
 };
 
