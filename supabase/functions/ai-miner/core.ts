@@ -15,7 +15,7 @@
  */
 import { Buffer, ComputeBudgetProgram, Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction } from './deps.ts';
 import { decodeAutomation, decodeBoard, LOCK_SLOTS, ORE_PROGRAM_ID, phaseOf, SIZE, STRATEGY, type Auto, type Phase } from '../autopilot/core.ts';
-import { addToBoard, AI_FEE_BPS, BLOCKS, planFee, botPlan, huntPlan, joinLimitLamports, MAX_FEE_BPS, MIN_STAKE, planRound, prizeLamports, roundRng, settleRound, type AiParams, type Plan, type Rules, type Settled, type Style } from '../_shared/aiStrategy.ts';
+import { addToBoard, AI_FEE_BPS, BLOCKS, planFee, roundBudget, botPlan, huntPlan, joinLimitLamports, MAX_FEE_BPS, MIN_STAKE, planRound, prizeLamports, roundRng, settleRound, type AiParams, type Plan, type Rules, type Settled, type Style } from '../_shared/aiStrategy.ts';
 
 const ENTROPY_PROGRAM_ID = new PublicKey('3jSkUuYBoJzQPMEzTvkDFXCZUBksPamrVhrnHR9igu2X');
 const BOARD = new PublicKey('BrcSxdp1nXFzou1YyDnQJcPNBNHgoypZmTsyKBSLLXzi');
@@ -157,8 +157,10 @@ export interface BotChoice {
   rules: Rules;
   /** stop once the result since the settings were saved is this much SOL down */
   stopLossSol: number | null;
+  /** when the player's run ends (ms); the AI paces each bet to it. null: runs until stopped */
+  runUntil?: number | null;
 }
-export const DEFAULT_CHOICE: BotChoice = { mode: 'ai', style: 'safe', rules: { spots: 10, perSpotSol: 0.002, maxSpotSol: null, minMotherlodeOre: null, maxRoundSol: null }, stopLossSol: null };
+export const DEFAULT_CHOICE: BotChoice = { mode: 'ai', style: 'safe', rules: { spots: 10, perSpotSol: 0.002, maxSpotSol: null, minMotherlodeOre: null, maxRoundSol: null }, stopLossSol: null, runUntil: null };
 
 export interface Hooks {
   /** the AI settings for a style (the agents tune each style separately) */
@@ -508,7 +510,13 @@ export async function pass(conn: Connection, signer: Keypair, hooks: Hooks, st: 
       res.skipped++;
       return;
     }
-    const base = { onBoard, motherlodeGrams: motherlode, orePriceSol: price, maxPerSquare: a.amount, balance: a.balance, feeBps: a.fee };
+    // the player's run time is over: it stops until they start it again
+    if (choice.runUntil && now >= choice.runUntil) {
+      res.skipped++;
+      return;
+    }
+    const pace = choice.mode === 'ai' && choice.runUntil ? roundBudget(a.balance, a.fee, choice.runUntil, now) : null;
+    const base = { onBoard, motherlodeGrams: motherlode, orePriceSol: price, maxPerSquare: a.amount, balance: a.balance, feeBps: a.fee, roundBudget: pace };
     const sp = styleParams.get(choice.style) ?? params;
     const plan =
       choice.mode === 'bot'

@@ -92,14 +92,19 @@ export interface BotSettings {
   minMotherlodeOre: number | null;
   maxRoundSol: number | null;
   stopLossSol: number | null;
+  /** how long the bot runs from START, in hours; null: until stopped */
+  runHours: number | null;
+  /** when the current run ends (ms), from the server */
+  runUntil?: number | null;
 }
-export const DEFAULT_BOT_SETTINGS: BotSettings = { mode: 'ai', style: 'safe', spots: 10, perSpotSol: 0.002, maxSpotSol: null, minMotherlodeOre: null, maxRoundSol: null, stopLossSol: null };
+export const DEFAULT_BOT_SETTINGS: BotSettings = { mode: 'ai', style: 'safe', spots: 10, perSpotSol: 0.002, maxSpotSol: null, minMotherlodeOre: null, maxRoundSol: null, stopLossSol: null, runHours: null };
 const orNull = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 const toSettings = (x: Record<string, unknown>): BotSettings => ({
   mode: x.mode === 'bot' ? 'bot' : 'ai',
   style: x.style === 'solo' || x.style === 'balance' ? x.style : 'safe',
   spots: Number(x.spots) || 10, perSpotSol: Number(x.per_spot_sol) || 0.002,
   maxSpotSol: orNull(x.max_spot_sol), minMotherlodeOre: orNull(x.min_motherlode_ore), maxRoundSol: orNull(x.max_round_sol), stopLossSol: orNull(x.stop_loss_sol),
+  runHours: orNull(x.run_hours), runUntil: x.run_until ? Date.parse(String(x.run_until)) || null : null,
 });
 export interface AiLesson { at: number; fromRound: number; toRound: number; rounds: number; played: number; lessons: string; watch: string | null }
 const toLesson = (x: Record<string, unknown>): AiLesson => ({
