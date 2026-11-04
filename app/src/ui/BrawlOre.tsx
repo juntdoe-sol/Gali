@@ -134,11 +134,11 @@ export function BrawlOreScreen() {
     setStage('fight');
     ref.current?.begin({ mode, diff, name: name || 'You', look: myLook(), weapon: 'pick', special: myWeapon().sp });
   };
-  const find = (q: Queue, need = 0) => {
+  const find = (q: Queue, need = 0, made = false) => {
     lastQ.current = q;
     setResult(null);
     setStage('search');
-    search(q, { name: name || 'Miner', look: myLook(), weapon: 'pick', sp: myWeapon().sp }, useGame.getState().wallet.owner, { need });
+    search(q, { name: name || 'Miner', look: myLook(), weapon: 'pick', sp: myWeapon().sp }, useGame.getState().wallet.owner, { need, made });
   };
   // call out: tell the rivals, make the card; fight now (wait in the room) or later (a reminder at the time)
   const callOut = (rivals: Rival[], n: number, at: number) => {
@@ -286,7 +286,7 @@ export function BrawlOreScreen() {
                     PRIVATE ROOM
                   </T>
                   <View style={[styles.row, { alignItems: 'center' }]}>
-                    <Btn kind="plain" label="NEW ROOM" onPress={() => find(`code:${newCode()}`)} style={{ flex: 1 }} />
+                    <Btn kind="plain" label="NEW ROOM" onPress={() => find(`code:${newCode()}`, 0, true)} style={{ flex: 1 }} />
                     <TextInput
                       value={code}
                       onChangeText={(t) => setCode(cleanCode(t))}
@@ -422,6 +422,7 @@ function Searching({ q, onCancel, card }: { q: Queue; onCancel: () => void; card
   const mine = useCallout((s) => s.mine);
   const phase = useOnline((s) => s.phase);
   const me = useOnline((s) => s.me);
+  const made = useOnline((s) => s.made);
   const since = useOnline((s) => s.since);
   const error = useOnline((s) => s.error);
   useOnline((s) => s.peers);
@@ -439,7 +440,19 @@ function Searching({ q, onCancel, card }: { q: Queue; onCancel: () => void; card
   if (error) line = error;
   else if (phase === 'connecting') line = 'Connecting to the arena...';
   else if (room && mine && mine.fight.code === room) line = list.length < mine.fight.n ? `Waiting for ${mine.fight.rivals.join(', ')}. The fight starts when ${mine.fight.n > 2 ? 'everyone is' : 'they are'} in.` : 'Everyone is here. Starting...';
-  else if (room) line = host ? (list.length < 2 ? 'Share the code. You start when someone joins.' : 'Start when everyone is in (up to 4).') : 'Waiting for the room host to start.';
+  else if (room && !made && list.length < 2)
+    // joined with a code and nobody showed up: the room's maker has the game in the background, or left
+    line = 'Nobody here yet. The room only shows players with the Fightclub open: ask your friend to come back to it (switching apps pauses it).';
+  else if (room) {
+    const here = list.filter((p) => !p.away).length;
+    line = host
+      ? here < 2
+        ? 'Share the code, then come back here. You start when someone joins.'
+        : 'Start when everyone is in (up to 4).'
+      : list[0]?.away
+        ? 'The host stepped away (sharing the code?). They start when they are back.'
+        : 'Waiting for the room host to start.';
+  }
   else if (list.length < 2) line = `Nobody yet. Bots step in after ${left(SOLO_WAIT_MS)}s.`;
   else if (q === 'ffa') line = list.length >= 4 ? 'Starting...' : `Starting in ${left(FFA_WAIT_MS)}s. Bots fill the empty spots.`;
   else line = 'Found one. Starting...';
@@ -453,14 +466,14 @@ function Searching({ q, onCancel, card }: { q: Queue; onCancel: () => void; card
         {list.map((p) => (
           <View key={p.id} style={styles.res}>
             <T v="bold" style={{ flex: 1 }}>
-              {p.id === me ? `${p.name} (you)` : p.name}
+              {p.id === me ? `${p.name} (you)` : p.away ? `${p.name} (away, back soon?)` : p.name}
             </T>
-            {p.id === list[0].id ? <T v="muted">HOST</T> : null}
+            {p.id === list[0].id && (list.length > 1 || made) ? <T v="muted">HOST</T> : null}
           </View>
         ))}
         {mine && room === mine.fight.code ? <CardShare rivals={mine.rivals} fight={mine.fight} card={card} /> : null}
         <View style={styles.row}>
-          {room && host && !(mine && mine.fight.code === room) ? <Btn kind="gold" label="START" disabled={list.length < 2} onPress={startRoom} style={{ flex: 1 }} /> : null}
+          {room && host && !(mine && mine.fight.code === room) ? <Btn kind="gold" label="START" disabled={list.filter((p) => !p.away).length < 2} onPress={startRoom} style={{ flex: 1 }} /> : null}
           <Btn kind="plain" label="CANCEL" onPress={onCancel} style={{ flex: 1 }} />
         </View>
       </PixelBox>
