@@ -82,19 +82,21 @@ export const BOUNDS: Bounds = {
  * The review agents tune each style from its own results. The wide bounds below only keep values sane; the limits that
  * protect a player are the player's own (per-spot limit, enforced by ORE; most per round; stop-loss).
  */
-export type Style = 'safe' | 'solo' | 'motherlode';
-export const STYLES: Style[] = ['safe', 'solo', 'motherlode'];
+export type Style = 'safe' | 'balance' | 'solo' | 'motherlode';
+export const STYLES: Style[] = ['safe', 'balance', 'solo', 'motherlode'];
 export const STYLE_DEFAULTS: Record<Style, AiParams> = {
   safe: DEFAULT_PARAMS,
   solo: { minEdge: -0.05, crowdBuffer: 0.1, maxRoundShare: 0.05, targetSlotsLeft: 30, minMotherlode: 0 },
   motherlode: { minEdge: -0.2, crowdBuffer: 0.1, maxRoundShare: 0.05, targetSlotsLeft: 30, minMotherlode: 150 },
+  balance: { minEdge: 0, crowdBuffer: 0.2, maxRoundShare: 0.03, targetSlotsLeft: 30, minMotherlode: 0 },
 };
 export const STYLE_BOUNDS: Record<Style, Bounds> = {
   safe: BOUNDS,
   solo: { ...BOUNDS, minEdge: [-0.3, 0.5] },
   motherlode: { ...BOUNDS, minEdge: [-0.6, 0.5], minMotherlode: [20, 3000] },
+  balance: { ...BOUNDS, minEdge: [-0.1, 0.5] },
 };
-export const isStyle = (x: unknown): x is Style => x === 'safe' || x === 'solo' || x === 'motherlode';
+export const isStyle = (x: unknown): x is Style => x === 'safe' || x === 'balance' || x === 'solo' || x === 'motherlode';
 
 /** Every param inside its bounds, missing or broken values replaced by `base`. */
 export function clampParams(p: unknown, base: AiParams = DEFAULT_PARAMS, bounds: Bounds = BOUNDS): AiParams {
@@ -344,6 +346,21 @@ export const soloChance = (amount: number, crowds: number[]) => crowds.reduce((n
  */
 export const HUNT_MIN_COVER = 23;
 
+/** Chance the solo 1 ORE lands on us, for `stakes[k]` on a square already holding `crowds[k]`. */
+export const soloChanceOf = (stakes: number[], crowds: number[]) => stakes.reduce((n, a, k) => n + (a > 0 ? a / (crowds[k] + a) : 0), 0) / BLOCKS;
+
+/** Shares of the round budget the hunters try as the base on every covered square; the rest tops up the quiet ones. */
+const BASE_SHARES = [1, 0.85, 0.7, 0.55, 0.4, 0.25];
+
+/**
+ * Solo hunter and motherlode chaser. They cover at least HUNT_MIN_COVER squares (quietest first) so they are on the
+ * winning square most rounds, and size for the best chance of the solo 1 ORE: a base stake on every covered square plus
+ * a top-up on the quietest ones, where the same SOL buys a bigger share. A small budget mostly tops up the quiet squares;
+ * a big one spreads evenly (the best split of a fixed budget puts more on a square the quieter it is, until the budget
+ * is big next to the crowd). Two deploys at most, on separate squares, the bigger one first: ORE takes Gali's fee on the
+ * first deploy of a round only. The round as a whole must clear `minEdge` per SOL (below zero for these styles: a known
+ * small loss for more ORE). The motherlode chaser only plays big motherlodes.
+ */
 export function huntPlan(i: PlanInput & { style: Style; maxRoundSol?: number | null }): Plan | null {
   const p = i.params;
   if (i.onBoard.length !== BLOCKS) return null;
@@ -352,23 +369,55 @@ export function huntPlan(i: PlanInput & { style: Style; maxRoundSol?: number | n
   if (!(prize > 0)) return null;
   const feeRate = Number(i.feeBps ?? AI_FEE_BPS) / 10_000;
   const budget = Math.min(Number(i.balance) * p.maxRoundShare, Number(i.balance) / (1 + feeRate), i.maxRoundSol ? i.maxRoundSol * LAMPORTS_PER_SOL : Infinity);
+  const cap = Number(i.maxPerSquare);
   const crowd = (s: number) => Math.max(EMPTY_FLOOR, Number(i.onBoard[s]) * (1 + p.crowdBuffer));
   const order = quietestFirst(i.onBoard).map((x) => x.s);
-  let best: { n: number; amount: number; chance: number; ev: number } | null = null;
+  let best: { n: number; q: number; base: number; top: number; chance: number; ev: number } | null = null;
   for (let n = HUNT_MIN_COVER; n <= BLOCKS; n++) {
-    const amount = roundDown2(Math.min(budget / n, Number(i.maxPerSquare)));
-    if (amount < Number(MIN_STAKE) || amount * n < Number(MIN_ROUND)) continue;
     const picked = order.slice(0, n);
-    const evs = picked.map((s) => squareEv(amount, crowd(s), prize) - amount * feeRate);
-    // the margin is on the whole round: one crowded square should not shrink the cover
-    if (evs.reduce((a, b) => a + b, 0) < p.minEdge * amount * n) continue;
-    const chance = soloChance(amount, picked.map(crowd));
-    if (!best || chance > best.chance + 1e-12) best = { n, amount, chance, ev: evs.reduce((a, b) => a + b, 0) };
+    const crowds = picked.map(crowd);
+    for (const share of BASE_SHARES) {
+      const base = roundDown2(Math.min((budget * share) / n, cap));
+      if (base < Number(MIN_STAKE)) continue;
+      for (let q = share === 1 ? 0 : 1; q <= (share === 1 ? 0 : n - 1); q++) {
+        const top = q ? roundDown2(Math.min((budget - base * n) / q, cap - base)) : 0;
+        if (q && top < Number(MIN_STAKE)) continue;
+        const stakes = picked.map((_, k) => base + (k < q ? top : 0));
+        const total = stakes.reduce((a, b) => a + b, 0);
+        if (total < Number(MIN_ROUND)) continue;
+        const ev = stakes.reduce((a, amt, k) => a + squareEv(amt, crowds[k], prize) - amt * feeRate, 0);
+        // the margin is on the whole round: one crowded square should not shrink the cover
+        if (ev < p.minEdge * total) continue;
+        const chance = soloChanceOf(stakes, crowds);
+        if (!best || chance > best.chance + 1e-12) best = { n, q, base, top, chance, ev };
+      }
+    }
   }
   if (!best) return null;
-  const plan = uniform(i.onBoard, BigInt(best.amount), order.slice(0, best.n), best.ev);
-  return plan.total + aiFee(plan.total, i.feeBps ?? AI_FEE_BPS) <= i.balance ? plan : null;
+  const picked = order.slice(0, best.n);
+  const maskOf = (ss: number[]) => ss.reduce((m, s) => m | (1 << s), 0);
+  const quiet = picked.slice(0, best.q);
+  const rest = picked.slice(best.q);
+  const groups = [
+    { amount: BigInt(best.base + best.top), mask: maskOf(quiet), n: quiet.length },
+    { amount: BigInt(best.base), mask: maskOf(rest), n: rest.length },
+  ]
+    .filter((g) => g.n > 0)
+    .sort((a, b) => Number(b.amount * BigInt(b.n) - a.amount * BigInt(a.n)))
+    .map(({ amount, mask }) => ({ amount, mask }));
+  const total = BigInt(best.base) * BigInt(best.n) + BigInt(best.top) * BigInt(best.q);
+  const plan: Plan = { groups, total, squares: picked, ev: best.ev, boardBefore: picked.reduce((a, s) => a + i.onBoard[s], 0n) };
+  return total + aiFee(total, i.feeBps ?? AI_FEE_BPS) <= i.balance ? plan : null;
 }
+
+/** The fee ORE takes on a plan: Gali's bps on the first deploy only. */
+export const planFee = (plan: Plan, bps: bigint = AI_FEE_BPS) => {
+  const g = plan.groups[0];
+  if (!g) return 0n;
+  let n = 0n;
+  for (let s = 0; s < BLOCKS; s++) if (g.mask & (1 << s)) n++;
+  return aiFee(g.amount * n, bps);
+};
 
 /** Adds a plan's stakes to the board, so the next automation in the same round sees them. */
 export function addToBoard(onBoard: bigint[], plan: Plan): bigint[] {

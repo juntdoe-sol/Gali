@@ -9,6 +9,7 @@
 //             pass, at most one every 2 hours. The hourly review reads it as players' opinions, never as orders.
 // Secrets: RPC_URL, DM_SECRET (the same one dm and play use for sign-in). SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY
 // come with every edge function.
+import { botAllowed } from '../_shared/botAccess.ts';
 import { isWallet, readPass } from '../_shared/pass.ts';
 import { cleanComment } from '../_shared/aiText.ts';
 import { Buffer, PublicKey } from '../ai-miner/deps.ts';
@@ -66,7 +67,7 @@ export async function botRunning(rpc: string, wallet: string): Promise<boolean> 
 export function botSettings(x: unknown): Record<string, unknown> | string {
   const o = (x && typeof x === 'object' ? x : {}) as Record<string, unknown>;
   const mode = o.mode === 'bot' || o.mode === 'ai' ? o.mode : null;
-  const style = o.style === 'safe' || o.style === 'solo' || o.style === 'motherlode' ? o.style : null;
+  const style = o.style === 'safe' || o.style === 'balance' || o.style === 'solo' ? o.style : null;
   if (!mode || !style) return 'Pick Bot or AI bot, and how the AI plays';
   const pos = (k: string, max: number) => {
     const n = o[k] === null || o[k] === undefined || o[k] === '' ? null : Number(o[k]);
@@ -98,6 +99,7 @@ Deno.serve(async (req) => {
   if (a === 'trial' || a === 'log' || a === 'feedback' || a === 'settings') {
     const wallet = await readPass(body?.pass).catch(() => null);
     if (!wallet) return json(401, { error: 'sign in first' });
+    if ((a === 'trial' || a === 'settings') && !botAllowed(wallet)) return json(403, { error: 'Bot mining is not open yet' });
 
     if (a === 'trial') {
       const r = await fetch(`${base}/rest/v1/rpc/gali_ai_trial`, { method: 'POST', headers: h, body: JSON.stringify({ p_wallet: wallet }) });

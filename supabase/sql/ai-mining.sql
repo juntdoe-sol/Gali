@@ -290,7 +290,7 @@ grant execute on function public.gali_ai_stats(), public.gali_ai_board(int), pub
 create table if not exists public.gali_bot_settings (
   wallet text primary key,
   mode text not null default 'ai' check (mode in ('bot', 'ai')),
-  style text not null default 'safe' check (style in ('safe', 'solo', 'motherlode')),
+  style text not null default 'safe' check (style in ('safe', 'balance', 'solo', 'motherlode')),
   spots int not null default 10 check (spots between 1 and 25),   -- Bot: the quietest this many squares
   per_spot_sol numeric not null default 0.002 check (per_spot_sol > 0),
   max_spot_sol numeric check (max_spot_sol > 0),                  -- Bot: skip squares holding more
@@ -314,6 +314,11 @@ where not exists (select 1 from public.gali_ai_params where style = 'solo');
 insert into public.gali_ai_params (min_edge, crowd_buffer, max_round_share, target_slots_left, min_motherlode, style, source, note)
 select -0.2, 0.1, 0.05, 30, 150, 'motherlode', 'default', 'Motherlode chaser starting settings'
 where not exists (select 1 from public.gali_ai_params where style = 'motherlode');
+insert into public.gali_ai_params (min_edge, crowd_buffer, max_round_share, target_slots_left, min_motherlode, style, source, note)
+select 0, 0.2, 0.03, 30, 0, 'balance', 'default', 'Balance starting settings'
+where not exists (select 1 from public.gali_ai_params where style = 'balance');
+alter table public.gali_bot_settings drop constraint if exists gali_bot_settings_style_check;
+alter table public.gali_bot_settings add constraint gali_bot_settings_style_check check (style in ('safe', 'balance', 'solo', 'motherlode'));
 
 -- Everyone: a wallet's Bot settings (nothing secret: they are rules, not keys)
 create or replace function public.gali_bot_settings_of(p_wallet text)
@@ -353,6 +358,28 @@ create table if not exists public.gali_solo_wins (
 create index if not exists gali_solo_wins_at on public.gali_solo_wins (at desc);
 alter table public.gali_solo_wins enable row level security;
 revoke all on public.gali_solo_wins from anon, authenticated;
+
+-- Every miner on the board, every round (any wallet), grouped by squares covered and SOL per square: what the AI agents
+-- study. groups: {"<squares>|<SOL per square>": {miners, deployed, back, onWin, ore, solo}} in lamports and grams.
+create table if not exists public.gali_board_rounds (
+  round_id bigint primary key,
+  at timestamptz not null default now(),
+  miners int not null,
+  deployed bigint not null,
+  seen real not null,
+  win_square int not null,
+  split boolean not null,
+  reward bigint not null,
+  motherlode bigint not null,
+  solo_wallet text,
+  solo_stake bigint,
+  solo_square_total bigint,
+  solo_squares int,
+  groups jsonb not null
+);
+create index if not exists gali_board_rounds_at on public.gali_board_rounds (at desc);
+alter table public.gali_board_rounds enable row level security;
+revoke all on public.gali_board_rounds from anon, authenticated;
 
 -- ---------------- schedules ----------------
 create extension if not exists pg_cron;
