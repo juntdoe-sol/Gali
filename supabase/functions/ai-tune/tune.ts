@@ -98,9 +98,9 @@ export function styleBrief(style: Style): string {
   const b = STYLE_BOUNDS[style];
   const ranges = (Object.keys(b) as (keyof AiParams)[]).filter((k) => b[k][0] !== b[k][1]).map((k) => `${k} ${b[k][0]} to ${b[k][1]}`).join(', ');
   const goal = {
-    safe: 'Safe: players asked to "play safe, don\'t lose much, be smart". The bot stakes only squares worth more than they cost, with the margin minEdge, sized for the best expected return. Judge it by expected and realized return; minEdge cannot go below break-even. Each review moves a setting at most a quarter of its range.',
+    safe: 'Safe: players asked to "play safe, don\'t lose much, be smart". The bot stakes only squares worth more than they cost, with the margin minEdge, sized for the best expected return. Judge it by expected and realized return, and keep losses small. The players chose to let the team tune this style freely: any value in range, no step limit.',
     solo: 'Aggressive (solo hunter): the players want the solo 1 ORE as often as possible and accept losing rounds for it. The bot spends its whole round budget (maxRoundShare of the balance) evenly across at least 23 of the 25 squares (skipping only the most crowded), choosing how many from 23 to 25 gives the best chance of the solo ORE, and keeps only covers where the round as a whole clears minEdge per SOL. It must cover most of the board: the solo ORE only goes to miners on the winning square. minEdge may be negative: a planned loss per SOL in exchange for more ORE. Judge it by SOL lost per ORE mined against the ORE price, and by how often it wins ORE, over many rounds. The players chose to let the team tune this style freely: any value in range, no step limit.',
-    balance: 'Balance: the players want steady ORE without big losses. The bot covers at least 23 of the 25 squares like the aggressive style, but with a smaller round budget (maxRoundShare) and a margin near break-even (minEdge from -0.1). Judge it by ORE mined against SOL lost, and keep losing streaks small.',
+    balance: 'Balance: the players want steady ORE without big losses. The bot covers at least 23 of the 25 squares like the aggressive style, but with a smaller round budget (maxRoundShare) and a margin near break-even. Judge it by ORE mined against SOL lost, and keep losing streaks small. The players chose to let the team tune this style freely: any value in range, no step limit.',
     motherlode: 'Motherlode chaser: the players want a share of big motherlodes. The bot plays only when the motherlode holds at least minMotherlode ORE, then hunts like the solo hunter (the whole round budget across at least 23 squares, minEdge may be negative). Judge it by motherlode shares and ORE won against SOL lost over many rounds; most rounds it sits out. The players chose to let the team tune this style freely: any value in range, no step limit.',
   }[style];
   return `Style under review: ${goal}\nAllowed ranges: ${ranges}.`;
@@ -387,12 +387,10 @@ export function riskLimits(answer: unknown, style: Style = 'safe'): RiskLimits {
 export function apply(answer: unknown, current: AiParams, limits?: RiskLimits, style: Style = 'safe'): { params: AiParams; note: string; learned: string; feedbackReply: string } {
   const a = (answer && typeof answer === 'object' ? answer : {}) as Record<string, unknown>;
   const bounds = STYLE_BOUNDS[style];
-  // safe moves a quarter of a range per review; the hunters' players chose to let the team tune them freely
-  const params = limitStep(clampParams(a, current, bounds), current, style === 'safe' ? 0.25 : 1, bounds);
-  if (limits) {
-    params.minEdge = Math.max(params.minEdge, limits.minEdgeFloor);
-    params.maxRoundShare = Math.min(params.maxRoundShare, limits.maxRoundShareCap);
-  }
+  // the player chose to let the team tune every style freely: no step limit, and the risk checker advises the lead
+  // rather than capping it (`limits` is kept for the log only)
+  void limits;
+  const params = limitStep(clampParams(a, current, bounds), current, 1, bounds);
   return { params, note: text(a.note, 280), learned: text(a.learned, 900), feedbackReply: text(a.feedbackReply, 400) };
 }
 
