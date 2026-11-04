@@ -62,6 +62,10 @@ const ME = 'me';
 const HOST_LOST_MS = 3500;
 const GUEST_LOST_MS = 5000;
 const NET_MS = 100;
+/** A correction up to this far (px) glides instead of jumping. 60 was too little: a dash or a knockback seen 150 ms late is more. */
+const EASE_MAX = 150;
+/** How fast a correction glides away (s). */
+const EASE_S = 0.07;
 /** each fighter's colour: you are gold */
 const COLORS = ['#ffc93c', '#ff5a6a', '#4fd6ef', '#8ef06a'];
 const BOT_NAMES = ['Rusty', 'Clank', 'Pebble', 'Grit'];
@@ -347,7 +351,8 @@ export class BrawlEngine {
   private ease(f: Fighter, ox: number, oy: number) {
     const dx = ox - f.x, dy = oy - f.y;
     const o = this.off.get(f.id) ?? { x: 0, y: 0 };
-    if (Math.hypot(dx + o.x, dy + o.y) > 60) this.off.delete(f.id);
+    // a respawn is a real jump; anything else (a late snapshot, a knockback the copy had not seen) glides there
+    if (f.respawn > 0 || Math.hypot(dx + o.x, dy + o.y) > EASE_MAX) this.off.delete(f.id);
     else this.off.set(f.id, { x: o.x + dx, y: o.y + dy });
   }
   private netTick(m: Match, now: number) {
@@ -523,9 +528,11 @@ export class BrawlEngine {
       }
       this.wasFull = full;
     }
+    // the same glide on every screen: about 70 ms to close two thirds of the gap, whatever the refresh rate
+    const keep = Math.exp(-dt / EASE_S);
     for (const [id, o] of this.off) {
-      o.x *= 0.82;
-      o.y *= 0.82;
+      o.x *= keep;
+      o.y *= keep;
       if (Math.abs(o.x) + Math.abs(o.y) < 0.3) this.off.delete(id);
     }
     if (m && m.over && !this.sent) {

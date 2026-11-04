@@ -133,6 +133,9 @@ function setPhys(f: Fighter, p: number[]) {
     f.ledge = p[32];
   }
   const mv = MOVE_LIST[p[15]];
+  // the same swing already playing here: keep its own frame count, or every snapshot (a little late) would rewind the
+  // swing a few frames and it would stutter
+  if (mv && f.act && f.act.move === mv && Math.abs(f.act.f - p[16]) < 8) return;
   f.act = mv ? { move: mv, f: p[16], hit: f.act && f.act.move === mv ? f.act.hit : [] } : null;
 }
 /**
