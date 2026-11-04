@@ -320,6 +320,10 @@ where not exists (select 1 from public.gali_ai_params where style = 'balance');
 alter table public.gali_bot_settings drop constraint if exists gali_bot_settings_style_check;
 alter table public.gali_bot_settings add constraint gali_bot_settings_style_check check (style in ('safe', 'balance', 'solo', 'motherlode'));
 
+-- how long the player wants the bot to run (set at START); the AI spreads the balance over the rounds left
+alter table public.gali_bot_settings add column if not exists run_hours numeric check (run_hours > 0 and run_hours <= 720);
+alter table public.gali_bot_settings add column if not exists run_until timestamptz;
+
 -- Everyone: a wallet's Bot settings (nothing secret: they are rules, not keys)
 create or replace function public.gali_bot_settings_of(p_wallet text)
 returns setof public.gali_bot_settings

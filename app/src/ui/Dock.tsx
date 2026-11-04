@@ -808,11 +808,24 @@ function BotModeSwitch() {
   );
 }
 
+/** How long a run lasts. With an end time the AI sizes every bet from what is left in the bot over the rounds left. */
+const RUN_TIMES: { label: string; hours: number | null }[] = [
+  { label: '1H', hours: 1 }, { label: '6H', hours: 6 }, { label: '1D', hours: 24 }, { label: '3D', hours: 72 }, { label: '7D', hours: 168 }, { label: 'NONSTOP', hours: null },
+];
+const runText = (h: number) => (h % 24 === 0 ? `${h / 24} day${h === 24 ? '' : 's'}` : `${h} hour${h === 1 ? '' : 's'}`);
+/** "5h 20m left", or "ended" once the run time is over. */
+const runLeft = (until: number) => {
+  const m = Math.round((until - Date.now()) / 60_000);
+  if (m <= 0) return 'run time over: STOP and START to run again';
+  return m >= 1440 ? `${Math.floor(m / 1440)}d ${Math.floor((m % 1440) / 60)}h left` : m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m left` : `${m}m left`;
+};
+
 /** Before START: Bot (their own rules, no AI) or AI bot (a style the agents tune), and their own limits. START saves them. */
 function BotSettingsPanel({ saved }: { saved: BotSettings | null }) {
   const start = saved ?? DEFAULT_BOT_SETTINGS;
   const mode = useAi((s) => s.modeDraft) ?? start.mode;
   const [style, setStyle] = useState<AiStyle>(start.style);
+  const [runHours, setRunHours] = useState<number | null>(start.runHours ?? null);
   const [f, setF] = useState(() => ({
     spots: String(start.spots), perSpot: String(start.perSpotSol), maxSpot: numText(start.maxSpotSol), minMotherlode: numText(start.minMotherlodeOre),
     maxRound: numText(start.maxRoundSol), stopLoss: numText(start.stopLossSol),
@@ -828,11 +841,11 @@ function BotSettingsPanel({ saved }: { saved: BotSettings | null }) {
       draft: ok
         ? {
             mode, style, spots: spots >= 1 && spots <= 25 ? spots : 10, perSpotSol: Number(f.perSpot) > 0 ? Number(f.perSpot) : 0.002,
-            maxSpotSol: numOrNull(f.maxSpot), minMotherlodeOre: numOrNull(f.minMotherlode), maxRoundSol: numOrNull(f.maxRound), stopLossSol: numOrNull(f.stopLoss),
+            maxSpotSol: numOrNull(f.maxSpot), minMotherlodeOre: numOrNull(f.minMotherlode), maxRoundSol: numOrNull(f.maxRound), stopLossSol: numOrNull(f.stopLoss), runHours,
           }
         : null,
     });
-  }, [ok, mode, style, spots, f]);
+  }, [ok, mode, style, spots, f, runHours]);
   const [edit, setEdit] = useState(false);
   const rulesLine = [
     mode === 'bot' ? `${f.spots || '?'} spots × ${f.perSpot || '?'} SOL` : null,
@@ -840,6 +853,7 @@ function BotSettingsPanel({ saved }: { saved: BotSettings | null }) {
     mode === 'bot' && f.minMotherlode ? `motherlode ≥ ${f.minMotherlode}` : null,
     f.maxRound ? `max ${f.maxRound}/round` : null,
     f.stopLoss ? `stop-loss ${f.stopLoss}` : null,
+    mode === 'ai' && runHours ? `spreads your SOL over ${runText(runHours)}` : null,
   ].filter(Boolean);
   return (
     <View style={{ gap: 8 }}>
@@ -849,6 +863,14 @@ function BotSettingsPanel({ saved }: { saved: BotSettings | null }) {
               <Chip key={k} grow label={k === 'safe' ? 'PLAY SAFE' : k.toUpperCase()} onPress={() => preset(BOT_PRESETS[k])} />
             ))
           : AI_STYLES.map((x) => <Chip key={x.id} grow label={x.label} on={style === x.id} onPress={() => setStyle(x.id)} />)}
+      </View>
+      <View style={styles.lineRight}>
+        <T v="label" style={{ fontSize: 11, color: COLORS.muted, alignSelf: 'center' }}>
+          RUN FOR
+        </T>
+        {RUN_TIMES.map((x) => (
+          <Chip key={x.label} grow label={x.label} on={runHours === x.hours} onPress={() => setRunHours(x.hours)} />
+        ))}
       </View>
       <Pressable onPress={() => setEdit(true)} style={styles.rulesLine} accessibilityRole="button" accessibilityLabel="Edit rules and limits">
         <T v="num" numberOfLines={1} style={{ flex: 1, fontSize: 13, color: ok ? COLORS.text : COLORS.red }}>
@@ -891,7 +913,12 @@ function BotSettingsSummary({ s }: { s: BotSettings | null }) {
     v.mode === 'bot'
       ? [`quietest ${v.spots} spots`, `${v.perSpotSol} SOL each`, v.maxSpotSol ? `skips spots over ${v.maxSpotSol} SOL` : null, v.minMotherlodeOre ? `only when the motherlode is ${v.minMotherlodeOre}+ ORE` : null]
       : [AI_STYLES.find((x) => x.id === v.style)?.about ?? ''];
-  const limits = [v.maxRoundSol ? `most ${v.maxRoundSol} SOL a round` : null, v.stopLossSol ? `stop-loss ${v.stopLossSol} SOL` : null].filter(Boolean);
+  const limits = [
+    v.maxRoundSol ? `most ${v.maxRoundSol} SOL a round` : null,
+    v.stopLossSol ? `stop-loss ${v.stopLossSol} SOL` : null,
+    v.runHours ? `runs ${runText(v.runHours)}${v.runUntil ? ` (${runLeft(v.runUntil)})` : ''}` : null,
+    v.mode === 'ai' && v.runHours ? 'each bet = SOL left ÷ rounds left' : null,
+  ].filter(Boolean);
   return (
     <View style={[styles.aiLog, { borderBottomWidth: 0 }]}>
       <T v="label" style={{ color: COLORS.gold }}>
