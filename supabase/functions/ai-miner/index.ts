@@ -54,6 +54,7 @@ function supabaseHooks(base: string, key: string): Hooks {
         style: isStyle(r.style) ? r.style : 'safe',
         rules: { spots: Number(r.spots), perSpotSol: Number(r.per_spot_sol), maxSpotSol: n(r.max_spot_sol), minMotherlodeOre: n(r.min_motherlode_ore), maxRoundSol: n(r.max_round_sol) },
         stopLossSol: n(r.stop_loss_sol),
+        runUntil: r.run_until ? Date.parse(String(r.run_until)) || null : null,
       }]));
     }),
     net: cache(30_000, async () => {

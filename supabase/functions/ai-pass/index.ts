@@ -81,6 +81,8 @@ export function botSettings(x: unknown): Record<string, unknown> | string {
     per_spot_sol: perSpot ?? 0.002,
     max_spot_sol: pos('maxSpotSol', 10_000), min_motherlode_ore: pos('minMotherlodeOre', 100_000),
     max_round_sol: pos('maxRoundSol', 10_000), stop_loss_sol: pos('stopLossSol', 100_000),
+    // how long the bot runs, from START (up to 30 days); empty: until stopped
+    run_hours: pos('runHours', 720),
   };
   return Object.values(out).some((n) => Number.isNaN(n)) ? 'Check the numbers: spots 1 to 25, amounts above 0' : out;
 }
@@ -126,7 +128,10 @@ Deno.serve(async (req) => {
         method: 'POST',
         headers: { ...h, prefer: 'resolution=merge-duplicates,return=representation' },
         // saving starts the stop-loss count again
-        body: JSON.stringify({ wallet, ...v, started_at: new Date().toISOString(), updated_at: new Date().toISOString() }),
+        body: JSON.stringify({
+          wallet, ...v, started_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+          run_until: v.run_hours ? new Date(Date.now() + Number(v.run_hours) * 3_600_000).toISOString() : null,
+        }),
       });
       if (!r.ok) return json(500, { error: 'could not save your settings' });
       return json(200, { settings: (await r.json())[0] });
