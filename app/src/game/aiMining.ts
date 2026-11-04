@@ -74,7 +74,10 @@ interface AiState {
 }
 /** Bot: the player's own rules, no AI. AI bot: a style the review agents tune. SOL amounts in SOL; null = no such rule. */
 export type BotMode = 'bot' | 'ai';
-export type AiStyle = 'safe' | 'solo' | 'motherlode';
+export type AiStyle = 'safe' | 'balance' | 'solo';
+/** Bot mining is closed while it is being tuned: only these wallets see it (the server keeps the same list). */
+export const BOT_WALLETS: readonly string[] = ['PNX9utQBdEs4W7vMNop4wkuzPEsd84dGbMgFeVcoKYa', 'JANRmfiFcQo2D251hQfqmpYzGCrEzqjCid7kisv3Vpym'];
+export const botAllowed = (wallet: string | null | undefined) => BOT_WALLETS.length === 0 || (!!wallet && BOT_WALLETS.includes(wallet));
 export interface BotSettings {
   mode: BotMode;
   style: AiStyle;
@@ -89,7 +92,7 @@ export const DEFAULT_BOT_SETTINGS: BotSettings = { mode: 'ai', style: 'safe', sp
 const orNull = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 const toSettings = (x: Record<string, unknown>): BotSettings => ({
   mode: x.mode === 'bot' ? 'bot' : 'ai',
-  style: x.style === 'solo' || x.style === 'motherlode' ? x.style : 'safe',
+  style: x.style === 'solo' || x.style === 'balance' ? x.style : 'safe',
   spots: Number(x.spots) || 10, perSpotSol: Number(x.per_spot_sol) || 0.002,
   maxSpotSol: orNull(x.max_spot_sol), minMotherlodeOre: orNull(x.min_motherlode_ore), maxRoundSol: orNull(x.max_round_sol), stopLossSol: orNull(x.stop_loss_sol),
 });

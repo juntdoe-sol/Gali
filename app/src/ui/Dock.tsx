@@ -20,7 +20,7 @@ import { useLayout } from './layout';
 import { openScanTv, TV_PAIR } from './TvLink';
 import { evOf } from '../game/ev';
 import { refreshMarket, useOreStats } from '../game/oreStats';
-import { buyPass, DEFAULT_BOT_SETTINGS, loadLog, netSol, refreshAi, saveBotSettings, sendFeedback, startTrial, useAi, type AiLogEntry, type AiStyle, type AiVote, type BotMode, type BotSettings } from '../game/aiMining';
+import { botAllowed, buyPass, DEFAULT_BOT_SETTINGS, loadLog, netSol, refreshAi, saveBotSettings, sendFeedback, startTrial, useAi, type AiLogEntry, type AiStyle, type AiVote, type BotMode, type BotSettings } from '../game/aiMining';
 
 const SHAKE_G = 2.1;
 const layoutNowDesktop = () => layoutNow().desktop;
@@ -780,14 +780,15 @@ function AiLog({ log, busy }: { log: AiLogEntry[] | null; busy: boolean }) {
 }
 
 /** Quick starting points for the Bot's rules; every value stays editable. */
-const BOT_PRESETS: Record<'safe' | 'aggressive', Partial<BotSettings>> = {
-  safe: { spots: 5, perSpotSol: 0.002, maxSpotSol: 0.5, minMotherlodeOre: null, maxRoundSol: 0.01, stopLossSol: 0.05 },
-  aggressive: { spots: 20, perSpotSol: 0.005, maxSpotSol: null, minMotherlodeOre: null, maxRoundSol: 0.1, stopLossSol: 0.3 },
+const BOT_PRESETS: Record<'aggressive' | 'balance' | 'safe', Partial<BotSettings>> = {
+  aggressive: { spots: 24, perSpotSol: 0.005, maxSpotSol: null, minMotherlodeOre: null, maxRoundSol: 0.12, stopLossSol: 0.5 },
+  balance: { spots: 23, perSpotSol: 0.002, maxSpotSol: null, minMotherlodeOre: null, maxRoundSol: 0.05, stopLossSol: 0.2 },
+  safe: { spots: 23, perSpotSol: 0.0005, maxSpotSol: 0.5, minMotherlodeOre: null, maxRoundSol: 0.012, stopLossSol: 0.05 },
 };
 const AI_STYLES: { id: AiStyle; label: string; about: string }[] = [
-  { id: 'safe', label: 'SAFE', about: 'Plays only when the ORE is worth more than the SOL, with a margin. Sits out crowded rounds.' },
-  { id: 'solo', label: 'SOLO HUNTER', about: 'Chases the solo 1 ORE: spends its round budget on the quietest spots and accepts losing rounds for more ORE.' },
-  { id: 'motherlode', label: 'MOTHERLODE', about: 'Waits for a big motherlode, then plays hard for a share of it. Sits out most rounds.' },
+  { id: 'solo', label: 'AGGRESSIVE', about: 'Goes for the solo 1 ORE and the motherlode every round: covers 23 to 25 spots with its biggest round budget, more on the quiet spots, and accepts losing rounds for more ORE.' },
+  { id: 'balance', label: 'BALANCE', about: 'Covers 23 to 25 spots every round with a smaller budget, close to break-even. Steady ORE, smaller losses.' },
+  { id: 'safe', label: 'PLAY SAFE', about: 'Plays only when the ORE is worth more than the SOL, with a margin. Sits out crowded rounds.' },
 ];
 const numText = (n: number | null) => (n === null ? '' : String(n));
 const numOrNull = (t: string) => (t.trim() === '' || !(Number(t) > 0) ? null : Number(t));
@@ -827,6 +828,8 @@ function BotModeSwitch() {
   const saved = useAi((s) => s.settings?.mode ?? DEFAULT_BOT_SETTINGS.mode);
   const draft = useAi((s) => s.modeDraft);
   const running = useGame((s) => Boolean(s.autopilot?.ai));
+  const owner = useGame((s) => s.wallet.owner);
+  if (!botAllowed(owner) && !running) return null;
   // while it runs the switch shows what is playing and cannot change
   const mode = running ? saved : (draft ?? saved);
   const pick = (m: BotMode) => useAi.setState({ modeDraft: m });
@@ -874,8 +877,9 @@ function BotSettingsPanel({ saved }: { saved: BotSettings | null }) {
             No AI: the bot plays exactly your rules every round. Start from a preset, then change anything. Settings lock while the bot runs.
           </T>
           <View style={styles.lineRight}>
-            <Chip grow label="SAFE PLAY" onPress={() => preset(BOT_PRESETS.safe)} />
             <Chip grow label="AGGRESSIVE" onPress={() => preset(BOT_PRESETS.aggressive)} />
+            <Chip grow label="BALANCE" onPress={() => preset(BOT_PRESETS.balance)} />
+            <Chip grow label="PLAY SAFE" onPress={() => preset(BOT_PRESETS.safe)} />
           </View>
           <NumField label="Spots" info="How many spots to play each round, quietest first (1 to 25)." value={f.spots} onChange={set('spots')} unit="of 25" />
           <NumField label="SOL per spot" info="How much SOL on each spot. Never more than your most per spot, which ORE enforces." value={f.perSpot} onChange={set('perSpot')} unit="SOL" />
@@ -921,7 +925,7 @@ function BotSettingsSummary({ s }: { s: BotSettings | null }) {
   return (
     <View style={[styles.aiLog, { borderBottomWidth: 0, marginTop: 8 }]}>
       <T v="label" style={{ color: COLORS.gold }}>
-        {v.mode === 'bot' ? 'BOT · YOUR RULES' : `AI BOT · ${AI_STYLES.find((x) => x.id === v.style)?.label ?? 'SAFE'}`}
+        {v.mode === 'bot' ? 'BOT · YOUR RULES' : `AI BOT · ${AI_STYLES.find((x) => x.id === v.style)?.label ?? 'PLAY SAFE'}`}
       </T>
       <T v="num" style={{ fontSize: 14, color: COLORS.text, lineHeight: 17 }}>
         {[...parts.filter(Boolean), ...limits].join(' · ')}
@@ -950,7 +954,6 @@ function AiPanel() {
   }, [owner]);
 
   const oreSol = stats?.oreSol ?? 0;
-  const allNet = stats ? netSol(stats, oreSol) : 0;
   const myNet = me ? netSol(me, oreSol) : 0;
   const passOn = Boolean(me?.expiresAt && me.expiresAt > Date.now());
   useEffect(() => {
@@ -980,28 +983,22 @@ function AiPanel() {
                 ? 'LIMIT IS OVER THE AMOUNT'
                 : `START BOT · ${fmtSol(amt)} SOL`;
 
+  // closed while it is being tuned; a bot already running can still be seen and stopped
+  if (!botAllowed(owner) && !aiOn) {
+    return (
+      <View style={[styles.aiLog, { borderBottomWidth: 0 }]}>
+        <T v="label" style={{ color: COLORS.gold }}>
+          BOT MINING IS CLOSED FOR NOW
+        </T>
+        <T v="num" style={styles.evNote}>
+          We are tuning the bots before opening them to everyone. LITE and PRO work as usual.
+        </T>
+      </View>
+    );
+  }
+
   return (
     <>
-      <Row
-        icon="bot"
-        label="Miners on Gali bots"
-        info={AI_INFO}
-        right={
-          <T v="num" style={{ fontSize: 18, color: COLORS.gold }}>
-            {stats ? stats.activeMiners : status === 'error' ? '—' : '…'}
-          </T>
-        }
-      />
-      <Row
-        icon="sol"
-        label="All bot miners"
-        info="What Gali's bots made all their miners together, from ORE's own accounts: SOL back plus ORE mined (valued at today's ORE/SOL price after ORE's 10% claim fee), minus the SOL it played and Gali's 0.25% fee."
-        right={
-          <T v="num" style={{ fontSize: 16, color: !stats || !stats.rounds ? COLORS.muted : allNet >= 0 ? COLORS.green : COLORS.red }}>
-            {stats && stats.rounds ? `${signed(allNet)} SOL · ${stats.rounds} rounds` : 'no rounds yet'}
-          </T>
-        }
-      />
       <Row
         icon="bot"
         label="AI agents reviewing"

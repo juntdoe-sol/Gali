@@ -99,8 +99,9 @@ export function styleBrief(style: Style): string {
   const ranges = (Object.keys(b) as (keyof AiParams)[]).filter((k) => b[k][0] !== b[k][1]).map((k) => `${k} ${b[k][0]} to ${b[k][1]}`).join(', ');
   const goal = {
     safe: 'Safe: players asked to "play safe, don\'t lose much, be smart". The bot stakes only squares worth more than they cost, with the margin minEdge, sized for the best expected return. Judge it by expected and realized return; minEdge cannot go below break-even. Each review moves a setting at most a quarter of its range.',
-    solo: 'Solo hunter: the players want the solo 1 ORE as often as possible and accept losing rounds for it. The bot spends its whole round budget (maxRoundShare of the balance) evenly on the quietest squares, choosing how many squares gives the best chance of the solo ORE, and keeps only covers where every square clears minEdge per SOL. minEdge may be negative: a planned loss per SOL in exchange for more ORE. Judge it by SOL lost per ORE mined against the ORE price, and by how often it wins ORE, over many rounds. The players chose to let the team tune this style freely: any value in range, no step limit.',
-    motherlode: 'Motherlode chaser: the players want a share of big motherlodes. The bot plays only when the motherlode holds at least minMotherlode ORE, then hunts like the solo hunter (the whole round budget on the quietest squares, minEdge may be negative). Judge it by motherlode shares and ORE won against SOL lost over many rounds; most rounds it sits out. The players chose to let the team tune this style freely: any value in range, no step limit.',
+    solo: 'Aggressive (solo hunter): the players want the solo 1 ORE as often as possible and accept losing rounds for it. The bot spends its whole round budget (maxRoundShare of the balance) evenly across at least 23 of the 25 squares (skipping only the most crowded), choosing how many from 23 to 25 gives the best chance of the solo ORE, and keeps only covers where the round as a whole clears minEdge per SOL. It must cover most of the board: the solo ORE only goes to miners on the winning square. minEdge may be negative: a planned loss per SOL in exchange for more ORE. Judge it by SOL lost per ORE mined against the ORE price, and by how often it wins ORE, over many rounds. The players chose to let the team tune this style freely: any value in range, no step limit.',
+    balance: 'Balance: the players want steady ORE without big losses. The bot covers at least 23 of the 25 squares like the aggressive style, but with a smaller round budget (maxRoundShare) and a margin near break-even (minEdge from -0.1). Judge it by ORE mined against SOL lost, and keep losing streaks small.',
+    motherlode: 'Motherlode chaser: the players want a share of big motherlodes. The bot plays only when the motherlode holds at least minMotherlode ORE, then hunts like the solo hunter (the whole round budget across at least 23 squares, minEdge may be negative). Judge it by motherlode shares and ORE won against SOL lost over many rounds; most rounds it sits out. The players chose to let the team tune this style freely: any value in range, no step limit.',
   }[style];
   return `Style under review: ${goal}\nAllowed ranges: ${ranges}.`;
 }
@@ -187,6 +188,47 @@ export function soloSummary(rows: SoloRow[]): Record<string, unknown> {
 
 const SOLO_NOTE = 'Solo winners are anyone on the board, not only Gali bots. A solo win goes to one miner on the winning square with odds equal to their share, so a big share is how they win. Wallets that win often are likely bots playing big every round.';
 
+/** Every miner on the board in one round, grouped by style (a gali_board_rounds row). Lamports and grams. */
+export interface BoardRow { round_id: number | string; miners: number; deployed: number | string; seen: number; split: boolean; motherlode: number | string; groups: Record<string, { miners: number; deployed: number; back: number; onWin: number; ore: number; solo: number }> }
+
+/**
+ * How every miner on ORE's board did, by style ("<squares covered>|<SOL per square>"), over the given rounds: how often
+ * each style was on the winning square, the ORE it mined, the SOL it lost, and its solo wins. Any wallet, not only ours.
+ */
+export function boardSummary(rows: BoardRow[]): Record<string, unknown> {
+  if (!rows.length) return { rounds: 0 };
+  const acc = new Map<string, { minerRounds: number; deployed: number; back: number; onWin: number; ore: number; solo: number }>();
+  for (const r of rows) {
+    for (const [k, g] of Object.entries(r.groups ?? {})) {
+      const a = acc.get(k) ?? { minerRounds: 0, deployed: 0, back: 0, onWin: 0, ore: 0, solo: 0 };
+      a.minerRounds += g.miners; a.deployed += g.deployed; a.back += g.back; a.onWin += g.onWin; a.ore += g.ore; a.solo += g.solo;
+      acc.set(k, a);
+    }
+  }
+  const styles = [...acc.entries()]
+    .map(([k, a]) => {
+      const [squares, solPerSquare] = k.split('|');
+      const lost = (a.deployed - a.back) / 1e9;
+      const ore = a.ore / 1e11;
+      return {
+        squares, solPerSquare, minerRounds: a.minerRounds, solDeployed: r3(a.deployed / 1e9), solLost: r3(lost),
+        onWinningSquare: r3(a.onWin / Math.max(1, a.minerRounds)), ore: r3(ore), solLostPerOre: ore > 0 ? r3(lost / ore) : null,
+        soloWins: a.solo, soloWinsPer100MinerRounds: r3((a.solo * 100) / Math.max(1, a.minerRounds)),
+      };
+    })
+    .sort((x, y) => y.ore - x.ore);
+  return {
+    rounds: rows.length,
+    minersPerRound: r3(rows.reduce((n, r) => n + r.miners, 0) / rows.length),
+    boardSolPerRound: r3(rows.reduce((n, r) => n + Number(r.deployed), 0) / rows.length / 1e9),
+    sharedRounds: rows.filter((r) => r.split).length,
+    motherlodes: rows.filter((r) => Number(r.motherlode) > 0).length,
+    styles,
+  };
+}
+
+const BOARD_NOTE = 'every miner on ORE\'s board, not only Gali bots, grouped by squares covered and average SOL per covered square. Compare SOL lost per ORE and solo wins per 100 miner-rounds across styles: the styles that mine ORE cheapest and win solo most are what to copy. Our bot covers 23 to 25 squares';
+
 // ---------------- the round reviewer ----------------
 
 /** What the bot saw and decided in one round (a gali_ai_thoughts row), in lamports and grams. */
@@ -196,7 +238,7 @@ export interface PlayRow { round_id: number | string; total: number | string; so
 
 const sol = (x: unknown) => Number(x) / 1e9;
 /** One line per round for the round reviewer, oldest first, plus totals. Nothing per wallet. */
-export function roundsPrompt(current: AiParams, thoughts: ThoughtRow[], plays: PlayRow[], oreSol = 0, solos: SoloRow[] = []): string {
+export function roundsPrompt(current: AiParams, thoughts: ThoughtRow[], plays: PlayRow[], oreSol = 0, solos: SoloRow[] = [], boards: BoardRow[] = []): string {
   const byRound = new Map<string, PlayRow[]>();
   for (const p of plays) if (!p.void) byRound.set(String(p.round_id), [...(byRound.get(String(p.round_id)) ?? []), p]);
   let staked = 0, back = 0, ore = 0, played = 0, gold = 0, drawn = 0;
@@ -225,6 +267,7 @@ export function roundsPrompt(current: AiParams, thoughts: ThoughtRow[], plays: P
     `Rounds since your last look, oldest first:\n${lines.join('\n')}`,
     `Totals: ${fmt({ rounds: thoughts.length, played, drawn, onWinningSquare: gold, stakedSol: staked, backSol: back, ore, orePriceSol: oreSol, oreValueSol: ore * ORE_KEEP * oreSol, netSol: back + ore * ORE_KEEP * oreSol - staked })}`,
     `How the solo 1 ORE winners in these rounds played (${SOLO_NOTE}): ${fmt(soloSummary(solos))}`,
+    `The whole board in these rounds (${BOARD_NOTE}): ${fmt(boardSummary(boards))}`,
   ].join('\n\n');
 }
 
@@ -263,7 +306,7 @@ export function commentBlock(rows: FeedbackRow[]): string {
 
 const fmt = (v: unknown) => JSON.stringify(v, (_k, x) => (typeof x === 'number' ? Number(x.toPrecision(5)) : x));
 
-export function analystPrompt(current: AiParams, last24h: Summary, last7d: Summary, history: { at: string; note: string | null }[], lessons: { at: string; lessons: string }[] = [], style: Style = 'safe', solos: SoloRow[] = []): string {
+export function analystPrompt(current: AiParams, last24h: Summary, last7d: Summary, history: { at: string; note: string | null }[], lessons: { at: string; lessons: string }[] = [], style: Style = 'safe', solos: SoloRow[] = [], boards: BoardRow[] = []): string {
   return [
     styleBrief(style),
     `Current settings: ${fmt(current)}`,
@@ -272,6 +315,7 @@ export function analystPrompt(current: AiParams, last24h: Summary, last7d: Summa
     `The team's recent notes, newest first:\n${history.map((h) => `- ${h.at}: ${h.note ?? ''}`).join('\n') || '- none yet'}`,
     `The round reviewer's lessons since the last review, newest first:\n${lessons.map((l) => `- ${l.at}: ${text(l.lessons, 400)}`).join('\n') || '- none yet'}`,
     `How solo 1 ORE winners played in the last 24 hours (${SOLO_NOTE}): ${fmt(soloSummary(solos))}`,
+    `The whole board in the last 24 hours (${BOARD_NOTE}): ${fmt(boardSummary(boards))}`,
   ].join('\n\n');
 }
 
