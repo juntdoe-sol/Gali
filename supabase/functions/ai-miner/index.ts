@@ -6,6 +6,7 @@
 import { Connection } from './deps.ts';
 import { loadKey } from '../autopilot/core.ts';
 import { clampParams, isStyle, STYLE_BOUNDS, STYLE_DEFAULTS, type AiParams, type Style } from '../_shared/aiStrategy.ts';
+import { botAllowed } from '../_shared/botAccess.ts';
 import { run, sweepFees, type BotChoice, type Hooks } from './core.ts';
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -71,7 +72,7 @@ function supabaseHooks(base: string, key: string): Hooks {
     }),
     active: cache(20_000, async () => {
       const rows: { wallet: string }[] = await get(`gali_ai_passes?select=wallet&expires_at=gt.${encodeURIComponent(new Date().toISOString())}`);
-      return new Set(rows.map((r) => r.wallet));
+      return new Set(rows.map((r) => r.wallet).filter(botAllowed));
     }),
     async played(p) {
       const r = await fetch(`${base}/rest/v1/gali_ai_rounds`, {
@@ -107,6 +108,18 @@ function supabaseHooks(base: string, key: string): Hooks {
         }),
       });
       if (!r.ok) throw new Error(`solo ${r.status}`);
+    },
+    async boardRound(b) {
+      const r = await fetch(`${base}/rest/v1/gali_board_rounds`, {
+        method: 'POST',
+        headers: { ...h, prefer: 'resolution=ignore-duplicates' },
+        body: JSON.stringify({
+          round_id: b.round.toString(), miners: b.miners, deployed: b.deployed.toString(), seen: b.seen, win_square: b.winSquare, split: b.split,
+          reward: b.reward.toString(), motherlode: b.motherlode.toString(), solo_wallet: b.solo?.wallet ?? null, solo_stake: b.solo?.stake.toString() ?? null,
+          solo_square_total: b.solo?.squareTotal.toString() ?? null, solo_squares: b.solo?.squares ?? null, groups: b.groups,
+        }),
+      });
+      if (!r.ok) throw new Error(`board ${r.status}`);
     },
     async thought(t) {
       const r = await fetch(`${base}/rest/v1/gali_ai_thoughts`, {
