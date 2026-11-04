@@ -162,6 +162,23 @@ export interface PlanInput {
   /** The automation's fee in basis points (Gali's 0.25% unless the player set more). */
   feeBps?: bigint;
   params: AiParams;
+  /**
+   * Lamports this round may use when the player set how long the bot runs: what is left in the bot over the rounds
+   * left (see roundBudget). Unset: the style's share of the balance (maxRoundShare).
+   */
+  roundBudget?: number | null;
+}
+
+/** About how long one ORE round takes, intermission included (77 s measured in Nov 2026). */
+export const ROUND_MS = 77_000;
+
+/**
+ * The bot's pace when the player set an end time: the balance (less Gali's fee) spread over the rounds left. A round the
+ * AI sits out leaves its share in the bot, so the rounds after it get more; the last round may use all of it.
+ */
+export function roundBudget(balance: bigint, feeBps: bigint, runUntil: number, now: number, roundMs = ROUND_MS): number {
+  const left = Math.max(1, Math.ceil((runUntil - now) / roundMs));
+  return Number(balance) / (1 + Number(feeBps) / 10_000) / left;
 }
 
 export interface Plan {
@@ -245,7 +262,7 @@ export function planRound(i: PlanInput): Plan | null {
   if (!(prize > 0) || i.onBoard.length !== BLOCKS) return null;
   const feeRate = Number(i.feeBps ?? AI_FEE_BPS) / 10_000;
   // the round and ORE's fee on it must both come out of the balance
-  const budget = Math.min(Number(i.balance) * p.maxRoundShare, Number(i.balance) / (1 + feeRate));
+  const budget = Math.min(i.roundBudget ?? Number(i.balance) * p.maxRoundShare, Number(i.balance) / (1 + feeRate));
   const cap = Number(i.maxPerSquare);
   if (!(budget >= Number(MIN_STAKE)) || !(cap >= Number(MIN_STAKE))) return null;
   // what a stake must cost us per lamport for the margin to hold: ORE's cut, Gali's fee, and the margin
@@ -375,7 +392,7 @@ export function huntPlan(i: PlanInput & { style: Style; maxRoundSol?: number | n
   const prize = prizeLamports(i.motherlodeGrams, i.orePriceSol);
   if (!(prize > 0)) return null;
   const feeRate = Number(i.feeBps ?? AI_FEE_BPS) / 10_000;
-  const budget = Math.min(Number(i.balance) * p.maxRoundShare, Number(i.balance) / (1 + feeRate), i.maxRoundSol ? i.maxRoundSol * LAMPORTS_PER_SOL : Infinity);
+  const budget = Math.min(i.roundBudget ?? Number(i.balance) * p.maxRoundShare, Number(i.balance) / (1 + feeRate), i.maxRoundSol ? i.maxRoundSol * LAMPORTS_PER_SOL : Infinity);
   const cap = Number(i.maxPerSquare);
   const crowd = (s: number) => Math.max(EMPTY_FLOOR, Number(i.onBoard[s]) * (1 + p.crowdBuffer));
   const order = quietestFirst(i.onBoard).map((x) => x.s);

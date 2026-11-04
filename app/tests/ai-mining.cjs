@@ -675,6 +675,22 @@ const test = (name, fn) => {
     assert.ok(Math.abs(T.worstReviewCost('claude-haiku-5-5', 8000, 8000, 1) * 4 - T.worstReviewCost('claude-haiku-5-5', 8000)) < 1e-12, 'one call for the round reviewer');
   });
 
+  test('a set run time spreads the bot over the rounds left', () => {
+    const sol = (x) => BigInt(Math.round(x * 1e9));
+    const now = 1_000_000;
+    // 1 SOL over about 10 rounds: 0.1 SOL a round, less Gali's 0.25%
+    const b = S.roundBudget(sol(1), 25n, now + 10 * S.ROUND_MS, now);
+    assert.ok(Math.abs(b - 1e9 / 1.0025 / 10) < 1, `0.1 SOL a round: ${b / 1e9}`);
+    assert.ok(S.roundBudget(sol(1), 25n, now + 100 * S.ROUND_MS, now) < b / 9, 'a longer run bets smaller');
+    assert.ok(Math.abs(S.roundBudget(sol(1), 25n, now - 5, now) - 1e9 / 1.0025) < 1, 'the last round may use it all');
+    const onBoard = Array.from({ length: 25 }, (_, i) => sol(0.3 + (i % 5) * 0.1));
+    const base = { onBoard, motherlodeGrams: 0n, orePriceSol: 1.5, maxPerSquare: sol(1), balance: sol(2), params: { ...S.STYLE_DEFAULTS.solo, maxRoundShare: 0.5 }, style: 'solo' };
+    const paced = S.huntPlan({ ...base, roundBudget: 0.05e9 });
+    assert.ok(paced && Number(paced.total) <= 0.05e9 + 1 && Number(paced.total) >= 0.04e9, `the pace replaces the style's share: ${Number(paced?.total) / 1e9}`);
+    const safe = S.planRound({ ...base, params: { ...S.STYLE_DEFAULTS.safe, minEdge: -0.5, maxRoundShare: 0.5 }, roundBudget: 0.01e9 });
+    assert.ok(!safe || Number(safe.total) <= 0.01e9 + 25, 'safe keeps to the pace too');
+  });
+
   test('a quiet stretch needs no review', () => {
     const last = '2026-11-02T10:17:00Z';
     assert.equal(T.hasNews(last, ['2026-11-02T09:00:00Z'], []), false);
