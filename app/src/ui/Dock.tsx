@@ -20,7 +20,7 @@ import { useLayout } from './layout';
 import { openScanTv, TV_PAIR } from './TvLink';
 import { evOf } from '../game/ev';
 import { refreshMarket, useOreStats } from '../game/oreStats';
-import { botAllowed, buyPass, DEFAULT_BOT_SETTINGS, loadLog, netSol, refreshAi, saveBotSettings, sendFeedback, startTrial, useAi, type AiLogEntry, type AiStyle, type AiVote, type BotMode, type BotSettings } from '../game/aiMining';
+import { botAllowed, buyPass, DEFAULT_BOT_SETTINGS, loadRounds, type AiRoundRow, loadLog, netSol, refreshAi, saveBotSettings, sendFeedback, startTrial, useAi, type AiLogEntry, type AiStyle, type AiVote, type BotMode, type BotSettings } from '../game/aiMining';
 
 const SHAKE_G = 2.1;
 const layoutNowDesktop = () => layoutNow().desktop;
@@ -42,7 +42,6 @@ export function Dock({ embedded, noUnclaimed, scroll }: { embedded?: boolean; no
   const compact = false;
   const inside = useView((s) => s.focus >= 0);
   const { height: winH } = useWindowDimensions();
-  const phoneBodyMax = Math.max(220, winH * 0.55);
 
   // shake the phone to Smart-pick a random set of spots
   useEffect(() => {
@@ -107,7 +106,7 @@ export function Dock({ embedded, noUnclaimed, scroll }: { embedded?: boolean; no
       </>
     );
     // scroll: the tabs and the Bot switch stay put while the panel under them scrolls
-    return scroll ? (
+    return scroll && tab !== 'ai' ? (
       <View style={[styles.embedded, { flexShrink: 1, minHeight: 0 }]}>
         <View style={scroll.headStyle}>
           {head}
@@ -147,10 +146,8 @@ export function Dock({ embedded, noUnclaimed, scroll }: { embedded?: boolean; no
       {botSwitch}
       <UnclaimedRow />
       {tab === 'ai' && FEATURE_AI_MINING ? (
-        // the BOT panel is taller than LITE and PRO: it scrolls under the pinned tabs and switch
-        <ScrollView style={{ maxHeight: phoneBodyMax }} showsVerticalScrollIndicator>
-          <AiPanel />
-        </ScrollView>
+        // compact enough to fit without scrolling; the learning log and feedback pop up as cards
+        <AiPanel />
       ) : tab === 'lite' ? (
         <LitePanel compact={compact} />
       ) : (
@@ -674,10 +671,7 @@ function AiFeedback({ nextAt }: { nextAt: number | null }) {
   }, []);
   const wait = nextAt && nextAt > now ? nextAt - now : 0;
   return (
-    <View style={{ marginTop: 12, gap: 6 }}>
-      <T v="label" style={{ color: COLORS.gold }}>
-        HELP IT LEARN
-      </T>
+    <View style={{ gap: 6 }}>
       {wait ? (
         <T v="num" style={styles.evNote}>
           Thanks for your feedback. You can send more in {waitText(wait)}. The team reads it at every review.
@@ -730,10 +724,7 @@ function AiFeedback({ nextAt }: { nextAt: number | null }) {
 function AiLog({ log, busy }: { log: AiLogEntry[] | null; busy: boolean }) {
   const [all, setAll] = useState(false);
   return (
-    <View style={{ marginTop: 12 }}>
-      <T v="label" style={{ color: COLORS.gold, marginBottom: 4 }}>
-        WHAT THE AI BOT LEARNED
-      </T>
+    <View>
       {log === null ? (
         <Btn kind="plain" label={busy ? 'LOADING…' : 'READ THE LEARNING LOG'} sub="Sign in once with your wallet. No fee" onPress={() => void loadLog(true)} disabled={busy} />
       ) : !log.length ? (
@@ -786,9 +777,9 @@ const BOT_PRESETS: Record<'aggressive' | 'balance' | 'safe', Partial<BotSettings
   safe: { spots: 23, perSpotSol: 0.0005, maxSpotSol: 0.5, minMotherlodeOre: null, maxRoundSol: 0.012, stopLossSol: 0.05 },
 };
 const AI_STYLES: { id: AiStyle; label: string; about: string }[] = [
-  { id: 'solo', label: 'AGGRESSIVE', about: 'Goes for the solo 1 ORE and the motherlode every round: covers 23 to 25 spots with its biggest round budget, more on the quiet spots, and accepts losing rounds for more ORE.' },
-  { id: 'balance', label: 'BALANCE', about: 'Covers 23 to 25 spots every round with a smaller budget, close to break-even. Steady ORE, smaller losses.' },
-  { id: 'safe', label: 'PLAY SAFE', about: 'Plays only when the ORE is worth more than the SOL, with a margin. Sits out crowded rounds.' },
+  { id: 'solo', label: 'AGGRESSIVE', about: '23-25 spots, big bets, chases solo 1 ORE and motherlode.' },
+  { id: 'balance', label: 'BALANCE', about: '23-25 spots, smaller bets, steady ORE.' },
+  { id: 'safe', label: 'PLAY SAFE', about: 'Only plays rounds worth more than they cost.' },
 ];
 const numText = (n: number | null) => (n === null ? '' : String(n));
 const numOrNull = (t: string) => (t.trim() === '' || !(Number(t) > 0) ? null : Number(t));
@@ -866,50 +857,53 @@ function BotSettingsPanel({ saved }: { saved: BotSettings | null }) {
         : null,
     });
   }, [ok, mode, style, spots, f]);
+  const [edit, setEdit] = useState(false);
+  const rulesLine = [
+    mode === 'bot' ? `${f.spots || '?'} spots × ${f.perSpot || '?'} SOL` : null,
+    mode === 'bot' && f.maxSpot ? `skip > ${f.maxSpot}` : null,
+    mode === 'bot' && f.minMotherlode ? `motherlode ≥ ${f.minMotherlode}` : null,
+    f.maxRound ? `max ${f.maxRound}/round` : null,
+    f.stopLoss ? `stop-loss ${f.stopLoss}` : null,
+  ].filter(Boolean);
   return (
-    <View style={{ gap: 6 }}>
-      <T v="label" style={{ color: COLORS.gold }}>
-        SET UP YOUR BOT FIRST
-      </T>
-      {mode === 'bot' ? (
-        <>
-          <T v="num" style={styles.evNote}>
-            No AI: the bot plays exactly your rules every round. Start from a preset, then change anything. Settings lock while the bot runs.
-          </T>
-          <View style={styles.lineRight}>
-            <Chip grow label="AGGRESSIVE" onPress={() => preset(BOT_PRESETS.aggressive)} />
-            <Chip grow label="BALANCE" onPress={() => preset(BOT_PRESETS.balance)} />
-            <Chip grow label="PLAY SAFE" onPress={() => preset(BOT_PRESETS.safe)} />
-          </View>
-          <NumField label="Spots" info="How many spots to play each round, quietest first (1 to 25)." value={f.spots} onChange={set('spots')} unit="of 25" />
-          <NumField label="SOL per spot" info="How much SOL on each spot. Never more than your most per spot, which ORE enforces." value={f.perSpot} onChange={set('perSpot')} unit="SOL" />
-          <NumField label="Skip spots over" info="Never join a spot already holding more than this. Empty: no limit." value={f.maxSpot} onChange={set('maxSpot')} unit="SOL" />
-          <NumField label="Only when motherlode ≥" info="Play only when the motherlode holds at least this much ORE. Empty: every round." value={f.minMotherlode} onChange={set('minMotherlode')} unit="ORE" />
-        </>
-      ) : (
-        <>
-          <T v="num" style={styles.evNote}>
-            Pick how the AI plays. The review agents learn and tune your style from its own results. Settings lock while the bot runs.
-          </T>
-          <View style={styles.lineRight}>
-            {AI_STYLES.map((x) => (
-              <Chip key={x.id} grow label={x.label} on={style === x.id} onPress={() => setStyle(x.id)} />
-            ))}
-          </View>
-          <T v="num" style={styles.evNote}>
-            {AI_STYLES.find((x) => x.id === style)?.about}
-          </T>
-        </>
-      )}
-      <NumField label="Most per round" info="The most SOL the bot may use in one round. Empty: no extra limit beyond your balance and most per spot." value={f.maxRound} onChange={set('maxRound')} unit="SOL" />
-      <NumField
-        label="Stop-loss"
-        info="Stop once the bot is this much SOL down since it started (ORE mined counts at today's price). Empty: no stop-loss."
-        value={f.stopLoss}
-        onChange={set('stopLoss')}
-        unit="SOL"
-        last
-      />
+    <View style={{ gap: 6, marginTop: 8 }}>
+      <View style={styles.lineRight}>
+        {mode === 'bot'
+          ? (['aggressive', 'balance', 'safe'] as const).map((k) => (
+              <Chip key={k} grow label={k === 'safe' ? 'PLAY SAFE' : k.toUpperCase()} onPress={() => preset(BOT_PRESETS[k])} />
+            ))
+          : AI_STYLES.map((x) => <Chip key={x.id} grow label={x.label} on={style === x.id} onPress={() => setStyle(x.id)} />)}
+      </View>
+      <Pressable onPress={() => setEdit(true)} style={styles.rulesLine} accessibilityRole="button" accessibilityLabel="Edit rules and limits">
+        <T v="num" numberOfLines={1} style={{ flex: 1, fontSize: 13, color: ok ? COLORS.text : COLORS.red }}>
+          {mode === 'bot' ? (ok ? rulesLine.join(' · ') : 'Set your spots and SOL per spot') : [AI_STYLES.find((x) => x.id === style)?.about, ...rulesLine].filter(Boolean).join(' · ')}
+        </T>
+        <T v="label" style={{ fontSize: 12, color: COLORS.gold }}>
+          EDIT
+        </T>
+      </Pressable>
+      <PopCard title={mode === 'bot' ? 'YOUR BOT RULES' : 'AI BOT LIMITS'} open={edit} onClose={() => setEdit(false)}>
+        {mode === 'bot' ? (
+          <>
+            <NumField label="Spots" info="How many spots to play each round, quietest first (1 to 25)." value={f.spots} onChange={set('spots')} unit="of 25" />
+            <NumField label="SOL per spot" info="How much SOL on each spot. Never more than your most per spot, which ORE enforces." value={f.perSpot} onChange={set('perSpot')} unit="SOL" />
+            <NumField label="Skip spots over" info="Never join a spot already holding more than this. Empty: no limit." value={f.maxSpot} onChange={set('maxSpot')} unit="SOL" />
+            <NumField label="Only when motherlode ≥" info="Play only when the motherlode holds at least this much ORE. Empty: every round." value={f.minMotherlode} onChange={set('minMotherlode')} unit="ORE" />
+          </>
+        ) : null}
+        <NumField label="Most per round" info="The most SOL the bot may use in one round. Empty: no extra limit beyond your balance and most per spot." value={f.maxRound} onChange={set('maxRound')} unit="SOL" />
+        <NumField
+          label="Stop-loss"
+          info="Stop once the bot is this much SOL down since it started (ORE mined counts at today's price). Empty: no stop-loss."
+          value={f.stopLoss}
+          onChange={set('stopLoss')}
+          unit="SOL"
+          last
+        />
+        <T v="num" style={[styles.evNote, { marginTop: 6 }]}>
+          Empty means no limit. Settings lock while the bot runs.
+        </T>
+      </PopCard>
     </View>
   );
 }
@@ -944,7 +938,8 @@ function AiPanel() {
   const owner = useGame((s) => s.wallet.owner);
   const startAi = useGame((s) => s.startAiMining);
   const stopAutopilot = useGame((s) => s.stopAutopilot);
-  const { status, stats, me, claiming, log, logBusy, settings } = useAi();
+  const { status, stats, me, claiming, log, logBusy, settings, day } = useAi();
+  const [pop, setPop] = useState<null | 'learned' | 'feedback' | 'rounds'>(null);
   const [amount, setAmount] = useState('');
   const [perSpot, setPerSpot] = useState(AI_PER_SPOT_DEFAULT);
   useEffect(() => {
@@ -954,7 +949,7 @@ function AiPanel() {
   }, [owner]);
 
   const oreSol = stats?.oreSol ?? 0;
-  const myNet = me ? netSol(me, oreSol) : 0;
+  const dayNet = day ? netSol(day, oreSol) : 0;
   const passOn = Boolean(me?.expiresAt && me.expiresAt > Date.now());
   useEffect(() => {
     if (!passOn) return;
@@ -999,46 +994,36 @@ function AiPanel() {
 
   return (
     <>
-      <Row
-        icon="bot"
-        label="AI agents reviewing"
-        info="The AI bot's betting math runs on its own, every round. A team of five AI agents reviews and improves it. The round reviewer reads every round every 15 minutes and writes what it learned. A results analyst, a feedback reader, a risk checker and a lead review the settings every 3 hours, and more deeply once a day, inside fixed limits the code enforces."
-        right={
-          <T v="num" style={{ fontSize: 16, color: COLORS.gold }}>
-            5 agents
-          </T>
-        }
-      />
-
-      {owner ? (
-        <Row
-          icon="hourglass"
-          label="Your pass"
+      {/* one line: today's result, the pass, the agents */}
+      <View style={styles.botStrip}>
+        <StatCell
+          label="TODAY"
+          value={day && day.rounds ? `${signed(dayNet)} SOL` : '—'}
+          sub={day && day.rounds ? `${day.ore.toFixed(4)} ORE · ${day.rounds} rds` : 'no rounds yet'}
+          color={!day || !day.rounds ? COLORS.muted : dayNet >= 0 ? COLORS.green : COLORS.red}
+          info={`Your bot's drawn rounds in the last 24 hours${day ? `: ${day.rounds} rounds, ${day.wins} on the winning spot` : ''}. SOL back plus ORE mined (at today's ORE/SOL price after ORE's 10% claim fee), minus the SOL played and Gali's 0.25% fee.`}
+        />
+        <StatCell
+          label="PASS"
+          value={passOn ? new Date(me!.expiresAt!).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : claiming ? '…' : 'none'}
+          sub={passOn ? 'active' : 'needed'}
+          color={passOn ? COLORS.teal : COLORS.muted}
           info="0.1 SOL gives you 7 days of Bot and AI bot, paid to Gali's revenue wallet. Buying again adds 7 more days. The SOL you mine with stays yours, inside ORE."
-          right={
-            passOn ? (
-              <T v="num" style={{ fontSize: 15, color: COLORS.teal }}>
-                until {new Date(me!.expiresAt!).toLocaleDateString()}
-              </T>
-            ) : (
-              <T v="num" style={{ fontSize: 15, color: COLORS.muted }}>
-                {claiming ? 'confirming…' : 'none'}
-              </T>
-            )
-          }
         />
-      ) : null}
-      {me && me.rounds ? (
-        <Row
-          icon="sol"
-          label="Your AI result"
-          info={`${me.rounds} rounds played for you, ${me.wins} on the gold spot${me.pending ? `, ${me.pending} still being drawn` : ''}. SOL back plus ORE mined (at today's ORE/SOL price after ORE's 10% claim fee), minus the SOL played and Gali's 0.25% fee.`}
-          right={
-            <T v="num" style={{ fontSize: 15, color: myNet >= 0 ? COLORS.green : COLORS.red }}>
-              {signed(myNet)} SOL · {me.ore.toFixed(3)} ORE
-            </T>
-          }
+        <StatCell
+          label="AI AGENTS"
+          value="5"
+          sub="learning"
+          color={COLORS.gold}
+          info="Five AI agents study every round of the whole ORE board, every miner, even when nobody uses the bot. A round reviewer writes what it learned every 15 minutes; an analyst, a feedback reader, a risk checker and a lead tune each style every 3 hours and once a day."
         />
+      </View>
+      {passOn || aiOn ? (
+        <View style={[styles.lineRight, { marginTop: 6 }]}>
+          <Chip grow label="ROUNDS" onPress={() => setPop('rounds')} />
+          {passOn ? <Chip grow label="AI LEARNED" onPress={() => { setPop('learned'); if (log === null) void loadLog(true); }} /> : null}
+          {passOn ? <Chip grow label="FEEDBACK" onPress={() => setPop('feedback')} /> : null}
+        </View>
       ) : null}
 
       {aiOn ? (
@@ -1047,14 +1032,14 @@ function AiPanel() {
           <BotSettingsSummary s={settings} />
           {!passOn ? (
             <T v="num" style={styles.evNote}>
-              Your pass ran out, so your bot is not playing. Renew it to carry on, or STOP to take your SOL back.
+              Pass ended: your bot is paused. Renew it, or STOP to take your SOL back.
             </T>
           ) : null}
         </>
       ) : passOn ? (
         <>
           <BotSettingsPanel key={JSON.stringify(settings)} saved={settings} />
-          <BigAmount value={amount} onChange={setAmount} hint="SOL for your bot to mine with" disabled={Boolean(busy)} />
+          <BigAmount value={amount} onChange={setAmount} hint="SOL for your bot" disabled={Boolean(busy)} />
           <QuickAdd onAdd={(v) => setAmount((c) => addTo(c, v))} onMax={() => setAmount(trim(balance - 0.001))} disabled={Boolean(busy)} />
           <Row
             icon="sol"
@@ -1083,7 +1068,7 @@ function AiPanel() {
           <Btn
             kind={ready ? 'gold' : 'plain'}
             label={busy ?? label}
-            sub={ready ? 'One approval. 0.25% fee only on rounds it plays' : undefined}
+            sub={ready ? '0.25% fee only on rounds it plays' : undefined}
             onPress={() => {
               // settings first: saved before the bot is funded, locked while it runs
               const d = useAi.getState().draft;
@@ -1095,7 +1080,7 @@ function AiPanel() {
               });
             }}
             disabled={!ready}
-            style={{ marginTop: 10, minHeight: 54 }}
+            style={{ marginTop: 8, minHeight: 50 }}
           />
         </>
       ) : null}
@@ -1103,10 +1088,10 @@ function AiPanel() {
         <Btn
           kind="gold"
           label={busy ?? 'TRY THE BOT FREE · 7 DAYS'}
-          sub="First time only. One signature, no fee"
+          sub="First time only. No fee"
           onPress={() => void startTrial()}
           disabled={Boolean(busy) || !live}
-          style={{ marginTop: 10 }}
+          style={{ marginTop: 8 }}
         />
       ) : null}
       {!aiOn && owner ? (
@@ -1115,24 +1100,122 @@ function AiPanel() {
           label={busy ?? (passOn ? 'ADD 7 DAYS · 0.1 SOL' : 'GET THE BOT PASS · 0.1 SOL / 7 DAYS')}
           onPress={() => void buyPass()}
           disabled={Boolean(busy) || claiming || !live}
-          style={{ marginTop: 10 }}
+          style={{ marginTop: 8 }}
         />
       ) : null}
-      {passOn ? (
-        <>
-          <AiFeedback nextAt={me?.nextFeedbackAt ?? null} />
-          <AiLog log={log} busy={logBusy} />
-        </>
-      ) : owner ? (
-        <T v="num" style={[styles.evNote, { marginTop: 8 }]}>
-          With a pass you choose Bot (your own rules) or AI bot (a style the AI agents tune), and get the AI bot's learning log and a vote on how it plays, every 2 hours.
-        </T>
-      ) : null}
 
-      <T v="num" style={[styles.evNote, { marginTop: 8 }]}>
-        The draw is random: no bot can see the winning spot. The Safe AI style only plays spots worth more than they cost on average; your own rules, Solo hunter and Motherlode chaser can play below break-even. You can still lose. Not financial advice.
+      <T v="num" style={[styles.evNote, { marginTop: 6, fontSize: 12 }]}>
+        Random draw: no bot sees the winning spot. You can lose. Not financial advice.
       </T>
+
+      <PopCard title="YOUR BOT'S ROUNDS" open={pop === 'rounds'} onClose={() => setPop(null)}>
+        <RoundList />
+      </PopCard>
+      <PopCard title="WHAT THE AI LEARNED" open={pop === 'learned'} onClose={() => setPop(null)}>
+        <AiLog log={log} busy={logBusy} />
+      </PopCard>
+      <PopCard title="HELP IT LEARN" open={pop === 'feedback'} onClose={() => setPop(null)}>
+        <AiFeedback nextAt={me?.nextFeedbackAt ?? null} />
+      </PopCard>
     </>
+  );
+}
+
+/** Every round since the bot started, newest first: what it played and how it went, or why it sat out. */
+function RoundList() {
+  const [rows, setRows] = useState<AiRoundRow[] | null | 'loading'>('loading');
+  useEffect(() => {
+    let on = true;
+    const load = () => void loadRounds().then((r) => on && setRows(r));
+    load();
+    const id = setInterval(load, 30_000);
+    return () => {
+      on = false;
+      clearInterval(id);
+    };
+  }, []);
+  if (rows === 'loading') return <T v="num" style={styles.evNote}>Loading…</T>;
+  if (!rows) return <T v="num" style={styles.evNote}>Could not load your rounds. Try again in a moment.</T>;
+  if (!rows.length) return <T v="num" style={styles.evNote}>No rounds yet. Rounds show here once your bot starts.</T>;
+  const played = rows.filter((r) => r.landed);
+  const onWin = played.filter((r) => r.won).length;
+  return (
+    <View>
+      <T v="num" style={[styles.evNote, { marginBottom: 6 }]}>
+        {rows.length} rounds · played {played.length} · on the winning spot {onWin} · sat out {rows.filter((r) => !r.played).length} · missed {rows.filter((r) => r.played && !r.landed && r.settled).length}
+      </T>
+      {rows.map((r, i) => {
+        const head = `#${r.round} · ${new Date(r.at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
+        let line: string;
+        let color: string = COLORS.muted;
+        if (!r.played) {
+          line =
+            r.quietestSol !== null && r.joinLimitSol !== null
+              ? `Sat out: quietest spot ${r.quietestSol.toFixed(3)} SOL, over its ${r.joinLimitSol.toFixed(3)} SOL limit`
+              : r.botsPlayed !== null
+                ? 'Sat out: your rules or limits said no'
+                : 'Sat out: the bot was between runs';
+        } else if (!r.landed && r.settled) {
+          line = `Bet did not land (${r.squares} spots, ${r.sol.toFixed(4)} SOL): round missed, no SOL spent`;
+          color = COLORS.red;
+        } else if (!r.settled) {
+          line = `${r.squares} spots · ${r.sol.toFixed(4)} SOL · drawing…`;
+          color = COLORS.text;
+        } else {
+          const net = (r.back ?? 0) - r.sol;
+          line = `${r.squares} spots · ${r.sol.toFixed(4)} SOL · ${r.won ? 'ON the winning spot' : 'missed the winning spot'} · back ${(r.back ?? 0).toFixed(4)} (${net >= 0 ? '+' : ''}${net.toFixed(4)})${r.ore ? ` · +${r.ore.toFixed(4)} ORE` : ''}`;
+          color = r.ore ? COLORS.green : r.won ? COLORS.text : COLORS.red;
+        }
+        return (
+          <View key={r.round} style={[styles.aiLog, { paddingVertical: 5 }, i === rows.length - 1 && { borderBottomWidth: 0 }]}>
+            <T v="num" style={{ fontSize: 12, color: COLORS.muted }}>
+              {head}
+            </T>
+            <T v="num" style={{ fontSize: 13, color, lineHeight: 16 }}>
+              {line}
+            </T>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+/** One small stat in the BOT tab's top line; tap the label for what it means. */
+function StatCell({ label, value, sub, color, info }: { label: string; value: string; sub: string; color: string; info: string }) {
+  const toast = useGame((s) => s.toast);
+  return (
+    <Pressable onPress={() => toast(info, 'info')} style={styles.botCell} accessibilityRole="button" accessibilityLabel={`${label}: ${value}, ${sub}. More info`}>
+      <T v="label" style={{ fontSize: 11, color: COLORS.muted }} numberOfLines={1}>
+        {label}
+      </T>
+      <T v="num" style={{ fontSize: 15, color }} numberOfLines={1}>
+        {value}
+      </T>
+      <T v="num" style={{ fontSize: 11, color: COLORS.muted }} numberOfLines={1}>
+        {sub}
+      </T>
+    </Pressable>
+  );
+}
+
+/** A card that pops up over the game, for what does not fit the BOT tab. It scrolls inside if long. */
+function PopCard({ title, open, onClose, children }: { title: string; open: boolean; onClose: () => void; children: ReactNode }) {
+  const { height } = useWindowDimensions();
+  if (!open) return null;
+  return (
+    <Modal transparent visible animationType="fade" onRequestClose={onClose}>
+      <Scrim onPress={onClose}>
+        <ModalCenter>
+          <Window title={title} accent={COLORS.gold} onClose={onClose} width={440}>
+            <ScrollView style={{ maxHeight: Math.max(240, height * 0.65) }} showsVerticalScrollIndicator>
+              {children}
+            </ScrollView>
+            <Btn kind="plain" label="CLOSE" onPress={onClose} style={{ marginTop: 10 }} />
+          </Window>
+        </ModalCenter>
+      </Scrim>
+    </Modal>
   );
 }
 
@@ -1595,6 +1678,9 @@ const styles = StyleSheet.create({
   evPill: { paddingHorizontal: 8, paddingVertical: 3 },
   evNote: { fontSize: 14, lineHeight: 16, color: COLORS.muted, marginTop: -2 },
   lineRight: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1, minWidth: 0 },
+  botStrip: { flexDirection: 'row', gap: 6 },
+  rulesLine: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6, paddingHorizontal: 8, backgroundColor: 'rgba(4,6,15,0.55)', borderWidth: U, borderColor: 'rgba(34,53,111,0.8)' },
+  botCell: { flex: 1, minWidth: 0, paddingVertical: 6, paddingHorizontal: 8, gap: 1, backgroundColor: 'rgba(4,6,15,0.55)', borderWidth: U, borderColor: 'rgba(34,53,111,0.8)' },
   aiSpot: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, height: 34, width: 120 },
   aiSpotInput: { position: 'relative', width: 64, height: 30, textAlign: 'right', color: COLORS.gold, fontFamily: F.display, fontSize: 18, paddingVertical: 0, paddingHorizontal: 0, ...WEB_NO_OUTLINE },
   aiComment: { minHeight: 56, paddingHorizontal: 10, paddingVertical: 6 },

@@ -381,6 +381,51 @@ create index if not exists gali_board_rounds_at on public.gali_board_rounds (at 
 alter table public.gali_board_rounds enable row level security;
 revoke all on public.gali_board_rounds from anon, authenticated;
 
+-- Everyone: one wallet's drawn bot rounds in the last 24 hours (the BOT tab's daily result).
+create or replace function public.gali_ai_day(p_wallet text)
+returns table (rounds bigint, wins bigint, deployed_sol numeric, returned_sol numeric, ore numeric, fees_sol numeric)
+language sql stable security definer set search_path = public as $$
+  select count(*), count(*) filter (where won), coalesce(sum(total), 0) / 1e9, coalesce(sum(sol_back), 0) / 1e9, coalesce(sum(ore_grams), 0) / 1e11, coalesce(sum(fee), 0) / 1e9
+  from gali_ai_rounds
+  where wallet = p_wallet and settled_at is not null and not void and played_at > now() - interval '24 hours'
+$$;
+revoke all on function public.gali_ai_day(text) from public;
+grant execute on function public.gali_ai_day(text) to anon, authenticated, service_role;
+
+-- Everyone: one wallet's bot rounds since it started, newest first, with the rounds it sat out
+-- (rounds the bot looked at, or the board study saw, with no play from this wallet).
+create or replace function public.gali_ai_my_rounds(p_wallet text, p_limit int default 100)
+returns table (round_id bigint, at timestamptz, played boolean, landed boolean, squares int, sol numeric, back numeric, ore numeric, won boolean, settled boolean,
+               board_sol numeric, quietest_sol numeric, join_limit_sol numeric, motherlode_ore numeric, bots_played int, win_square int)
+language sql stable security definer set search_path = public as $$
+  with since as (
+    select coalesce((select started_at from gali_bot_settings where wallet = p_wallet), now() - interval '7 days') as t
+  ),
+  mine as (
+    select r.* from gali_ai_rounds r where r.wallet = p_wallet and r.played_at >= (select t from since) - interval '5 minutes'
+  ),
+  ids as (
+    select t.round_id from gali_ai_thoughts t where t.at >= (select t from since)
+    union select b.round_id from gali_board_rounds b where b.at >= (select t from since)
+    union select m.round_id from mine m
+  )
+  select i.round_id,
+         coalesce(m.played_at, t.at, b.at),
+         m.round_id is not null,
+         m.round_id is not null and not coalesce(m.void, false),
+         (select count(*)::int from unnest(m.stake) x where x::bigint > 0),
+         m.total / 1e9, m.sol_back / 1e9, m.ore_grams / 1e11, m.won, m.settled_at is not null,
+         coalesce(t.board, b.deployed) / 1e9, t.quietest / 1e9, t.join_limit / 1e9, t.motherlode_grams / 1e11, t.played, b.win_square
+  from ids i
+  left join mine m on m.round_id = i.round_id
+  left join gali_ai_thoughts t on t.round_id = i.round_id
+  left join gali_board_rounds b on b.round_id = i.round_id
+  order by i.round_id desc
+  limit least(greatest(p_limit, 1), 300)
+$$;
+revoke all on function public.gali_ai_my_rounds(text, int) from public;
+grant execute on function public.gali_ai_my_rounds(text, int) to anon, authenticated, service_role;
+
 -- ---------------- schedules ----------------
 create extension if not exists pg_cron;
 create extension if not exists pg_net;
