@@ -347,7 +347,9 @@ const test = (name, fn) => {
     const p = S.huntPlan(base);
     assert.ok(p, 'plays');
     assert.ok(Number(p.total) <= 0.2e9 + 1 && Number(p.total) >= 0.15e9, `spends about its 10% budget: ${Number(p.total) / 1e9}`);
-    const chance = S.soloChance(Number(p.groups[0].amount), p.squares.map((s) => Number(onBoard[s]) * 1.1));
+    const stakeOf = (plan) => { const st = Array(25).fill(0); for (const g of plan.groups) for (let s = 0; s < 25; s++) if (g.mask & (1 << s)) st[s] += Number(g.amount); return st; };
+    const st = stakeOf(p);
+    const chance = S.soloChanceOf(p.squares.map((s) => st[s]), p.squares.map((s) => Number(onBoard[s]) * 1.1));
     assert.ok(p.squares.length >= S.HUNT_MIN_COVER, `covers most of the board: ${p.squares.length}`);
     for (let n = S.HUNT_MIN_COVER; n <= 25; n++) {
       const a = S.roundDown2(0.2e9 / n);
@@ -361,6 +363,78 @@ const test = (name, fn) => {
     assert.ok(Number(S.huntPlan({ ...base, maxRoundSol: 0.05 }).total) <= 0.05e9, 'the player\'s most per round holds');
     const small = S.huntPlan({ ...base, balance: sol(0.075), params: { ...params, maxRoundShare: 0.06 } });
     assert.ok(small && small.squares.length >= S.HUNT_MIN_COVER, 'a small balance still covers most of the board');
+  });
+
+  test('the hunters top up quiet squares when the budget is small and spread out when it is big, in at most two deploys', () => {
+    const onBoard = board((i) => sol(0.02 + i * 0.02)); // 0.02 .. 0.5 SOL
+    const params = { ...S.STYLE_DEFAULTS.solo, minEdge: -0.3, maxRoundShare: 0.1 };
+    const base = { onBoard, motherlodeGrams: 0n, orePriceSol: 1.5, maxPerSquare: sol(10), params, style: 'solo' };
+    const stakeOf = (plan) => { const st = Array(25).fill(0); for (const g of plan.groups) for (let s = 0; s < 25; s++) if (g.mask & (1 << s)) st[s] += Number(g.amount); return st; };
+    const small = S.huntPlan({ ...base, balance: sol(0.1) });
+    assert.ok(small && small.squares.length >= S.HUNT_MIN_COVER, 'small: still covers most of the board');
+    const ss = stakeOf(small);
+    assert.ok(small.groups.length === 2 && ss[0] > ss[22], `small: the quietest square gets more (${ss[0]} vs ${ss[22]})`);
+    const big = S.huntPlan({ ...base, balance: sol(200) });
+    const bs = stakeOf(big);
+    const covered = big.squares.map((s) => bs[s]);
+    assert.ok(Math.max(...covered) / Math.min(...covered) < ss[0] / ss[22], 'big: much more even than small');
+    for (const p of [small, big]) {
+      assert.ok(p.groups.length <= 2, 'two deploys at most');
+      if (p.groups.length === 2) {
+        assert.equal(p.groups[0].mask & p.groups[1].mask, 0, 'on separate squares');
+        const n = (m) => m.toString(2).split('').filter((x) => x === '1').length;
+        assert.ok(p.groups[0].amount * BigInt(n(p.groups[0].mask)) >= p.groups[1].amount * BigInt(n(p.groups[1].mask)), 'the bigger deploy first');
+      }
+      const total = stakeOf(p).reduce((a, b) => a + b, 0);
+      assert.equal(BigInt(total), p.total, 'total adds up');
+      assert.ok(S.planFee(p) <= S.aiFee(p.total), 'the fee is on the first deploy only');
+    }
+    const even = (bal) => { const p = S.huntPlan({ ...base, balance: sol(bal) }); const st = stakeOf(p); return S.soloChanceOf(p.squares.map((s) => st[s]), p.squares.map((s) => Number(onBoard[s]) * 1.1)); };
+    const flat = S.soloChanceOf(Array(23).fill(S.roundDown2(0.01e9 / 23)), [...Array(23).keys()].map((s) => Number(onBoard[s]) * 1.1));
+    assert.ok(even(0.1) >= flat, 'weighting never does worse than an even spread');
+  });
+
+  test('the whole board is studied: every miner grouped by squares and SOL per square, with the solo winner found', () => {
+    const entropy = Uint8Array.from({ length: 32 }, (_, i) => (i * 37 + 11) & 0xff);
+    const top = Keypair.generate().publicKey;
+    const r0 = { id: 7n, deployed: board(sol(0.1)), entropy, motherlode: 0n, reward: 100_000_000_000n, split: false, top };
+    const win = S.settleRound(r0, board(0n), null).winningSquare;
+    const wide = board(sol(0.004)); // 25 squares, 0.004 each
+    const narrow = board(0n); narrow[win] = sol(0.05); narrow[(win + 1) % 25] = sol(0.05);
+    const miss = board(0n); miss[(win + 3) % 25] = sol(0.2);
+    const miners = new Map([[top.toBase58(), wide], ['narrow', narrow], ['miss', miss]]);
+    const b = M.studyRound(r0, miners);
+    assert.equal(b.winSquare, win);
+    assert.equal(b.miners, 3);
+    assert.equal(b.solo.wallet, top.toBase58());
+    assert.equal(b.solo.squares, 25);
+    const g = b.groups['23-25|0.001-0.01'];
+    assert.ok(g && g.solo === 1 && g.onWin === 1 && g.ore >= 100_000_000_000, 'the 25-square miner won the solo ORE');
+    assert.equal(b.groups['1-5|0.01-0.1'].onWin, 1, 'the two-square miner hit the winning square');
+    assert.equal(b.groups['1-5|0.1+'].onWin, 0, 'the one-square miner missed');
+    assert.ok(b.groups['1-5|0.1+'].back < sol(0.2) * 9n / 10n + 1n && b.groups['1-5|0.1+'].back > 0, 'a miss gets most of its SOL back, less ORE\'s cut');
+    const shared = M.studyRound({ ...r0, split: true }, miners);
+    assert.equal(shared.solo, null, 'shared round: no solo winner');
+    assert.ok(shared.groups['1-5|0.01-0.1'].ore > 0, 'the split ORE goes by SOL on the winning square');
+  });
+
+  test('the reviewers see the whole board by style: SOL lost per ORE and solo wins', () => {
+    const g = (miners, deployed, back, onWin, ore, solo) => ({ miners, deployed, back, onWin, ore, solo });
+    const rows = [
+      { round_id: 1, miners: 3, deployed: 3e9, seen: 1, split: false, motherlode: 0, groups: { '23-25|0.001-0.01': g(2, 2e9, 1.8e9, 2, 1e11, 1), '1-5|0.1+': g(1, 1e9, 0.89e9, 0, 0, 0) } },
+      { round_id: 2, miners: 2, deployed: 2e9, seen: 1, split: true, motherlode: 0, groups: { '23-25|0.001-0.01': g(2, 2e9, 1.8e9, 2, 0.5e11, 0) } },
+    ];
+    const b = T.boardSummary(rows);
+    assert.equal(b.rounds, 2);
+    assert.equal(b.sharedRounds, 1);
+    const wide = b.styles[0];
+    assert.equal(wide.squares, '23-25', 'the style that mined most ORE first');
+    assert.equal(wide.ore, 1.5);
+    assert.equal(wide.soloWins, 1);
+    assert.equal(wide.onWinningSquare, 1);
+    assert.equal(b.styles[1].solLostPerOre, null, 'no ORE: no price per ORE');
+    assert.match(T.roundsPrompt(S.STYLE_DEFAULTS.solo, [], [], 1.5, [], rows), /whole board/);
+    assert.deepEqual(T.boardSummary([]), { rounds: 0 });
   });
 
   test('each style keeps its own bounds: the hunters may go below break-even, safe may not', () => {
