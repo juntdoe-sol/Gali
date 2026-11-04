@@ -866,7 +866,7 @@ function BotSettingsPanel({ saved }: { saved: BotSettings | null }) {
     f.stopLoss ? `stop-loss ${f.stopLoss}` : null,
   ].filter(Boolean);
   return (
-    <View style={{ gap: 6, marginTop: 8 }}>
+    <View style={{ gap: 8 }}>
       <View style={styles.lineRight}>
         {mode === 'bot'
           ? (['aggressive', 'balance', 'safe'] as const).map((k) => (
@@ -917,7 +917,7 @@ function BotSettingsSummary({ s }: { s: BotSettings | null }) {
       : [AI_STYLES.find((x) => x.id === v.style)?.about ?? ''];
   const limits = [v.maxRoundSol ? `most ${v.maxRoundSol} SOL a round` : null, v.stopLossSol ? `stop-loss ${v.stopLossSol} SOL` : null].filter(Boolean);
   return (
-    <View style={[styles.aiLog, { borderBottomWidth: 0, marginTop: 8 }]}>
+    <View style={[styles.aiLog, { borderBottomWidth: 0 }]}>
       <T v="label" style={{ color: COLORS.gold }}>
         {v.mode === 'bot' ? 'BOT · YOUR RULES' : `AI BOT · ${AI_STYLES.find((x) => x.id === v.style)?.label ?? 'PLAY SAFE'}`}
       </T>
@@ -981,7 +981,7 @@ function AiPanel() {
   // closed while it is being tuned; a bot already running can still be seen and stopped
   if (!botAllowed(owner) && !aiOn) {
     return (
-      <View style={[styles.aiLog, { borderBottomWidth: 0 }]}>
+      <View style={[styles.aiLog, styles.botPanel, { borderBottomWidth: 0 }]}>
         <T v="label" style={{ color: COLORS.gold }}>
           BOT MINING IS CLOSED FOR NOW
         </T>
@@ -993,7 +993,7 @@ function AiPanel() {
   }
 
   return (
-    <>
+    <View style={styles.botPanel}>
       {/* one line: today's result, the pass, the agents */}
       <View style={styles.botStrip}>
         <StatCell
@@ -1019,7 +1019,7 @@ function AiPanel() {
         />
       </View>
       {passOn || aiOn ? (
-        <View style={[styles.lineRight, { marginTop: 6 }]}>
+        <View style={styles.lineRight}>
           <Chip grow label="ROUNDS" onPress={() => setPop('rounds')} />
           {passOn ? <Chip grow label="AI LEARNED" onPress={() => { setPop('learned'); if (log === null) void loadLog(true); }} /> : null}
           {passOn ? <Chip grow label="FEEDBACK" onPress={() => setPop('feedback')} /> : null}
@@ -1080,7 +1080,7 @@ function AiPanel() {
               });
             }}
             disabled={!ready}
-            style={{ marginTop: 8, minHeight: 50 }}
+            style={{ minHeight: 50 }}
           />
         </>
       ) : null}
@@ -1091,7 +1091,6 @@ function AiPanel() {
           sub="First time only. No fee"
           onPress={() => void startTrial()}
           disabled={Boolean(busy) || !live}
-          style={{ marginTop: 8 }}
         />
       ) : null}
       {!aiOn && owner ? (
@@ -1100,11 +1099,10 @@ function AiPanel() {
           label={busy ?? (passOn ? 'ADD 7 DAYS · 0.1 SOL' : 'GET THE BOT PASS · 0.1 SOL / 7 DAYS')}
           onPress={() => void buyPass()}
           disabled={Boolean(busy) || claiming || !live}
-          style={{ marginTop: 8 }}
         />
       ) : null}
 
-      <T v="num" style={[styles.evNote, { marginTop: 6, fontSize: 12 }]}>
+      <T v="num" style={[styles.evNote, { marginTop: 0, fontSize: 12 }]}>
         Random draw: no bot sees the winning spot. You can lose. Not financial advice.
       </T>
 
@@ -1117,7 +1115,7 @@ function AiPanel() {
       <PopCard title="HELP IT LEARN" open={pop === 'feedback'} onClose={() => setPop(null)}>
         <AiFeedback nextAt={me?.nextFeedbackAt ?? null} />
       </PopCard>
-    </>
+    </View>
   );
 }
 
@@ -1678,7 +1676,8 @@ const styles = StyleSheet.create({
   evPill: { paddingHorizontal: 8, paddingVertical: 3 },
   evNote: { fontSize: 14, lineHeight: 16, color: COLORS.muted, marginTop: -2 },
   lineRight: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1, minWidth: 0 },
-  botStrip: { flexDirection: 'row', gap: 6 },
+  botPanel: { paddingHorizontal: 12, paddingTop: 10, paddingBottom: 12, gap: 8 },
+  botStrip: { flexDirection: 'row', gap: 8 },
   rulesLine: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6, paddingHorizontal: 8, backgroundColor: 'rgba(4,6,15,0.55)', borderWidth: U, borderColor: 'rgba(34,53,111,0.8)' },
   botCell: { flex: 1, minWidth: 0, paddingVertical: 6, paddingHorizontal: 8, gap: 1, backgroundColor: 'rgba(4,6,15,0.55)', borderWidth: U, borderColor: 'rgba(34,53,111,0.8)' },
   aiSpot: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, height: 34, width: 120 },
