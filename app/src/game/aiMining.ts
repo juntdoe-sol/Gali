@@ -67,6 +67,10 @@ interface AiState {
   lesson: AiLesson | null;
   /** the connected wallet's Bot / AI bot choice; null until it saves one (the server then plays AI bot, safe) */
   settings: BotSettings | null;
+  /** the Bot / AI bot switch under the tabs, before START (null: what was saved) */
+  modeDraft: BotMode | null;
+  /** the settings as filled in before START; null while a value is invalid. START saves them, then funds the bot. */
+  draft: BotSettings | null;
 }
 /** Bot: the player's own rules, no AI. AI bot: a style the review agents tune. SOL amounts in SOL; null = no such rule. */
 export type BotMode = 'bot' | 'ai';
@@ -128,7 +132,7 @@ export interface AiLogEntry {
   /** plays in the 24 hours before this entry, when known */
   plays: number | null;
 }
-export const useAi = create<AiState>(() => ({ status: 'idle', stats: null, board: [], me: null, claiming: false, log: null, logBusy: false, thoughts: [], lesson: null, settings: null }));
+export const useAi = create<AiState>(() => ({ status: 'idle', stats: null, board: [], me: null, claiming: false, log: null, logBusy: false, thoughts: [], lesson: null, settings: null, modeDraft: null, draft: null }));
 
 const headers = () => ({ apikey: publicKey(), authorization: `Bearer ${publicKey()}`, 'content-type': 'application/json' });
 const rpc = async (fn: string, args: Record<string, unknown> = {}) => {
@@ -148,9 +152,8 @@ export async function refreshAi() {
   const wallet = useGame.getState().wallet.owner;
   if (useAi.getState().status === 'idle') useAi.setState({ status: 'loading' });
   try {
-    const [s, b, m, t, l, cfg] = await Promise.all([
-      rpc('gali_ai_stats'), rpc('gali_ai_board', { p_limit: 50 }), wallet ? rpc('gali_ai_me', { p_wallet: wallet }) : Promise.resolve(null), rpc('gali_ai_thoughts', { p_limit: 8 }).catch(() => []),
-      rpc('gali_ai_lessons', { p_limit: 1 }).catch(() => []),
+    const [s, b, m, cfg] = await Promise.all([
+      rpc('gali_ai_stats'), rpc('gali_ai_board', { p_limit: 50 }), wallet ? rpc('gali_ai_me', { p_wallet: wallet }) : Promise.resolve(null),
       wallet ? rpc('gali_bot_settings_of', { p_wallet: wallet }).catch(() => null) : Promise.resolve(null),
     ]);
     const r = Array.isArray(s) ? s[0] : null;
@@ -172,14 +175,9 @@ export async function refreshAi() {
           returnedSol: num(mr.returned_sol), ore: num(mr.ore), feesSol: num(mr.fees_sol), pending: num(mr.pending),
         }
       : null;
-    const thoughts: AiThought[] = (Array.isArray(t) ? t : []).map((x) => ({
-      round: num(x.round_id), at: Date.parse(x.at), slotsLeft: num(x.slots_left), motherlodeOre: num(x.motherlode_grams) / 1e11, prizeSol: num(x.prize) / 1e9,
-      boardSol: num(x.board) / 1e9, quietestSol: num(x.quietest) / 1e9, joinLimitSol: num(x.join_limit) / 1e9, played: num(x.played), skipped: num(x.skipped),
-    }));
     if (useGame.getState().wallet.owner !== wallet) return;
-    const lesson = Array.isArray(l) && l[0] ? toLesson(l[0]) : null;
     const settings = Array.isArray(cfg) && cfg[0] ? toSettings(cfg[0]) : null;
-    useAi.setState({ status: 'ok', stats, board, me, thoughts, lesson, settings });
+    useAi.setState({ status: 'ok', stats, board, me, settings });
   } catch {
     useAi.setState((st) => ({ status: st.stats ? 'ok' : 'error' }));
   }
