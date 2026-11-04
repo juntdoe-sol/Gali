@@ -62,6 +62,13 @@ const ME = 'me';
 const HOST_LOST_MS = 3500;
 const GUEST_LOST_MS = 5000;
 const NET_MS = 100;
+/**
+ * Other online fighters are drawn this far in the past, between the two real positions around that moment, so they
+ * move smoothly even when messages arrive unevenly (the relay batches them, phones and Wi-Fi bunch them up).
+ */
+const INTERP_MS = 130;
+/** A trail with nothing newer than this is stale: draw the fighter where this copy has it. */
+const TRAIL_STALE_MS = 400;
 /** A correction up to this far (px) glides instead of jumping. 60 was too little: a dash or a knockback seen 150 ms late is more. */
 const EASE_MAX = 150;
 /** How fast a correction glides away (s). */
@@ -128,6 +135,8 @@ export class BrawlEngine {
   private lastIn: Input = NO_INPUT;
   /** where a fighter was drawn before a correction moved it: eased away over a few frames */
   private off = new Map<string, { x: number; y: number }>();
+  /** where each other online fighter really was, and when we heard it (see INTERP_MS) */
+  private trail = new Map<string, { t: number; x: number; y: number }[]>();
   /* input */
   private keys = new Set<string>();
   private mouse = { light: false, heavy: false, special: false };
@@ -184,6 +193,7 @@ export class BrawlEngine {
     this.overSends = 0;
     this.note = undefined;
     this.off.clear();
+    this.trail.clear();
     this.hostHeard = performance.now();
     this.looks.clear();
     this.colorOf.clear();
@@ -301,6 +311,8 @@ export class BrawlEngine {
         if (!i) this.remoteIn.set(from, (i = { ...NO_INPUT }));
         const ox = f.x, oy = f.y;
         if (applySelf(f, p.s as number[], i)) this.ease(f, ox, oy);
+        // their report, or (while they reel from a hit) where the host's own physics have them: the truth either way
+        this.mark(f);
       } else if (e === 'bol' || e === 'bye') this.toBot(f);
     } else if (this.role === 'guest') {
       if (from !== this.hostId) return;
@@ -337,6 +349,7 @@ export class BrawlEngine {
       } else {
         setFighter(f, sn.f[k], true);
         this.ease(f, ox, oy);
+        this.mark(f);
       }
     });
     if (Array.isArray(sn.e)) {
@@ -346,6 +359,29 @@ export class BrawlEngine {
     }
     if (sn.m[4] === 1) m.sudden = true;
     if (sn.m[3] === 1 && !m.over) m.over = true;
+  }
+  /** Note where another fighter really is now. A respawn starts its trail again (it really does jump). */
+  private mark(f: Fighter, now = performance.now()) {
+    let tr = this.trail.get(f.id);
+    if (!tr || f.respawn > 0) this.trail.set(f.id, (tr = []));
+    tr.push({ t: now, x: f.x, y: f.y });
+    while (tr.length > 2 && now - tr[1].t > 1000) tr.shift();
+  }
+  /** Where to draw another fighter: INTERP_MS ago on its trail, or null to draw it where this copy has it. */
+  private trailAt(id: string, now: number): { x: number; y: number } | null {
+    const tr = this.trail.get(id);
+    if (!tr || !tr.length || now - tr[tr.length - 1].t > TRAIL_STALE_MS) return null;
+    const at = now - INTERP_MS;
+    if (at <= tr[0].t) return tr[0];
+    for (let k = tr.length - 1; k > 0; k--) {
+      const a = tr[k - 1], b = tr[k];
+      if (at >= a.t) {
+        if (at >= b.t) return b;
+        const u = (at - a.t) / Math.max(1, b.t - a.t);
+        return { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u };
+      }
+    }
+    return tr[tr.length - 1];
   }
   /** Draw a corrected fighter where it was, easing to where it is. */
   private ease(f: Fighter, ox: number, oy: number) {
@@ -705,8 +741,10 @@ export class BrawlEngine {
     // fighters
     const order = [...m.fighters].sort((a, b) => (a.id === this.me ? 1 : 0) - (b.id === this.me ? 1 : 0));
     for (const f of order) {
-      const o = this.off.get(f.id);
-      this.drawFighter(c, o ? { ...f, x: f.x + o.x, y: f.y + o.y } : f, m, sx, sy, Z, now);
+      // other online fighters glide along where they really were; your own (and the host's bots) draw as they are
+      const p = f.id !== this.me && this.role !== 'solo' ? this.trailAt(f.id, now) : null;
+      const o = p ? null : this.off.get(f.id);
+      this.drawFighter(c, p ? { ...f, x: p.x, y: p.y } : o ? { ...f, x: f.x + o.x, y: f.y + o.y } : f, m, sx, sy, Z, now);
     }
     // effects
     this.fx = this.fx.filter((e) => now - e.t0 < e.dur);
