@@ -66,8 +66,6 @@ const NET_MS = 100;
 const EASE_MAX = 150;
 /** How fast a correction glides away (s). */
 const EASE_S = 0.07;
-/** How long another player's last move is carried on without news (two missed messages' worth). */
-const HOLD_MS = 250;
 /** each fighter's colour: you are gold */
 const COLORS = ['#ffc93c', '#ff5a6a', '#4fd6ef', '#8ef06a'];
 const BOT_NAMES = ['Rusty', 'Clank', 'Pebble', 'Grit'];
@@ -506,17 +504,13 @@ export class BrawlEngine {
         const meF = m.fighters.find((f) => f.id === this.me);
         this.lastIn = meF && meF.stocks > 0 ? this.myInput() : NO_INPUT;
         inputs[this.me] = this.lastIn;
-        // the others: online players hold what they last sent (host) or what the snapshot said (guest), but only
-        // for a moment. With no news for longer, guessing on would walk them off and the next message would yank
-        // them back (the "goes back" glitch), so they stand still until it comes.
-        const now = performance.now();
-        const fresh = (id: string) => now - (guest ? this.hostHeard : (this.heard.get(id) ?? 0)) < HOLD_MS;
         for (const f of m.fighters) {
           if (f.id === this.me || f.bot) continue;
+          // the others: online players hold what they last sent (host) or what the snapshot said (guest)
           const r = guest ? f.prev : this.remoteIn.get(f.id);
-          inputs[f.id] = fresh(f.id) ? { ...NO_INPUT, mx: r?.mx ?? 0, my: r?.my ?? 0 } : NO_INPUT;
+          inputs[f.id] = { ...NO_INPUT, mx: r?.mx ?? 0, my: r?.my ?? 0 };
         }
-        if (guest) for (const f of m.fighters) if (f.bot) inputs[f.id] = fresh(f.id) ? { ...NO_INPUT, mx: f.prev.mx, my: f.prev.my } : NO_INPUT;
+        if (guest) for (const f of m.fighters) if (f.bot) inputs[f.id] = { ...NO_INPUT, mx: f.prev.mx, my: f.prev.my };
         step(m, inputs);
         if (this.role === 'host') for (const e of m.events) if (e.t !== 'swing' && e.t !== 'recover') this.outbox.push({ ...e });
         // a guest's own copy only speaks for its own miner; the host's snapshots bring the rest
