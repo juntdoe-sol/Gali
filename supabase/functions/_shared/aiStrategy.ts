@@ -84,6 +84,8 @@ export const BOUNDS: Bounds = {
  */
 export type Style = 'safe' | 'balance' | 'solo' | 'motherlode';
 export const STYLES: Style[] = ['safe', 'balance', 'solo', 'motherlode'];
+/** The styles players can pick (Aggressive, Balance, Play safe); the motherlode chaser is kept only for old settings. */
+export const PLAYER_STYLES: Style[] = ['solo', 'balance', 'safe'];
 export const STYLE_DEFAULTS: Record<Style, AiParams> = {
   safe: DEFAULT_PARAMS,
   solo: { minEdge: -0.05, crowdBuffer: 0.1, maxRoundShare: 0.05, targetSlotsLeft: 30, minMotherlode: 0 },
