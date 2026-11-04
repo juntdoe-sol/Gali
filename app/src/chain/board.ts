@@ -27,7 +27,7 @@ import {
   ORE_REFINING_BPS,
   readRewards,
 } from './ore/read';
-import { closeLiveAutomation, deployFromAutomation, oreCheckpoint, oreClaimOre, oreClaimSol, oreDeploy, oreDeployWithWallet, payAiPass, readAutomation, startAiAutomation, startLiveAutomation, toOre, toSol } from './ore/tx';
+import { closeLiveAutomation, deployFromAutomation, oreCheckpoint, oreClaimOre, oreClaimSol, oreDeploy, oreDeployWithWallet, payAiPass, readAutomation, startAiAutomation, startLiveAutomation, toOre, toSol, topUpAutomation } from './ore/tx';
 import { decodeBoard, decodeMiner, decodeRound, decodeTreasury, distributionMask, type OreMiner, type OreRound } from './ore/accounts';
 import { minerPda } from './ore/consts';
 
@@ -409,6 +409,8 @@ export const startAutopilot = (perSpotSol: number, squares: number[], random: bo
   startLiveAutomation({ lamportsPerSquare: BigInt(Math.floor(perSpotSol * LAMPORTS_PER_SOL)), maxSquares: squares.length, squares, random, rounds, expectedOwner, topUpKey });
 export const stopAutopilot = (expectedOwner?: PublicKey) => closeLiveAutomation(expectedOwner);
 export const readAutopilot = (owner: PublicKey) => readAutomation(owner);
+/** Add SOL to a running autopilot or bot. Returns the extra rounds an autopilot gets (0 for the bot). */
+export const topUpAutopilot = (sol: number, expectedOwner?: PublicKey) => topUpAutomation({ deposit: BigInt(Math.floor(sol * LAMPORTS_PER_SOL)), expectedOwner });
 /** Gali AI mining: fund an ORE automation the AI plays. One approval. Stopping is stopAutopilot. */
 export const startAiMining = (depositSol: number, maxPerSpotSol: number, expectedOwner?: PublicKey) =>
   startAiAutomation({ deposit: BigInt(Math.floor(depositSol * LAMPORTS_PER_SOL)), maxPerSpot: BigInt(Math.floor(maxPerSpotSol * LAMPORTS_PER_SOL)), expectedOwner });
