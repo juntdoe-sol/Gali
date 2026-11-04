@@ -338,6 +338,12 @@ export const soloChance = (amount: number, crowds: number[]) => crowds.reduce((n
  * chance of winning the solo 1 ORE, keeping only covers where every square clears `minEdge` per SOL (which these styles
  * may set below zero: a known small loss per round for more ORE). The motherlode chaser only plays big motherlodes.
  */
+/**
+ * The hunters cover at least this many squares, skipping only the most crowded. Solo ORE and the motherlode both go to
+ * miners on the winning square, so a hunter that misses it gets nothing: with 3 squares it missed 88% of rounds.
+ */
+export const HUNT_MIN_COVER = 23;
+
 export function huntPlan(i: PlanInput & { style: Style; maxRoundSol?: number | null }): Plan | null {
   const p = i.params;
   if (i.onBoard.length !== BLOCKS) return null;
@@ -349,12 +355,13 @@ export function huntPlan(i: PlanInput & { style: Style; maxRoundSol?: number | n
   const crowd = (s: number) => Math.max(EMPTY_FLOOR, Number(i.onBoard[s]) * (1 + p.crowdBuffer));
   const order = quietestFirst(i.onBoard).map((x) => x.s);
   let best: { n: number; amount: number; chance: number; ev: number } | null = null;
-  for (let n = 1; n <= BLOCKS; n++) {
+  for (let n = HUNT_MIN_COVER; n <= BLOCKS; n++) {
     const amount = roundDown2(Math.min(budget / n, Number(i.maxPerSquare)));
     if (amount < Number(MIN_STAKE) || amount * n < Number(MIN_ROUND)) continue;
     const picked = order.slice(0, n);
     const evs = picked.map((s) => squareEv(amount, crowd(s), prize) - amount * feeRate);
-    if (evs.some((e) => e < p.minEdge * amount)) continue;
+    // the margin is on the whole round: one crowded square should not shrink the cover
+    if (evs.reduce((a, b) => a + b, 0) < p.minEdge * amount * n) continue;
     const chance = soloChance(amount, picked.map(crowd));
     if (!best || chance > best.chance + 1e-12) best = { n, amount, chance, ev: evs.reduce((a, b) => a + b, 0) };
   }

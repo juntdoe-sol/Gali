@@ -348,16 +348,19 @@ const test = (name, fn) => {
     assert.ok(p, 'plays');
     assert.ok(Number(p.total) <= 0.2e9 + 1 && Number(p.total) >= 0.15e9, `spends about its 10% budget: ${Number(p.total) / 1e9}`);
     const chance = S.soloChance(Number(p.groups[0].amount), p.squares.map((s) => Number(onBoard[s]) * 1.1));
-    for (let n = 1; n <= 25; n++) {
+    assert.ok(p.squares.length >= S.HUNT_MIN_COVER, `covers most of the board: ${p.squares.length}`);
+    for (let n = S.HUNT_MIN_COVER; n <= 25; n++) {
       const a = S.roundDown2(0.2e9 / n);
       const order = [...onBoard.keys()].sort((x, y) => Number(onBoard[x] - onBoard[y]) || x - y).slice(0, n);
-      const ok = order.every((s) => S.squareEv(a, Number(onBoard[s]) * 1.1, S.prizeLamports(0n, 1.5)) - a * 0.0025 >= params.minEdge * a);
+      const ok = order.reduce((t, s) => t + S.squareEv(a, Number(onBoard[s]) * 1.1, S.prizeLamports(0n, 1.5)) - a * 0.0025, 0) >= params.minEdge * a * n;
       if (ok) assert.ok(S.soloChance(a, order.map((s) => Number(onBoard[s]) * 1.1)) <= chance + 1e-12, `no better cover at ${n}`);
     }
     assert.equal(S.huntPlan({ ...base, params: { ...params, minEdge: 0.5 } }), null, 'a strict margin sits out');
     assert.equal(S.huntPlan({ ...base, params: S.STYLE_DEFAULTS.motherlode, style: 'motherlode' }), null, 'the motherlode chaser waits for a big pool');
     assert.ok(S.huntPlan({ ...base, params: S.STYLE_DEFAULTS.motherlode, style: 'motherlode', motherlodeGrams: 300n * 100_000_000_000n }), 'and plays it');
     assert.ok(Number(S.huntPlan({ ...base, maxRoundSol: 0.05 }).total) <= 0.05e9, 'the player\'s most per round holds');
+    const small = S.huntPlan({ ...base, balance: sol(0.075), params: { ...params, maxRoundShare: 0.06 } });
+    assert.ok(small && small.squares.length >= S.HUNT_MIN_COVER, 'a small balance still covers most of the board');
   });
 
   test('each style keeps its own bounds: the hunters may go below break-even, safe may not', () => {
