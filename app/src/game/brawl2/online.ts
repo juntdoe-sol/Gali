@@ -11,8 +11,11 @@
  * Matching needs no server: everyone searching the same queue sees the same list, sorted by who has waited longest.
  * The first on that list is the host and starts the match: 1v1 as soon as two are in; free for all at four, or
  * after 10 s with two or three (bots fill the rest). Nobody else for 12 s: a match against bots instead.
- * A private room is a 4-letter code; whoever made it first hosts and presses START.
+ * A private room is a 4-letter code; whoever made it first hosts and presses START. Someone who leaves the app to share
+ * the code (their game pauses, so they stop announcing themselves) stays in the room as away for ROOM_AWAY_MS, and
+ * coming back to the app announces them at once.
  */
+import { AppState } from 'react-native';
 import { create } from 'zustand';
 import type { Look } from '../../engine/types';
 import { cleanName } from '../lobbyMap';
@@ -43,6 +46,8 @@ interface OnlineState {
   match: OnlineMatch | null;
   /** nobody came: play bots instead (the screen starts that match) */
   solo: boolean;
+  /** this player made the private room (NEW ROOM), rather than joining it with a code */
+  made: boolean;
   error: string | null;
 }
 
@@ -52,9 +57,11 @@ export const FFA_WAIT_MS = 10_000;
 export const SOLO_WAIT_MS = 12_000;
 const PING_MS = 1500;
 const STALE_MS = 4500;
+/** A private room keeps someone it has not heard from for this long, shown as away, before dropping them. */
+export const ROOM_AWAY_MS = 120_000;
 
 const randomId = () => 'b' + Math.random().toString(36).slice(2, 10);
-export const useOnline = create<OnlineState>(() => ({ phase: 'off', q: null, me: randomId(), since: 0, peers: {}, match: null, solo: false, error: null }));
+export const useOnline = create<OnlineState>(() => ({ phase: 'off', q: null, me: randomId(), since: 0, peers: {}, match: null, solo: false, made: false, error: null }));
 
 type Ch = {
   on: (t: 'broadcast', f: { event: string }, cb: (m: { payload: any }) => void) => Ch; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -86,13 +93,26 @@ export function sendNet(e: 'bos' | 'boi' | 'bol', p: Record<string, unknown>) {
 }
 
 /** Start looking for a match in a queue. */
-export function search(q: Queue, me: { name: string; look: Look; weapon: string; sp: string }, wallet: string | null, opts?: { need?: number }) {
+export function search(q: Queue, me: { name: string; look: Look; weapon: string; sp: string }, wallet: string | null, opts?: { need?: number; made?: boolean }) {
   autoStart = opts?.need ? { need: Math.max(2, Math.min(4, opts.need)), pairAt: 0 } : null;
   mine = { ...me, w: wallet && B58.test(wallet) ? wallet : undefined };
-  useOnline.setState((s) => ({ phase: joined ? 'search' : 'connecting', q, me: idFor(wallet, s.me), since: Date.now(), peers: {}, match: null, solo: false, error: null }));
+  useOnline.setState((s) => ({ phase: joined ? 'search' : 'connecting', q, me: idFor(wallet, s.me), since: Date.now(), peers: {}, match: null, solo: false, made: Boolean(opts?.made), error: null }));
   lastPing = 0;
   join();
+  hookResume();
   if (!ticker) ticker = setInterval(tick, 400);
+}
+
+let resumeHooked = false;
+/** Back in the app (after sharing a room code from another app, say): announce ourselves at once. */
+function hookResume() {
+  if (resumeHooked) return;
+  resumeHooked = true;
+  AppState.addEventListener('change', (st) => {
+    if (st !== 'active' || useOnline.getState().phase !== 'search') return;
+    lastPing = 0;
+    tick();
+  });
 }
 /** Stop looking (back to the menu). */
 export function cancel() {
@@ -117,17 +137,25 @@ export function leaveOnline() {
 /** A private room's host starts the match. */
 export function startRoom() {
   const list = queueList();
-  if (list[0]?.id !== useOnline.getState().me || list.length < 2) return;
-  start(list.slice(0, 4), list.length === 2 ? '1v1' : 'ffa');
+  // only the players who are here: someone away would never load the match
+  const here = list.filter((p) => !p.away);
+  if (list[0]?.id !== useOnline.getState().me || here.length < 2) return;
+  start(here.slice(0, 4), here.length === 2 ? '1v1' : 'ffa');
 }
 
-/** Everyone in my queue (me too), the one who waited longest first. */
-export function queueList(): (NetPlayer & { since: number })[] {
+/**
+ * Everyone in my queue (me too), the one who waited longest first. In a private room, someone not heard from for a
+ * few seconds stays listed as away (for ROOM_AWAY_MS); in the quick queues they drop out.
+ */
+export function queueList(): (NetPlayer & { since: number; away: boolean })[] {
   const s = useOnline.getState();
   if (!s.q || !mine) return [];
   const now = Date.now();
-  const list = Object.values(s.peers).filter((p) => p.q === s.q && now - p.seen < STALE_MS);
-  list.push({ id: s.me, name: mine.name, look: mine.look, weapon: mine.weapon, sp: mine.sp, w: mine.w, q: s.q, since: s.since, seen: now });
+  const keep = s.q.startsWith('code:') ? ROOM_AWAY_MS : STALE_MS;
+  const list = Object.values(s.peers)
+    .filter((p) => p.q === s.q && now - p.seen < keep)
+    .map((p) => ({ ...p, away: now - p.seen >= STALE_MS }));
+  list.push({ id: s.me, name: mine.name, look: mine.look, weapon: mine.weapon, sp: mine.sp, w: mine.w, q: s.q, since: s.since, seen: now, away: false });
   return list.sort((a, b) => a.since - b.since || (a.id < b.id ? -1 : 1));
 }
 
@@ -147,10 +175,11 @@ function tick() {
   const list = queueList();
   if (s.q.startsWith('code:')) {
     // a callout starts by itself when the rival arrives; a private room waits for its host's START
-    if (autoStart && list.length >= 2) {
+    const here = list.filter((p) => !p.away);
+    if (autoStart && here.length >= 2) {
       if (!autoStart.pairAt) autoStart.pairAt = now;
-      const all = list.length >= autoStart.need;
-      if (list[0].id === s.me && (all || now - autoStart.pairAt > 120_000)) start(list.slice(0, autoStart.need), autoStart.need === 2 ? '1v1' : 'ffa');
+      const all = here.length >= autoStart.need;
+      if (list[0].id === s.me && (all || now - autoStart.pairAt > 120_000)) start(here.slice(0, autoStart.need), autoStart.need === 2 ? '1v1' : 'ffa');
     } else if (autoStart) autoStart.pairAt = 0;
     return;
   }
