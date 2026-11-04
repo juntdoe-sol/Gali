@@ -17,7 +17,7 @@ import { clampParams, DEFAULT_PARAMS, isStyle, STYLE_BOUNDS, STYLE_DEFAULTS, STY
 import {
   ANALYST, ANALYST_SCHEMA, analystPrompt, apply, budgetCheck, callCost, commentBlock, FEEDBACK, FEEDBACK_SCHEMA, feedbackPrompt, hasNews, LEAD,
   LEAD_SCHEMA, leadPrompt, monthBounds, RISK, RISK_SCHEMA, riskLimits, riskPrompt, ROUNDS, ROUNDS_SCHEMA, roundsPrompt, summarize, tally, text,
-  worstReviewCost, type FeedbackRow, type PlayRow, type RoundRow, type ThoughtRow,
+  worstReviewCost, type FeedbackRow, type PlayRow, type RoundRow, type SoloRow, type ThoughtRow,
 } from './tune.ts';
 
 const MODELS = {
@@ -103,14 +103,15 @@ Deno.serve(async (req) => {
     if (!thoughts.length) return json(200, { kind, reason: 'no new rounds since the last look' });
     const from = thoughts[0].round_id;
     const to = thoughts[thoughts.length - 1].round_id;
-    const [plays, market]: [PlayRow[], { sol_usd: number; ore_usd: number }[]] = await Promise.all([
+    const [plays, market, solos]: [PlayRow[], { sol_usd: number; ore_usd: number }[], SoloRow[]] = await Promise.all([
       get(`gali_ai_rounds?select=round_id,total,sol_back,ore_grams,won,board_before,board_after,stake,settled_at,void&round_id=gte.${from}&round_id=lte.${to}&limit=5000`),
       get('gali_ore_market?select=sol_usd,ore_usd&id=eq.1').catch(() => []),
+      get(`gali_solo_wins?select=wallet,square_total,stake,squares,deployed,motherlode&round_id=gte.${from}&round_id=lte.${to}&limit=1000`).catch(() => []),
     ]);
     const oreSol = market[0] && Number(market[0].sol_usd) > 0 ? Number(market[0].ore_usd) / Number(market[0].sol_usd) : 0;
     const why = await overBudget(1);
     if (why) return json(200, { kind, reason: why });
-    const r = await ask('rounds', ROUNDS, roundsPrompt(current, thoughts, plays, oreSol), ROUNDS_SCHEMA, 'low');
+    const r = await ask('rounds', ROUNDS, roundsPrompt(current, thoughts, plays, oreSol, solos), ROUNDS_SCHEMA, 'low');
     await saveSpend();
     if (!r.ok) return json(200, { kind, reason: `round reviewer: ${r.why}` });
     const ins = await fetch(`${base}/rest/v1/gali_ai_lessons`, {
@@ -154,6 +155,8 @@ Deno.serve(async (req) => {
   // subscribers' feedback from the last 24 hours (it applies to every style)
   const fb: FeedbackRow[] = await get(`gali_ai_feedback?select=wallet,vote,comment,at&at=gt.${encodeURIComponent(new Date(dayAgo).toISOString())}&order=at.desc&limit=2000`).catch(() => []);
   const votes = tally(fb);
+  // how solo 1 ORE winners played in the last 24 hours, for every style's review
+  const solos: SoloRow[] = await get(`gali_solo_wins?select=wallet,square_total,stake,squares,deployed,motherlode&at=gt.${encodeURIComponent(new Date(dayAgo).toISOString())}&limit=2000`).catch(() => []);
 
   const results: Record<string, unknown>[] = [];
   for (const style of styles) {
@@ -186,7 +189,7 @@ Deno.serve(async (req) => {
 
     // the analyst and the feedback reader work at the same time; the risk checker reads both; the lead decides
     const [analyst, feedback] = await Promise.all([
-      ask('analyst', ANALYST, analystPrompt(current, last24h, last7d, history, lessons, style), ANALYST_SCHEMA),
+      ask('analyst', ANALYST, analystPrompt(current, last24h, last7d, history, lessons, style, solos), ANALYST_SCHEMA),
       votes.wallets ? ask('feedback', FEEDBACK, feedbackPrompt(votes, commentBlock(fb)), FEEDBACK_SCHEMA) : Promise.resolve({ ok: false as const, why: 'no feedback in the last 24 hours' }),
     ]);
     const risk = await ask('risk', RISK, riskPrompt(current, last24h, last7d, said(analyst), said(feedback), votes, style), RISK_SCHEMA);

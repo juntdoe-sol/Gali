@@ -47,7 +47,7 @@ export const roundPda = (id: bigint) => {
 const u64 = (d: Buffer, o: number) => d.readBigUInt64LE(DISC + o);
 const squares = (d: Buffer, o: number) => Array.from({ length: BLOCKS }, (_, i) => u64(d, o + i * 8));
 
-export interface RoundAcc { id: bigint; deployed: bigint[]; entropy: Uint8Array; motherlode: bigint; reward: bigint; split: boolean }
+export interface RoundAcc { id: bigint; deployed: bigint[]; entropy: Uint8Array; motherlode: bigint; reward: bigint; split: boolean; top: PublicKey }
 export function decodeRound(d: Buffer): RoundAcc {
   if (d.length !== ROUND_SIZE) throw new Error(`round is ${d.length} bytes`);
   return {
@@ -57,6 +57,8 @@ export function decodeRound(d: Buffer): RoundAcc {
     motherlode: u64(d, 648),
     reward: squares(d, 688).reduce((a, b) => a + b, 0n),
     split: new PublicKey(d.subarray(DISC + 912, DISC + 944)).equals(SPLIT_ADDRESS),
+    // the solo winner (ORE's top miner), unless the round was shared
+    top: new PublicKey(d.subarray(DISC + 912, DISC + 944)),
   };
 }
 export interface MinerAcc { authority: PublicKey; checkpointId: bigint; deployed: bigint[]; cumulative: bigint[]; roundId: bigint }
@@ -176,6 +178,8 @@ export interface Hooks {
   settled(wallet: string, round: bigint, s: Settled | null, boardAfter: bigint): Promise<void>;
   /** What the AI saw and decided in a round's deploy window, for the AI tab. */
   thought?(t: Thought): Promise<void>;
+  /** How a round's solo 1 ORE winner played, for the agents to study. */
+  soloWin?(w: SoloWin): Promise<void>;
 }
 
 /** One round's decision in numbers a player can follow. Lamports and grams. */
@@ -211,8 +215,48 @@ export interface PassResult {
  * slotMs: the measured slot time. Solana's slots run faster than the nominal 400 ms (about 215 ms in Nov 2026), and
  * sleeping by the nominal figure overshoots the deploy window, so the AI never plays. Each pass refines the estimate.
  */
-export interface State { done: Set<string>; settleAt: number; slotMs: number; lastSlot?: number; lastAt?: number }
+export interface State { done: Set<string>; settleAt: number; slotMs: number; lastSlot?: number; lastAt?: number; studied?: bigint }
 export const newState = (slotMs = SLOT_MS): State => ({ done: new Set(), settleAt: 0, slotMs });
+
+/** How one solo 1 ORE winner played their round (lamports), for the AI agents to learn from. Any wallet, not only ours. */
+export interface SoloWin {
+  round: bigint;
+  wallet: string;
+  square: number;
+  /** SOL on the winning square, all miners */
+  squareTotal: bigint;
+  /** the winner's stake on the winning square */
+  stake: bigint;
+  /** squares the winner covered, and their SOL across the board */
+  squares: number;
+  deployed: bigint;
+  motherlode: boolean;
+}
+
+/**
+ * Reads how the last round's solo winner played, while their ORE Miner still holds that round (it moves on at their next
+ * deploy, so this runs early in the next round). Shared rounds and winners already moved on are skipped.
+ */
+export async function studySolo(conn: Connection, hooks: Hooks, current: bigint, st: State): Promise<SoloWin | null> {
+  const prev = current - 1n;
+  if (!hooks.soloWin || (st.studied !== undefined && st.studied >= prev)) return null;
+  st.studied = prev;
+  const info = await conn.getAccountInfo(roundPda(prev), 'confirmed');
+  if (!info || info.data.length !== ROUND_SIZE) return null;
+  const r = decodeRound(Buffer.from(info.data));
+  if (r.split || r.top.equals(PublicKey.default)) return null;
+  const win = settleRound(r, Array.from({ length: BLOCKS }, () => 0n), null)?.winningSquare;
+  if (win === undefined) return null;
+  const mi = await conn.getAccountInfo(minerPda(r.top), 'confirmed');
+  const m = mi && mi.data.length === SIZE.miner ? decodeMiner(Buffer.from(mi.data)) : null;
+  if (!m || m.roundId !== prev || !(m.deployed[win] > 0n)) return null;
+  const w: SoloWin = {
+    round: prev, wallet: r.top.toBase58(), square: win, squareTotal: r.deployed[win], stake: m.deployed[win],
+    squares: m.deployed.filter((x) => x > 0n).length, deployed: m.deployed.reduce((a, b) => a + b, 0n), motherlode: r.motherlode > 0n,
+  };
+  await hooks.soloWin(w);
+  return w;
+}
 /** Never sleep longer than this while waiting for the deploy window, so a wrong slot estimate can't skip it. */
 export const MAX_WAIT_MS = 8000;
 
@@ -285,6 +329,8 @@ export async function pass(conn: Connection, signer: Keypair, hooks: Hooks, st: 
   const err = (tag: string, e: unknown) => res.errors.length < 6 && res.errors.push(`${tag}: ${String((e as Error)?.message ?? e).slice(0, 160)}`);
 
   if (phase !== 'waiting') res.settled = await settle(conn, hooks, board.roundId, st, now).catch((e) => (err('settle', e), 0));
+  // early in a round: how the last round's solo winner played, before their next deploy moves their miner on
+  if (phase === 'mining') await studySolo(conn, hooks, board.roundId, st).catch((e) => err('study', e));
   if (phase !== 'mining') {
     if (phase === 'locked') res.waitMs = Math.max(1000, slotsLeft * st.slotMs + 1500);
     return res;

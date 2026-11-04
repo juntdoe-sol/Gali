@@ -114,6 +114,7 @@ You are the results analyst on the team that reviews the bot. Read the numbers o
 - realizedReturn vs expectedReturn: well below over many plays means the bot is too optimistic.
 - plays: very few plays may mean the margin is too strict, or that the board is simply full.
 - the round reviewer's lessons: a quick look at every round, every 15 minutes. Use them for patterns the totals hide, but trust the totals over a few rounds.
+- how solo 1 ORE winners played in the last 24 hours: the share of the winning square, squares covered and SOL they needed. Compare it with what this style does and what a player's budget allows.
 Say what the numbers show, how sure you are given the sample size, and which settings you would move and which way. ${PLAIN}`;
 
 export const FEEDBACK = `${GAME}
@@ -151,11 +152,40 @@ export const LEAD_SCHEMA = obj({ ...settings, learned: str, note: str, feedbackR
 export const ROUNDS = `${GAME}
 
 You are the round reviewer. Every 15 minutes you look at each round since your last look: what the bot saw at its decision (the quietest square, the most a square could hold and still be worth joining, the motherlode), what it did (played or sat out, how many squares, how much) and, once drawn, what happened (on the winning square or not, solo or shared, SOL back, ORE mined, how much SOL landed after it played).
-Find patterns a busy team would miss, for example: the board always just over the limit, the late crowd bigger than crowdBuffer, results by number of squares played, near misses. Results swing a lot over a few rounds: say what the rounds suggest and how sure you can be, never claim a few rounds prove anything.
+Find patterns a busy team would miss, for example: the board always just over the limit, the late crowd bigger than crowdBuffer, results by number of squares played, near misses. Study how the round's solo 1 ORE winners played (their share of the winning square, squares covered, stake, total SOL) and what that means for the solo hunter and the motherlode chaser, given what a player's balance allows. Results swing a lot over a few rounds: say what the rounds suggest and how sure you can be, never claim a few rounds prove anything.
 - "lessons": two to four sentences of plain, specific observations with numbers, for the review team.
 - "watch": one sentence on what to look for in the next rounds.
 ${PLAIN}`;
 export const ROUNDS_SCHEMA = obj({ lessons: str, watch: str, confidence: { type: 'string', enum: ['low', 'medium', 'high'] } });
+
+// ---------------- how solo 1 ORE winners play ----------------
+
+/** One solo 1 ORE winner's round (a gali_solo_wins row), lamports. Any wallet on ORE's board. */
+export interface SoloRow { wallet: string; square_total: number | string; stake: number | string; squares: number; deployed: number | string; motherlode?: boolean }
+
+const median = (xs: number[]) => quantile(xs, 0.5);
+const r3 = (x: number | null) => (x === null ? null : Number(x.toPrecision(3)));
+/** How solo winners played, in numbers the agents can compare with the bot's own play. Nothing per wallet but a count. */
+export function soloSummary(rows: SoloRow[]): Record<string, unknown> {
+  if (!rows.length) return { winners: 0 };
+  const share = rows.map((r) => Number(r.stake) / Math.max(1, Number(r.square_total)));
+  const wins = new Map<string, number>();
+  for (const r of rows) wins.set(r.wallet, (wins.get(r.wallet) ?? 0) + 1);
+  const repeat = [...wins.values()].filter((n) => n > 1);
+  return {
+    winners: rows.length,
+    shareOfWinningSquare: { p25: r3(quantile(share, 0.25)), median: r3(median(share)), p75: r3(quantile(share, 0.75)) },
+    squaresCovered: { median: median(rows.map((r) => r.squares)), coveredAtLeast20: r3(rows.filter((r) => r.squares >= 20).length / rows.length), coveredAtMost5: r3(rows.filter((r) => r.squares <= 5).length / rows.length) },
+    stakeOnWinningSquareSol: r3(median(rows.map((r) => Number(r.stake) / 1e9))),
+    totalDeployedSol: { median: r3(median(rows.map((r) => Number(r.deployed) / 1e9))), p75: r3(quantile(rows.map((r) => Number(r.deployed) / 1e9), 0.75)) },
+    winningSquareSol: r3(median(rows.map((r) => Number(r.square_total) / 1e9))),
+    wallets: wins.size,
+    walletsWinningMoreThanOnce: repeat.length,
+    winsByThoseWallets: repeat.reduce((a, b) => a + b, 0),
+  };
+}
+
+const SOLO_NOTE = 'Solo winners are anyone on the board, not only Gali bots. A solo win goes to one miner on the winning square with odds equal to their share, so a big share is how they win. Wallets that win often are likely bots playing big every round.';
 
 // ---------------- the round reviewer ----------------
 
@@ -166,7 +196,7 @@ export interface PlayRow { round_id: number | string; total: number | string; so
 
 const sol = (x: unknown) => Number(x) / 1e9;
 /** One line per round for the round reviewer, oldest first, plus totals. Nothing per wallet. */
-export function roundsPrompt(current: AiParams, thoughts: ThoughtRow[], plays: PlayRow[], oreSol = 0): string {
+export function roundsPrompt(current: AiParams, thoughts: ThoughtRow[], plays: PlayRow[], oreSol = 0, solos: SoloRow[] = []): string {
   const byRound = new Map<string, PlayRow[]>();
   for (const p of plays) if (!p.void) byRound.set(String(p.round_id), [...(byRound.get(String(p.round_id)) ?? []), p]);
   let staked = 0, back = 0, ore = 0, played = 0, gold = 0, drawn = 0;
@@ -194,6 +224,7 @@ export function roundsPrompt(current: AiParams, thoughts: ThoughtRow[], plays: P
     `Current settings: ${fmt(current)}`,
     `Rounds since your last look, oldest first:\n${lines.join('\n')}`,
     `Totals: ${fmt({ rounds: thoughts.length, played, drawn, onWinningSquare: gold, stakedSol: staked, backSol: back, ore, orePriceSol: oreSol, oreValueSol: ore * ORE_KEEP * oreSol, netSol: back + ore * ORE_KEEP * oreSol - staked })}`,
+    `How the solo 1 ORE winners in these rounds played (${SOLO_NOTE}): ${fmt(soloSummary(solos))}`,
   ].join('\n\n');
 }
 
@@ -232,7 +263,7 @@ export function commentBlock(rows: FeedbackRow[]): string {
 
 const fmt = (v: unknown) => JSON.stringify(v, (_k, x) => (typeof x === 'number' ? Number(x.toPrecision(5)) : x));
 
-export function analystPrompt(current: AiParams, last24h: Summary, last7d: Summary, history: { at: string; note: string | null }[], lessons: { at: string; lessons: string }[] = [], style: Style = 'safe'): string {
+export function analystPrompt(current: AiParams, last24h: Summary, last7d: Summary, history: { at: string; note: string | null }[], lessons: { at: string; lessons: string }[] = [], style: Style = 'safe', solos: SoloRow[] = []): string {
   return [
     styleBrief(style),
     `Current settings: ${fmt(current)}`,
@@ -240,6 +271,7 @@ export function analystPrompt(current: AiParams, last24h: Summary, last7d: Summa
     `Last 7 days: ${fmt(last7d)}`,
     `The team's recent notes, newest first:\n${history.map((h) => `- ${h.at}: ${h.note ?? ''}`).join('\n') || '- none yet'}`,
     `The round reviewer's lessons since the last review, newest first:\n${lessons.map((l) => `- ${l.at}: ${text(l.lessons, 400)}`).join('\n') || '- none yet'}`,
+    `How solo 1 ORE winners played in the last 24 hours (${SOLO_NOTE}): ${fmt(soloSummary(solos))}`,
   ].join('\n\n');
 }
 
