@@ -262,6 +262,43 @@ const test = (name, fn) => {
     assert.equal(solo.h.log.played[0]?.style, 'solo');
   });
 
+  await test('the AI studies how every solo 1 ORE winner played, once a round, and skips shared rounds', async () => {
+    const winner = Keypair.generate().publicKey;
+    const rd = roundData({ id: 99, deployed: board(sol(0.5)), entropy: entropyFor(7), reward: 100_000_000_000n, split: false });
+    winner.toBuffer().copy(rd, DISC + 912);
+    const stake = board((i) => (i < 20 ? sol(0.05) : 0n));
+    const md = minerData({ authority: winner, roundId: 99, checkpointId: 98, deployed: stake });
+    const conn = { async getAccountInfo(k) { return k.equals(M.roundPda(99n)) ? { data: rd } : k.equals(minerPda(winner)) ? { data: md } : null; } };
+    const h = hooks();
+    const seen = [];
+    h.soloWin = async (w) => seen.push(w);
+    const st = M.newState();
+    const w = await M.studySolo(conn, h, 100n, st);
+    assert.equal(w.wallet, winner.toBase58());
+    assert.equal(w.square, 7);
+    assert.equal(w.stake, sol(0.05));
+    assert.equal(w.squareTotal, sol(0.5));
+    assert.equal(w.squares, 20);
+    assert.equal(w.deployed, sol(1));
+    assert.equal(seen.length, 1);
+    assert.equal(await M.studySolo(conn, h, 100n, st), null, 'once a round');
+    const shared = roundData({ id: 99, deployed: board(sol(0.5)), entropy: entropyFor(7), split: true });
+    assert.equal(await M.studySolo({ async getAccountInfo(k) { return k.equals(M.roundPda(99n)) ? { data: shared } : { data: md }; } }, h, 100n, M.newState()), null, 'shared round: no solo winner');
+    const moved = minerData({ authority: winner, roundId: 100, checkpointId: 99, deployed: stake });
+    assert.equal(await M.studySolo({ async getAccountInfo(k) { return k.equals(M.roundPda(99n)) ? { data: rd } : { data: moved }; } }, h, 100n, M.newState()), null, 'winner already moved on');
+
+    const sum = T.soloSummary([
+      { wallet: 'a', square_total: 1e9, stake: 1e8, squares: 25, deployed: 2.5e9 },
+      { wallet: 'a', square_total: 1e9, stake: 3e8, squares: 20, deployed: 6e9 },
+      { wallet: 'b', square_total: 1e9, stake: 2e8, squares: 3, deployed: 0.6e9 },
+    ]);
+    assert.equal(sum.shareOfWinningSquare.median, 0.2);
+    assert.equal(sum.squaresCovered.median, 20);
+    assert.equal(sum.walletsWinningMoreThanOnce, 1);
+    assert.equal(sum.winsByThoseWallets, 2);
+    assert.deepEqual(T.soloSummary([]), { winners: 0 });
+  });
+
   test('the "joins spots under" limit the AI tab shows matches what the planner does', () => {
     const prize = S.prizeLamports(245n * 100_000_000_000n, 1.59);
     const limit = S.joinLimitLamports(prize, P);
