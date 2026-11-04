@@ -26,10 +26,8 @@ export const LIMITS = {
   frameBytes: 16_384,
   sockets: 400,
   perIp: 30, // phones on one carrier or one venue Wi-Fi share an IP
-  // a Fightclub fighter sends 10 a second on the same socket as the island and lobby positions (1 a second each):
-  // 12 left no room, and the relay dropped fight updates, so the other fighter jumped about (Nov 2026)
-  ratePerSec: 25,
-  burst: 50,
+  ratePerSec: 12, // Arena fighters send up to 8 a second
+  burst: 24,
   /** all sockets from one IP together: 30 walking players need about 30 a second */
   ipRatePerSec: 60,
   ipBurst: 120,
