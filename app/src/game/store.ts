@@ -1452,10 +1452,10 @@ export const useGame = create<GameState>((set, get) => {
       try {
         const [board, owner] = await Promise.all([loadBoard(), ownerKey()]);
         if (!owner) throw new Error('wallet disconnected');
-        setWallet({ busy: 'Approve in your wallet to fund Gali AI' });
+        setWallet({ busy: 'Approve in your wallet to fund your bot' });
         await board.startAiMining(depositSol, maxPerSpotSol, owner);
         set({ autopilot: { balance: depositSol, perSpot: maxPerSpotSol, runnable: false, ai: true } });
-        get().toast('Gali AI is on. It plays near the end of each round, and sits out rounds that are not worth it', 'good');
+        get().toast('Your bot is on. It plays near the end of each round, the way you set it under HOW YOUR BOT PLAYS', 'good');
         return true;
       } catch (e) {
         get().toast(errMsg(e), 'bad');
@@ -1472,7 +1472,7 @@ export const useGame = create<GameState>((set, get) => {
       try {
         const [board, owner] = await Promise.all([loadBoard(), ownerKey()]);
         if (!owner) throw new Error('wallet disconnected');
-        setWallet({ busy: 'Approve in your wallet: 0.1 SOL for 7 days of Gali AI' });
+        setWallet({ busy: 'Approve in your wallet: 0.1 SOL for 7 days of the bot' });
         return await board.buyAiPass(owner);
       } catch (e) {
         get().toast(errMsg(e), 'bad');
