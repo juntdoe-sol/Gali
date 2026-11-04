@@ -65,11 +65,15 @@ export interface AiParams {
 export const DEFAULT_PARAMS: AiParams = { minEdge: 0.08, crowdBuffer: 0.25, maxRoundShare: 0.05, targetSlotsLeft: 40, minMotherlode: 0 };
 
 export type Bounds = Record<keyof AiParams, [number, number]>;
+/**
+ * Wide on purpose: the player chose to let the agents tune every style freely. These only keep a value workable (the
+ * bot must send before ORE's lock, so targetSlotsLeft stays at 18+; a round never spends more than half the balance).
+ */
 export const BOUNDS: Bounds = {
-  minEdge: [0.02, 0.5],
-  crowdBuffer: [0, 1.5],
-  maxRoundShare: [0.01, 0.25],
-  targetSlotsLeft: [18, 45],
+  minEdge: [-0.6, 0.5],
+  crowdBuffer: [0, 3],
+  maxRoundShare: [0.01, 0.5],
+  targetSlotsLeft: [18, 60],
   minMotherlode: [0, 0],
 };
 
@@ -94,9 +98,9 @@ export const STYLE_DEFAULTS: Record<Style, AiParams> = {
 };
 export const STYLE_BOUNDS: Record<Style, Bounds> = {
   safe: BOUNDS,
-  solo: { ...BOUNDS, minEdge: [-0.3, 0.5] },
-  motherlode: { ...BOUNDS, minEdge: [-0.6, 0.5], minMotherlode: [20, 3000] },
-  balance: { ...BOUNDS, minEdge: [-0.1, 0.5] },
+  solo: BOUNDS,
+  motherlode: { ...BOUNDS, minMotherlode: [20, 3000] },
+  balance: BOUNDS,
 };
 export const isStyle = (x: unknown): x is Style => x === 'safe' || x === 'balance' || x === 'solo' || x === 'motherlode';
 
