@@ -5,8 +5,8 @@
 // edge function.
 import { Connection } from './deps.ts';
 import { loadKey } from '../autopilot/core.ts';
-import { clampParams, DEFAULT_PARAMS, type AiParams } from '../_shared/aiStrategy.ts';
-import { run, sweepFees, type Hooks } from './core.ts';
+import { clampParams, isStyle, STYLE_BOUNDS, STYLE_DEFAULTS, type AiParams, type Style } from '../_shared/aiStrategy.ts';
+import { run, sweepFees, type BotChoice, type Hooks } from './core.ts';
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 /** Prices older than this and the AI sits out: a stale price could make a bad round look good. */
@@ -31,10 +31,35 @@ function supabaseHooks(base: string, key: string): Hooks {
     };
   };
   return {
-    params: cache(60_000, async (): Promise<AiParams> => {
-      const rows = await get('gali_ai_params?select=min_edge,crowd_buffer,max_round_share,target_slots_left&order=id.desc&limit=1').catch(() => []);
-      const r = rows[0];
-      return r ? clampParams({ minEdge: r.min_edge, crowdBuffer: r.crowd_buffer, maxRoundShare: r.max_round_share, targetSlotsLeft: r.target_slots_left }) : DEFAULT_PARAMS;
+    params: (() => {
+      const byStyle = new Map<Style, () => Promise<AiParams>>();
+      return (style: Style = 'safe') => {
+        if (!byStyle.has(style)) {
+          byStyle.set(style, cache(60_000, async (): Promise<AiParams> => {
+            const rows = await get(`gali_ai_params?select=min_edge,crowd_buffer,max_round_share,target_slots_left,min_motherlode&style=eq.${style}&order=id.desc&limit=1`).catch(() => []);
+            const r = rows[0];
+            const d = STYLE_DEFAULTS[style];
+            return r ? clampParams({ minEdge: r.min_edge, crowdBuffer: r.crowd_buffer, maxRoundShare: r.max_round_share, targetSlotsLeft: r.target_slots_left, minMotherlode: r.min_motherlode }, d, STYLE_BOUNDS[style]) : d;
+          }));
+        }
+        return byStyle.get(style)!();
+      };
+    })(),
+    choices: cache(20_000, async () => {
+      const rows: Record<string, unknown>[] = await get('gali_bot_settings?select=*&limit=10000');
+      const n = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+      return new Map(rows.map((r): [string, BotChoice] => [String(r.wallet), {
+        mode: r.mode === 'bot' ? 'bot' : 'ai',
+        style: isStyle(r.style) ? r.style : 'safe',
+        rules: { spots: Number(r.spots), perSpotSol: Number(r.per_spot_sol), maxSpotSol: n(r.max_spot_sol), minMotherlodeOre: n(r.min_motherlode_ore), maxRoundSol: n(r.max_round_sol) },
+        stopLossSol: n(r.stop_loss_sol),
+      }]));
+    }),
+    net: cache(30_000, async () => {
+      const r = await fetch(`${base}/rest/v1/rpc/gali_bot_net`, { method: 'POST', headers: h, body: '{}' });
+      if (!r.ok) throw new Error(`net ${r.status}`);
+      const rows: { wallet: string; net_sol: number }[] = await r.json();
+      return new Map(rows.map((x) => [x.wallet, Number(x.net_sol)]));
     }),
     price: cache(60_000, async () => {
       const rows = await get('gali_ore_market?select=sol_usd,ore_usd,prices_at&id=eq.1').catch(() => []);
@@ -53,7 +78,7 @@ function supabaseHooks(base: string, key: string): Hooks {
         method: 'POST',
         headers: { ...h, prefer: 'resolution=ignore-duplicates' },
         body: JSON.stringify({
-          wallet: p.wallet, round_id: p.round.toString(), stake: p.stake.map(String), total: p.total.toString(), fee: p.fee.toString(), ev: p.ev,
+          wallet: p.wallet, round_id: p.round.toString(), mode: p.mode ?? 'ai', style: p.style ?? 'safe', stake: p.stake.map(String), total: p.total.toString(), fee: p.fee.toString(), ev: p.ev,
           board_before: p.boardBefore.toString(), prize: p.prize, signature: p.signature,
         }),
       });

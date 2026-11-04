@@ -15,7 +15,7 @@
  */
 import { Buffer, ComputeBudgetProgram, Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction } from './deps.ts';
 import { decodeAutomation, decodeBoard, LOCK_SLOTS, ORE_PROGRAM_ID, phaseOf, SIZE, STRATEGY, type Auto, type Phase } from '../autopilot/core.ts';
-import { addToBoard, AI_FEE_BPS, aiFee, BLOCKS, joinLimitLamports, MAX_FEE_BPS, MIN_STAKE, planRound, prizeLamports, settleRound, type AiParams, type Plan, type Settled } from '../_shared/aiStrategy.ts';
+import { addToBoard, AI_FEE_BPS, aiFee, BLOCKS, botPlan, huntPlan, joinLimitLamports, MAX_FEE_BPS, MIN_STAKE, planRound, prizeLamports, settleRound, type AiParams, type Plan, type Rules, type Settled, type Style } from '../_shared/aiStrategy.ts';
 
 const ENTROPY_PROGRAM_ID = new PublicKey('3jSkUuYBoJzQPMEzTvkDFXCZUBksPamrVhrnHR9igu2X');
 const BOARD = new PublicKey('BrcSxdp1nXFzou1YyDnQJcPNBNHgoypZmTsyKBSLLXzi');
@@ -132,6 +132,8 @@ export function txFor(plan: Plan, a: Auto, miner: MinerAcc, roundId: bigint, sig
 export interface Played {
   wallet: string;
   round: bigint;
+  mode?: 'bot' | 'ai';
+  style?: Style;
   /** lamports staked on each square */
   stake: bigint[];
   total: bigint;
@@ -146,8 +148,23 @@ export interface Played {
 export interface Pending { wallet: string; round: bigint; stake: bigint[] }
 
 /** Where the AI reads its settings and the players' passes, and writes what it did. index.ts backs these with Supabase. */
+/** A wallet's choice: Bot (its own rules, no AI) or AI bot (a style), plus its own limits. No row: AI bot, safe. */
+export interface BotChoice {
+  mode: 'bot' | 'ai';
+  style: Style;
+  rules: Rules;
+  /** stop once the result since the settings were saved is this much SOL down */
+  stopLossSol: number | null;
+}
+export const DEFAULT_CHOICE: BotChoice = { mode: 'ai', style: 'safe', rules: { spots: 10, perSpotSol: 0.002, maxSpotSol: null, minMotherlodeOre: null, maxRoundSol: null }, stopLossSol: null };
+
 export interface Hooks {
-  params(): Promise<AiParams>;
+  /** the AI settings for a style (the agents tune each style separately) */
+  params(style?: Style): Promise<AiParams>;
+  /** each wallet's Bot or AI bot choice */
+  choices?(): Promise<Map<string, BotChoice>>;
+  /** each wallet's result in SOL since its settings were saved, for the stop-loss */
+  net?(): Promise<Map<string, number>>;
   /** One ORE in SOL, or null when the price is missing or stale (the AI then sits out). */
   price(): Promise<number | null>;
   /** Wallets with a live AI pass. */
@@ -314,7 +331,13 @@ export async function pass(conn: Connection, signer: Keypair, hooks: Hooks, st: 
 
   // plan one player at a time, each seeing the stakes of the ones before, so the AI does not crowd itself
   let onBoard = round.deployed;
-  const sends: { a: Auto; plan: Plan; ixs: TransactionInstruction[] }[] = [];
+  const sends: { a: Auto; plan: Plan; ixs: TransactionInstruction[]; choice: BotChoice }[] = [];
+  const [choices, nets] = await Promise.all([hooks.choices?.().catch((e) => (err('choices', e), new Map())) ?? new Map(), hooks.net?.().catch((e) => (err('net', e), new Map())) ?? new Map()]);
+  const styleParams = new Map<Style, AiParams>();
+  for (const a of autos) {
+    const c: BotChoice = choices.get(a.authority.toBase58()) ?? DEFAULT_CHOICE;
+    if (c.mode === 'ai' && !styleParams.has(c.style)) styleParams.set(c.style, await hooks.params(c.style));
+  }
   autos.forEach((a, i) => {
     const tag = `${a.authority.toBase58()}:${board.roundId}`;
     const info = minerInfos[i];
@@ -325,13 +348,26 @@ export async function pass(conn: Connection, signer: Keypair, hooks: Hooks, st: 
       res.skipped++;
       return;
     }
-    const plan = planRound({ onBoard, motherlodeGrams: motherlode, orePriceSol: price, maxPerSquare: a.amount, balance: a.balance, feeBps: a.fee, params });
+    const choice: BotChoice = choices.get(a.authority.toBase58()) ?? DEFAULT_CHOICE;
+    // the player's stop-loss: down this much since the settings were saved, it stops until they change something
+    if (choice.stopLossSol && (nets.get(a.authority.toBase58()) ?? 0) <= -choice.stopLossSol) {
+      res.skipped++;
+      return;
+    }
+    const base = { onBoard, motherlodeGrams: motherlode, orePriceSol: price, maxPerSquare: a.amount, balance: a.balance, feeBps: a.fee };
+    const sp = styleParams.get(choice.style) ?? params;
+    const plan =
+      choice.mode === 'bot'
+        ? botPlan({ ...base, rules: choice.rules })
+        : choice.style === 'safe'
+          ? capRound(planRound({ ...base, params: sp }), choice.rules.maxRoundSol)
+          : huntPlan({ ...base, params: sp, style: choice.style, maxRoundSol: choice.rules.maxRoundSol });
     if (!plan) {
       res.skipped++;
       return;
     }
     onBoard = addToBoard(onBoard, plan);
-    sends.push({ a, plan, ixs: txFor(plan, a, miner, board.roundId, signer.publicKey) });
+    sends.push({ a, plan, ixs: txFor(plan, a, miner, board.roundId, signer.publicKey), choice });
   });
   await hooks
     .thought?.({
@@ -344,16 +380,20 @@ export async function pass(conn: Connection, signer: Keypair, hooks: Hooks, st: 
   if (!sends.length) return res;
 
   const { blockhash } = await conn.getLatestBlockhash('confirmed');
+  // resending the same signed transaction costs nothing (one signature, paid once) and gets bets through busy slots
+  const until = now + Math.max(0, slotsLeft - LOCK_SLOTS) * st.slotMs;
   await Promise.all(
-    sends.map(async ({ a, plan, ixs }) => {
+    sends.map(async ({ a, plan, ixs, choice }) => {
       try {
         const tx = new Transaction({ feePayer: signer.publicKey, recentBlockhash: blockhash }).add(...ixs);
         tx.sign(signer);
-        const signature = await conn.sendRawTransaction(tx.serialize(), { skipPreflight: false, maxRetries: 2 });
+        const raw = tx.serialize();
+        const signature = await conn.sendRawTransaction(raw, { skipPreflight: false, maxRetries: 2 });
         res.sent++;
         const stake = Array.from({ length: BLOCKS }, () => 0n);
         for (const g of plan.groups) for (let s = 0; s < BLOCKS; s++) if (g.mask & (1 << s)) stake[s] = g.amount;
-        await hooks.played({ wallet: a.authority.toBase58(), round: board.roundId, stake, total: plan.total, fee: aiFee(plan.total, a.fee), ev: plan.ev, boardBefore: plan.boardBefore, prize, signature }).catch((e) => err('save', e));
+        await hooks.played({ wallet: a.authority.toBase58(), round: board.roundId, mode: choice.mode, style: choice.style, stake, total: plan.total, fee: aiFee(plan.total, a.fee), ev: plan.ev, boardBefore: plan.boardBefore, prize, signature }).catch((e) => err('save', e));
+        await rebroadcast(conn, raw, signature, until).catch((e) => err('resend', e));
       } catch (e) {
         res.failed++;
         err(a.authority.toBase58().slice(0, 6), e);
@@ -361,6 +401,30 @@ export async function pass(conn: Connection, signer: Keypair, hooks: Hooks, st: 
     }),
   );
   return res;
+}
+
+/** A safe-style plan over the player's most per round is dropped rather than resized (its stakes were sized for the margin). */
+export const capRound = (plan: Plan | null, maxRoundSol: number | null): Plan | null =>
+  plan && maxRoundSol && Number(plan.total) > maxRoundSol * 1e9 ? null : plan;
+
+/** How often a sent bet is checked and resent until it lands. */
+export const RESEND_MS = 400;
+
+/**
+ * Resends `raw` every RESEND_MS until its signature is seen or `until` (ORE's lock) passes. A deploy that misses the
+ * lock never lands, and the round is then settled as void. Throws if the transaction landed with an error.
+ */
+export async function rebroadcast(conn: Connection, raw: Buffer | Uint8Array, signature: string, until: number, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))): Promise<boolean> {
+  if (!conn.getSignatureStatuses) return false;
+  while (Date.now() < until) {
+    await sleep(RESEND_MS);
+    const { value } = await conn.getSignatureStatuses([signature]);
+    const s = value[0];
+    if (s?.err) throw new Error(`landed with an error: ${JSON.stringify(s.err).slice(0, 120)}`);
+    if (s?.confirmationStatus) return true;
+    await conn.sendRawTransaction(raw, { skipPreflight: true, maxRetries: 0 }).catch(() => undefined);
+  }
+  return false;
 }
 
 /** Passes until `budgetMs` is used up, sleeping between them for as long as nothing needs doing. */

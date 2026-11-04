@@ -285,6 +285,59 @@ $$;
 revoke all on function public.gali_ai_stats(), public.gali_ai_board(int), public.gali_ai_me(text) from public;
 grant execute on function public.gali_ai_stats(), public.gali_ai_board(int), public.gali_ai_me(text) to anon, authenticated, service_role;
 
+-- ---------------- Bot and AI bot ----------------
+-- Each wallet picks Bot (its own rules, no AI) or AI bot (a style the agents tune). One pass covers both.
+create table if not exists public.gali_bot_settings (
+  wallet text primary key,
+  mode text not null default 'ai' check (mode in ('bot', 'ai')),
+  style text not null default 'safe' check (style in ('safe', 'solo', 'motherlode')),
+  spots int not null default 10 check (spots between 1 and 25),   -- Bot: the quietest this many squares
+  per_spot_sol numeric not null default 0.002 check (per_spot_sol > 0),
+  max_spot_sol numeric check (max_spot_sol > 0),                  -- Bot: skip squares holding more
+  min_motherlode_ore numeric check (min_motherlode_ore > 0),      -- Bot: only play big motherlodes
+  max_round_sol numeric check (max_round_sol > 0),                -- both: most SOL in one round
+  stop_loss_sol numeric check (stop_loss_sol > 0),                -- both: stop after losing this much
+  started_at timestamptz not null default now(),                  -- the stop-loss counts from here
+  updated_at timestamptz not null default now()
+);
+alter table public.gali_bot_settings enable row level security;
+revoke all on public.gali_bot_settings from anon, authenticated;
+
+-- which mode and style played each round, and per-style settings the agents tune
+alter table public.gali_ai_rounds add column if not exists mode text not null default 'ai';
+alter table public.gali_ai_rounds add column if not exists style text not null default 'safe';
+alter table public.gali_ai_params add column if not exists style text not null default 'safe';
+alter table public.gali_ai_params add column if not exists min_motherlode numeric not null default 0;
+insert into public.gali_ai_params (min_edge, crowd_buffer, max_round_share, target_slots_left, min_motherlode, style, source, note)
+select -0.05, 0.1, 0.05, 30, 0, 'solo', 'default', 'Solo hunter starting settings'
+where not exists (select 1 from public.gali_ai_params where style = 'solo');
+insert into public.gali_ai_params (min_edge, crowd_buffer, max_round_share, target_slots_left, min_motherlode, style, source, note)
+select -0.2, 0.1, 0.05, 30, 150, 'motherlode', 'default', 'Motherlode chaser starting settings'
+where not exists (select 1 from public.gali_ai_params where style = 'motherlode');
+
+-- Everyone: a wallet's Bot settings (nothing secret: they are rules, not keys)
+create or replace function public.gali_bot_settings_of(p_wallet text)
+returns setof public.gali_bot_settings
+language sql stable security definer set search_path = public as $$
+  select * from gali_bot_settings where wallet = p_wallet
+$$;
+
+-- The miner: each wallet's result since its settings started (SOL back + ORE at today's price - SOL played - fees),
+-- for the stop-loss. Rounds not drawn yet count as played and lost until they are.
+create or replace function public.gali_bot_net()
+returns table (wallet text, net_sol numeric)
+language sql stable security definer set search_path = public as $$
+  select r.wallet,
+         (coalesce(sum(r.sol_back), 0) + coalesce(sum(r.ore_grams), 0) / 1e2 * coalesce((select ore_usd / nullif(sol_usd, 0) from gali_ore_market where id = 1), 0)
+          - sum(r.total) - sum(r.fee)) / 1e9
+  from gali_ai_rounds r join gali_bot_settings s on s.wallet = r.wallet
+  where not r.void and r.played_at >= s.started_at
+  group by r.wallet
+$$;
+revoke all on function public.gali_bot_settings_of(text), public.gali_bot_net() from public;
+grant execute on function public.gali_bot_settings_of(text) to anon, authenticated, service_role;
+grant execute on function public.gali_bot_net() to service_role;
+
 -- ---------------- schedules ----------------
 create extension if not exists pg_cron;
 create extension if not exists pg_net;

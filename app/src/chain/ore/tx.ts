@@ -364,7 +364,7 @@ export const AI_FEE_BPS = PLATFORM_FEE_BPS;
 export const AI_PASS_LAMPORTS = 100_000_000n;
 
 export async function startAiAutomation(args: { deposit: bigint; maxPerSpot: bigint; expectedOwner?: PublicKey }): Promise<string> {
-  if (!AI_EXECUTOR_KEY) throw new Error('Gali AI is not set up in this build');
+  if (!AI_EXECUTOR_KEY) throw new Error('The bot is not set up in this build');
   if (args.deposit <= 0n || args.maxPerSpot <= 0n) throw new Error('Enter an amount');
   return sendWithWallet(async (owner) => {
     if (await fetchOreAutomation(connection, owner)) throw new Error('Autopilot is already on. Stop it first');

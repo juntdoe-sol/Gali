@@ -239,6 +239,29 @@ const test = (name, fn) => {
     rounds: new Map([[M.roundPda(77n).toBase58(), roundData({ id: 77, deployed: quiet })]]),
   });
 
+  await test('the miner plays each wallet its own way, and the stop-loss stops a wallet', async () => {
+    const st = state(P.targetSlotsLeft);
+    const conn = fakeConn(st);
+    const choice = (o) => ({ ...M.DEFAULT_CHOICE, ...o, rules: { ...M.DEFAULT_CHOICE.rules, ...(o.rules ?? {}) } });
+    const run = async (c, net = 0) => {
+      const h = hooks({ active: [alice.toBase58()] });
+      h.choices = async () => new Map([[alice.toBase58(), c]]);
+      h.net = async () => new Map([[alice.toBase58(), net]]);
+      const before = conn.sent.length;
+      const r = await M.pass(conn, ai, h, M.newState());
+      return { r, h, sent: conn.sent.length - before };
+    };
+    const bot = await run(choice({ mode: 'bot', rules: { spots: 3, perSpotSol: 0.002 } }));
+    assert.equal(bot.sent, 1);
+    assert.equal(bot.h.log.played[0].mode, 'bot');
+    assert.equal(bot.h.log.played[0].stake.filter((x) => x > 0n).length, 3, 'three squares, as the rules say');
+    const stopped = await run(choice({ mode: 'bot', rules: { spots: 3, perSpotSol: 0.002 }, stopLossSol: 0.05 }), -0.06);
+    assert.equal(stopped.sent, 0, 'down 0.06 SOL with a 0.05 stop-loss: stopped');
+    assert.equal(stopped.r.skipped, 1);
+    const solo = await run(choice({ mode: 'ai', style: 'solo' }));
+    assert.equal(solo.h.log.played[0]?.style, 'solo');
+  });
+
   test('the "joins spots under" limit the AI tab shows matches what the planner does', () => {
     const prize = S.prizeLamports(245n * 100_000_000_000n, 1.59);
     const limit = S.joinLimitLamports(prize, P);
@@ -262,6 +285,62 @@ const test = (name, fn) => {
     assert.ok(Math.abs(s.slotMs - 213) < 30, `converges: ${s.slotMs}`);
     M.trackSlot(s, 1141, 40_000);
     assert.ok(Math.abs(s.slotMs - 213) < 30, 'a stalled slot read changes nothing');
+  });
+
+  // ---------------- Bot and AI bot ----------------
+  test('Bot mode follows the player\'s rules exactly: quietest squares, per-spot amount, busy-square skip, motherlode trigger, round cap', () => {
+    const onBoard = board((i) => sol(0.1 + i * 0.05)); // square 0 quietest, 24 busiest
+    const rules = { spots: 5, perSpotSol: 0.01, maxSpotSol: null, minMotherlodeOre: null, maxRoundSol: null };
+    const base = { onBoard, motherlodeGrams: 0n, orePriceSol: 1.5, maxPerSquare: sol(1), balance: sol(10) };
+    const p = S.botPlan({ ...base, rules });
+    assert.deepEqual(p.squares, [0, 1, 2, 3, 4], 'the five quietest');
+    assert.equal(p.groups[0].amount, sol(0.01));
+    assert.deepEqual(S.botPlan({ ...base, rules: { ...rules, maxSpotSol: 0.22 } }).squares, [0, 1, 2], 'skips squares over 0.22 SOL');
+    assert.equal(S.botPlan({ ...base, rules: { ...rules, minMotherlodeOre: 100 } }), null, 'waits for a 100 ORE motherlode');
+    assert.ok(S.botPlan({ ...base, motherlodeGrams: 150n * 100_000_000_000n, rules: { ...rules, minMotherlodeOre: 100 } }), 'plays a 150 ORE one');
+    assert.equal(S.botPlan({ ...base, rules: { ...rules, maxRoundSol: 0.03 } }).squares.length, 3, 'round cap: three squares of 0.01');
+    assert.equal(S.botPlan({ ...base, maxPerSquare: sol(0.004), rules }).groups[0].amount, sol(0.004), 'ORE\'s per-spot limit wins');
+    assert.equal(S.botPlan({ ...base, balance: sol(0.02), rules }).squares.length, 1, 'only what the balance covers, fee included');
+  });
+
+  test('the solo hunter spends its budget for the best solo-ORE chance, and only below break-even as far as its margin allows', () => {
+    const onBoard = board((i) => sol(0.3 + (i % 5) * 0.1));
+    const params = { ...S.STYLE_DEFAULTS.solo, maxRoundShare: 0.1 };
+    const base = { onBoard, motherlodeGrams: 0n, orePriceSol: 1.5, maxPerSquare: sol(1), balance: sol(2), params, style: 'solo' };
+    const p = S.huntPlan(base);
+    assert.ok(p, 'plays');
+    assert.ok(Number(p.total) <= 0.2e9 + 1 && Number(p.total) >= 0.15e9, `spends about its 10% budget: ${Number(p.total) / 1e9}`);
+    const chance = S.soloChance(Number(p.groups[0].amount), p.squares.map((s) => Number(onBoard[s]) * 1.1));
+    for (let n = 1; n <= 25; n++) {
+      const a = S.roundDown2(0.2e9 / n);
+      const order = [...onBoard.keys()].sort((x, y) => Number(onBoard[x] - onBoard[y]) || x - y).slice(0, n);
+      const ok = order.every((s) => S.squareEv(a, Number(onBoard[s]) * 1.1, S.prizeLamports(0n, 1.5)) - a * 0.0025 >= params.minEdge * a);
+      if (ok) assert.ok(S.soloChance(a, order.map((s) => Number(onBoard[s]) * 1.1)) <= chance + 1e-12, `no better cover at ${n}`);
+    }
+    assert.equal(S.huntPlan({ ...base, params: { ...params, minEdge: 0.5 } }), null, 'a strict margin sits out');
+    assert.equal(S.huntPlan({ ...base, params: S.STYLE_DEFAULTS.motherlode, style: 'motherlode' }), null, 'the motherlode chaser waits for a big pool');
+    assert.ok(S.huntPlan({ ...base, params: S.STYLE_DEFAULTS.motherlode, style: 'motherlode', motherlodeGrams: 300n * 100_000_000_000n }), 'and plays it');
+    assert.ok(Number(S.huntPlan({ ...base, maxRoundSol: 0.05 }).total) <= 0.05e9, 'the player\'s most per round holds');
+  });
+
+  test('each style keeps its own bounds: the hunters may go below break-even, safe may not', () => {
+    assert.equal(S.clampParams({ minEdge: -0.4 }, S.STYLE_DEFAULTS.safe, S.STYLE_BOUNDS.safe).minEdge, S.BOUNDS.minEdge[0]);
+    assert.equal(S.clampParams({ minEdge: -0.4 }, S.STYLE_DEFAULTS.solo, S.STYLE_BOUNDS.solo).minEdge, -0.3);
+    assert.equal(S.clampParams({ minEdge: -0.4 }, S.STYLE_DEFAULTS.motherlode, S.STYLE_BOUNDS.motherlode).minEdge, -0.4);
+    assert.equal(S.clampParams({ minMotherlode: 5 }, S.STYLE_DEFAULTS.motherlode, S.STYLE_BOUNDS.motherlode).minMotherlode, 20);
+  });
+
+  test('a sent bet is resent until it lands, and never after the lock', async () => {
+    let checks = 0;
+    let resent = 0;
+    const conn = {
+      async getSignatureStatuses() { checks++; return { value: [checks >= 3 ? { confirmationStatus: 'processed', err: null } : null] }; },
+      async sendRawTransaction() { resent++; return 'sig'; },
+    };
+    assert.equal(await M.rebroadcast(conn, Buffer.alloc(1), 'sig', Date.now() + 60_000, async () => {}), true);
+    assert.equal(resent, 2, 'resent while unseen, stopped once it landed');
+    assert.equal(await M.rebroadcast(conn, Buffer.alloc(1), 'sig', Date.now() - 1, async () => {}), false, 'past the lock: nothing');
+    await assert.rejects(M.rebroadcast({ async getSignatureStatuses() { return { value: [{ err: { InstructionError: [0, 'x'] } }] }; } }, Buffer.alloc(1), 'sig', Date.now() + 60_000, async () => {}));
   });
 
   await test('waits for the deploy window, then plays only for wallets with a pass', async () => {

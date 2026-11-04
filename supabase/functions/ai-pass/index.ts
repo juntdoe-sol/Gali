@@ -39,6 +39,28 @@ export function paidLamports(tx: { meta?: { err: unknown } | null; transaction?:
   return paid;
 }
 
+/** A player's Bot settings, checked. Returns the row to save, or what is wrong with it. */
+export function botSettings(x: unknown): Record<string, unknown> | string {
+  const o = (x && typeof x === 'object' ? x : {}) as Record<string, unknown>;
+  const mode = o.mode === 'bot' || o.mode === 'ai' ? o.mode : null;
+  const style = o.style === 'safe' || o.style === 'solo' || o.style === 'motherlode' ? o.style : null;
+  if (!mode || !style) return 'Pick Bot or AI bot, and how the AI plays';
+  const pos = (k: string, max: number) => {
+    const n = o[k] === null || o[k] === undefined || o[k] === '' ? null : Number(o[k]);
+    return n === null ? null : Number.isFinite(n) && n > 0 && n <= max ? n : NaN;
+  };
+  const spots = Number(o.spots ?? 10);
+  const perSpot = pos('perSpotSol', 100);
+  const out = {
+    mode, style,
+    spots: Number.isInteger(spots) && spots >= 1 && spots <= 25 ? spots : NaN,
+    per_spot_sol: perSpot ?? 0.002,
+    max_spot_sol: pos('maxSpotSol', 10_000), min_motherlode_ore: pos('minMotherlodeOre', 100_000),
+    max_round_sol: pos('maxRoundSol', 10_000), stop_loss_sol: pos('stopLossSol', 100_000),
+  };
+  return Object.values(out).some((n) => Number.isNaN(n)) ? 'Check the numbers: spots 1 to 25, amounts above 0' : out;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: cors });
   if (req.method !== 'POST') return json(405, { error: 'POST only' });
@@ -50,7 +72,7 @@ Deno.serve(async (req) => {
   const body = await req.json().catch(() => null);
   const a = body?.a ?? 'pay';
 
-  if (a === 'trial' || a === 'log' || a === 'feedback') {
+  if (a === 'trial' || a === 'log' || a === 'feedback' || a === 'settings') {
     const wallet = await readPass(body?.pass).catch(() => null);
     if (!wallet) return json(401, { error: 'sign in first' });
 
@@ -66,7 +88,20 @@ Deno.serve(async (req) => {
     // log and feedback: only for a live pass
     const p = await fetch(`${base}/rest/v1/gali_ai_passes?select=expires_at&wallet=eq.${encodeURIComponent(wallet)}`, { headers: h });
     const rows = p.ok ? await p.json() : [];
-    if (!rows[0] || !(Date.parse(rows[0].expires_at) > Date.now())) return json(403, { error: a === 'log' ? 'The learning log is for miners with a pass' : 'Feedback is for miners with a pass' });
+    if (!rows[0] || !(Date.parse(rows[0].expires_at) > Date.now())) return json(403, { error: a === 'log' ? 'The learning log is for miners with a pass' : a === 'settings' ? 'Bot settings are for miners with a pass' : 'Feedback is for miners with a pass' });
+
+    if (a === 'settings') {
+      const v = botSettings(body?.settings);
+      if (typeof v === 'string') return json(400, { error: v });
+      const r = await fetch(`${base}/rest/v1/gali_bot_settings`, {
+        method: 'POST',
+        headers: { ...h, prefer: 'resolution=merge-duplicates,return=representation' },
+        // saving starts the stop-loss count again
+        body: JSON.stringify({ wallet, ...v, started_at: new Date().toISOString(), updated_at: new Date().toISOString() }),
+      });
+      if (!r.ok) return json(500, { error: 'could not save your settings' });
+      return json(200, { settings: (await r.json())[0] });
+    }
 
     if (a === 'feedback') {
       const vote = body?.vote;
