@@ -426,6 +426,23 @@ $$;
 revoke all on function public.gali_ai_my_rounds(text, int) from public;
 grant execute on function public.gali_ai_my_rounds(text, int) to anon, authenticated, service_role;
 
+-- Everyone: big hits on ORE's board, newest first: every solo 1 ORE winner and every motherlode (any wallet, from the
+-- whole-board study), flagged when it was this wallet. Wallets and amounts are public on chain anyway.
+create or replace function public.gali_big_hits(p_wallet text default null, p_limit int default 60)
+returns table (round_id bigint, at timestamptz, wallet text, name text, mine boolean, squares int, stake_sol numeric, square_sol numeric, share numeric, ore numeric, motherlode_ore numeric)
+language sql stable security definer set search_path = public as $$
+  select b.round_id, b.at, b.solo_wallet, m.name, b.solo_wallet = p_wallet, b.solo_squares, b.solo_stake / 1e9, b.solo_square_total / 1e9,
+         case when b.solo_square_total > 0 then b.solo_stake::numeric / b.solo_square_total end,
+         b.reward / 1e11, b.motherlode / 1e11
+  from gali_board_rounds b
+  left join gali_miners m on m.wallet = b.solo_wallet
+  where b.solo_wallet is not null or b.motherlode > 0
+  order by b.round_id desc
+  limit least(greatest(p_limit, 1), 200)
+$$;
+revoke all on function public.gali_big_hits(text, int) from public;
+grant execute on function public.gali_big_hits(text, int) to anon, authenticated, service_role;
+
 -- ---------------- schedules ----------------
 create extension if not exists pg_cron;
 create extension if not exists pg_net;
