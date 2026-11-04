@@ -350,6 +350,41 @@ export async function deployFromAutomation(owner: PublicKey, squares: number[], 
   return clock.roundId;
 }
 
+/**
+ * Add SOL to a running autopilot or bot without stopping it. ORE's automate on an existing automation adds the deposit
+ * to its balance and rewrites the rest, so every other field is sent back unchanged. An autopilot's platform fee is paid
+ * here for the whole rounds the top-up buys, as at start; the bot's fee is taken by ORE each round it plays.
+ * Returns how many more rounds an autopilot gets (0 for the bot).
+ */
+export async function topUpAutomation(args: { deposit: bigint; expectedOwner?: PublicKey }): Promise<number> {
+  if (args.deposit <= 0n) throw new Error('Enter an amount');
+  let rounds = 0;
+  await sendWithWallet(async (owner) => {
+    const a = await fetchOreAutomation(connection, owner);
+    if (!a) throw new Error('Nothing is running to top up');
+    const c = a.conditions;
+    // the legacy instruction resets ORE's newer conditions: never top up one that uses them
+    if (c.maxProductionCost || c.minMotherlode || c.maxMotherlode || c.splitTiles || c.soloTiles) throw new Error('Top this one up from ORE');
+    const ai = Boolean(AI_EXECUTOR_KEY && a.executor.equals(AI_EXECUTOR_KEY));
+    const ixs: TransactionInstruction[] = [priorityIx()];
+    let deposit = args.deposit;
+    if (!ai) {
+      const n = BigInt(Number(a.strategy) === AUTOMATION_STRATEGY.Random ? Number(a.mask) : maskToSquares(Number(a.mask & 0x1ffffffn)).length);
+      const perRound = a.amount * n + a.fee;
+      if (perRound <= 0n) throw new Error('This autopilot has no round size');
+      rounds = Number(args.deposit / perRound);
+      if (rounds < 1) throw new Error(`At least ${toSol(perRound)} SOL: one round`);
+      deposit = perRound * BigInt(rounds);
+      ixs.push(...(await feeIx(owner, a.amount * n * BigInt(rounds))));
+    }
+    ixs.push(
+      automateIx({ authority: owner, amount: a.amount, deposit, fee: a.fee, mask: Number(a.mask), strategy: Number(a.strategy), reload: a.reload > 0n, executor: a.executor }),
+    );
+    return ixs;
+  }, args.expectedOwner);
+  return rounds;
+}
+
 /** Close the automation and get what is left of its balance back. One wallet approval. */
 export async function closeLiveAutomation(expectedOwner?: PublicKey): Promise<void> {
   await sendWithWallet(async (owner) => {
