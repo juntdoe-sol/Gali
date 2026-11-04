@@ -97,6 +97,17 @@ function supabaseHooks(base: string, key: string): Hooks {
       const r = await fetch(`${base}/rest/v1/gali_ai_rounds?wallet=eq.${encodeURIComponent(wallet)}&round_id=eq.${round}`, { method: 'PATCH', headers: h, body: JSON.stringify(body) });
       if (!r.ok) throw new Error(`settle ${r.status}`);
     },
+    async soloWin(w) {
+      const r = await fetch(`${base}/rest/v1/gali_solo_wins`, {
+        method: 'POST',
+        headers: { ...h, prefer: 'resolution=ignore-duplicates' },
+        body: JSON.stringify({
+          round_id: w.round.toString(), wallet: w.wallet, square: w.square, square_total: w.squareTotal.toString(), stake: w.stake.toString(),
+          squares: w.squares, deployed: w.deployed.toString(), motherlode: w.motherlode,
+        }),
+      });
+      if (!r.ok) throw new Error(`solo ${r.status}`);
+    },
     async thought(t) {
       const r = await fetch(`${base}/rest/v1/gali_ai_thoughts`, {
         method: 'POST',

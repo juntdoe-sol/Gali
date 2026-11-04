@@ -338,6 +338,22 @@ revoke all on function public.gali_bot_settings_of(text), public.gali_bot_net() 
 grant execute on function public.gali_bot_settings_of(text) to anon, authenticated, service_role;
 grant execute on function public.gali_bot_net() to service_role;
 
+-- How every solo 1 ORE winner played (any wallet), read by ai-miner early in the next round. The AI agents study it.
+create table if not exists public.gali_solo_wins (
+  round_id bigint primary key,
+  at timestamptz not null default now(),
+  wallet text not null,
+  square int not null,
+  square_total bigint not null,  -- lamports on the winning square, all miners
+  stake bigint not null,         -- the winner's lamports on it
+  squares int not null,          -- squares the winner covered
+  deployed bigint not null,      -- the winner's lamports across the board
+  motherlode boolean not null default false
+);
+create index if not exists gali_solo_wins_at on public.gali_solo_wins (at desc);
+alter table public.gali_solo_wins enable row level security;
+revoke all on public.gali_solo_wins from anon, authenticated;
+
 -- ---------------- schedules ----------------
 create extension if not exists pg_cron;
 create extension if not exists pg_net;
