@@ -65,7 +65,30 @@ interface AiState {
   thoughts: AiThought[];
   /** the round reviewer's latest lessons (everyone) */
   lesson: AiLesson | null;
+  /** the connected wallet's Bot / AI bot choice; null until it saves one (the server then plays AI bot, safe) */
+  settings: BotSettings | null;
 }
+/** Bot: the player's own rules, no AI. AI bot: a style the review agents tune. SOL amounts in SOL; null = no such rule. */
+export type BotMode = 'bot' | 'ai';
+export type AiStyle = 'safe' | 'solo' | 'motherlode';
+export interface BotSettings {
+  mode: BotMode;
+  style: AiStyle;
+  spots: number;
+  perSpotSol: number;
+  maxSpotSol: number | null;
+  minMotherlodeOre: number | null;
+  maxRoundSol: number | null;
+  stopLossSol: number | null;
+}
+export const DEFAULT_BOT_SETTINGS: BotSettings = { mode: 'ai', style: 'safe', spots: 10, perSpotSol: 0.002, maxSpotSol: null, minMotherlodeOre: null, maxRoundSol: null, stopLossSol: null };
+const orNull = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+const toSettings = (x: Record<string, unknown>): BotSettings => ({
+  mode: x.mode === 'bot' ? 'bot' : 'ai',
+  style: x.style === 'solo' || x.style === 'motherlode' ? x.style : 'safe',
+  spots: Number(x.spots) || 10, perSpotSol: Number(x.per_spot_sol) || 0.002,
+  maxSpotSol: orNull(x.max_spot_sol), minMotherlodeOre: orNull(x.min_motherlode_ore), maxRoundSol: orNull(x.max_round_sol), stopLossSol: orNull(x.stop_loss_sol),
+});
 export interface AiLesson { at: number; fromRound: number; toRound: number; rounds: number; played: number; lessons: string; watch: string | null }
 const toLesson = (x: Record<string, unknown>): AiLesson => ({
   at: Date.parse(String(x.at)), fromRound: num(x.from_round), toRound: num(x.to_round), rounds: num(x.rounds), played: num(x.played),
@@ -105,7 +128,7 @@ export interface AiLogEntry {
   /** plays in the 24 hours before this entry, when known */
   plays: number | null;
 }
-export const useAi = create<AiState>(() => ({ status: 'idle', stats: null, board: [], me: null, claiming: false, log: null, logBusy: false, thoughts: [], lesson: null }));
+export const useAi = create<AiState>(() => ({ status: 'idle', stats: null, board: [], me: null, claiming: false, log: null, logBusy: false, thoughts: [], lesson: null, settings: null }));
 
 const headers = () => ({ apikey: publicKey(), authorization: `Bearer ${publicKey()}`, 'content-type': 'application/json' });
 const rpc = async (fn: string, args: Record<string, unknown> = {}) => {
@@ -125,9 +148,10 @@ export async function refreshAi() {
   const wallet = useGame.getState().wallet.owner;
   if (useAi.getState().status === 'idle') useAi.setState({ status: 'loading' });
   try {
-    const [s, b, m, t, l] = await Promise.all([
+    const [s, b, m, t, l, cfg] = await Promise.all([
       rpc('gali_ai_stats'), rpc('gali_ai_board', { p_limit: 50 }), wallet ? rpc('gali_ai_me', { p_wallet: wallet }) : Promise.resolve(null), rpc('gali_ai_thoughts', { p_limit: 8 }).catch(() => []),
       rpc('gali_ai_lessons', { p_limit: 1 }).catch(() => []),
+      wallet ? rpc('gali_bot_settings_of', { p_wallet: wallet }).catch(() => null) : Promise.resolve(null),
     ]);
     const r = Array.isArray(s) ? s[0] : null;
     const stats: AiStats | null = r
@@ -154,7 +178,8 @@ export async function refreshAi() {
     }));
     if (useGame.getState().wallet.owner !== wallet) return;
     const lesson = Array.isArray(l) && l[0] ? toLesson(l[0]) : null;
-    useAi.setState({ status: 'ok', stats, board, me, thoughts, lesson });
+    const settings = Array.isArray(cfg) && cfg[0] ? toSettings(cfg[0]) : null;
+    useAi.setState({ status: 'ok', stats, board, me, thoughts, lesson, settings });
   } catch {
     useAi.setState((st) => ({ status: st.stats ? 'ok' : 'error' }));
   }
@@ -219,7 +244,7 @@ export async function buyPass(): Promise<boolean> {
     g.toast('The server could not match that payment. Contact @Gali_Game with your transaction', 'bad');
     return false;
   }
-  g.toast('Gali AI pass active for 7 days', 'good');
+  g.toast('Bot pass active for 7 days', 'good');
   await refreshAi();
   return true;
 }
@@ -228,7 +253,7 @@ export async function buyPass(): Promise<boolean> {
 
 async function passCall<T>(body: Record<string, unknown>): Promise<{ status: number; data: T & { error?: string } }> {
   const base = restBase();
-  if (!base) throw new Error('Gali AI is not set up in this build');
+  if (!base) throw new Error('The bot is not set up in this build');
   const r = await fetch(`${base}/functions/v1/ai-pass`, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
   return { status: r.status, data: await r.json().catch(() => ({})) };
 }
@@ -268,7 +293,7 @@ export async function startTrial(): Promise<boolean> {
       g.toast(r.data.error ?? 'Could not start the free week', 'bad');
       return false;
     }
-    g.toast('Your free week of Gali AI has started', 'good');
+    g.toast('Your free week of the bot has started', 'good');
     await refreshAi();
     return true;
   } catch {
@@ -344,6 +369,32 @@ export async function sendFeedback(vote: AiVote, comment: string): Promise<boole
       return false;
     }
     g.toast('Thanks. The team reads it at the next review', 'good');
+    return true;
+  } catch {
+    g.toast('Could not reach the server. Try again', 'bad');
+    return false;
+  }
+}
+
+/** Saves the wallet's Bot / AI bot choice (signs in once). Saving starts the stop-loss count again. */
+export async function saveBotSettings(v: BotSettings): Promise<boolean> {
+  const g = useGame.getState();
+  const pass = await signedPass();
+  if (!pass) return false;
+  try {
+    let r = await passCall<{ settings: Record<string, unknown> }>({ a: 'settings', pass, settings: v });
+    if (r.status === 401) {
+      await signOut();
+      const again = await signedPass();
+      if (!again) return false;
+      r = await passCall<{ settings: Record<string, unknown> }>({ a: 'settings', pass: again, settings: v });
+    }
+    if (r.status !== 200 || !r.data.settings) {
+      g.toast(r.data.error ?? 'Could not save your settings', 'bad');
+      return false;
+    }
+    useAi.setState({ settings: toSettings(r.data.settings) });
+    g.toast(v.mode === 'bot' ? 'Saved. The bot follows your rules from the next round' : 'Saved. The AI bot plays your style from the next round', 'good');
     return true;
   } catch {
     g.toast('Could not reach the server. Try again', 'bad');

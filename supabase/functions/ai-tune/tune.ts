@@ -5,8 +5,9 @@
 //   feedback  reads subscribers' votes/comments  }
 //   risk      reads both, sets hard limits the code enforces (a margin floor, a cap on the round share)
 //   lead      decides the settings and writes the log entry, inside the risk limits
-// Whatever comes back, code clamps it to BOUNDS, to the risk limits and to a quarter-range step per review.
-import { AI_FEE_BPS, BOUNDS, clampParams, LOSS, limitStep, ORE_KEEP, type AiParams } from '../_shared/aiStrategy.ts';
+// Whatever comes back, code clamps it to the style's bounds and the risk limits; safe also moves at most a quarter of a
+// range per review, while the hunters' players chose to let the team tune them freely.
+import { AI_FEE_BPS, clampParams, LOSS, limitStep, ORE_KEEP, STYLE_BOUNDS, type AiParams, type Style } from '../_shared/aiStrategy.ts';
 
 export interface RoundRow {
   total: number; // lamports
@@ -88,9 +89,21 @@ How ORE pays: every round (about 80 seconds) players put SOL on any of 25 square
 
 How the bot plays: it waits until targetSlotsLeft slots (about 0.2 s each; ORE locks the last 15) before the round ends, reads the board, and stakes only squares where the expected ORE is worth more than the expected SOL loss, Gali's fee and a margin of minEdge per SOL. It assumes crowdBuffer more SOL (as a share of what is already there) will land on each square after it deploys. It plays one stake size per round and never more than maxRoundShare of a player's balance. It sits out rounds where nothing clears the margin. A bigger motherlode raises every square's prize, so the bot plays more when the pool is big: that is how it chases the motherlode without gambling.
 
-Players asked for: "play safe, don't lose much, be smart". Results swing a lot: a square wins 1 time in 25 and the motherlode hits 1 round in 500, so a few lucky or unlucky rounds prove nothing. Under about 300 plays, small samples say little.
+Results swing a lot: a square wins 1 time in 25 and the motherlode hits about 1 round in 500, so a few lucky or unlucky rounds prove nothing. Under about 300 plays, small samples say little.
 
-Settings and their allowed ranges: minEdge ${BOUNDS.minEdge.join('-')}, crowdBuffer ${BOUNDS.crowdBuffer.join('-')}, maxRoundShare ${BOUNDS.maxRoundShare.join('-')}, targetSlotsLeft ${BOUNDS.targetSlotsLeft.join('-')}. Each review can move a setting at most a quarter of its range. The team reviews every 3 hours, with a deeper review once a day.`;
+Each player picks a style, and the team reviews one style at a time: its goal and its allowed setting ranges come with each review. The team reviews every 3 hours, with a deeper review once a day.`;
+
+/** What each AI style is for and how far its settings may go, for the team reviewing it. */
+export function styleBrief(style: Style): string {
+  const b = STYLE_BOUNDS[style];
+  const ranges = (Object.keys(b) as (keyof AiParams)[]).filter((k) => b[k][0] !== b[k][1]).map((k) => `${k} ${b[k][0]} to ${b[k][1]}`).join(', ');
+  const goal = {
+    safe: 'Safe: players asked to "play safe, don\'t lose much, be smart". The bot stakes only squares worth more than they cost, with the margin minEdge, sized for the best expected return. Judge it by expected and realized return; minEdge cannot go below break-even. Each review moves a setting at most a quarter of its range.',
+    solo: 'Solo hunter: the players want the solo 1 ORE as often as possible and accept losing rounds for it. The bot spends its whole round budget (maxRoundShare of the balance) evenly on the quietest squares, choosing how many squares gives the best chance of the solo ORE, and keeps only covers where every square clears minEdge per SOL. minEdge may be negative: a planned loss per SOL in exchange for more ORE. Judge it by SOL lost per ORE mined against the ORE price, and by how often it wins ORE, over many rounds. The players chose to let the team tune this style freely: any value in range, no step limit.',
+    motherlode: 'Motherlode chaser: the players want a share of big motherlodes. The bot plays only when the motherlode holds at least minMotherlode ORE, then hunts like the solo hunter (the whole round budget on the quietest squares, minEdge may be negative). Judge it by motherlode shares and ORE won against SOL lost over many rounds; most rounds it sits out. The players chose to let the team tune this style freely: any value in range, no step limit.',
+  }[style];
+  return `Style under review: ${goal}\nAllowed ranges: ${ranges}.`;
+}
 
 const PLAIN = 'Write plain sentences a casual player can follow. No hype, no promises of profit, no links.';
 
@@ -127,7 +140,7 @@ ${PLAIN}`;
 
 const num = { type: 'number' } as const;
 const str = { type: 'string' } as const;
-const settings = { minEdge: num, crowdBuffer: num, maxRoundShare: num, targetSlotsLeft: { type: 'integer' } } as const;
+const settings = { minEdge: num, crowdBuffer: num, maxRoundShare: num, targetSlotsLeft: { type: 'integer' }, minMotherlode: num } as const;
 const obj = (properties: Record<string, unknown>) => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
 
 export const ANALYST_SCHEMA = obj({ findings: str, confidence: { type: 'string', enum: ['low', 'medium', 'high'] }, suggest: obj(settings) });
@@ -219,8 +232,9 @@ export function commentBlock(rows: FeedbackRow[]): string {
 
 const fmt = (v: unknown) => JSON.stringify(v, (_k, x) => (typeof x === 'number' ? Number(x.toPrecision(5)) : x));
 
-export function analystPrompt(current: AiParams, last24h: Summary, last7d: Summary, history: { at: string; note: string | null }[], lessons: { at: string; lessons: string }[] = []): string {
+export function analystPrompt(current: AiParams, last24h: Summary, last7d: Summary, history: { at: string; note: string | null }[], lessons: { at: string; lessons: string }[] = [], style: Style = 'safe'): string {
   return [
+    styleBrief(style),
     `Current settings: ${fmt(current)}`,
     `Last 24 hours: ${fmt(last24h)}`,
     `Last 7 days: ${fmt(last7d)}`,
@@ -236,8 +250,9 @@ export function feedbackPrompt(t: Tally, comments: string): string {
   ].join('\n\n');
 }
 
-export function riskPrompt(current: AiParams, last24h: Summary, last7d: Summary, analyst: string, feedback: string, t: Tally): string {
+export function riskPrompt(current: AiParams, last24h: Summary, last7d: Summary, analyst: string, feedback: string, t: Tally, style: Style = 'safe'): string {
   return [
+    styleBrief(style),
     `Current settings: ${fmt(current)}`,
     `Last 24 hours: ${fmt(last24h)}`,
     `Last 7 days: ${fmt(last7d)}`,
@@ -247,8 +262,9 @@ export function riskPrompt(current: AiParams, last24h: Summary, last7d: Summary,
   ].join('\n\n');
 }
 
-export function leadPrompt(current: AiParams, last24h: Summary, last7d: Summary, analyst: string, feedback: string, risk: string, t: Tally, daily = false): string {
+export function leadPrompt(current: AiParams, last24h: Summary, last7d: Summary, analyst: string, feedback: string, risk: string, t: Tally, daily = false, style: Style = 'safe'): string {
   return [
+    styleBrief(style),
     `Current settings: ${fmt(current)}`,
     `Last 24 hours: ${fmt(last24h)}`,
     `Last 7 days: ${fmt(last7d)}`,
@@ -275,11 +291,11 @@ export function text(v: unknown, max: number): string {
 }
 
 export interface RiskLimits { minEdgeFloor: number; maxRoundShareCap: number }
-/** The risk checker's limits, kept inside BOUNDS. Missing or broken values put no extra limit. */
-export function riskLimits(answer: unknown): RiskLimits {
+/** The risk checker's limits, kept inside the style's bounds. Missing or broken values put no extra limit. */
+export function riskLimits(answer: unknown, style: Style = 'safe'): RiskLimits {
   const a = (answer && typeof answer === 'object' ? answer : {}) as Record<string, unknown>;
-  const [eLo, eHi] = BOUNDS.minEdge;
-  const [sLo, sHi] = BOUNDS.maxRoundShare;
+  const [eLo, eHi] = STYLE_BOUNDS[style].minEdge;
+  const [sLo, sHi] = STYLE_BOUNDS[style].maxRoundShare;
   const floor = Number(a.minEdgeFloor);
   const cap = Number(a.maxRoundShareCap);
   return {
@@ -289,12 +305,14 @@ export function riskLimits(answer: unknown): RiskLimits {
 }
 
 /**
- * The lead's answer, made safe: inside BOUNDS and at most a quarter-range step from now, then inside the risk limits.
+ * The lead's answer, made safe: inside the style's bounds (and for safe at most a quarter-range step from now), then inside the risk limits.
  * The risk limits go last and may move further than a quarter step, since they only ever make the bot more careful.
  */
-export function apply(answer: unknown, current: AiParams, limits?: RiskLimits): { params: AiParams; note: string; learned: string; feedbackReply: string } {
+export function apply(answer: unknown, current: AiParams, limits?: RiskLimits, style: Style = 'safe'): { params: AiParams; note: string; learned: string; feedbackReply: string } {
   const a = (answer && typeof answer === 'object' ? answer : {}) as Record<string, unknown>;
-  const params = limitStep(clampParams(a, current), current);
+  const bounds = STYLE_BOUNDS[style];
+  // safe moves a quarter of a range per review; the hunters' players chose to let the team tune them freely
+  const params = limitStep(clampParams(a, current, bounds), current, style === 'safe' ? 0.25 : 1, bounds);
   if (limits) {
     params.minEdge = Math.max(params.minEdge, limits.minEdgeFloor);
     params.maxRoundShare = Math.min(params.maxRoundShare, limits.maxRoundShareCap);
