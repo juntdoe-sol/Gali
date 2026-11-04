@@ -13,7 +13,7 @@
 // Optional: AI_TUNE_MODEL (3-hourly, default claude-haiku-5-5), AI_DAILY_MODEL (default claude-sonnet-5-5),
 // AI_ROUNDS_MODEL (default claude-haiku-5-5), AI_MONTHLY_BUDGET_USD (default 10).
 import Anthropic from 'npm:@anthropic-ai/sdk@1.3.0';
-import { clampParams, DEFAULT_PARAMS, isStyle, STYLE_BOUNDS, STYLE_DEFAULTS, STYLES, type AiParams, type Style } from '../_shared/aiStrategy.ts';
+import { clampParams, DEFAULT_PARAMS, isStyle, STYLE_BOUNDS, STYLE_DEFAULTS, PLAYER_STYLES, STYLES, type AiParams, type Style } from '../_shared/aiStrategy.ts';
 import {
   ANALYST, ANALYST_SCHEMA, analystPrompt, apply, budgetCheck, callCost, commentBlock, FEEDBACK, FEEDBACK_SCHEMA, feedbackPrompt, hasNews, LEAD,
   LEAD_SCHEMA, leadPrompt, monthBounds, RISK, RISK_SCHEMA, riskLimits, riskPrompt, ROUNDS, ROUNDS_SCHEMA, roundsPrompt, summarize, tally, text,
@@ -100,9 +100,14 @@ Deno.serve(async (req) => {
   if (kind === 'rounds') {
     const last = (await get('gali_ai_lessons?select=to_round&order=id.desc&limit=1'))[0];
     const thoughts: ThoughtRow[] = await get(`gali_ai_thoughts?select=round_id,slots_left,motherlode_grams,quietest,join_limit,board,played,skipped&round_id=gt.${last?.to_round ?? 0}&order=round_id.asc&limit=${ROUNDS_MAX}`);
-    if (!thoughts.length) return json(200, { kind, reason: 'no new rounds since the last look' });
-    const from = thoughts[0].round_id;
-    const to = thoughts[thoughts.length - 1].round_id;
+    // nobody playing: no bot rounds, so the reviewer studies the whole board's rounds instead
+    const boardOnly: { round_id: number | string }[] = thoughts.length
+      ? []
+      : await get(`gali_board_rounds?select=round_id&round_id=gt.${last?.to_round ?? 0}&order=round_id.asc&limit=${ROUNDS_MAX}`).catch(() => []);
+    const span = thoughts.length ? thoughts : boardOnly;
+    if (!span.length) return json(200, { kind, reason: 'no new rounds since the last look' });
+    const from = span[0].round_id;
+    const to = span[span.length - 1].round_id;
     const [plays, market, solos, boards]: [PlayRow[], { sol_usd: number; ore_usd: number }[], SoloRow[], BoardRow[]] = await Promise.all([
       get(`gali_ai_rounds?select=round_id,total,sol_back,ore_grams,won,board_before,board_after,stake,settled_at,void&round_id=gte.${from}&round_id=lte.${to}&limit=5000`),
       get('gali_ore_market?select=sol_usd,ore_usd&id=eq.1').catch(() => []),
@@ -119,7 +124,7 @@ Deno.serve(async (req) => {
       method: 'POST',
       headers: h,
       body: JSON.stringify({
-        from_round: from, to_round: to, rounds: thoughts.length, played: thoughts.filter((t) => t.played > 0).length, model: MODEL,
+        from_round: from, to_round: to, rounds: span.length, played: thoughts.filter((t) => t.played > 0).length, model: MODEL,
         lessons: text(r.data.lessons, 900), watch: text(r.data.watch, 300), confidence: r.data.confidence,
       }),
     });
@@ -141,8 +146,9 @@ Deno.serve(async (req) => {
     if (!c) inUse.add('safe');
     else if (c.mode === 'ai' && isStyle(c.style)) inUse.add(c.style);
   }
+  // the team tunes every style players can pick, even with nobody playing: the whole board is enough to learn from
+  for (const s of PLAYER_STYLES) inUse.add(s);
   const styles = STYLES.filter((x) => inUse.has(x));
-  if (!styles.length) return json(200, { kind, reason: 'no player uses the AI bot right now' });
 
   const oreSol = market[0] && Number(market[0].sol_usd) > 0 ? Number(market[0].ore_usd) / Number(market[0].sol_usd) : 0;
   const toRow = (r: Record<string, unknown>) => ({
@@ -159,7 +165,7 @@ Deno.serve(async (req) => {
   // how solo 1 ORE winners played in the last 24 hours, for every style's review
   const solos: SoloRow[] = await get(`gali_solo_wins?select=wallet,square_total,stake,squares,deployed,motherlode&at=gt.${encodeURIComponent(new Date(dayAgo).toISOString())}&limit=2000`).catch(() => []);
   // how every miner on the board played in the last 24 hours, by style
-  const boards: BoardRow[] = await get(`gali_board_rounds?select=round_id,miners,deployed,seen,split,motherlode,groups&at=gt.${encodeURIComponent(new Date(dayAgo).toISOString())}&limit=2000`).catch(() => []);
+  const boards: BoardRow[] = await get(`gali_board_rounds?select=round_id,at,miners,deployed,seen,split,motherlode,groups&at=gt.${encodeURIComponent(new Date(dayAgo).toISOString())}&limit=2000`).catch(() => []);
 
   const results: Record<string, unknown>[] = [];
   for (const style of styles) {
@@ -176,7 +182,7 @@ Deno.serve(async (req) => {
 
     // nothing new for this style since its last review of this kind: nothing to learn, so no Claude calls
     const lastAt = daily ? (await get(`gali_ai_params?select=at&source=eq.${SOURCE}&style=eq.${style}&order=id.desc&limit=1`))[0]?.at : p?.at;
-    if (!hasNews(lastAt, mine.map((r: { settled_at: string }) => r.settled_at), fb.map((f) => f.at))) {
+    if (!hasNews(lastAt, [...mine.map((r: { settled_at: string }) => r.settled_at), ...boards.map((b) => b.at ?? '')], fb.map((f) => f.at))) {
       results.push({ style, kept: current, reason: 'nothing new since the last review' });
       continue;
     }

@@ -434,6 +434,8 @@ const test = (name, fn) => {
     assert.equal(wide.onWinningSquare, 1);
     assert.equal(b.styles[1].solLostPerOre, null, 'no ORE: no price per ORE');
     assert.match(T.roundsPrompt(S.STYLE_DEFAULTS.solo, [], [], 1.5, [], rows), /whole board/);
+    assert.match(T.roundsPrompt(S.STYLE_DEFAULTS.solo, [], [], 1.5, [], rows), /no player uses the bot/, 'no players: the reviewer is told to study the board');
+    assert.ok(T.hasNews('2026-11-04T00:00:00Z', ['2026-11-04T01:00:00Z'], []), 'a new board round is news');
     assert.deepEqual(T.boardSummary([]), { rounds: 0 });
   });
 
