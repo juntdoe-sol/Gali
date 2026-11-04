@@ -3,7 +3,7 @@
  * always open. On a phone the same two pieces are the floating round card and the dock.
  */
 import { useEffect, type ReactNode } from 'react';
-import { Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import { COLORS } from '../game/constants';
 import { Dock, UnclaimedRow } from './Dock';
 import { OreStatsPanel } from './OreStats';
@@ -72,9 +72,8 @@ export function MineColumn({ hint, extra }: { hint: string; extra?: ReactNode })
           {extra}
           <HideBtn />
         </View>
-        <ScrollView style={{ flexGrow: 0 }} contentContainerStyle={styles.scroll} showsVerticalScrollIndicator>
-          <Dock embedded noUnclaimed />
-        </ScrollView>
+        {/* LITE / PRO / BOT and the Bot switch stay put; only the panel under them scrolls */}
+        <Dock embedded noUnclaimed scroll={{ headStyle: styles.scrollHead, bodyStyle: styles.scroll }} />
       </PixelBox>
       <View ref={unclaimedRef} collapsable={false}>
         <UnclaimedRow boxed />
@@ -100,7 +99,8 @@ const styles = StyleSheet.create({
   dockBox: { flexShrink: 1, minHeight: 0, paddingTop: 10 },
   tabAt: { position: 'absolute', zIndex: 15 },
   dockHead: { paddingHorizontal: 16, paddingBottom: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, borderBottomWidth: U, borderColor: '#22356f', marginHorizontal: U * 2 },
-  scroll: { paddingHorizontal: 14, paddingTop: 8, paddingBottom: 12 },
+  scrollHead: { paddingHorizontal: 14, paddingTop: 8 },
+  scroll: { paddingHorizontal: 14, paddingBottom: 12 },
   keys: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10, paddingVertical: 2 },
   key: { flexDirection: 'row', alignItems: 'center', gap: 5 },
 });

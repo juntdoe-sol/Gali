@@ -2,7 +2,7 @@ import { layoutNow } from './layout';
 import { FEATURE_AI_MINING, FEATURE_GALI_PROGRAM } from '../config/features';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useTut, useTutTarget } from '../game/tutTargets';
-import { Modal, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, useWindowDimensions, View, type StyleProp, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CLUSTER, PLATFORM_FEE_BPS, REFINING_FEE, short } from '../chain/light';
 import { BLOCKS, boostFor, COLORS, pointsFor } from '../game/constants';
@@ -20,7 +20,7 @@ import { useLayout } from './layout';
 import { openScanTv, TV_PAIR } from './TvLink';
 import { evOf } from '../game/ev';
 import { refreshMarket, useOreStats } from '../game/oreStats';
-import { buyPass, DEFAULT_BOT_SETTINGS, loadLog, netSol, refreshAi, saveBotSettings, sendFeedback, startTrial, useAi, type AiLesson, type AiLogEntry, type AiStyle, type AiThought, type AiVote, type BotSettings } from '../game/aiMining';
+import { buyPass, DEFAULT_BOT_SETTINGS, loadLog, netSol, refreshAi, saveBotSettings, sendFeedback, startTrial, useAi, type AiLogEntry, type AiStyle, type AiVote, type BotMode, type BotSettings } from '../game/aiMining';
 
 const SHAKE_G = 2.1;
 const layoutNowDesktop = () => layoutNow().desktop;
@@ -30,7 +30,7 @@ const TABS: { id: DockTab; label: string }[] = [
   ...(FEATURE_AI_MINING ? [{ id: 'ai' as const, label: 'BOT' }] : []),
 ];
 
-export function Dock({ embedded, noUnclaimed }: { embedded?: boolean; noUnclaimed?: boolean } = {}) {
+export function Dock({ embedded, noUnclaimed, scroll }: { embedded?: boolean; noUnclaimed?: boolean; scroll?: { headStyle?: StyleProp<ViewStyle>; bodyStyle?: StyleProp<ViewStyle> } } = {}) {
   const liteRef = useTutTarget('tab-lite');
   const proRef = useTutTarget('tab-pro');
   const insets = useSafeAreaInsets();
@@ -41,6 +41,8 @@ export function Dock({ embedded, noUnclaimed }: { embedded?: boolean; noUnclaime
   const setOpen = useGame((s) => s.setDockOpen);
   const compact = false;
   const inside = useView((s) => s.focus >= 0);
+  const { height: winH } = useWindowDimensions();
+  const phoneBodyMax = Math.max(220, winH * 0.55);
 
   // shake the phone to Smart-pick a random set of spots
   useEffect(() => {
@@ -96,12 +98,30 @@ export function Dock({ embedded, noUnclaimed }: { embedded?: boolean; noUnclaime
     </View>
   );
 
+  const botSwitch = tab === 'ai' && FEATURE_AI_MINING ? <BotModeSwitch /> : null;
   if (embedded) {
-    return (
-      <View style={styles.embedded}>
-        {head}
+    const body = (
+      <>
         {noUnclaimed ? null : <UnclaimedRow />}
         {tab === 'lite' ? <DeskLite /> : tab === 'ai' && FEATURE_AI_MINING ? <AiPanel /> : <DeskPro />}
+      </>
+    );
+    // scroll: the tabs and the Bot switch stay put while the panel under them scrolls
+    return scroll ? (
+      <View style={[styles.embedded, { flexShrink: 1, minHeight: 0 }]}>
+        <View style={scroll.headStyle}>
+          {head}
+          {botSwitch}
+        </View>
+        <ScrollView style={{ flexGrow: 0, flexShrink: 1 }} contentContainerStyle={scroll.bodyStyle} showsVerticalScrollIndicator>
+          {body}
+        </ScrollView>
+      </View>
+    ) : (
+      <View style={styles.embedded}>
+        {head}
+        {botSwitch}
+        {body}
       </View>
     );
   }
@@ -124,8 +144,18 @@ export function Dock({ embedded, noUnclaimed }: { embedded?: boolean; noUnclaime
         <View style={styles.handleBar} />
       </Pressable>
       {head}
+      {botSwitch}
       <UnclaimedRow />
-      {tab === 'lite' ? <LitePanel compact={compact} /> : tab === 'ai' && FEATURE_AI_MINING ? <AiPanel /> : <ProPanel compact={compact} />}
+      {tab === 'ai' && FEATURE_AI_MINING ? (
+        // the BOT panel is taller than LITE and PRO: it scrolls under the pinned tabs and switch
+        <ScrollView style={{ maxHeight: phoneBodyMax }} showsVerticalScrollIndicator>
+          <AiPanel />
+        </ScrollView>
+      ) : tab === 'lite' ? (
+        <LitePanel compact={compact} />
+      ) : (
+        <ProPanel compact={compact} />
+      )}
     </View>
   );
 }
@@ -749,59 +779,6 @@ function AiLog({ log, busy }: { log: AiLogEntry[] | null; busy: boolean }) {
   );
 }
 
-/** One round's decision in a sentence. The numbers are the board's, the same for every AI miner. */
-function thoughtText(t: AiThought): string {
-  const q = t.quietestSol.toFixed(3);
-  const lim = t.joinLimitSol.toFixed(3);
-  if (t.played) return `Played for ${t.played === 1 ? '1 miner' : `${t.played} miners`}. The quietest spot had ${q} SOL, under the ${lim} SOL it joins at, with the motherlode at ${t.motherlodeOre.toFixed(1)} ORE.`;
-  return `Sat out. The quietest spot had ${q} SOL, and it only joins spots under ${lim} SOL. With the motherlode at ${t.motherlodeOre.toFixed(1)} ORE, one winning spot is worth ${t.prizeSol.toFixed(2)} SOL, so it waits for a quieter spot or a bigger pool.`;
-}
-
-/** Everyone: what the AI bot saw and decided in the latest rounds, newest first, and what the round reviewer took from them. */
-function AiThinking({ thoughts, lesson }: { thoughts: AiThought[]; lesson: AiLesson | null }) {
-  if (!thoughts.length && !lesson) return null;
-  const [t, ...rest] = thoughts;
-  return (
-    <View style={{ marginTop: 12 }}>
-      <T v="label" style={{ color: COLORS.gold, marginBottom: 4 }}>
-        WHAT THE AI BOT IS THINKING
-      </T>
-      {lesson ? (
-        <View style={styles.aiLog}>
-          <T v="num" style={{ fontSize: 13, color: COLORS.muted }}>
-            Round reviewer · {when(lesson.at)} · rounds {lesson.fromRound}–{lesson.toRound}, {lesson.played} of {lesson.rounds} played
-          </T>
-          <T v="num" style={{ fontSize: 15, color: COLORS.text, lineHeight: 18 }}>
-            {lesson.lessons}
-          </T>
-          {lesson.watch ? (
-            <T v="num" style={{ fontSize: 13, color: COLORS.teal, lineHeight: 16 }}>
-              Watching: {lesson.watch}
-            </T>
-          ) : null}
-        </View>
-      ) : null}
-      {t ? (
-        <View style={[styles.aiLog, !rest.length && { borderBottomWidth: 0 }]}>
-          <T v="num" style={{ fontSize: 13, color: COLORS.muted }}>
-            Round {t.round} · {when(t.at)} · {(t.slotsLeft * 0.2).toFixed(0)} s before the end
-          </T>
-          <T v="num" style={{ fontSize: 15, color: COLORS.text, lineHeight: 18 }}>
-            {thoughtText(t)}
-          </T>
-        </View>
-      ) : null}
-      {rest.slice(0, 4).map((r, i, shown) => (
-        <View key={r.round} style={[styles.aiLog, i === shown.length - 1 && { borderBottomWidth: 0 }]}>
-          <T v="num" style={{ fontSize: 13, color: r.played ? COLORS.green : COLORS.muted }}>
-            Round {r.round} · {r.played ? 'played' : 'sat out'} · quietest {r.quietestSol.toFixed(3)} / joins under {r.joinLimitSol.toFixed(3)} SOL
-          </T>
-        </View>
-      ))}
-    </View>
-  );
-}
-
 /** Quick starting points for the Bot's rules; every value stays editable. */
 const BOT_PRESETS: Record<'safe' | 'aggressive', Partial<BotSettings>> = {
   safe: { spots: 5, perSpotSol: 0.002, maxSpotSol: 0.5, minMotherlodeOre: null, maxRoundSol: 0.01, stopLossSol: 0.05 },
@@ -845,44 +822,60 @@ function NumField({ label, info, value, onChange, unit, last }: { label: string;
 }
 
 /** Subscribers: Bot (their own rules, no AI) or AI bot (a style the agents tune), and their own limits. */
+/** Bot or AI bot, pinned just under LITE / PRO / BOT. Picks which settings show below; SAVE SETTINGS applies it. */
+function BotModeSwitch() {
+  const saved = useAi((s) => s.settings?.mode ?? DEFAULT_BOT_SETTINGS.mode);
+  const draft = useAi((s) => s.modeDraft);
+  const running = useGame((s) => Boolean(s.autopilot?.ai));
+  // while it runs the switch shows what is playing and cannot change
+  const mode = running ? saved : (draft ?? saved);
+  const pick = (m: BotMode) => useAi.setState({ modeDraft: m });
+  return (
+    <View style={[styles.lineRight, { marginBottom: 10 }]}>
+      <Chip grow label="BOT · YOUR RULES" on={mode === 'bot'} onPress={() => pick('bot')} disabled={running} />
+      <Chip grow label="AI BOT" on={mode === 'ai'} onPress={() => pick('ai')} disabled={running} />
+    </View>
+  );
+}
+
+/** Before START: Bot (their own rules, no AI) or AI bot (a style the agents tune), and their own limits. START saves them. */
 function BotSettingsPanel({ saved }: { saved: BotSettings | null }) {
   const start = saved ?? DEFAULT_BOT_SETTINGS;
-  const [mode, setMode] = useState(start.mode);
+  const mode = useAi((s) => s.modeDraft) ?? start.mode;
   const [style, setStyle] = useState<AiStyle>(start.style);
   const [f, setF] = useState(() => ({
     spots: String(start.spots), perSpot: String(start.perSpotSol), maxSpot: numText(start.maxSpotSol), minMotherlode: numText(start.minMotherlodeOre),
     maxRound: numText(start.maxRoundSol), stopLoss: numText(start.stopLossSol),
   }));
-  const [saving, setSaving] = useState(false);
   const set = (k: keyof typeof f) => (v: string) => setF((x) => ({ ...x, [k]: v }));
   const preset = (p: Partial<BotSettings>) =>
     setF({ spots: String(p.spots), perSpot: String(p.perSpotSol), maxSpot: numText(p.maxSpotSol ?? null), minMotherlode: numText(p.minMotherlodeOre ?? null), maxRound: numText(p.maxRoundSol ?? null), stopLoss: numText(p.stopLossSol ?? null) });
   const spots = Math.round(Number(f.spots));
   const ok = mode === 'ai' || (spots >= 1 && spots <= 25 && Number(f.perSpot) > 0);
-  const save = () => {
-    setSaving(true);
-    void saveBotSettings({
-      mode, style, spots: spots >= 1 && spots <= 25 ? spots : 10, perSpotSol: Number(f.perSpot) > 0 ? Number(f.perSpot) : 0.002,
-      maxSpotSol: numOrNull(f.maxSpot), minMotherlodeOre: numOrNull(f.minMotherlode), maxRoundSol: numOrNull(f.maxRound), stopLossSol: numOrNull(f.stopLoss),
-    }).then(() => setSaving(false));
-  };
+  // the START button reads what is filled in here
+  useEffect(() => {
+    useAi.setState({
+      draft: ok
+        ? {
+            mode, style, spots: spots >= 1 && spots <= 25 ? spots : 10, perSpotSol: Number(f.perSpot) > 0 ? Number(f.perSpot) : 0.002,
+            maxSpotSol: numOrNull(f.maxSpot), minMotherlodeOre: numOrNull(f.minMotherlode), maxRoundSol: numOrNull(f.maxRound), stopLossSol: numOrNull(f.stopLoss),
+          }
+        : null,
+    });
+  }, [ok, mode, style, spots, f]);
   return (
-    <View style={{ marginTop: 12, gap: 6 }}>
+    <View style={{ gap: 6 }}>
       <T v="label" style={{ color: COLORS.gold }}>
-        HOW YOUR BOT PLAYS
+        SET UP YOUR BOT FIRST
       </T>
-      <View style={styles.lineRight}>
-        <Chip grow label="BOT · YOUR RULES" on={mode === 'bot'} onPress={() => setMode('bot')} disabled={saving} />
-        <Chip grow label="AI BOT" on={mode === 'ai'} onPress={() => setMode('ai')} disabled={saving} />
-      </View>
       {mode === 'bot' ? (
         <>
           <T v="num" style={styles.evNote}>
-            No AI: the bot plays exactly your rules every round. Start from a preset, then change anything.
+            No AI: the bot plays exactly your rules every round. Start from a preset, then change anything. Settings lock while the bot runs.
           </T>
           <View style={styles.lineRight}>
-            <Chip grow label="SAFE PLAY" onPress={() => preset(BOT_PRESETS.safe)} disabled={saving} />
-            <Chip grow label="AGGRESSIVE" onPress={() => preset(BOT_PRESETS.aggressive)} disabled={saving} />
+            <Chip grow label="SAFE PLAY" onPress={() => preset(BOT_PRESETS.safe)} />
+            <Chip grow label="AGGRESSIVE" onPress={() => preset(BOT_PRESETS.aggressive)} />
           </View>
           <NumField label="Spots" info="How many spots to play each round, quietest first (1 to 25)." value={f.spots} onChange={set('spots')} unit="of 25" />
           <NumField label="SOL per spot" info="How much SOL on each spot. Never more than your most per spot, which ORE enforces." value={f.perSpot} onChange={set('perSpot')} unit="SOL" />
@@ -892,11 +885,11 @@ function BotSettingsPanel({ saved }: { saved: BotSettings | null }) {
       ) : (
         <>
           <T v="num" style={styles.evNote}>
-            Pick how the AI plays. The review agents learn and tune your style from its own results. Your limits below always hold.
+            Pick how the AI plays. The review agents learn and tune your style from its own results. Settings lock while the bot runs.
           </T>
           <View style={styles.lineRight}>
             {AI_STYLES.map((x) => (
-              <Chip key={x.id} grow label={x.label} on={style === x.id} onPress={() => setStyle(x.id)} disabled={saving} />
+              <Chip key={x.id} grow label={x.label} on={style === x.id} onPress={() => setStyle(x.id)} />
             ))}
           </View>
           <T v="num" style={styles.evNote}>
@@ -907,13 +900,35 @@ function BotSettingsPanel({ saved }: { saved: BotSettings | null }) {
       <NumField label="Most per round" info="The most SOL the bot may use in one round. Empty: no extra limit beyond your balance and most per spot." value={f.maxRound} onChange={set('maxRound')} unit="SOL" />
       <NumField
         label="Stop-loss"
-        info="Stop once the bot is this much SOL down since you saved these settings (ORE mined counts at today's price). Save again to start counting from zero. Empty: no stop-loss."
+        info="Stop once the bot is this much SOL down since it started (ORE mined counts at today's price). Empty: no stop-loss."
         value={f.stopLoss}
         onChange={set('stopLoss')}
         unit="SOL"
         last
       />
-      <Btn kind={ok ? 'gold' : 'plain'} label={saving ? 'SAVING…' : ok ? 'SAVE SETTINGS' : 'SPOTS 1 TO 25, SOL ABOVE 0'} sub={ok ? 'Sign in once with your wallet. No fee' : undefined} onPress={save} disabled={!ok || saving} />
+    </View>
+  );
+}
+
+/** While the bot runs: what it plays, read-only. Settings change only after STOP. */
+function BotSettingsSummary({ s }: { s: BotSettings | null }) {
+  const v = s ?? DEFAULT_BOT_SETTINGS;
+  const parts =
+    v.mode === 'bot'
+      ? [`quietest ${v.spots} spots`, `${v.perSpotSol} SOL each`, v.maxSpotSol ? `skips spots over ${v.maxSpotSol} SOL` : null, v.minMotherlodeOre ? `only when the motherlode is ${v.minMotherlodeOre}+ ORE` : null]
+      : [AI_STYLES.find((x) => x.id === v.style)?.about ?? ''];
+  const limits = [v.maxRoundSol ? `most ${v.maxRoundSol} SOL a round` : null, v.stopLossSol ? `stop-loss ${v.stopLossSol} SOL` : null].filter(Boolean);
+  return (
+    <View style={[styles.aiLog, { borderBottomWidth: 0, marginTop: 8 }]}>
+      <T v="label" style={{ color: COLORS.gold }}>
+        {v.mode === 'bot' ? 'BOT · YOUR RULES' : `AI BOT · ${AI_STYLES.find((x) => x.id === v.style)?.label ?? 'SAFE'}`}
+      </T>
+      <T v="num" style={{ fontSize: 14, color: COLORS.text, lineHeight: 17 }}>
+        {[...parts.filter(Boolean), ...limits].join(' · ')}
+      </T>
+      <T v="num" style={styles.evNote}>
+        Locked while your bot runs. STOP it to change these settings.
+      </T>
     </View>
   );
 }
@@ -925,7 +940,7 @@ function AiPanel() {
   const owner = useGame((s) => s.wallet.owner);
   const startAi = useGame((s) => s.startAiMining);
   const stopAutopilot = useGame((s) => s.stopAutopilot);
-  const { status, stats, board, me, claiming, log, logBusy, thoughts, lesson, settings } = useAi();
+  const { status, stats, me, claiming, log, logBusy, settings } = useAi();
   const [amount, setAmount] = useState('');
   const [perSpot, setPerSpot] = useState(AI_PER_SPOT_DEFAULT);
   useEffect(() => {
@@ -947,20 +962,23 @@ function AiPanel() {
   const aiOn = Boolean(autopilot?.ai);
   const amt = Number(amount) || 0;
   const spot = Number(perSpot) || 0;
-  const ready = live && passOn && !autopilot && amt > 0 && spot >= 0.0001 && spot <= amt && amt <= balance + 1e-9 && !busy;
+  const draft = useAi((s) => s.draft);
+  const ready = live && passOn && !autopilot && Boolean(draft) && amt > 0 && spot >= 0.0001 && spot <= amt && amt <= balance + 1e-9 && !busy;
   const label = !live
     ? 'MAINNET WALLET NEEDED'
     : autopilot && !aiOn
       ? 'STOP AUTOPILOT FIRST'
-      : !amt
-        ? 'ENTER AMOUNT'
-        : amt > balance + 1e-9
-          ? 'NOT ENOUGH SOL'
-          : !(spot >= 0.0001)
-            ? 'MIN 0.0001 SOL A SPOT'
-            : spot > amt
-              ? 'LIMIT IS OVER THE AMOUNT'
-              : `START BOT · ${fmtSol(amt)} SOL`;
+      : !draft
+        ? 'CHECK YOUR BOT SETTINGS'
+        : !amt
+          ? 'ENTER AMOUNT'
+          : amt > balance + 1e-9
+            ? 'NOT ENOUGH SOL'
+            : !(spot >= 0.0001)
+              ? 'MIN 0.0001 SOL A SPOT'
+              : spot > amt
+                ? 'LIMIT IS OVER THE AMOUNT'
+                : `START BOT · ${fmtSol(amt)} SOL`;
 
   return (
     <>
@@ -994,7 +1012,6 @@ function AiPanel() {
           </T>
         }
       />
-      <AiThinking thoughts={thoughts} lesson={lesson} />
 
       {owner ? (
         <Row
@@ -1030,6 +1047,7 @@ function AiPanel() {
       {aiOn ? (
         <>
           <AutopilotRow />
+          <BotSettingsSummary s={settings} />
           {!passOn ? (
             <T v="num" style={styles.evNote}>
               Your pass ran out, so your bot is not playing. Renew it to carry on, or STOP to take your SOL back.
@@ -1038,6 +1056,7 @@ function AiPanel() {
         </>
       ) : passOn ? (
         <>
+          <BotSettingsPanel key={JSON.stringify(settings)} saved={settings} />
           <BigAmount value={amount} onChange={setAmount} hint="SOL for your bot to mine with" disabled={Boolean(busy)} />
           <QuickAdd onAdd={(v) => setAmount((c) => addTo(c, v))} onMax={() => setAmount(trim(balance - 0.001))} disabled={Boolean(busy)} />
           <Row
@@ -1069,7 +1088,14 @@ function AiPanel() {
             label={busy ?? label}
             sub={ready ? 'One approval. 0.25% fee only on rounds it plays' : undefined}
             onPress={() => {
-              void startAi(amt, spot).then((ok) => ok && setAmount(''));
+              // settings first: saved before the bot is funded, locked while it runs
+              const d = useAi.getState().draft;
+              if (!d) return;
+              void saveBotSettings(d).then((saved) => {
+                if (!saved) return;
+                useAi.setState({ modeDraft: null });
+                void startAi(amt, spot).then((ok) => ok && setAmount(''));
+              });
             }}
             disabled={!ready}
             style={{ marginTop: 10, minHeight: 54 }}
@@ -1095,7 +1121,6 @@ function AiPanel() {
           style={{ marginTop: 10 }}
         />
       ) : null}
-      {passOn ? <BotSettingsPanel key={JSON.stringify(settings)} saved={settings} /> : null}
       {passOn ? (
         <>
           <AiFeedback nextAt={me?.nextFeedbackAt ?? null} />
@@ -1107,24 +1132,6 @@ function AiPanel() {
         </T>
       ) : null}
 
-      {board.length ? (
-        <View style={{ marginTop: 12 }}>
-          <T v="label" style={{ color: COLORS.gold, marginBottom: 4 }}>
-            EVERY BOT MINER
-          </T>
-          {board.slice(0, 20).map((r, i) => (
-            <View key={r.wallet} style={[styles.line, i === Math.min(board.length, 20) - 1 && { borderBottomWidth: 0 }]}>
-              <View style={[styles.aiDot, { backgroundColor: r.active ? COLORS.green : 'transparent', borderColor: r.active ? COLORS.green : COLORS.muted }]} accessibilityLabel={r.active ? 'pass active' : 'pass ended'} />
-              <T v="num" style={{ fontSize: 14, color: r.wallet === owner ? COLORS.gold : COLORS.text, flex: 1 }} numberOfLines={1}>
-                {r.name || short(r.wallet)}
-              </T>
-              <T v="num" style={{ fontSize: 14, color: r.netSol >= 0 ? COLORS.green : COLORS.red }}>
-                {signed(r.netSol)} SOL · {r.ore.toFixed(3)} ORE · {r.rounds}r
-              </T>
-            </View>
-          ))}
-        </View>
-      ) : null}
       <T v="num" style={[styles.evNote, { marginTop: 8 }]}>
         The draw is random: no bot can see the winning spot. The Safe AI style only plays spots worth more than they cost on average; your own rules, Solo hunter and Motherlode chaser can play below break-even. You can still lose. Not financial advice.
       </T>
@@ -1593,7 +1600,6 @@ const styles = StyleSheet.create({
   lineRight: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1, minWidth: 0 },
   aiSpot: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, height: 34, width: 120 },
   aiSpotInput: { position: 'relative', width: 64, height: 30, textAlign: 'right', color: COLORS.gold, fontFamily: F.display, fontSize: 18, paddingVertical: 0, paddingHorizontal: 0, ...WEB_NO_OUTLINE },
-  aiDot: { width: 8, height: 8, borderWidth: 1.5 },
   aiComment: { minHeight: 56, paddingHorizontal: 10, paddingVertical: 6 },
   aiCommentInput: { position: 'relative', minHeight: 44, color: COLORS.text, fontFamily: F.body, fontSize: 15, textAlignVertical: 'top', paddingVertical: 0, paddingHorizontal: 0, ...WEB_NO_OUTLINE },
   aiLog: { gap: 3, paddingVertical: 8, borderBottomWidth: U, borderColor: 'rgba(34,53,111,0.6)', borderStyle: 'dashed' },

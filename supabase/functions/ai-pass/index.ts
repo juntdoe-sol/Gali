@@ -11,6 +11,7 @@
 // come with every edge function.
 import { isWallet, readPass } from '../_shared/pass.ts';
 import { cleanComment } from '../_shared/aiText.ts';
+import { Buffer, PublicKey } from '../ai-miner/deps.ts';
 
 export const PASS_LAMPORTS = 100_000_000; // 0.1 SOL
 export const REVENUE_WALLET = 'HDa2MTDdZXnrjTs6RRUUzEqCcrWMWu1fM673Cg7pzQMw';
@@ -37,6 +38,28 @@ export function paidLamports(tx: { meta?: { err: unknown } | null; transaction?:
     if (info?.source === wallet && info.destination === REVENUE_WALLET && Number.isSafeInteger(info.lamports)) paid += info.lamports!;
   }
   return paid;
+}
+
+const ORE_PROGRAM = new PublicKey('oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv');
+/** Autopilot's executor (open to any bot). An automation run by anything else is a Gali bot. */
+const AUTOPILOT_EXECUTOR = 'executor11111111111111111111111111111111112';
+
+/** Whether the wallet's ORE automation is running with a bot (not Autopilot) as its executor. */
+export async function botRunning(rpc: string, wallet: string): Promise<boolean> {
+  const pda = PublicKey.findProgramAddressSync([Buffer.from('automation'), new PublicKey(wallet).toBuffer()], ORE_PROGRAM)[0];
+  const r = await fetch(rpc, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getAccountInfo', params: [pda.toBase58(), { encoding: 'base64', commitment: 'confirmed' }] }),
+  });
+  if (!r.ok) throw new Error(`rpc ${r.status}`);
+  const j = await r.json();
+  if (j.error) throw new Error('rpc error');
+  const v = j.result?.value;
+  if (!v) return false;
+  const d = Buffer.from(v.data[0], 'base64');
+  // ORE's Automation: 8-byte discriminator, then amount, authority, balance, executor (offset 56)
+  return d.length === 160 && new PublicKey(d.subarray(56, 88)).toBase58() !== AUTOPILOT_EXECUTOR;
 }
 
 /** A player's Bot settings, checked. Returns the row to save, or what is wrong with it. */
@@ -93,6 +116,10 @@ Deno.serve(async (req) => {
     if (a === 'settings') {
       const v = botSettings(body?.settings);
       if (typeof v === 'string') return json(400, { error: v });
+      // settings are set before the bot starts and stay fixed while it runs
+      const running = await botRunning(rpc, wallet).catch(() => null);
+      if (running === null) return json(503, { error: 'Could not check your bot. Try again' });
+      if (running) return json(409, { error: 'Your bot is running. STOP it to change its settings' });
       const r = await fetch(`${base}/rest/v1/gali_bot_settings`, {
         method: 'POST',
         headers: { ...h, prefer: 'resolution=merge-duplicates,return=representation' },
