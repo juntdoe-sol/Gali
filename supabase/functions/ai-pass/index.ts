@@ -9,8 +9,10 @@
 //             pass, at most one every 2 hours. The hourly review reads it as players' opinions, never as orders.
 // Secrets: RPC_URL, DM_SECRET (the same one dm and play use for sign-in). SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY
 // come with every edge function.
+import { botAllowed } from '../_shared/botAccess.ts';
 import { isWallet, readPass } from '../_shared/pass.ts';
 import { cleanComment } from '../_shared/aiText.ts';
+import { Buffer, PublicKey } from '../ai-miner/deps.ts';
 
 export const PASS_LAMPORTS = 100_000_000; // 0.1 SOL
 export const REVENUE_WALLET = 'HDa2MTDdZXnrjTs6RRUUzEqCcrWMWu1fM673Cg7pzQMw';
@@ -39,6 +41,52 @@ export function paidLamports(tx: { meta?: { err: unknown } | null; transaction?:
   return paid;
 }
 
+const ORE_PROGRAM = new PublicKey('oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv');
+/** Autopilot's executor (open to any bot). An automation run by anything else is a Gali bot. */
+const AUTOPILOT_EXECUTOR = 'executor11111111111111111111111111111111112';
+
+/** Whether the wallet's ORE automation is running with a bot (not Autopilot) as its executor. */
+export async function botRunning(rpc: string, wallet: string): Promise<boolean> {
+  const pda = PublicKey.findProgramAddressSync([Buffer.from('automation'), new PublicKey(wallet).toBuffer()], ORE_PROGRAM)[0];
+  const r = await fetch(rpc, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getAccountInfo', params: [pda.toBase58(), { encoding: 'base64', commitment: 'confirmed' }] }),
+  });
+  if (!r.ok) throw new Error(`rpc ${r.status}`);
+  const j = await r.json();
+  if (j.error) throw new Error('rpc error');
+  const v = j.result?.value;
+  if (!v) return false;
+  const d = Buffer.from(v.data[0], 'base64');
+  // ORE's Automation: 8-byte discriminator, then amount, authority, balance, executor (offset 56)
+  return d.length === 160 && new PublicKey(d.subarray(56, 88)).toBase58() !== AUTOPILOT_EXECUTOR;
+}
+
+/** A player's Bot settings, checked. Returns the row to save, or what is wrong with it. */
+export function botSettings(x: unknown): Record<string, unknown> | string {
+  const o = (x && typeof x === 'object' ? x : {}) as Record<string, unknown>;
+  const mode = o.mode === 'bot' || o.mode === 'ai' ? o.mode : null;
+  const style = o.style === 'safe' || o.style === 'balance' || o.style === 'solo' ? o.style : null;
+  if (!mode || !style) return 'Pick Bot or AI bot, and how the AI plays';
+  const pos = (k: string, max: number) => {
+    const n = o[k] === null || o[k] === undefined || o[k] === '' ? null : Number(o[k]);
+    return n === null ? null : Number.isFinite(n) && n > 0 && n <= max ? n : NaN;
+  };
+  const spots = Number(o.spots ?? 10);
+  const perSpot = pos('perSpotSol', 100);
+  const out = {
+    mode, style,
+    spots: Number.isInteger(spots) && spots >= 1 && spots <= 25 ? spots : NaN,
+    per_spot_sol: perSpot ?? 0.002,
+    max_spot_sol: pos('maxSpotSol', 10_000), min_motherlode_ore: pos('minMotherlodeOre', 100_000),
+    max_round_sol: pos('maxRoundSol', 10_000), stop_loss_sol: pos('stopLossSol', 100_000),
+    // how long the bot runs, from START (up to 30 days); empty: until stopped
+    run_hours: pos('runHours', 720),
+  };
+  return Object.values(out).some((n) => Number.isNaN(n)) ? 'Check the numbers: spots 1 to 25, amounts above 0' : out;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: cors });
   if (req.method !== 'POST') return json(405, { error: 'POST only' });
@@ -50,9 +98,10 @@ Deno.serve(async (req) => {
   const body = await req.json().catch(() => null);
   const a = body?.a ?? 'pay';
 
-  if (a === 'trial' || a === 'log' || a === 'feedback') {
+  if (a === 'trial' || a === 'log' || a === 'feedback' || a === 'settings') {
     const wallet = await readPass(body?.pass).catch(() => null);
     if (!wallet) return json(401, { error: 'sign in first' });
+    if ((a === 'trial' || a === 'settings') && !botAllowed(wallet)) return json(403, { error: 'Bot mining is not open yet' });
 
     if (a === 'trial') {
       const r = await fetch(`${base}/rest/v1/rpc/gali_ai_trial`, { method: 'POST', headers: h, body: JSON.stringify({ p_wallet: wallet }) });
@@ -66,7 +115,27 @@ Deno.serve(async (req) => {
     // log and feedback: only for a live pass
     const p = await fetch(`${base}/rest/v1/gali_ai_passes?select=expires_at&wallet=eq.${encodeURIComponent(wallet)}`, { headers: h });
     const rows = p.ok ? await p.json() : [];
-    if (!rows[0] || !(Date.parse(rows[0].expires_at) > Date.now())) return json(403, { error: a === 'log' ? 'The learning log is for miners with a pass' : 'Feedback is for miners with a pass' });
+    if (!rows[0] || !(Date.parse(rows[0].expires_at) > Date.now())) return json(403, { error: a === 'log' ? 'The learning log is for miners with a pass' : a === 'settings' ? 'Bot settings are for miners with a pass' : 'Feedback is for miners with a pass' });
+
+    if (a === 'settings') {
+      const v = botSettings(body?.settings);
+      if (typeof v === 'string') return json(400, { error: v });
+      // settings are set before the bot starts and stay fixed while it runs
+      const running = await botRunning(rpc, wallet).catch(() => null);
+      if (running === null) return json(503, { error: 'Could not check your bot. Try again' });
+      if (running) return json(409, { error: 'Your bot is running. STOP it to change its settings' });
+      const r = await fetch(`${base}/rest/v1/gali_bot_settings`, {
+        method: 'POST',
+        headers: { ...h, prefer: 'resolution=merge-duplicates,return=representation' },
+        // saving starts the stop-loss count again
+        body: JSON.stringify({
+          wallet, ...v, started_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+          run_until: v.run_hours ? new Date(Date.now() + Number(v.run_hours) * 3_600_000).toISOString() : null,
+        }),
+      });
+      if (!r.ok) return json(500, { error: 'could not save your settings' });
+      return json(200, { settings: (await r.json())[0] });
+    }
 
     if (a === 'feedback') {
       const vote = body?.vote;
