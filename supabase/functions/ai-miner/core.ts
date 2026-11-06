@@ -29,8 +29,14 @@ const DISC = 8;
 export const ROUND_SIZE = DISC + 944;
 export const TREASURY_SIZE = DISC + 40;
 /** a checkpoint plus up to four deploys */
-const CU_LIMIT = 400_000;
-const CU_PRICE = 5_000; // micro-lamports per CU: at most 2,000 lamports of priority, inside the 10,000 fee
+/**
+ * Compute a deploy may use. A checkpoint plus two deploys measured 57,000 to 60,000 units on mainnet (Nov 2026): this
+ * leaves 2.5x room. Solana ranks transactions by fee per unit requested, so asking for 400,000 (as before) made the
+ * same fee rank 2.7x lower, and 15% of deploys were dropped or landed after the round closed.
+ */
+export const CU_LIMIT = 150_000;
+/** Micro-lamports per CU: 3,750 lamports of priority a deploy, paid by the AI key from Gali's 0.25%. */
+export const CU_PRICE = 25_000;
 /** most players one round plays, so a crowd of tiny automations cannot drain the key on network fees */
 export const MAX_PER_ROUND = 60;
 export const SLOT_MS = 400;
@@ -446,23 +452,40 @@ export async function pass(conn: Connection, signer: Keypair, hooks: Hooks, st: 
     return res;
   }
   const params = await hooks.params();
-  if (slotsLeft > params.targetSlotsLeft) {
+  // each player deploys on their own style's timing (the review team tunes targetSlotsLeft per style): wake for the
+  // earliest window still to come this round, and leave players whose window is not open yet for a later pass
+  const [active, choices] = await Promise.all([
+    hooks.active(),
+    hooks.choices?.().catch((e) => (err('choices', e), new Map<string, BotChoice>())) ?? Promise.resolve(new Map<string, BotChoice>()),
+  ]);
+  const styleParams = new Map<Style, AiParams>();
+  const paramsOf = async (c: BotChoice): Promise<AiParams> => {
+    if (c.mode !== 'ai') return params;
+    if (!styleParams.has(c.style)) styleParams.set(c.style, await hooks.params(c.style));
+    return styleParams.get(c.style)!;
+  };
+  const targets = new Map<string, number>();
+  for (const w of active) if (!st.done.has(`${w}:${board.roundId}`)) targets.set(w, (await paramsOf(choices.get(w) ?? DEFAULT_CHOICE)).targetSlotsLeft);
+  const firstOpen = targets.size ? Math.max(...targets.values()) : params.targetSlotsLeft;
+  if (slotsLeft > firstOpen) {
     // sleep until just before the deploy window, checking back at least every MAX_WAIT_MS
-    res.waitMs = Math.min(MAX_WAIT_MS, Math.max(300, (slotsLeft - params.targetSlotsLeft) * st.slotMs - 300));
+    res.waitMs = Math.min(MAX_WAIT_MS, Math.max(300, (slotsLeft - firstOpen) * st.slotMs - 300));
     return res;
   }
-  res.waitMs = Math.max(1000, slotsLeft * st.slotMs + 1500);
+  // players whose window opens later in this round: come back for the next one, else sleep to the round's end
+  const later = [...targets.values()].filter((t) => t < slotsLeft && t >= LOCK_SLOTS + 2);
+  res.waitMs = later.length ? Math.max(300, (slotsLeft - Math.max(...later)) * st.slotMs - 300) : Math.max(1000, slotsLeft * st.slotMs + 1500);
   // too close to the lock: anything sent now may land after it
   if (slotsLeft < LOCK_SLOTS + 2) return res;
+  const windowOpen = (w: string) => (targets.get(w) ?? firstOpen) >= slotsLeft;
 
   const accounts = await conn.getProgramAccounts(ORE_PROGRAM_ID, {
     commitment: 'confirmed',
     filters: [{ dataSize: SIZE.automation }, { memcmp: { offset: DISC + 48, bytes: signer.publicKey.toBase58() } }],
   });
-  const active = await hooks.active();
   const autos = accounts
     .map((x) => decodeAutomation(Buffer.from(x.account.data)))
-    .filter((a) => aiRunnable(a, signer.publicKey) && active.has(a.authority.toBase58()) && !st.done.has(`${a.authority.toBase58()}:${board.roundId}`))
+    .filter((a) => aiRunnable(a, signer.publicKey) && active.has(a.authority.toBase58()) && windowOpen(a.authority.toBase58()) && !st.done.has(`${a.authority.toBase58()}:${board.roundId}`))
     .sort((x, y) => (y.balance > x.balance ? 1 : y.balance < x.balance ? -1 : 0))
     .slice(0, MAX_PER_ROUND);
   res.candidates = autos.length;
@@ -488,12 +511,8 @@ export async function pass(conn: Connection, signer: Keypair, hooks: Hooks, st: 
   // plan one player at a time, each seeing the stakes of the ones before, so the AI does not crowd itself
   let onBoard = round.deployed;
   const sends: { a: Auto; plan: Plan; ixs: TransactionInstruction[]; choice: BotChoice }[] = [];
-  const [choices, nets] = await Promise.all([hooks.choices?.().catch((e) => (err('choices', e), new Map())) ?? new Map(), hooks.net?.().catch((e) => (err('net', e), new Map())) ?? new Map()]);
-  const styleParams = new Map<Style, AiParams>();
-  for (const a of autos) {
-    const c: BotChoice = choices.get(a.authority.toBase58()) ?? DEFAULT_CHOICE;
-    if (c.mode === 'ai' && !styleParams.has(c.style)) styleParams.set(c.style, await hooks.params(c.style));
-  }
+  const nets: Map<string, number> = (await hooks.net?.().catch((e) => (err('net', e), new Map()))) ?? new Map();
+  for (const a of autos) await paramsOf(choices.get(a.authority.toBase58()) ?? DEFAULT_CHOICE);
   autos.forEach((a, i) => {
     const tag = `${a.authority.toBase58()}:${board.roundId}`;
     const info = minerInfos[i];
@@ -531,12 +550,14 @@ export async function pass(conn: Connection, signer: Keypair, hooks: Hooks, st: 
     onBoard = addToBoard(onBoard, plan);
     sends.push({ a, plan, ixs: txFor(plan, a, miner, board.roundId, signer.publicKey), choice });
   });
+  const logged = sends[0]?.choice.mode === 'ai' ? (styleParams.get(sends[0].choice.style) ?? params) : params;
   await hooks
     .thought?.({
       round: board.roundId, slotsLeft, motherlode, prize,
       board: round.deployed.reduce((n, x) => n + x, 0n),
       quietest: round.deployed.reduce((m, x) => (x < m ? x : m), round.deployed[0]),
-      joinLimit: joinLimitLamports(prize, params), played: sends.length, skipped: res.skipped, params,
+      // the settings of the style that played (the first player's), so the round reviewer compares like with like
+      joinLimit: joinLimitLamports(prize, logged), played: sends.length, skipped: res.skipped, params: logged,
     })
     .catch((e) => err('thought', e));
   if (!sends.length) return res;

@@ -274,6 +274,33 @@ const test = (name, fn) => {
     assert.equal(conn.sent.length, 1);
   });
 
+  await test("each player deploys on their own style's timing, and the log keeps the style that played", async () => {
+    const st = state(45);
+    const conn = fakeConn(st);
+    const h = hooks({ active: [alice.toBase58(), bob.toBase58()] });
+    const solo = { ...P, minEdge: -0.6, crowdBuffer: 0.7, targetSlotsLeft: 45 };
+    const safe = { ...P, targetSlotsLeft: 32 };
+    h.params = async (style = 'safe') => (style === 'solo' ? solo : safe);
+    h.choices = async () => new Map([[bob.toBase58(), { ...M.DEFAULT_CHOICE, style: 'solo' }]]);
+    const logs = [];
+    h.thought = async (t) => { logs.push(t); };
+    const s = M.newState();
+    const first = await M.pass(conn, ai, h, s);
+    assert.equal(conn.sent.length, 1, "only the solo player's window is open at 45 slots left");
+    assert.ok(conn.sent[0].instructions.some((ix) => ix.keys[1] && ix.keys[1].pubkey.equals(bob)));
+    assert.equal(logs[0].params.crowdBuffer, 0.7, "the log has the solo style's settings, not safe's");
+    assert.ok(first.waitMs < (45 - 32) * s.slotMs, 'it comes back for the safe window, not at the round end');
+    st.slot = 1000 - 32;
+    await M.pass(conn, ai, h, s);
+    assert.equal(conn.sent.length, 2, 'the safe player plays in its own window');
+    assert.ok(conn.sent[1].instructions.some((ix) => ix.keys[1] && ix.keys[1].pubkey.equals(alice)));
+  });
+
+  test('deploys ask for little compute, so the priority fee ranks high, with room over the 60,000 measured', () => {
+    assert.ok(M.CU_LIMIT >= 2 * 60_000 && M.CU_LIMIT <= 200_000);
+    assert.ok((M.CU_LIMIT * M.CU_PRICE) / 1e6 <= 5_000, 'priority stays inside a few thousand lamports a deploy');
+  });
+
   await test('too close to the lock: sends nothing', async () => {
     const st = state(A.LOCK_SLOTS + 1);
     const conn = fakeConn(st);
@@ -398,6 +425,17 @@ const test = (name, fn) => {
     assert.deepEqual(limits, { minEdgeFloor: 0.15, maxRoundShareCap: 0.03 });
     const loose = T.riskLimits({ minEdgeFloor: -5, maxRoundShareCap: 'x' });
     assert.deepEqual(loose, { minEdgeFloor: S.BOUNDS.minEdge[0], maxRoundShareCap: S.BOUNDS.maxRoundShare[1] });
+  });
+
+  test("the round reviewer sees each style's settings and which style played, in the buffer's own units", () => {
+    const settings = { safe: { ...P, crowdBuffer: 2 }, solo: { ...P, minEdge: -0.3, crowdBuffer: 1.5 } };
+    const thoughts = [{ round_id: 9, slots_left: 38, motherlode_grams: 0, quietest: 4e8, join_limit: 1.4e8, board: 1e10, played: 1, skipped: 0 }];
+    const plays = [{ round_id: 9, style: 'solo', total: 5e6, sol_back: 4.5e6, ore_grams: 0, won: false, board_before: 1e8, board_after: 1.31e8 + 5e6, stake: [5e6], settled_at: 'x', void: false }];
+    const text = T.roundsPrompt(settings, thoughts, plays, 1.2);
+    assert.match(text, /Settings by style: \{"safe":\{[^}]*"crowdBuffer":2[^}]*\},"solo":\{[^}]*"crowdBuffer":1\.5/);
+    assert.match(text, /9: solo played 1 squares/);
+    assert.match(text, /late crowd 0\.31/, 'same units as crowdBuffer');
+    assert.doesNotMatch(text, /Current settings/);
   });
 
   test('log text and player comments carry no links or control characters', () => {

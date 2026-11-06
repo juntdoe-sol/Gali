@@ -87,7 +87,7 @@ const GAME = `Gali AI is a bot that plays ORE's mining board on Solana for playe
 
 How ORE pays: every round (about 80 seconds) players put SOL on any of 25 squares. One square wins, picked by a fair random draw that nobody can predict. ORE keeps 1% of every square and another 10% of the rest on the 24 squares that miss, and returns the rest. So about ${(LOSS * 100).toFixed(1)}% of every SOL staked is lost on average. The winning square also mines 1 ORE, shared by SOL on it (or, on some squares, all to one miner with odds equal to their share). One round in 500 the winning square also pays the motherlode pool, shared by SOL on it. Players mine to hold ORE and sell when they choose, so the bot values mined ORE at its full price (unclaimed ORE pays no claim fee): it plays when mining costs less SOL per ORE than buying it. Gali takes ${Number(AI_FEE_BPS) / 100}% of the SOL the bot deploys, only on rounds it plays.
 
-How the bot plays: it waits until targetSlotsLeft slots (about 0.2 s each; ORE locks the last 15) before the round ends, reads the board, and stakes only squares where the expected ORE is worth more than the expected SOL loss, Gali's fee and a margin of minEdge per SOL. It assumes crowdBuffer more SOL (as a share of what is already there) will land on each square after it deploys. It plays one stake size per round and never more than maxRoundShare of a player's balance. It sits out rounds where nothing clears the margin. A bigger motherlode raises every square's prize, so the bot plays more when the pool is big: that is how it chases the motherlode without gambling.
+How the bot plays: each style waits until its own targetSlotsLeft slots (about 0.2 s each; ORE locks the last 15) before the round ends and reads the board. It assumes crowdBuffer more SOL (as a share of what is already there) will land on each square after it deploys. The safe style stakes one size per round, only on squares where the expected ORE is worth more than the expected SOL loss, Gali's fee and a margin of minEdge per SOL. The balance and solo styles cover at least 23 squares (quietest first) with up to two stake sizes, sized for the best chance of the solo 1 ORE, and play when the round as a whole clears minEdge per SOL (which may be below zero: a planned small loss for more ORE). A round uses at most maxRoundShare of a player's balance, unless the player set how long the bot runs: then the balance is spread over the rounds left instead. Every style sits out rounds where nothing clears its margin. A bigger motherlode raises every square's prize, so the bot plays more when the pool is big.
 
 Results swing a lot: a square wins 1 time in 25 and the motherlode hits about 1 round in 500, so a few lucky or unlucky rounds prove nothing. Under about 300 plays, small samples say little.
 
@@ -154,7 +154,8 @@ export const ROUNDS = `${GAME}
 
 You are the round reviewer. Every 15 minutes you look at each round since your last look: what the bot saw at its decision (the quietest square, the most a square could hold and still be worth joining, the motherlode), what it did (played or sat out, how many squares, how much) and, once drawn, what happened (on the winning square or not, solo or shared, SOL back, ORE mined, how much SOL landed after it played).
 Find patterns a busy team would miss, for example: the board always just over the limit, the late crowd bigger than crowdBuffer, results by number of squares played, near misses. Study how the round's solo 1 ORE winners played (their share of the winning square, squares covered, stake, total SOL) and how every miner on the board did by style (squares covered, SOL per square), and what that means for the Aggressive and Balance styles, given what a player's balance allows. When no player uses the bot there are no bot rounds: study the whole board alone and say what the bot's styles should copy. Results swing a lot over a few rounds: say what the rounds suggest and how sure you can be, never claim a few rounds prove anything.
-- "lessons": two to four sentences of plain, specific observations with numbers, for the review team.
+Each style has its own settings (listed by style below), and each play line says which style played. Compare a play only with its own style's settings. The "limit" on a round is worked out from the settings of the style that played that round (the safe style's when nobody played). Units: crowdBuffer 2 means the bot expects 200% more SOL to land on a square after it deploys; the late crowd on a play line is given the same way (late crowd 0.31 = 31% more landed), so compare them directly.
+- "lessons": two to four sentences of plain, specific observations with numbers, for the review team. Name the style each observation is about.
 - "watch": one sentence on what to look for in the next rounds.
 ${PLAIN}`;
 export const ROUNDS_SCHEMA = obj({ lessons: str, watch: str, confidence: { type: 'string', enum: ['low', 'medium', 'high'] } });
@@ -234,11 +235,12 @@ const BOARD_NOTE = 'every miner on ORE\'s board, not only Gali bots, grouped by 
 /** What the bot saw and decided in one round (a gali_ai_thoughts row), in lamports and grams. */
 export interface ThoughtRow { round_id: number | string; slots_left: number; motherlode_grams: number | string; quietest: number | string; join_limit: number | string; board: number | string; played: number; skipped: number }
 /** One wallet's play in a round (a gali_ai_rounds row). */
-export interface PlayRow { round_id: number | string; total: number | string; sol_back: number | string | null; ore_grams: number | string | null; won: boolean | null; board_before: number | string; board_after: number | string | null; stake: (number | string)[]; settled_at: string | null; void: boolean }
+export interface PlayRow { round_id: number | string; style?: string | null; total: number | string; sol_back: number | string | null; ore_grams: number | string | null; won: boolean | null; board_before: number | string; board_after: number | string | null; stake: (number | string)[]; settled_at: string | null; void: boolean }
 
 const sol = (x: unknown) => Number(x) / 1e9;
 /** One line per round for the round reviewer, oldest first, plus totals. Nothing per wallet. */
-export function roundsPrompt(current: AiParams, thoughts: ThoughtRow[], plays: PlayRow[], oreSol = 0, solos: SoloRow[] = [], boards: BoardRow[] = []): string {
+/** `settings`: each style's current settings, by style. */
+export function roundsPrompt(settings: Partial<Record<Style, AiParams>>, thoughts: ThoughtRow[], plays: PlayRow[], oreSol = 0, solos: SoloRow[] = [], boards: BoardRow[] = []): string {
   const byRound = new Map<string, PlayRow[]>();
   for (const p of plays) if (!p.void) byRound.set(String(p.round_id), [...(byRound.get(String(p.round_id)) ?? []), p]);
   let staked = 0, back = 0, ore = 0, played = 0, gold = 0, drawn = 0;
@@ -249,9 +251,10 @@ export function roundsPrompt(current: AiParams, thoughts: ThoughtRow[], plays: P
     played++;
     const st = ps.reduce((n, p) => n + sol(p.total), 0);
     const squares = Math.max(...ps.map((p) => p.stake.filter((x) => Number(x) > 0).length));
+    const by = [...new Set(ps.map((p) => p.style ?? 'safe'))].join('+');
     staked += st;
     const done = ps.filter((p) => p.settled_at);
-    if (!done.length) return `${t.round_id}: played ${squares} squares, ${st.toFixed(4)} SOL, not drawn yet (${seen})`;
+    if (!done.length) return `${t.round_id}: ${by} played ${squares} squares, ${st.toFixed(4)} SOL, not drawn yet (${seen})`;
     drawn++;
     const b = done.reduce((n, p) => n + sol(p.sol_back ?? 0), 0);
     const o = done.reduce((n, p) => n + Number(p.ore_grams ?? 0) / 1e11, 0);
@@ -260,10 +263,10 @@ export function roundsPrompt(current: AiParams, thoughts: ThoughtRow[], plays: P
     back += b;
     ore += o;
     if (won) gold++;
-    return `${t.round_id}: played ${squares} squares, ${st.toFixed(4)} SOL, ${won ? (o > 0 ? 'won ORE on the winning square' : 'on the winning square, ORE went to another miner') : 'missed the winning square'}, back ${b.toFixed(4)} SOL, ORE ${o.toFixed(4)}${late.length ? `, late crowd +${Math.round(Math.max(0, late[0]) * 100)}%` : ''} (${seen})`;
+    return `${t.round_id}: ${by} played ${squares} squares, ${st.toFixed(4)} SOL, ${won ? (o > 0 ? 'won ORE on the winning square' : 'on the winning square, ORE went to another miner') : 'missed the winning square'}, back ${b.toFixed(4)} SOL, ORE ${o.toFixed(4)}${late.length ? `, late crowd ${Math.max(0, late[0]).toFixed(2)}` : ''} (${seen})`;
   });
   return [
-    `Current settings: ${fmt(current)}`,
+    `Settings by style: ${fmt(settings)}`,
     `Rounds since your last look, oldest first:\n${lines.join('\n') || '- none: no player uses the bot right now, so study the whole board below'}`,
     `Totals: ${fmt({ rounds: thoughts.length, played, drawn, onWinningSquare: gold, stakedSol: staked, backSol: back, ore, orePriceSol: oreSol, oreValueSol: ore * ORE_KEEP * oreSol, netSol: back + ore * ORE_KEEP * oreSol - staked })}`,
     `How the solo 1 ORE winners in these rounds played (${SOLO_NOTE}): ${fmt(soloSummary(solos))}`,

@@ -92,9 +92,6 @@ Deno.serve(async (req) => {
   };
   const said = (r: Awaited<ReturnType<typeof ask>>) => (r.ok ? JSON.stringify(r.data) : `(unavailable: ${r.why})`);
 
-  // the round reviewer reads against the safe style's settings (the board-level numbers it sees are the safe style's)
-  const p = (await get("gali_ai_params?select=min_edge,crowd_buffer,max_round_share,target_slots_left,min_motherlode&style=eq.safe&order=id.desc&limit=1"))[0];
-  const current: AiParams = p ? clampParams({ minEdge: p.min_edge, crowdBuffer: p.crowd_buffer, maxRoundShare: p.max_round_share, targetSlotsLeft: p.target_slots_left, minMotherlode: p.min_motherlode }) : DEFAULT_PARAMS;
 
   // ---------------- the round reviewer ----------------
   if (kind === 'rounds') {
@@ -109,7 +106,7 @@ Deno.serve(async (req) => {
     const from = span[0].round_id;
     const to = span[span.length - 1].round_id;
     const [plays, market, solos, boards]: [PlayRow[], { sol_usd: number; ore_usd: number }[], SoloRow[], BoardRow[]] = await Promise.all([
-      get(`gali_ai_rounds?select=round_id,total,sol_back,ore_grams,won,board_before,board_after,stake,settled_at,void&round_id=gte.${from}&round_id=lte.${to}&limit=5000`),
+      get(`gali_ai_rounds?select=round_id,style,total,sol_back,ore_grams,won,board_before,board_after,stake,settled_at,void&round_id=gte.${from}&round_id=lte.${to}&limit=5000`),
       get('gali_ore_market?select=sol_usd,ore_usd&id=eq.1').catch(() => []),
       get(`gali_solo_wins?select=wallet,square_total,stake,squares,deployed,motherlode&round_id=gte.${from}&round_id=lte.${to}&limit=1000`).catch(() => []),
       get(`gali_board_rounds?select=round_id,miners,deployed,seen,split,motherlode,groups&round_id=gte.${from}&round_id=lte.${to}&limit=1000`).catch(() => []),
@@ -117,7 +114,15 @@ Deno.serve(async (req) => {
     const oreSol = market[0] && Number(market[0].sol_usd) > 0 ? Number(market[0].ore_usd) / Number(market[0].sol_usd) : 0;
     const why = await overBudget(1);
     if (why) return json(200, { kind, reason: why });
-    const r = await ask('rounds', ROUNDS, roundsPrompt(current, thoughts, plays, oreSol, solos, boards), ROUNDS_SCHEMA, 'low');
+    // every style's current settings, labelled, so lessons about one style aren't read against another's numbers
+    const settings: Partial<Record<Style, AiParams>> = {};
+    for (const style of STYLES) {
+      const row = (await get(`gali_ai_params?select=min_edge,crowd_buffer,max_round_share,target_slots_left,min_motherlode&style=eq.${style}&order=id.desc&limit=1`))[0];
+      settings[style] = row
+        ? clampParams({ minEdge: row.min_edge, crowdBuffer: row.crowd_buffer, maxRoundShare: row.max_round_share, targetSlotsLeft: row.target_slots_left, minMotherlode: row.min_motherlode }, STYLE_DEFAULTS[style], STYLE_BOUNDS[style])
+        : STYLE_DEFAULTS[style];
+    }
+    const r = await ask('rounds', ROUNDS, roundsPrompt(settings, thoughts, plays, oreSol, solos, boards), ROUNDS_SCHEMA, 'low');
     await saveSpend();
     if (!r.ok) return json(200, { kind, reason: `round reviewer: ${r.why}` });
     const ins = await fetch(`${base}/rest/v1/gali_ai_lessons`, {
