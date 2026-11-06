@@ -15,7 +15,7 @@
 import Anthropic from 'npm:@anthropic-ai/sdk@1.3.0';
 import { clampParams, DEFAULT_PARAMS, isStyle, STYLE_BOUNDS, STYLE_DEFAULTS, PLAYER_STYLES, STYLES, type AiParams, type Style } from '../_shared/aiStrategy.ts';
 import {
-  ANALYST, ANALYST_SCHEMA, analystPrompt, apply, budgetCheck, callCost, commentBlock, FEEDBACK, FEEDBACK_SCHEMA, feedbackPrompt, hasNews, LEAD,
+  ANALYST, ANALYST_SCHEMA, analystPrompt, apply, DISCUSS_SCHEMA, discussPrompt, discussSystem, type Role, type Said, budgetCheck, callCost, commentBlock, FEEDBACK, FEEDBACK_SCHEMA, feedbackPrompt, hasNews, LEAD,
   LEAD_SCHEMA, leadPrompt, monthBounds, RISK, RISK_SCHEMA, riskLimits, riskPrompt, ROUNDS, ROUNDS_SCHEMA, roundsPrompt, summarize, tally, text,
   worstReviewCost, type BoardRow, type FeedbackRow, type PlayRow, type RoundRow, type SoloRow, type ThoughtRow,
 } from './tune.ts';
@@ -195,7 +195,8 @@ Deno.serve(async (req) => {
     const lessons: { at: string; lessons: string }[] = await get(
       `gali_ai_lessons?select=at,lessons&order=id.desc&limit=${daily ? 24 : 12}${lastAt ? `&at=gt.${encodeURIComponent(lastAt)}` : ''}`,
     ).catch(() => []);
-    const why = await overBudget(4);
+    // analyst, feedback reader, risk checker, their three replies, and the lead
+    const why = await overBudget(7);
     if (why) {
       results.push({ style, kept: current, reason: why });
       break;
@@ -207,20 +208,32 @@ Deno.serve(async (req) => {
       votes.wallets ? ask('feedback', FEEDBACK, feedbackPrompt(votes, commentBlock(fb)), FEEDBACK_SCHEMA) : Promise.resolve({ ok: false as const, why: 'no feedback in the last 24 hours' }),
     ]);
     const risk = await ask('risk', RISK, riskPrompt(current, last24h, last7d, said(analyst), said(feedback), votes, style), RISK_SCHEMA);
-    const lead = await ask('lead', LEAD, leadPrompt(current, last24h, last7d, said(analyst), said(feedback), said(risk), votes, daily, style), LEAD_SCHEMA, 'high');
+    // the discussion round: everyone who spoke reads the others and answers them, at the same time
+    const turns: Said[] = [];
+    if (analyst.ok) turns.push({ who: 'analyst', stage: 'opening', text: text(analyst.data.findings, 900) });
+    if (feedback.ok) turns.push({ who: 'feedback', stage: 'opening', text: text(feedback.data.summary, 900) });
+    if (risk.ok) turns.push({ who: 'risk', stage: 'opening', text: `${text(risk.data.concerns, 900)} Limits: ${JSON.stringify(riskLimits(risk.data, style))}` });
+    const speakers = [...new Set(turns.map((t) => t.who as Role))];
+    const replies = speakers.length > 1
+      ? await Promise.all(speakers.map((who) => ask(`${who}-reply`, discussSystem(who), discussPrompt(current, last24h, last7d, turns, votes, style), DISCUSS_SCHEMA, 'low').then((r) => ({ who, r }))))
+      : [];
+    for (const { who, r } of replies) if (r.ok) turns.push({ who, stage: 'reply', text: `${text(r.data.reply, 700)}${r.data.changedMind ? ' (changed my mind)' : ''}` });
+    const lead = await ask('lead', LEAD, leadPrompt(current, last24h, last7d, said(analyst), said(feedback), said(risk), votes, daily, style, turns), LEAD_SCHEMA, 'high');
     await saveSpend();
     if (!lead.ok) {
       results.push({ style, kept: current, reason: `lead: ${lead.why}` });
       continue;
     }
 
-    const { params, note, learned, feedbackReply } = apply(lead.data, current, risk.ok ? riskLimits(risk.data, style) : undefined, style);
+    const { params, note, learned, feedbackReply, discussion } = apply(lead.data, current, risk.ok ? riskLimits(risk.data, style) : undefined, style);
     const agents = {
       votes,
       lessons: lessons.length,
       analyst: analyst.ok ? { findings: text(analyst.data.findings, 900), confidence: analyst.data.confidence } : { unavailable: analyst.why },
       feedback: feedback.ok ? { summary: text(feedback.data.summary, 900), lean: feedback.data.lean } : { unavailable: feedback.why },
       risk: risk.ok ? { concerns: text(risk.data.concerns, 900), ...riskLimits(risk.data, style) } : { unavailable: risk.why },
+      // the whole discussion, in order, and how the lead settled it
+      discussion: { turns, summary: discussion || null },
     };
     const ins = await fetch(`${base}/rest/v1/gali_ai_params`, {
       method: 'POST',
