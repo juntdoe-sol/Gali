@@ -15,7 +15,7 @@
  */
 import { Buffer, ComputeBudgetProgram, Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction } from './deps.ts';
 import { decodeAutomation, decodeBoard, LOCK_SLOTS, ORE_PROGRAM_ID, phaseOf, SIZE, STRATEGY, type Auto, type Phase } from '../autopilot/core.ts';
-import { addToBoard, AI_FEE_BPS, aiFee, BLOCKS, MAX_FEE_BPS, MIN_STAKE, planRound, prizeLamports, settleRound, type AiParams, type Plan, type Settled } from '../_shared/aiStrategy.ts';
+import { addToBoard, AI_FEE_BPS, BLOCKS, planFee, roundBudget, botPlan, huntPlan, joinLimitLamports, MAX_FEE_BPS, MIN_STAKE, planRound, prizeLamports, roundRng, settleRound, type AiParams, type Plan, type Rules, type Settled, type Style } from '../_shared/aiStrategy.ts';
 
 const ENTROPY_PROGRAM_ID = new PublicKey('3jSkUuYBoJzQPMEzTvkDFXCZUBksPamrVhrnHR9igu2X');
 const BOARD = new PublicKey('BrcSxdp1nXFzou1YyDnQJcPNBNHgoypZmTsyKBSLLXzi');
@@ -47,7 +47,7 @@ export const roundPda = (id: bigint) => {
 const u64 = (d: Buffer, o: number) => d.readBigUInt64LE(DISC + o);
 const squares = (d: Buffer, o: number) => Array.from({ length: BLOCKS }, (_, i) => u64(d, o + i * 8));
 
-export interface RoundAcc { id: bigint; deployed: bigint[]; entropy: Uint8Array; motherlode: bigint; reward: bigint; split: boolean }
+export interface RoundAcc { id: bigint; deployed: bigint[]; entropy: Uint8Array; motherlode: bigint; reward: bigint; split: boolean; top: PublicKey }
 export function decodeRound(d: Buffer): RoundAcc {
   if (d.length !== ROUND_SIZE) throw new Error(`round is ${d.length} bytes`);
   return {
@@ -57,6 +57,8 @@ export function decodeRound(d: Buffer): RoundAcc {
     motherlode: u64(d, 648),
     reward: squares(d, 688).reduce((a, b) => a + b, 0n),
     split: new PublicKey(d.subarray(DISC + 912, DISC + 944)).equals(SPLIT_ADDRESS),
+    // the solo winner (ORE's top miner), unless the round was shared
+    top: new PublicKey(d.subarray(DISC + 912, DISC + 944)),
   };
 }
 export interface MinerAcc { authority: PublicKey; checkpointId: bigint; deployed: bigint[]; cumulative: bigint[]; roundId: bigint }
@@ -132,6 +134,8 @@ export function txFor(plan: Plan, a: Auto, miner: MinerAcc, roundId: bigint, sig
 export interface Played {
   wallet: string;
   round: bigint;
+  mode?: 'bot' | 'ai';
+  style?: Style;
   /** lamports staked on each square */
   stake: bigint[];
   total: bigint;
@@ -146,8 +150,25 @@ export interface Played {
 export interface Pending { wallet: string; round: bigint; stake: bigint[] }
 
 /** Where the AI reads its settings and the players' passes, and writes what it did. index.ts backs these with Supabase. */
+/** A wallet's choice: Bot (its own rules, no AI) or AI bot (a style), plus its own limits. No row: AI bot, safe. */
+export interface BotChoice {
+  mode: 'bot' | 'ai';
+  style: Style;
+  rules: Rules;
+  /** stop once the result since the settings were saved is this much SOL down */
+  stopLossSol: number | null;
+  /** when the player's run ends (ms); the AI paces each bet to it. null: runs until stopped */
+  runUntil?: number | null;
+}
+export const DEFAULT_CHOICE: BotChoice = { mode: 'ai', style: 'safe', rules: { spots: 10, perSpotSol: 0.002, maxSpotSol: null, minMotherlodeOre: null, maxRoundSol: null }, stopLossSol: null, runUntil: null };
+
 export interface Hooks {
-  params(): Promise<AiParams>;
+  /** the AI settings for a style (the agents tune each style separately) */
+  params(style?: Style): Promise<AiParams>;
+  /** each wallet's Bot or AI bot choice */
+  choices?(): Promise<Map<string, BotChoice>>;
+  /** each wallet's result in SOL since its settings were saved, for the stop-loss */
+  net?(): Promise<Map<string, number>>;
   /** One ORE in SOL, or null when the price is missing or stale (the AI then sits out). */
   price(): Promise<number | null>;
   /** Wallets with a live AI pass. */
@@ -157,6 +178,27 @@ export interface Hooks {
   pending(before: bigint): Promise<Pending[]>;
   /** `s` null: the deploy never landed. */
   settled(wallet: string, round: bigint, s: Settled | null, boardAfter: bigint): Promise<void>;
+  /** What the AI saw and decided in a round's deploy window, for the AI tab. */
+  thought?(t: Thought): Promise<void>;
+  /** How a round's solo 1 ORE winner played, for the agents to study. */
+  soloWin?(w: SoloWin): Promise<void>;
+  /** How every miner on the board played a finished round, grouped by style, for the agents to study. */
+  boardRound?(b: BoardStudy): Promise<void>;
+}
+
+/** One round's decision in numbers a player can follow. Lamports and grams. */
+export interface Thought {
+  round: bigint;
+  slotsLeft: number;
+  motherlode: bigint;
+  prize: number;
+  board: bigint;
+  quietest: bigint;
+  /** a square holding more than this is not worth joining */
+  joinLimit: number;
+  played: number;
+  skipped: number;
+  params: AiParams;
 }
 
 export interface PassResult {
@@ -173,8 +215,165 @@ export interface PassResult {
   waitMs: number;
 }
 
-export interface State { done: Set<string>; settleAt: number }
-export const newState = (): State => ({ done: new Set(), settleAt: 0 });
+/**
+ * slotMs: the measured slot time. Solana's slots run faster than the nominal 400 ms (about 215 ms in Nov 2026), and
+ * sleeping by the nominal figure overshoots the deploy window, so the AI never plays. Each pass refines the estimate.
+ */
+export interface State { done: Set<string>; settleAt: number; slotMs: number; lastSlot?: number; lastAt?: number; studied?: bigint; boardStudied?: bigint; snap?: { round: bigint; miners: Map<string, bigint[]> } }
+export const newState = (slotMs = SLOT_MS): State => ({ done: new Set(), settleAt: 0, slotMs });
+
+/** How one solo 1 ORE winner played their round (lamports), for the AI agents to learn from. Any wallet, not only ours. */
+export interface SoloWin {
+  round: bigint;
+  wallet: string;
+  square: number;
+  /** SOL on the winning square, all miners */
+  squareTotal: bigint;
+  /** the winner's stake on the winning square */
+  stake: bigint;
+  /** squares the winner covered, and their SOL across the board */
+  squares: number;
+  deployed: bigint;
+  motherlode: boolean;
+}
+
+/**
+ * Reads how the last round's solo winner played, while their ORE Miner still holds that round (it moves on at their next
+ * deploy, so this runs early in the next round). Shared rounds and winners already moved on are skipped.
+ */
+export async function studySolo(conn: Connection, hooks: Hooks, current: bigint, st: State): Promise<SoloWin | null> {
+  const prev = current - 1n;
+  if (!hooks.soloWin || (st.studied !== undefined && st.studied >= prev)) return null;
+  st.studied = prev;
+  const info = await conn.getAccountInfo(roundPda(prev), 'confirmed');
+  if (!info || info.data.length !== ROUND_SIZE) return null;
+  const r = decodeRound(Buffer.from(info.data));
+  if (r.split || r.top.equals(PublicKey.default)) return null;
+  const win = settleRound(r, Array.from({ length: BLOCKS }, () => 0n), null)?.winningSquare;
+  if (win === undefined) return null;
+  const mi = await conn.getAccountInfo(minerPda(r.top), 'confirmed');
+  const m = mi && mi.data.length === SIZE.miner ? decodeMiner(Buffer.from(mi.data)) : null;
+  if (!m || m.roundId !== prev || !(m.deployed[win] > 0n)) return null;
+  const w: SoloWin = {
+    round: prev, wallet: r.top.toBase58(), square: win, squareTotal: r.deployed[win], stake: m.deployed[win],
+    squares: m.deployed.filter((x) => x > 0n).length, deployed: m.deployed.reduce((a, b) => a + b, 0n), motherlode: r.motherlode > 0n,
+  };
+  await hooks.soloWin(w);
+  return w;
+}
+/** How miners played, by how many squares they covered and their average SOL per covered square. */
+export const TILE_BUCKETS = ['1-5', '6-15', '16-22', '23-25'] as const;
+export const SIZE_BUCKETS = ['<0.001', '0.001-0.01', '0.01-0.1', '0.1+'] as const;
+export const tileBucket = (n: number) => (n <= 5 ? '1-5' : n <= 15 ? '6-15' : n <= 22 ? '16-22' : '23-25');
+export const sizeBucket = (lamportsPerSquare: number) => {
+  const sol = lamportsPerSquare / 1e9;
+  return sol < 0.001 ? '<0.001' : sol < 0.01 ? '0.001-0.01' : sol < 0.1 ? '0.01-0.1' : '0.1+';
+};
+/** One style group's round: miners, SOL in and back (lamports), on the winning square, ORE mined (grams), solo wins. */
+export interface StyleGroup { miners: number; deployed: number; back: number; onWin: number; ore: number; solo: number }
+/** Every miner's play in one finished round, any wallet, grouped by style. Lamports and grams. */
+export interface BoardStudy {
+  round: bigint;
+  miners: number;
+  deployed: bigint;
+  /** SOL of the miners we read, against the round's total: under 1 when some miners had moved on before we looked */
+  seen: number;
+  winSquare: number;
+  split: boolean;
+  reward: bigint;
+  motherlode: bigint;
+  /** the solo winner's stake, the SOL on the winning square, and the squares they covered (null in shared rounds) */
+  solo: { wallet: string; stake: bigint; squareTotal: bigint; squares: number } | null;
+  /** key: "<squares bucket>|<SOL per square bucket>" */
+  groups: Record<string, StyleGroup>;
+}
+
+/** Groups every miner's result in a drawn round. Pure: `miners` maps wallet to SOL on each square. */
+export function studyRound(r: RoundAcc, miners: Map<string, bigint[]>): BoardStudy | null {
+  const zero = Array.from({ length: BLOCKS }, () => 0n);
+  const win = settleRound(r, zero, null)?.winningSquare;
+  if (win === undefined) return null;
+  const groups: Record<string, StyleGroup> = {};
+  let deployed = 0n;
+  let solo: BoardStudy['solo'] = null;
+  const top = r.split || r.top.equals(PublicKey.default) ? null : r.top.toBase58();
+  for (const [wallet, d] of miners) {
+    const total = d.reduce((a, b) => a + b, 0n);
+    if (total <= 0n) continue;
+    deployed += total;
+    const n = d.filter((x) => x > 0n).length;
+    const key = `${tileBucket(n)}|${sizeBucket(Number(total) / n)}`;
+    const g = (groups[key] ??= { miners: 0, deployed: 0, back: 0, onWin: 0, ore: 0, solo: 0 });
+    const s = settleRound(r, d, null);
+    let ore = s ? Number(s.oreGrams) : 0;
+    if (wallet === top && d[win] > 0n) {
+      ore += Number(r.reward);
+      g.solo++;
+      solo = { wallet, stake: d[win], squareTotal: r.deployed[win], squares: n };
+    }
+    g.miners++;
+    g.deployed += Number(total);
+    g.back += s ? Number(s.solBack) : 0;
+    g.onWin += d[win] > 0n ? 1 : 0;
+    g.ore += ore;
+  }
+  const roundTotal = r.deployed.reduce((a, b) => a + b, 0n);
+  return {
+    round: r.id, miners: [...miners.values()].filter((d) => d.some((x) => x > 0n)).length, deployed,
+    seen: roundTotal > 0n ? Math.min(1, Number(deployed) / Number(roundTotal)) : 0,
+    winSquare: win, split: r.split, reward: r.reward, motherlode: r.motherlode, solo, groups,
+  };
+}
+
+/** Every ORE miner whose account still holds `roundId`, with their SOL on each square. */
+export async function minersIn(conn: Connection, roundId: bigint): Promise<Map<string, bigint[]>> {
+  const id = Buffer.alloc(8);
+  id.writeBigUInt64LE(roundId);
+  const accounts = await conn.getProgramAccounts(ORE_PROGRAM_ID, {
+    commitment: 'confirmed',
+    filters: [{ dataSize: SIZE.miner }, { memcmp: { offset: DISC + 656, bytes: id.toString('base64'), encoding: 'base64' } as never }],
+    dataSlice: { offset: DISC, length: 256 },
+  });
+  const out = new Map<string, bigint[]>();
+  for (const a of accounts) {
+    const d = Buffer.from(a.account.data);
+    if (d.length < 256) continue;
+    out.set(new PublicKey(d.subarray(0, 32)).toBase58(), Array.from({ length: BLOCKS }, (_, i) => d.readBigUInt64LE(56 + i * 8)));
+  }
+  return out;
+}
+
+/**
+ * Studies the last round's whole board once it is drawn. Uses the snapshot taken between rounds (nobody can deploy then,
+ * and nobody has moved on), or reads the miners now, missing those who already deployed in the new round.
+ */
+export async function studyBoard(conn: Connection, hooks: Hooks, current: bigint, st: State): Promise<BoardStudy | null> {
+  const prev = current - 1n;
+  if (!hooks.boardRound || (st.boardStudied !== undefined && st.boardStudied >= prev)) return null;
+  const info = await conn.getAccountInfo(roundPda(prev), 'confirmed');
+  if (!info || info.data.length !== ROUND_SIZE) return null;
+  const r = decodeRound(Buffer.from(info.data));
+  if (!roundRng(r.entropy)) return null; // not drawn yet: try again next pass
+  st.boardStudied = prev;
+  const miners = st.snap?.round === prev && st.snap.miners.size ? st.snap.miners : await minersIn(conn, prev);
+  st.snap = undefined;
+  const b = studyRound(r, miners);
+  if (b) await hooks.boardRound(b);
+  return b;
+}
+
+/** Never sleep longer than this while waiting for the deploy window, so a wrong slot estimate can't skip it. */
+export const MAX_WAIT_MS = 8000;
+
+/** Folds the slot progress seen since the last pass into the slot-time estimate. */
+export function trackSlot(st: State, slot: number, now: number): void {
+  if (st.lastSlot !== undefined && st.lastAt !== undefined && slot > st.lastSlot && now - st.lastAt >= 1500) {
+    const seen = (now - st.lastAt) / (slot - st.lastSlot);
+    st.slotMs = Math.min(600, Math.max(100, (st.slotMs + seen) / 2));
+  }
+  st.lastSlot = slot;
+  st.lastAt = now;
+}
 
 /** Work out what each played round paid. Runs at most every 10 s. */
 export async function settle(conn: Connection, hooks: Hooks, current: bigint, st: State, now = Date.now()): Promise<number> {
@@ -227,6 +426,7 @@ export async function settle(conn: Connection, hooks: Hooks, current: bigint, st
 export async function pass(conn: Connection, signer: Keypair, hooks: Hooks, st: State, now = Date.now()): Promise<PassResult> {
   const [boardInfo, slot] = await Promise.all([conn.getAccountInfo(BOARD), conn.getSlot('confirmed')]);
   if (!boardInfo) throw new Error('ORE board not found');
+  trackSlot(st, slot, now);
   const board = decodeBoard(Buffer.from(boardInfo.data));
   const phase = phaseOf(board, slot);
   const slotsLeft = phase === 'mining' || phase === 'locked' ? Number(board.endSlot - BigInt(slot)) : 0;
@@ -234,17 +434,24 @@ export async function pass(conn: Connection, signer: Keypair, hooks: Hooks, st: 
   const err = (tag: string, e: unknown) => res.errors.length < 6 && res.errors.push(`${tag}: ${String((e as Error)?.message ?? e).slice(0, 160)}`);
 
   if (phase !== 'waiting') res.settled = await settle(conn, hooks, board.roundId, st, now).catch((e) => (err('settle', e), 0));
+  // early in a round: how the last round's solo winner played, before their next deploy moves their miner on
+  if (phase === 'mining') await studySolo(conn, hooks, board.roundId, st).catch((e) => err('study', e));
+  if (phase === 'mining') await studyBoard(conn, hooks, board.roundId, st).catch((e) => err('board', e));
+  // between rounds nobody can deploy and nobody has moved on: the whole board, complete
+  if (phase === 'intermission' && hooks.boardRound && st.snap?.round !== board.roundId) {
+    st.snap = { round: board.roundId, miners: await minersIn(conn, board.roundId).catch((e) => (err('snap', e), new Map())) };
+  }
   if (phase !== 'mining') {
-    if (phase === 'locked') res.waitMs = Math.max(1000, slotsLeft * SLOT_MS + 1500);
+    if (phase === 'locked') res.waitMs = Math.max(1000, slotsLeft * st.slotMs + 1500);
     return res;
   }
   const params = await hooks.params();
   if (slotsLeft > params.targetSlotsLeft) {
-    // sleep until just before the deploy window
-    res.waitMs = Math.max(500, (slotsLeft - params.targetSlotsLeft) * SLOT_MS - 300);
+    // sleep until just before the deploy window, checking back at least every MAX_WAIT_MS
+    res.waitMs = Math.min(MAX_WAIT_MS, Math.max(300, (slotsLeft - params.targetSlotsLeft) * st.slotMs - 300));
     return res;
   }
-  res.waitMs = Math.max(1000, slotsLeft * SLOT_MS + 1500);
+  res.waitMs = Math.max(1000, slotsLeft * st.slotMs + 1500);
   // too close to the lock: anything sent now may land after it
   if (slotsLeft < LOCK_SLOTS + 2) return res;
 
@@ -280,7 +487,13 @@ export async function pass(conn: Connection, signer: Keypair, hooks: Hooks, st: 
 
   // plan one player at a time, each seeing the stakes of the ones before, so the AI does not crowd itself
   let onBoard = round.deployed;
-  const sends: { a: Auto; plan: Plan; ixs: TransactionInstruction[] }[] = [];
+  const sends: { a: Auto; plan: Plan; ixs: TransactionInstruction[]; choice: BotChoice }[] = [];
+  const [choices, nets] = await Promise.all([hooks.choices?.().catch((e) => (err('choices', e), new Map())) ?? new Map(), hooks.net?.().catch((e) => (err('net', e), new Map())) ?? new Map()]);
+  const styleParams = new Map<Style, AiParams>();
+  for (const a of autos) {
+    const c: BotChoice = choices.get(a.authority.toBase58()) ?? DEFAULT_CHOICE;
+    if (c.mode === 'ai' && !styleParams.has(c.style)) styleParams.set(c.style, await hooks.params(c.style));
+  }
   autos.forEach((a, i) => {
     const tag = `${a.authority.toBase58()}:${board.roundId}`;
     const info = minerInfos[i];
@@ -291,27 +504,58 @@ export async function pass(conn: Connection, signer: Keypair, hooks: Hooks, st: 
       res.skipped++;
       return;
     }
-    const plan = planRound({ onBoard, motherlodeGrams: motherlode, orePriceSol: price, maxPerSquare: a.amount, balance: a.balance, feeBps: a.fee, params });
+    const choice: BotChoice = choices.get(a.authority.toBase58()) ?? DEFAULT_CHOICE;
+    // the player's stop-loss: down this much since the settings were saved, it stops until they change something
+    if (choice.stopLossSol && (nets.get(a.authority.toBase58()) ?? 0) <= -choice.stopLossSol) {
+      res.skipped++;
+      return;
+    }
+    // the player's run time is over: it stops until they start it again
+    if (choice.runUntil && now >= choice.runUntil) {
+      res.skipped++;
+      return;
+    }
+    const pace = choice.mode === 'ai' && choice.runUntil ? roundBudget(a.balance, a.fee, choice.runUntil, now) : null;
+    const base = { onBoard, motherlodeGrams: motherlode, orePriceSol: price, maxPerSquare: a.amount, balance: a.balance, feeBps: a.fee, roundBudget: pace };
+    const sp = styleParams.get(choice.style) ?? params;
+    const plan =
+      choice.mode === 'bot'
+        ? botPlan({ ...base, rules: choice.rules })
+        : choice.style === 'safe'
+          ? capRound(planRound({ ...base, params: sp }), choice.rules.maxRoundSol)
+          : huntPlan({ ...base, params: sp, style: choice.style, maxRoundSol: choice.rules.maxRoundSol });
     if (!plan) {
       res.skipped++;
       return;
     }
     onBoard = addToBoard(onBoard, plan);
-    sends.push({ a, plan, ixs: txFor(plan, a, miner, board.roundId, signer.publicKey) });
+    sends.push({ a, plan, ixs: txFor(plan, a, miner, board.roundId, signer.publicKey), choice });
   });
+  await hooks
+    .thought?.({
+      round: board.roundId, slotsLeft, motherlode, prize,
+      board: round.deployed.reduce((n, x) => n + x, 0n),
+      quietest: round.deployed.reduce((m, x) => (x < m ? x : m), round.deployed[0]),
+      joinLimit: joinLimitLamports(prize, params), played: sends.length, skipped: res.skipped, params,
+    })
+    .catch((e) => err('thought', e));
   if (!sends.length) return res;
 
   const { blockhash } = await conn.getLatestBlockhash('confirmed');
+  // resending the same signed transaction costs nothing (one signature, paid once) and gets bets through busy slots
+  const until = now + Math.max(0, slotsLeft - LOCK_SLOTS) * st.slotMs;
   await Promise.all(
-    sends.map(async ({ a, plan, ixs }) => {
+    sends.map(async ({ a, plan, ixs, choice }) => {
       try {
         const tx = new Transaction({ feePayer: signer.publicKey, recentBlockhash: blockhash }).add(...ixs);
         tx.sign(signer);
-        const signature = await conn.sendRawTransaction(tx.serialize(), { skipPreflight: false, maxRetries: 2 });
+        const raw = tx.serialize();
+        const signature = await conn.sendRawTransaction(raw, { skipPreflight: false, maxRetries: 2 });
         res.sent++;
         const stake = Array.from({ length: BLOCKS }, () => 0n);
-        for (const g of plan.groups) for (let s = 0; s < BLOCKS; s++) if (g.mask & (1 << s)) stake[s] = g.amount;
-        await hooks.played({ wallet: a.authority.toBase58(), round: board.roundId, stake, total: plan.total, fee: aiFee(plan.total, a.fee), ev: plan.ev, boardBefore: plan.boardBefore, prize, signature }).catch((e) => err('save', e));
+        for (const g of plan.groups) for (let s = 0; s < BLOCKS; s++) if (g.mask & (1 << s)) stake[s] += g.amount;
+        await hooks.played({ wallet: a.authority.toBase58(), round: board.roundId, mode: choice.mode, style: choice.style, stake, total: plan.total, fee: planFee(plan, a.fee), ev: plan.ev, boardBefore: plan.boardBefore, prize, signature }).catch((e) => err('save', e));
+        await rebroadcast(conn, raw, signature, until).catch((e) => err('resend', e));
       } catch (e) {
         res.failed++;
         err(a.authority.toBase58().slice(0, 6), e);
@@ -321,11 +565,38 @@ export async function pass(conn: Connection, signer: Keypair, hooks: Hooks, st: 
   return res;
 }
 
+/** A safe-style plan over the player's most per round is dropped rather than resized (its stakes were sized for the margin). */
+export const capRound = (plan: Plan | null, maxRoundSol: number | null): Plan | null =>
+  plan && maxRoundSol && Number(plan.total) > maxRoundSol * 1e9 ? null : plan;
+
+/** How often a sent bet is checked and resent until it lands. */
+export const RESEND_MS = 400;
+
+/**
+ * Resends `raw` every RESEND_MS until its signature is seen or `until` (ORE's lock) passes. A deploy that misses the
+ * lock never lands, and the round is then settled as void. Throws if the transaction landed with an error.
+ */
+export async function rebroadcast(conn: Connection, raw: Buffer | Uint8Array, signature: string, until: number, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))): Promise<boolean> {
+  if (!conn.getSignatureStatuses) return false;
+  while (Date.now() < until) {
+    await sleep(RESEND_MS);
+    const { value } = await conn.getSignatureStatuses([signature]);
+    const s = value[0];
+    if (s?.err) throw new Error(`landed with an error: ${JSON.stringify(s.err).slice(0, 120)}`);
+    if (s?.confirmationStatus) return true;
+    await conn.sendRawTransaction(raw, { skipPreflight: true, maxRetries: 0 }).catch(() => undefined);
+  }
+  return false;
+}
+
 /** Passes until `budgetMs` is used up, sleeping between them for as long as nothing needs doing. */
 export async function run(conn: Connection, signer: Keypair, hooks: Hooks, budgetMs: number, now: () => number = Date.now, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))): Promise<PassResult[]> {
-  const st = newState();
-  const out: PassResult[] = [];
   const end = now() + budgetMs;
+  // start from the network's recent slot time rather than the nominal 400 ms
+  const samples = await conn.getRecentPerformanceSamples?.(4).catch(() => []) ?? [];
+  const slots = samples.reduce((n, s) => n + s.numSlots, 0);
+  const st = newState(slots > 0 ? Math.min(600, Math.max(100, (samples.reduce((n, s) => n + s.samplePeriodSecs, 0) * 1000) / slots)) : SLOT_MS);
+  const out: PassResult[] = [];
   while (now() < end) {
     let r: PassResult;
     try {

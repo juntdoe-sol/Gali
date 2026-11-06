@@ -113,9 +113,10 @@ const test = (name, fn) => {
     assert.equal(c.crowdBuffer, 0);
     assert.equal(c.maxRoundShare, P.maxRoundShare);
     assert.equal(c.targetSlotsLeft, S.BOUNDS.targetSlotsLeft[0]);
-    const step = S.limitStep({ ...P, minEdge: 0.5, maxRoundShare: 0.25 }, P);
-    assert.ok(Math.abs(step.minEdge - (P.minEdge + 0.48 * 0.25)) < 1e-9);
-    assert.ok(Math.abs(step.maxRoundShare - (P.maxRoundShare + 0.24 * 0.25)) < 1e-9);
+    const span = (k) => S.BOUNDS[k][1] - S.BOUNDS[k][0];
+    const step = S.limitStep({ ...P, minEdge: S.BOUNDS.minEdge[1], maxRoundShare: S.BOUNDS.maxRoundShare[1] }, P);
+    assert.ok(Math.abs(step.minEdge - Math.min(S.BOUNDS.minEdge[1], P.minEdge + span('minEdge') * 0.25)) < 1e-9);
+    assert.ok(Math.abs(step.maxRoundShare - Math.min(S.BOUNDS.maxRoundShare[1], P.maxRoundShare + span('maxRoundShare') * 0.25)) < 1e-9);
   });
 
   // ---------------- settling ----------------
@@ -245,7 +246,8 @@ const test = (name, fn) => {
     const s = M.newState();
     const early = await M.pass(conn, ai, h, s);
     assert.equal(conn.sent.length, 0, 'nothing sent early');
-    assert.ok(early.waitMs >= (80 - P.targetSlotsLeft) * M.SLOT_MS - 300);
+    // it sleeps until the window (at most MAX_WAIT_MS at a time, so it notices a faster chain)
+    assert.ok(early.waitMs > 0 && early.waitMs <= M.MAX_WAIT_MS);
     st.slot = 1000 - P.targetSlotsLeft;
     const r = await M.pass(conn, ai, h, s);
     assert.equal(r.candidates, 1, 'bob has no pass, carol is on autopilot');
@@ -305,12 +307,13 @@ const test = (name, fn) => {
   });
 
   // ---------------- the review ----------------
-  test("Claude's answer is clamped and step-limited; the note is trimmed", () => {
-    const { params, note, learned } = T.apply({ minEdge: 0.9, crowdBuffer: 0.25, maxRoundShare: 1, targetSlotsLeft: 5, note: '  Kept   it safe.\n', learned: 'x'.repeat(2000) }, P);
-    assert.equal(learned.length, 900, 'the hourly log entry is capped');
-    assert.ok(params.minEdge <= P.minEdge + 0.12 + 1e-9);
-    assert.ok(params.maxRoundShare <= P.maxRoundShare + 0.06 + 1e-9);
-    assert.ok(params.targetSlotsLeft >= S.BOUNDS.targetSlotsLeft[0]);
+  test("the lead's answer stays inside the style's bounds; the note and log are trimmed", () => {
+    // the player chose to let the team tune each style freely: no hourly step limit, only the style's bounds
+    const { params, note, learned } = T.apply({ minEdge: 9, crowdBuffer: 0.25, maxRoundShare: 9, targetSlotsLeft: 5, note: '  Kept   it safe.\n', learned: 'x'.repeat(2000) }, P);
+    assert.equal(learned.length, 900, 'the log entry is capped');
+    assert.equal(params.minEdge, S.BOUNDS.minEdge[1]);
+    assert.equal(params.maxRoundShare, S.BOUNDS.maxRoundShare[1]);
+    assert.equal(params.targetSlotsLeft, S.BOUNDS.targetSlotsLeft[0]);
     assert.equal(note, 'Kept it safe.');
     assert.deepEqual(T.apply('nonsense', P).params, P);
   });
@@ -326,7 +329,7 @@ const test = (name, fn) => {
     assert.equal(s.winRate, 0.5);
     assert.ok(Math.abs(s.fairWinRate - 0.08) < 1e-12);
     assert.ok(Math.abs(s.lateCrowdP80 - 0.5) < 1e-9);
-    assert.ok(Math.abs(s.oreValueSol - 0.45) < 1e-9);
+    assert.ok(Math.abs(s.oreValueSol - 1 * S.ORE_KEEP * 0.5) < 1e-9, 'mined ORE counts at ORE_KEEP of its price');
   });
 
   test("Gali's 0.25% is part of every decision: a square that only just pays is skipped", () => {
@@ -390,12 +393,9 @@ const test = (name, fn) => {
     assert.equal(T.commentBlock([]), '(no comments)');
   });
 
-  test("the risk checker's limits hold even when the lead asks for more", () => {
-    const current = { ...P, minEdge: 0.08, maxRoundShare: 0.1 };
+  test("the risk checker's limits are kept inside the style's bounds (they advise the lead, they don't cap it)", () => {
     const limits = T.riskLimits({ minEdgeFloor: 0.15, maxRoundShareCap: 0.03 });
-    const { params } = T.apply({ minEdge: 0.02, crowdBuffer: 0.25, maxRoundShare: 0.25, targetSlotsLeft: 22, learned: '', note: '', feedbackReply: '' }, current, limits);
-    assert.equal(params.minEdge, 0.15, 'margin floor beats the lead and the hourly step');
-    assert.equal(params.maxRoundShare, 0.03, 'round cap beats the lead and the hourly step');
+    assert.deepEqual(limits, { minEdgeFloor: 0.15, maxRoundShareCap: 0.03 });
     const loose = T.riskLimits({ minEdgeFloor: -5, maxRoundShareCap: 'x' });
     assert.deepEqual(loose, { minEdgeFloor: S.BOUNDS.minEdge[0], maxRoundShareCap: S.BOUNDS.maxRoundShare[1] });
   });
