@@ -17,6 +17,12 @@ import { roundFields, scoreRound, type RoundScore } from '../_shared/score.ts';
 
 /** Called with each finished round a player's miner still holds, before the next deploy replaces it. */
 export type ScoreHook = (wallet: string, roundId: bigint, s: RoundScore) => Promise<void>;
+/**
+ * Which players this server plays for. ORE's open executor lets anyone press deploy on any open automation, so
+ * without this the server key pays for every ORE miner who set one up, Gali player or not. index.ts passes the
+ * wallets of named Gali miners (the same rule gali_score_round uses). Left out, every open automation is played.
+ */
+export type Allow = (wallet: string) => boolean;
 
 export const ORE_PROGRAM_ID = new PublicKey('oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv');
 const ENTROPY_PROGRAM_ID = new PublicKey('3jSkUuYBoJzQPMEzTvkDFXCZUBksPamrVhrnHR9igu2X');
@@ -190,9 +196,9 @@ export interface PassResult { phase: Phase; round: string; candidates: number; s
 
 /**
  * One pass: read the board, find automations to run, send one transaction each.
- * `done` remembers (authority, round) pairs already sent this invocation.
+ * `done` remembers (authority, round) pairs already sent this invocation. `allow` limits it to Gali's players.
  */
-export async function pass(conn: Connection, signer: Keypair, done: Set<string>, onScore?: ScoreHook): Promise<PassResult> {
+export async function pass(conn: Connection, signer: Keypair, done: Set<string>, onScore?: ScoreHook, allow?: Allow): Promise<PassResult> {
   const [boardInfo, slot] = await Promise.all([conn.getAccountInfo(BOARD), conn.getSlot('confirmed')]);
   if (!boardInfo) throw new Error('ORE board not found');
   const board = decodeBoard(Buffer.from(boardInfo.data));
@@ -208,6 +214,7 @@ export async function pass(conn: Connection, signer: Keypair, done: Set<string>,
   const autos = accounts
     .map((x) => decodeAutomation(Buffer.from(x.account.data)))
     .filter(runnable)
+    .filter((a) => !allow || allow(a.authority.toBase58()))
     .filter((a) => !done.has(`${a.authority.toBase58()}:${board.roundId}`) && (failures.get(a.authority.toBase58()) ?? 0) < MAX_FAILURES)
     .sort((x, y) => (roundSize(y) > roundSize(x) ? 1 : roundSize(y) < roundSize(x) ? -1 : 0));
   res.candidates = autos.length;
@@ -258,7 +265,7 @@ export function nextGap(r: PassResult, gapMs: number): number {
 }
 
 /** Run passes until `budgetMs` is used up, so every round in the window is played. */
-export async function run(conn: Connection, signer: Keypair, budgetMs: number, gapMs = 4000, now: () => number = Date.now, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms)), onScore?: ScoreHook): Promise<PassResult[]> {
+export async function run(conn: Connection, signer: Keypair, budgetMs: number, gapMs = 4000, now: () => number = Date.now, sleep = (ms: number) => new Promise((r) => setTimeout(r, ms)), onScore?: ScoreHook, allow?: Allow): Promise<PassResult[]> {
   const done = new Set<string>();
   failures.clear();
   const out: PassResult[] = [];
@@ -266,7 +273,7 @@ export async function run(conn: Connection, signer: Keypair, budgetMs: number, g
   while (now() < end) {
     let r: PassResult;
     try {
-      r = await pass(conn, signer, done, onScore);
+      r = await pass(conn, signer, done, onScore, allow);
     } catch (e) {
       r = { phase: 'waiting', round: '?', candidates: 0, sent: 0, skipped: 0, failed: 1, errors: [String((e as Error)?.message ?? e).slice(0, 160)], slotsLeft: 0 };
     }

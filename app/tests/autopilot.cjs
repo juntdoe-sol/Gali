@@ -1,7 +1,8 @@
 // Run: node tests/autopilot.cjs
 // The autopilot server (supabase/functions/autopilot/core.ts) against a fake RPC: it only runs open,
 // fixed-spot automations that can pay, never plays a round twice, settles the last round first,
-// stays out of the lock window, and its deploy matches the app's own deploy instruction.
+// stays out of the lock window, plays only for Gali's players when given the list, and its deploy matches the app's
+// own deploy instruction.
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -122,6 +123,36 @@ const minerPda = (a) => PublicKey.findProgramAddressSync([Buffer.from('miner'), 
   const before = conn.sent.length;
   await C.pass(conn, server, done);
   assert.equal(conn.sent.length, before, 'never plays the same round twice');
+
+  // only Gali's players: an open automation from a wallet outside the list is never played or scored
+  const outsider = Keypair.generate().publicKey;
+  const gState = {
+    slot: 1000,
+    board: boardData(77, 900, 1100),
+    autos: [
+      { key: other, data: autoData({ authority: ok }) },
+      { key: other, data: autoData({ authority: outsider, amount: 9_000_000n }) }, // bigger round, sorted first without the list
+    ],
+    miners: new Map([
+      [minerPda(ok).toBase58(), { data: minerData({ authority: ok, roundId: 76, checkpointId: 76 }) }],
+      [minerPda(outsider).toBase58(), { data: minerData({ authority: outsider, roundId: 76, checkpointId: 76 }) }],
+    ]),
+  };
+  const gConn = fakeConn(gState);
+  const gScores = [];
+  const allowed = new Set([ok.toBase58()]);
+  const g = await C.pass(gConn, server, new Set(), async (wallet) => { gScores.push(wallet); }, (wallet) => allowed.has(wallet));
+  assert.equal(g.candidates, 1, 'the outsider is not even a candidate');
+  assert.equal(g.sent, 1);
+  assert.equal(gConn.sent.length, 1);
+  assert.ok(gConn.sent[0].instructions.at(-1).keys[1].pubkey.equals(ok), 'only the Gali player is played');
+  assert.ok(!gScores.includes(outsider.toBase58()), 'the outsider is never scored');
+  const none = await C.pass(fakeConn(gState), server, new Set(), undefined, () => false);
+  assert.equal(none.sent + none.candidates, 0, 'an empty list plays for nobody');
+  let gt = 0;
+  const gConn2 = fakeConn(gState);
+  await C.run(gConn2, server, 5_000, 4000, () => gt, async (ms) => { gt += ms; }, undefined, (wallet) => allowed.has(wallet));
+  assert.ok(gConn2.sent.length >= 1 && gConn2.sent.every((tx) => tx.instructions.at(-1).keys[1].pubkey.equals(ok)), 'run passes the list on to every pass');
 
   // the lock window and the break between rounds: hands off
   state.slot = 1090;
