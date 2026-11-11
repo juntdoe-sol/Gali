@@ -50,7 +50,9 @@
         "EXPO_PUBLIC_RELAY_URL": "wss://relay.gali.lol/ws",
         "EXPO_PUBLIC_WORLD_URL": "wss://rckvfpwtdyvvvjqqlffn.supabase.co/realtime/v1",
         "EXPO_PUBLIC_WORLD_KEY": "sb_publishable_Kyd6aSVrdTjDRkUK3bw5bA_GIM_5PFh",
-        "EXPO_PUBLIC_TICKET_KEY": "8eqMhsRzKt1G7CcRJEtpPUAKZQDsfizsGShxMQGHRXnn"
+        "EXPO_PUBLIC_TICKET_KEY": "8eqMhsRzKt1G7CcRJEtpPUAKZQDsfizsGShxMQGHRXnn",
+        "EXPO_PUBLIC_FEATURE_AI_MINING": "1",
+        "EXPO_PUBLIC_AI_EXECUTOR": "24k5E2QeRzEMcxMATQC9uS9tiV5sPxX19rD4eBQoHtmR"
       },
       "android": {
         "image": "latest",
