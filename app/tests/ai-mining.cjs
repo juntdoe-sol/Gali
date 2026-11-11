@@ -691,6 +691,17 @@ const test = (name, fn) => {
     assert.ok(!safe || Number(safe.total) <= 0.01e9 + 25, 'safe keeps to the pace too');
   });
 
+  test('the team tunes freely and from the whole board when the bot has not played', () => {
+    assert.doesNotMatch(T.RISK + T.LEAD, /code enforces|Stay inside the risk/, 'no agent is told the risk numbers are enforced');
+    assert.match(T.RISK, /You advise; you do not set limits/);
+    assert.match(T.LEAD, /not enough bot data" alone is not one/);
+    assert.match(T.ANALYST, /even when the bot has not played/);
+    const P = { minEdge: 0, crowdBuffer: 0.2, maxRoundShare: 0.03, targetSlotsLeft: 30, minMotherlode: 0 };
+    const out = T.leadPrompt(P, {}, {}, 'a', 'f', 'r', {}, false, 'solo', []);
+    assert.match(out, /The whole board in the last 24 hours/, 'the lead sees the board itself');
+    assert.match(out, /This style's own bot plays, last 7 days/, 'stats say whose plays they are');
+  });
+
   test('a quiet stretch needs no review', () => {
     const last = '2026-11-02T10:17:00Z';
     assert.equal(T.hasNews(last, ['2026-11-02T09:00:00Z'], []), false);

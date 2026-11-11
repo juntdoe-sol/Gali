@@ -202,7 +202,7 @@ Deno.serve(async (req) => {
       votes.wallets ? ask('feedback', FEEDBACK, feedbackPrompt(votes, commentBlock(fb)), FEEDBACK_SCHEMA) : Promise.resolve({ ok: false as const, why: 'no feedback in the last 24 hours' }),
     ]);
     const risk = await ask('risk', RISK, riskPrompt(current, last24h, last7d, said(analyst), said(feedback), votes, style), RISK_SCHEMA);
-    const lead = await ask('lead', LEAD, leadPrompt(current, last24h, last7d, said(analyst), said(feedback), said(risk), votes, daily, style), LEAD_SCHEMA, 'high');
+    const lead = await ask('lead', LEAD, leadPrompt(current, last24h, last7d, said(analyst), said(feedback), said(risk), votes, daily, style, boards), LEAD_SCHEMA, 'high');
     await saveSpend();
     if (!lead.ok) {
       results.push({ style, kept: current, reason: `lead: ${lead.why}` });
