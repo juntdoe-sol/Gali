@@ -12,6 +12,7 @@ import { minerFrame } from './actors';
 import { ctx2d, makeCanvas, text, textWidth, type Ctx } from './art';
 import type { Look } from './types';
 import { COLOSSEUM_MARK, COLOSSEUM_WORD, ORE_MARK, ORE_WORD, SEEKER_MARK_S, SEEKER_WORD, drawBits } from './logos';
+import { paintGaliLogo } from './fightLogos';
 
 type Light = { x: number; y: number; r: number; c: string; k: number };
 type Px = (x: number, y: number, w: number, h: number, col: string) => void;
@@ -373,6 +374,74 @@ function slideAdvertise(g: Ctx, now: number, t: number) {
 
 const midText = (g: Ctx, str: string, y: number, sc: number, col: string, sh?: string) => text(g, str, Math.round(LED.w / 2 - (textWidth(str) * sc) / 2), y, sc, col, sh);
 
+/**
+ * WE WON: Gali won the Clock In hackathon and the ORE track. A gold burst and confetti, WE WON! popping in, then
+ * Gali's mark beside the two titles, and a ticker thanking the miners.
+ */
+function slideWinner(g: Ctx, now: number, t: number) {
+  g.fillStyle = '#1a0c2a';
+  g.fillRect(0, 0, LED.w, LED.h);
+  // a slow gold sunburst from behind the middle
+  const cx = LED.w / 2, cy = 22;
+  for (let i = 0; i < 12; i++) {
+    const a0 = (i / 12) * Math.PI * 2 + now / 2400;
+    g.fillStyle = i % 2 ? 'rgba(255,190,60,0.16)' : 'rgba(255,120,200,0.10)';
+    g.beginPath();
+    g.moveTo(cx, cy);
+    g.lineTo(cx + Math.cos(a0) * 120, cy + Math.sin(a0) * 120);
+    g.lineTo(cx + Math.cos(a0 + 0.26) * 120, cy + Math.sin(a0 + 0.26) * 120);
+    g.closePath();
+    g.fill();
+  }
+  const first = t < 0.42;
+  if (first) {
+    // WE WON! drops in and bounces, a trophy under it
+    const p = Math.min(1, t / 0.12);
+    const bounce = p < 1 ? (1 - p) * -26 : Math.round(Math.abs(Math.sin(now / 160)) * -1);
+    midText(g, 'WE WON!', 6 + bounce, 3, '#ffd24a', '#5a2a00');
+    // a little gold cup
+    const tx = Math.round(LED.w / 2) - 7, ty = 25;
+    g.fillStyle = '#ffcf4a';
+    g.fillRect(tx, ty, 14, 7);
+    g.fillRect(tx + 2, ty + 7, 10, 2);
+    g.fillRect(tx + 6, ty + 9, 2, 3);
+    g.fillRect(tx + 3, ty + 12, 8, 2);
+    g.fillRect(tx - 3, ty + 1, 3, 1);
+    g.fillRect(tx - 3, ty + 1, 1, 4);
+    g.fillRect(tx + 14, ty + 1, 3, 1);
+    g.fillRect(tx + 16, ty + 1, 1, 4);
+    g.fillStyle = '#fff3b0';
+    g.fillRect(tx + 2, ty + 1, 2, 4);
+  } else {
+    // Gali's mark beside the two titles
+    const k = Math.min(1, (t - 0.42) / 0.08);
+    const lx = Math.round(-34 + k * 38);
+    paintGaliLogo(painter(g), lx, 6, 'small');
+    const tx = 42;
+    if (k >= 1) {
+      text(g, 'WINNER', tx, 6, 2, '#ffd24a', '#5a2a00');
+      text(g, 'CLOCK IN HACKATHON', tx, 20, 1, '#ffffff', '#000000');
+      if (t > 0.55 || Math.floor(now / 300) % 2) text(g, '+ ORE TRACK WINNER', tx, 29, 1, '#3de0c8', '#000000');
+    }
+  }
+  // confetti
+  for (let i = 0; i < 26; i++) {
+    const x = (i * 53 + Math.floor(now / 700) * 7) % LED.w;
+    const y = ((now / (14 + (i % 5) * 3) + i * 23) % (LED.h + 6)) - 3;
+    g.fillStyle = ['#ffd24a', '#ff4fd8', '#3de0c8', '#ffffff', '#ff7a1a'][i % 5];
+    g.fillRect(x + Math.round(Math.sin(now / 200 + i) * 2), Math.round(y), (i % 3) + 1, 1);
+  }
+  // ticker
+  g.fillStyle = '#0a0612';
+  g.fillRect(0, LED.h - 12, LED.w, 11);
+  g.fillStyle = '#ffd24a';
+  g.fillRect(0, LED.h - 12, LED.w, 1);
+  const tick = 'GALI WINS THE CLOCK IN HACKATHON  -  ORE TRACK WINNER  -  THANK YOU MINERS  -  ';
+  const tw = textWidth(tick);
+  const off = (now / 28) % tw;
+  for (let x = -off; x < LED.w; x += tw) text(g, tick, Math.round(x), LED.h - 9, 1, '#ffffff', '#000000');
+}
+
 function slideOre(g: Ctx, now: number, t: number) {
   // ORE's own mark and wordmark, white on black, with a few gold sparks
   g.fillStyle = '#07070d';
@@ -497,9 +566,12 @@ export function drawBillboard(c: Ctx, X: number, Y: number, z: number, now: numb
   const cv = bbScreen();
   const g = ctx2d(cv);
   g.clearRect(0, 0, LED.w, LED.h);
-  const slide = Math.floor(now / SLIDE_MS) % 8;
+  // the win comes round every other slide while it is news: win, market, win, parade, ...
+  const n = Math.floor(now / SLIDE_MS);
   const t = (now % SLIDE_MS) / SLIDE_MS;
-  if (slide === 0) slideMarket(g, now, t);
+  const slide = n % 2 === 0 ? -1 : Math.floor(n / 2) % 8;
+  if (slide === -1) slideWinner(g, now, t);
+  else if (slide === 0) slideMarket(g, now, t);
   else if (slide === 1) slideParade(g, now);
   else if (slide === 2) slideFounders(g, now, t);
   else if (slide === 3) slideColosseum(g, now, t);
@@ -515,6 +587,6 @@ export function drawBillboard(c: Ctx, X: number, Y: number, z: number, now: numb
   led(g, LED.w, LED.h);
   c.drawImage(cv, 0, 0, LED.w, LED.h, x0 + LED.x * z, y0 + LED.y * z, LED.w * z, LED.h * z);
   // the screen lights the clearing
-  const col = ['#ffcf4a', '#ff4fd8', '#ffb020', '#a066ff', '#ffcf4a', '#9945ff', '#ff9a3c', '#3ee6ff'][slide];
+  const col = slide === -1 ? '#ffd24a' : ['#ffcf4a', '#ff4fd8', '#ffb020', '#a066ff', '#ffcf4a', '#9945ff', '#ff9a3c', '#3ee6ff'][slide];
   lights.push({ x: X * dpr, y: (Y - 60 * z) * dpr, r: 120 * z * dpr, c: col, k: 0.8 });
 }
