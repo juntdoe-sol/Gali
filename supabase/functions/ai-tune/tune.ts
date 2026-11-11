@@ -319,7 +319,7 @@ export function analystPrompt(current: AiParams, last24h: Summary, last7d: Summa
     `The team's recent notes, newest first:\n${history.map((h) => `- ${h.at}: ${h.note ?? ''}`).join('\n') || '- none yet'}`,
     `The round reviewer's lessons since the last review, newest first:\n${lessons.map((l) => `- ${l.at}: ${text(l.lessons, 400)}`).join('\n') || '- none yet'}`,
     `How solo 1 ORE winners played in the last 24 hours (${SOLO_NOTE}): ${fmt(soloSummary(solos))}`,
-    `The whole board in the last 24 hours (${BOARD_NOTE}): ${fmt(boardSummary(boards))}`,
+    `The whole board in the last 24 hours: ${boards.length} rounds, ${boards.reduce((t, r) => t + Number(r.miners || 0), 0)} miner-rounds (${BOARD_NOTE}). This is the full day, not a sample of a few rounds: ${fmt(boardSummary(boards))}`,
   ].join('\n\n');
 }
 
@@ -352,7 +352,7 @@ export function leadPrompt(current: AiParams, last24h: Summary, last7d: Summary,
     `Analyst's report: ${analyst}`,
     `Feedback reader's summary: ${feedback}`,
     `Risk checker's advice (not limits): ${risk}`,
-    `The whole board in the last 24 hours (${BOARD_NOTE}): ${fmt(boardSummary(boards))}`,
+    `The whole board in the last 24 hours: ${boards.length} rounds, ${boards.reduce((t, r) => t + Number(r.miners || 0), 0)} miner-rounds (${BOARD_NOTE}). This is the full day, not a sample of a few rounds: ${fmt(boardSummary(boards))}`,
     daily
       ? 'This is the daily review: weigh the last 7 days most, and correct any drift from the 3-hourly reviews since yesterday. Choose the settings until the next review.'
       : 'Choose the settings until the next review.',
