@@ -89,7 +89,9 @@ begin
   insert into gali_ai_feedback (wallet, vote, comment) values (p_wallet, p_vote, nullif(p_comment, ''));
   return now() + interval '2 hours';
 end $$;
-revoke all on function public.gali_ai_feedback_add(text, text, text) from public;
+-- Supabase also grants anon and authenticated directly: revoking from public alone leaves them able to call these
+
+revoke all on function public.gali_ai_feedback_add(text, text, text) from public, anon, authenticated;
 grant execute on function public.gali_ai_feedback_add(text, text, text) to service_role;
 
 -- what Claude learned at each review (subscribers only; read through ai-pass)
@@ -172,7 +174,7 @@ returns numeric
 language sql stable security definer set search_path = public as $$
   select coalesce(sum(usd), 0) from gali_ai_claude_spend where at >= p_since
 $$;
-revoke all on function public.gali_ai_claude_spent(timestamptz) from public;
+revoke all on function public.gali_ai_claude_spent(timestamptz) from public, anon, authenticated;
 grant execute on function public.gali_ai_claude_spent(timestamptz) to service_role;
 
 create index if not exists gali_ai_rounds_pending on public.gali_ai_rounds (round_id) where settled_at is null;
@@ -208,7 +210,7 @@ begin
 exception when unique_violation then
   raise exception 'payment already used';
 end $$;
-revoke all on function public.gali_ai_pass_add(text, text, bigint) from public;
+revoke all on function public.gali_ai_pass_add(text, text, bigint) from public, anon, authenticated;
 grant execute on function public.gali_ai_pass_add(text, text, bigint) to service_role;
 
 -- ai-pass calls this for a signed-in wallet. 7 free days, once, and only if the wallet never had a pass.
@@ -225,7 +227,7 @@ begin
 exception when unique_violation then
   raise exception 'trial not available';
 end $$;
-revoke all on function public.gali_ai_trial(text) from public;
+revoke all on function public.gali_ai_trial(text) from public, anon, authenticated;
 grant execute on function public.gali_ai_trial(text) to service_role;
 
 -- Everyone: how many miners use Gali AI and what it made them, all together. What the AI learned at each review is
@@ -343,7 +345,7 @@ language sql stable security definer set search_path = public as $$
   where not r.void and r.played_at >= s.started_at
   group by r.wallet
 $$;
-revoke all on function public.gali_bot_settings_of(text), public.gali_bot_net() from public;
+revoke all on function public.gali_bot_settings_of(text), public.gali_bot_net() from public, anon, authenticated;
 grant execute on function public.gali_bot_settings_of(text) to anon, authenticated, service_role;
 grant execute on function public.gali_bot_net() to service_role;
 
