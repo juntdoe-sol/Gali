@@ -283,6 +283,11 @@ export async function buyPass(): Promise<boolean> {
     g.toast('Connect a wallet first', 'info');
     return false;
   }
+  // closed while the bot is being tuned: never send SOL for a pass the server would refuse
+  if (!botAllowed(wallet)) {
+    g.toast('Bot mining is not open yet', 'info');
+    return false;
+  }
   const signature = await g.payAiPass();
   if (!signature) return false;
   await AsyncStorage.setItem(PENDING_KEY, JSON.stringify({ wallet, signature, at: Date.now() })).catch(() => undefined);
