@@ -46,7 +46,7 @@ export const DOORS: Door[] = [
   { id: 'tunnel', x: 26, y: 42, w: 3, h: 1, label: 'TUNNEL', sub: 'ORE and SKR' },
   { id: 'pot', x: 35, y: 42, w: 3, h: 1, label: 'GOLD RUSH', sub: 'ORE and SKR' },
   { id: 'crash', x: 44, y: 42, w: 3, h: 1, label: 'CRASH CART', sub: 'ORE and SKR' },
-  { id: 'arena', x: 7, y: 30, w: 3, h: 1, label: 'ARENA', sub: 'Brawl' },
+  { id: 'arena', x: 6, y: 30, w: 3, h: 1, label: 'FIGHTCLUB', sub: 'Fight' },
 ];
 /** The three pavilions on the games row: the body tiles that block, above each door. */
 export const PAVILIONS: { id: 'tunnel' | 'pot' | 'crash'; x: number; y: number; w: number; h: number }[] = [
@@ -75,8 +75,11 @@ export interface Structure {
   /** which flag, for a flagpole */
   v?: 'us' | 'my' | 'id' | 'ng';
 }
+/** The tiles the street Fightclub covers (its brick wall runs from the roof line to the forecourt). */
+export const FIGHTCLUB_BLOCK = { x: 0, y: 20, w: 14, h: 10 };
+const inFightclub = (x: number, y: number) => x >= FIGHTCLUB_BLOCK.x && x < FIGHTCLUB_BLOCK.x + FIGHTCLUB_BLOCK.w && y >= FIGHTCLUB_BLOCK.y && y < FIGHTCLUB_BLOCK.y + FIGHTCLUB_BLOCK.h;
 export const STRUCTURES: Structure[] = [
-  // the Brawl arena: a round stone colosseum, its gate on the south side, a cobbled drive up to it
+  // the Fightclub (a warehouse since Nov 2026; this footprint is the old arena's, kept so the map generates the same)
   { kind: 'arena', at: [3, 24, 11, 6] },
   // a directory board by the fountain: every place, and an arrow to it
   { kind: 'sign', at: [32, 19, 2, 1] },
@@ -321,6 +324,13 @@ export function lobbyMap(): Lobby {
     [14, 13], [17, 13], [44, 13], [60, 13], [64, 26], [64, 28], [31, 44], [41, 44], [23, 44], [49, 44],
   ];
   for (const [x, y] of lamps) if (linside(x, y) && !block[lidx(x, y)] && terrain[lidx(x, y)] !== WATER) block[lidx(x, y)] = 1;
+
+  // the Fightclub warehouse (engine/fightclubStreet.ts) stands on these tiles, west of the cave road, from its roof
+  // line down to the forecourt. Blocked after the trees are placed, so every other tree stays where it was.
+  const fc = FIGHTCLUB_BLOCK;
+  for (let y = fc.y; y < fc.y + fc.h; y++) for (let x = fc.x; x < fc.x + fc.w; x++) if (linside(x, y) && terrain[lidx(x, y)] !== ROAD && terrain[lidx(x, y)] !== PLAZA) block[lidx(x, y)] = 1;
+  for (let i = trees.length - 1; i >= 0; i--) if (inFightclub(trees[i].x, trees[i].y)) trees.splice(i, 1);
+  for (let i = decor.length - 1; i >= 0; i--) if (inFightclub(decor[i].x, decor[i].y)) decor.splice(i, 1);
 
   // nothing stands on a door or its way in
   for (const d of DOORS) for (let y = d.y - 1; y <= d.y + d.h + 2; y++) for (let x = d.x - 1; x <= d.x + d.w; x++) if (linside(x, y) && terrain[lidx(x, y)] !== CLIFF && terrain[lidx(x, y)] !== HALL && terrain[lidx(x, y)] !== WATER) block[lidx(x, y)] = block[lidx(x, y)] && trees.some((t) => t.x === x && t.y === y) ? 0 : block[lidx(x, y)];

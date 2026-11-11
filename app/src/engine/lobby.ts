@@ -26,7 +26,8 @@ import { drawRide, RIDE_LIFT } from './rideArt';
 import { drawFlight, drawProp, isProp, THROW_MS, type Flight, type PropKind } from './carry';
 import { drawBillboard, drawVending } from './marketArt';
 import { drawHp, drawKo, drawShield, FightFx, hitFlash, jumpLift, koAge, pickTarget, swingTilt } from './brawlfx';
-import { FLAG_H, FLAG_W, paintFlag, ARENA_FLAGS, ARENA_TORCHES, FIGHTCLUB_LAMPS, paintColosseum, paintFightclub, paintPotw, paintSign, paintSmash, POTW_H, POTW_W, paintSolBase, paintSolLogo, SIGN_H, SIGN_W, SMASH_COLORS, SMASH_DIM, SOL_BASE, SOL_LOGO } from './lobbyArt';
+import { paintFightclubStreet, STREET_H, STREET_LIGHTS, STREET_W } from './fightclubStreet';
+import { FLAG_H, FLAG_W, paintFlag, ARENA_FLAGS, ARENA_TORCHES, paintColosseum, paintPotw, paintSign, paintSmash, POTW_H, POTW_W, paintSolBase, paintSolLogo, SIGN_H, SIGN_W, SMASH_COLORS, SMASH_DIM, SOL_BASE, SOL_LOGO } from './lobbyArt';
 import { CLIFF, DOORS, PAVILIONS, SMASH_HEAL, SMASHABLES, STRUCTURES, doorAt, GRASS, HALL, LCOLS, LH, LROWS, LT, LW, lidx, lobbyMap, lobbyPath, PLANK, PLAZA, ROAD, SAND, SPAWNS, standable, tileCentre, tileOf, WATER, type DoorId } from '../game/lobbyMap';
 
 export type LobbyEvent =
@@ -155,6 +156,11 @@ const SMASH_HEAL_OF: Record<PropKind, number> = { pot: SMASH_HEAL.pot, crate: SM
 const SMASH_BACK_MS = 18000;
 /** The Gali Fightclub stands where the arena was (`?oldarena=1` on the web brings the colosseum back, see ui/BrawlOre.tsx). */
 const FIGHTCLUB = !(typeof window !== 'undefined' && /[?&]oldarena=1\b/.test(window.location?.search ?? ''));
+/**
+ * The street Fightclub is wider than the old arena's footprint: it sits this many px west of the footprint's centre,
+ * so its brick wall stops short of the cave road (lobbyMap FIGHTCLUB_BLOCK) and its west end runs off the map.
+ */
+const FIGHTCLUB_SHIFT = -26;
 const DOOR_COLOR: Record<DoorId, string> = { island: '#3de0c8', cave: '#ff9a3d', market: '#b86bff', tunnel: '#ff9a3d', pot: '#ffcf4a', crash: '#3de0c8', arena: '#ff4f5e' };
 
 interface Walker extends Body {
@@ -1640,7 +1646,7 @@ export class LobbyEngine {
     for (const st of STRUCTURES) {
       const wx = (st.at[0] + st.at[2] / 2) * LT;
       const wy = (st.at[1] + st.at[3]) * LT - 1;
-      if (!inView(wx, wy, st.kind === 'arena' ? 110 : st.kind === 'billboard' ? 100 : 40)) continue;
+      if (!inView(wx, wy, st.kind === 'arena' ? 190 : st.kind === 'billboard' ? 100 : 40)) continue;
       if (st.kind === 'flag' && st.v) {
         const v = st.v;
         items.push({ y: wy, draw: () => this.drawFlagPole(c, v, sx(wx), sy(wy), z, now) });
@@ -2048,7 +2054,7 @@ export class LobbyEngine {
   private structSprite(kind: string): HTMLCanvasElement {
     const hit = this.structCache.get(kind);
     if (hit) return hit;
-    const dims: Record<string, [number, number]> = { arena: [176, 128], tent: [50, 40], fire: [20, 8], cart: [44, 26], crates: [20, 22], barrel: [14, 18], 'stall-red': [52, 46], 'stall-teal': [52, 46], rack: [36, 24], boulder: [30, 22], 'sol-crystal': SOL_BASE, 'ore-vein': [34, 26], lighthouse: [1, 1] };
+    const dims: Record<string, [number, number]> = { arena: FIGHTCLUB ? [STREET_W, STREET_H] : [176, 128], tent: [50, 40], fire: [20, 8], cart: [44, 26], crates: [20, 22], barrel: [14, 18], 'stall-red': [52, 46], 'stall-teal': [52, 46], rack: [36, 24], boulder: [30, 22], 'sol-crystal': SOL_BASE, 'ore-vein': [34, 26], lighthouse: [1, 1] };
     const [w, h] = dims[kind] ?? [16, 16];
     const cv = makeCanvas(w, h);
     const g = ctx2d(cv);
@@ -2136,7 +2142,7 @@ export class LobbyEngine {
     } else if (kind === 'sol-crystal') {
       paintSolBase(g);
     } else if (kind === 'arena') {
-      if (FIGHTCLUB) paintFightclub(g);
+      if (FIGHTCLUB) paintFightclubStreet(g);
       else paintColosseum(g);
     } else if (kind === 'ore-vein') {
       // a dark rock with warm ore running through it
@@ -2165,6 +2171,7 @@ export class LobbyEngine {
       }
       return;
     }
+    if (kind === 'arena' && FIGHTCLUB) X += FIGHTCLUB_SHIFT * z;
     const sp = this.structSprite(kind);
     const w = sp.width;
     const h = sp.height;
@@ -2213,11 +2220,22 @@ export class LobbyEngine {
       }
       c.globalAlpha = 1;
     } else if (kind === 'arena' && FIGHTCLUB) {
-      // the Fightclub: lanterns by the door, the fight glowing inside
+      // the street Fightclub: the neon pulses and now and then flickers, the drum fires dance, the lamps hold steady
       const sp0 = X - (sp.width / 2) * z;
       const sy0 = Y - sp.height * z;
-      for (const [lx, ly] of FIGHTCLUB_LAMPS) lights.push({ x: (sp0 + lx * z) * this.dpr, y: (sy0 + ly * z) * this.dpr, r: 40 * z * this.dpr, c: '#ffb050', k: 0.85 + 0.15 * Math.sin(now / 110 + lx) });
-      lights.push({ x: X * this.dpr, y: (Y - 12 * z) * this.dpr, r: 34 * z * this.dpr, c: '#ff8a3a', k: 0.75 + 0.25 * Math.sin(now / 240) });
+      const flick = Math.floor(now / 90) % 47 === 0 ? 0.25 : 1;
+      for (const l of STREET_LIGHTS) {
+        const k = l.kind === 'neon' ? (0.85 + 0.15 * Math.sin(now / 900)) * flick : l.kind === 'fire' ? 0.7 + 0.3 * Math.abs(Math.sin(now / 97 + l.x)) : 1;
+        lights.push({ x: (sp0 + l.x * z) * this.dpr, y: (sy0 + l.y * z) * this.dpr, r: l.r * z * this.dpr, c: l.c, k });
+      }
+      // the drum fires: a few live flame tongues over the painted ones
+      for (const fx of [88, 200]) {
+        for (let i = 0; i < 4; i++) {
+          const fh = 3 + Math.abs(Math.sin(now / 80 + i * 1.7 + fx)) * 6;
+          c.fillStyle = i % 2 ? '#ffc93c' : '#ff8a30';
+          c.fillRect(sp0 + (fx - 5 + i * 3) * z, sy0 + (STREET_H - 8 - 16 - fh - 4) * z, 2 * z, fh * z);
+        }
+      }
     } else if (kind === 'arena') {
       const sp0 = X - (sp.width / 2) * z;
       const sy0 = Y - sp.height * z;
@@ -2382,7 +2400,7 @@ export class LobbyEngine {
     const bottom = H - this.opts.bottom - 6;
     for (const d of DOORS) {
       const wx = (d.x + d.w / 2) * LT;
-      const wy = d.id === 'cave' ? d.y * LT - 20 : d.id === 'market' ? d.y * LT - 66 : d.id === 'tunnel' || d.id === 'pot' || d.id === 'crash' ? d.y * LT - 4 * LT - 22 : d.id === 'arena' ? d.y * LT - 136 : d.y * LT - 34;
+      const wy = d.id === 'cave' ? d.y * LT - 20 : d.id === 'market' ? d.y * LT - 66 : d.id === 'tunnel' || d.id === 'pot' || d.id === 'crash' ? d.y * LT - 4 * LT - 22 : d.id === 'arena' ? d.y * LT - (FIGHTCLUB ? 224 : 136) : d.y * LT - 34;
       const X = sx(wx);
       const Y = sy(wy) + Math.sin(now / 420 + d.x) * 2;
       const near = Math.hypot(this.me.x - wx, this.me.y - d.y * LT) < 110;
