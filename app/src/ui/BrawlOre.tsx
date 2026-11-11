@@ -7,7 +7,7 @@
  * The fight runs in the canvas (pixel/BrawlOreView, engine/brawlore.ts); this screen is the menu around it and
  * the results. It opens where the old arena opened (useArena.open).
  */
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, gearByKey } from '../game/constants';
@@ -28,7 +28,7 @@ import type { Difficulty, Mode } from '../game/brawl2/sim';
 import { atlasSource } from '../pixel/atlasSource';
 import BrawlOreView, { type BrawlOreRef } from '../pixel/BrawlOreView';
 import { myLook } from '../pixel/PixelMine';
-import { Btn, Choice, INPUT, PixelBox, T } from './kit';
+import { Btn, Choice, INPUT, T } from './kit';
 import { MineAnywhere, useMinePanel } from './MineAnywhere';
 import { LANDSCAPE_APP, useLayout } from './layout';
 
@@ -39,6 +39,50 @@ import { LANDSCAPE_APP, useLayout } from './layout';
 export const BRAWLORE = !(Platform.OS === 'web' && typeof window !== 'undefined' && /[?&]oldarena=1\b/.test(window.location?.search ?? ''));
 
 const SFX: Record<string, Sound> = { swing: 'dig', hit: 'bonk', slam: 'crack', ko: 'ko', cheer: 'win', pop: 'pop', pick: 'pop', throw: 'dig', special: 'crack', ready: 'pop' };
+
+/* ---------------- the street look: dark brick panels, a neon edge, caution tape on the corners ---------------- */
+
+const PINK = '#ff3fa4';
+const TAPE = '#ffc93c';
+const GALI_PIXEL = require('../../assets/brand/logo.png');
+
+/** Caution tape stuck across a corner. */
+function Tape({ side }: { side: 'l' | 'r' }) {
+  return (
+    <View pointerEvents="none" style={[styles.tape, side === 'l' ? { left: -14, transform: [{ rotate: '-24deg' }] } : { right: -14, transform: [{ rotate: '24deg' }] }]}>
+      {[0, 1, 2, 3, 4, 5].map((k) => (
+        <View key={k} style={[styles.tapeStripe, { left: 6 + k * 14 }]} />
+      ))}
+    </View>
+  );
+}
+
+/** A Fightclub panel: dark brick, black edge, a neon pink (or gold, for a win) line, tape on the top corners. */
+function StreetCard({ children, style, tone = 'pink', tape = 'both' }: { children: React.ReactNode; style?: object | object[]; tone?: 'pink' | 'gold'; tape?: 'l' | 'r' | 'both' | 'none' }) {
+  const hi = tone === 'gold' ? COLORS.gold : PINK;
+  return (
+    <View style={[styles.street, { borderColor: hi }, Platform.OS === 'web' ? ({ boxShadow: `0 0 0 3px #000, 0 0 22px ${hi}66` } as object) : null, style]}>
+      {/* mortar lines, so the panel reads as brick */}
+      <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+        {Array.from({ length: 14 }, (_, k) => (
+          <View key={k} style={[styles.mortar, { top: `${(k + 1) * 7}%` as unknown as number }]} />
+        ))}
+      </View>
+      {tape === 'l' || tape === 'both' ? <Tape side="l" /> : null}
+      {tape === 'r' || tape === 'both' ? <Tape side="r" /> : null}
+      {children}
+    </View>
+  );
+}
+
+/** A neon tube word: pale core, coloured glow. */
+function Neon({ children, size = 32, color = PINK }: { children: React.ReactNode; size?: number; color?: string }) {
+  return (
+    <T v="display" style={{ fontSize: size, lineHeight: size * 1.05, textAlign: 'center', letterSpacing: 2, color: color === PINK ? '#ffd6ee' : '#d8fff8', textShadowColor: color, textShadowRadius: 10, textShadowOffset: { width: 0, height: 0 } }}>
+      {children}
+    </T>
+  );
+}
 
 /** Your weapon and the special it gives. */
 function myWeapon() {
@@ -239,14 +283,21 @@ export function BrawlOreScreen() {
         </View>
         {stage === 'menu' && !calling ? (
           <ScrollView style={styles.scroll} contentContainerStyle={[styles.center, { paddingVertical: short ? 6 : 12 }]}>
-            <PixelBox fill="rgba(20,12,14,0.95)" hi={COLORS.gold} lo="#04060f" shadow={1} style={[styles.card, short && { gap: 6, padding: 10 }]}>
+            <StreetCard style={[styles.card, short && { gap: 6, padding: 10 }]}>
               <View style={styles.head}>
                 <T v="label" style={{ color: COLORS.teal, letterSpacing: 3, fontSize: short ? 9 : 11 }}>
-                  UNDER THE MINE
+                  BACK OF THE WAREHOUSE · NO REFS
                 </T>
-                <T v="display" style={[styles.logo, short && { fontSize: 24, lineHeight: 26 }]}>
-                  GALI FIGHTCLUB
-                </T>
+                <View style={styles.brandRow}>
+                  <Image source={GALI_PIXEL} style={[styles.galiMark, short && { width: 30, height: 29 }]} resizeMode="contain" accessibilityLabel="Gali" />
+                  <View>
+                    <Neon size={short ? 15 : 20} color={COLORS.teal}>
+                      GALI
+                    </Neon>
+                    <Neon size={short ? 26 : 38}>FIGHTCLUB</Neon>
+                  </View>
+                  <Image source={GALI_PIXEL} style={[styles.galiMark, short && { width: 30, height: 29 }, { transform: [{ scaleX: -1 }] }]} resizeMode="contain" />
+                </View>
                 <RankChip rating={rank?.rating ?? null} games={rank?.games ?? 0} place={rank?.place ?? null} signedIn={Boolean(owner)} />
                 {short ? null : (
                   <T v="muted" style={{ textAlign: 'center', fontSize: 12 }}>
@@ -306,7 +357,7 @@ export function BrawlOreScreen() {
                   ? 'Left thumb: move. Right: JUMP, LIGHT, HEAVY, DODGE, SP. Hold down + a button to aim down. HEAVY in the air without down flies you up.'
                   : 'A/D move · W or Space jump · S down · J light · K heavy · L or Shift dodge · I or E special. Heavy in the air flies you up; down + heavy slams.'}
               </T>
-            </PixelBox>
+            </StreetCard>
           </ScrollView>
         ) : null}
         {/* mine while you fight: the round chip and the DEPLOY drawer, hideable like everywhere else */}
@@ -335,19 +386,27 @@ export function BrawlOreScreen() {
         {stage === 'called' ? <Called card={cardUrl} onDone={() => setStage('menu')} /> : null}
         {stage === 'done' && result ? (
           <View style={styles.centerAbs} pointerEvents="box-none">
-            <PixelBox fill="rgba(12,8,24,0.95)" hi={result.place === 1 ? COLORS.gold : '#3a2c50'} lo="#04060f" shadow={1} style={styles.card}>
-              <T v="display" style={[styles.logo, { color: result.place === 1 ? COLORS.gold : COLORS.text }]}>
+            <StreetCard tone={result.place === 1 ? 'gold' : 'pink'} style={styles.card}>
+              {result.place === 1 ? (
+                <View style={styles.stamp} pointerEvents="none">
+                  <T v="display" style={{ color: '#ff3040', fontSize: 24, lineHeight: 26 }}>
+                    K.O.
+                  </T>
+                </View>
+              ) : null}
+              <Image source={GALI_PIXEL} style={[styles.galiMark, { alignSelf: 'center' }]} resizeMode="contain" accessibilityLabel="Gali" />
+              <T v="display" style={[styles.big, { color: result.place === 1 ? COLORS.gold : COLORS.text }]}>
                 {result.place === 1 ? 'YOU WIN!' : `${ORD[result.place] ?? result.place} PLACE`}
               </T>
               {result.table.map((r) => (
-                <View key={r.name + r.place} style={[styles.res, r.you && { backgroundColor: 'rgba(255,201,60,0.12)' }]}>
-                  <T v="display" style={{ width: 44, color: r.place === 1 ? COLORS.gold : COLORS.text, fontSize: 18 }}>
+                <View key={r.name + r.place} style={[styles.res, styles.paper, r.you && { backgroundColor: COLORS.gold }, { transform: [{ rotate: r.place % 2 ? '-0.6deg' : '0.5deg' }] }]}>
+                  <T v="display" style={{ width: 44, color: '#c0202e', fontSize: 18 }}>
                     {ORD[r.place] ?? r.place}
                   </T>
-                  <T v="bold" style={{ flex: 1 }}>
+                  <T v="bold" style={{ flex: 1, color: '#140c10' }}>
                     {r.you ? (r.name === 'You' ? 'You' : `${r.name} (you)`) : r.name}
                   </T>
-                  <T v="muted">
+                  <T style={{ color: '#3a2a30', fontSize: 12 }}>
                     {r.kos} KO · {r.falls} falls
                   </T>
                 </View>
@@ -378,7 +437,7 @@ export function BrawlOreScreen() {
                 <Btn kind="gold" label={result.online || soloNote ? 'PLAY AGAIN' : 'REMATCH'} onPress={again} style={{ flex: 1 }} />
                 <Btn kind="plain" label="MENU" onPress={() => setStage('menu')} style={{ flex: 1 }} />
               </View>
-            </PixelBox>
+            </StreetCard>
           </View>
         ) : null}
       </View>
@@ -408,6 +467,18 @@ const styles = StyleSheet.create({
   whenOn: { backgroundColor: '#ff5a6a', borderColor: '#ff5a6a' },
   stepper: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#5a3040', backgroundColor: '#0c0610' },
   stepBtn: { paddingHorizontal: 8, paddingVertical: 4 },
+  street: { borderWidth: 2, backgroundColor: '#160e12', overflow: 'visible' },
+  mortar: { position: 'absolute', left: 0, right: 0, height: 1, backgroundColor: 'rgba(0,0,0,0.35)' },
+  tape: { position: 'absolute', top: -8, width: 84, height: 18, backgroundColor: TAPE, overflow: 'hidden', zIndex: 3 },
+  tapeStripe: { position: 'absolute', top: -6, width: 6, height: 30, backgroundColor: 'rgba(20,12,16,0.85)', transform: [{ rotate: '35deg' }] },
+  brandRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginVertical: 2 },
+  galiMark: { width: 44, height: 42 },
+  big: { fontSize: 44, lineHeight: 44, textAlign: 'center', letterSpacing: 2, textShadowColor: '#000', textShadowRadius: 0, textShadowOffset: { width: 3, height: 3 } },
+  stamp: { position: 'absolute', right: 16, top: 14, borderWidth: 3, borderColor: '#ff3040', paddingHorizontal: 6, transform: [{ rotate: '14deg' }], opacity: 0.85, zIndex: 4 },
+  paper: { backgroundColor: '#efe4c6' },
+  plate: { backgroundColor: '#6a6e7a', borderColor: '#000', borderWidth: 2 },
+  tabOn: { backgroundColor: TAPE },
+  flyer: { backgroundColor: '#f4eadb', borderWidth: 3, borderColor: '#000', transform: [{ rotate: '-1.2deg' }] },
   rank: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, paddingHorizontal: 8, paddingVertical: 3, marginVertical: 2 },
   rankGem: { width: 8, height: 8, transform: [{ rotate: '45deg' }] },
   tabs: { flexDirection: 'row', borderWidth: 2, borderColor: '#3a2414', backgroundColor: '#140a08' },
@@ -458,10 +529,11 @@ function Searching({ q, onCancel, card }: { q: Queue; onCancel: () => void; card
   else line = 'Found one. Starting...';
   return (
     <View style={styles.centerAbs} pointerEvents="box-none">
-      <PixelBox fill="rgba(12,8,24,0.95)" hi={COLORS.gold} lo="#04060f" shadow={1} style={styles.card}>
-        <T v="display" style={[styles.logo, { fontSize: 24, lineHeight: 26 }]}>
-          {room ? `ROOM ${room}` : q === 'ffa' ? 'FREE FOR ALL' : '1 V 1'}
+      <StreetCard tape="l" style={styles.card}>
+        <T v="label" style={{ color: COLORS.teal, letterSpacing: 3, fontSize: 11, textAlign: 'center' }}>
+          LOOKING FOR A FIGHT
         </T>
+        <Neon size={28}>{room ? `ROOM ${room}` : q === 'ffa' ? 'FREE FOR ALL' : '1 V 1'}</Neon>
         <T style={{ textAlign: 'center' }}>{line}</T>
         {list.map((p) => (
           <View key={p.id} style={styles.res}>
@@ -476,7 +548,7 @@ function Searching({ q, onCancel, card }: { q: Queue; onCancel: () => void; card
           {room && host && !(mine && mine.fight.code === room) ? <Btn kind="gold" label="START" disabled={list.filter((p) => !p.away).length < 2} onPress={startRoom} style={{ flex: 1 }} /> : null}
           <Btn kind="plain" label="CANCEL" onPress={onCancel} style={{ flex: 1 }} />
         </View>
-      </PixelBox>
+      </StreetCard>
     </View>
   );
 }
@@ -493,15 +565,17 @@ function RankChip({ rating, games, place, signedIn }: { rating: number | null; g
   const r = rating ?? 1000;
   const t = tierOf(r);
   return (
-    <View style={[styles.rank, { borderColor: t.color }]}>
+    <View style={[styles.rank, styles.plate]}>
       <View style={[styles.rankGem, { backgroundColor: t.color }]} />
-      <T v="display" style={{ color: t.color, fontSize: 14 }}>
-        {t.tier}
-      </T>
-      <T v="bold" style={{ fontSize: 13 }}>
+      <View style={{ backgroundColor: '#140c10', paddingHorizontal: 5 }}>
+        <T v="display" style={{ color: t.color, fontSize: 14 }}>
+          {t.tier}
+        </T>
+      </View>
+      <T v="bold" style={{ fontSize: 13, color: '#101014' }}>
         {r}
       </T>
-      <T v="muted" style={{ fontSize: 11 }}>
+      <T style={{ fontSize: 11, color: '#2a2a34' }}>
         {games ? `${games} rated${place ? ` · #${place}` : ''}` : 'unrated'}
       </T>
     </View>
@@ -511,7 +585,7 @@ function RankChip({ rating, games, place, signedIn }: { rating: number | null; g
 /** A tab in the menu's top switch. */
 function Tab({ label, on, onPress }: { label: string; on: boolean; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={label} style={[styles.tab, on && { backgroundColor: COLORS.gold }]}>
+    <Pressable onPress={onPress} accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={label} style={[styles.tab, on && styles.tabOn]}>
       <T v="bold" style={{ fontSize: 12, color: on ? '#1a0e08' : COLORS.muted, letterSpacing: 1 }}>
         {label}
       </T>
@@ -662,7 +736,7 @@ function CallOutPanel({ onPick, onClose }: { onPick: (r: Rival[], n: number, at:
   return (
     <View style={styles.centerAbs} pointerEvents="box-none">
       <ScrollView style={styles.scroll} contentContainerStyle={styles.center}>
-        <PixelBox fill="rgba(20,12,14,0.97)" hi="#ff5a6a" lo="#04060f" shadow={1} style={styles.card}>
+        <StreetCard tape="r" style={styles.card}>
           <T v="display" style={[styles.logo, { fontSize: 24, lineHeight: 26, color: '#ff5a6a' }]}>
             CALL OUT
           </T>
@@ -718,7 +792,7 @@ function CallOutPanel({ onPick, onClose }: { onPick: (r: Rival[], n: number, at:
             </>
           )}
           <Btn kind="plain" label="BACK" onPress={onClose} />
-        </PixelBox>
+        </StreetCard>
       </ScrollView>
     </View>
   );
@@ -730,7 +804,7 @@ function Called({ card, onDone }: { card: string | null; onDone: () => void }) {
   if (!mine) return null;
   return (
     <View style={styles.centerAbs} pointerEvents="box-none">
-      <PixelBox fill="rgba(20,12,14,0.97)" hi="#ff5a6a" lo="#04060f" shadow={1} style={styles.card}>
+      <StreetCard tape="r" style={styles.card}>
         <T v="display" style={[styles.logo, { fontSize: 22, lineHeight: 24, color: '#ff5a6a' }]}>
           CALLOUT SET
         </T>
@@ -740,7 +814,7 @@ function Called({ card, onDone }: { card: string | null; onDone: () => void }) {
           At the time, a FIGHT popup takes you in. Keep Gali open, or come back then.
         </T>
         <Btn kind="plain" label="DONE" onPress={onDone} />
-      </PixelBox>
+      </StreetCard>
     </View>
   );
 }
@@ -807,14 +881,14 @@ export function CalloutPopup({ inside = false }: { inside?: boolean }) {
   const late = incoming.at - Date.now() > 60_000;
   return (
     <View style={styles.popWrap} pointerEvents="box-none">
-      <PixelBox fill="rgba(20,12,14,0.97)" hi="#ff5a6a" lo="#04060f" shadow={1} style={styles.popCard}>
-        <T v="label" style={{ color: '#ff5a6a', letterSpacing: 2 }}>
+      <View style={[styles.popCard, styles.flyer]}>
+        <T v="label" style={{ color: '#c0202e', letterSpacing: 2 }}>
           GALI FIGHTCLUB
         </T>
-        <T v="display" style={{ fontSize: 20, lineHeight: 22, color: COLORS.text }}>
+        <T v="display" style={{ fontSize: 26, lineHeight: 26, color: '#c0202e' }}>
           {incoming.mine ? 'YOUR CALLOUT IS ON' : `${incoming.from.toUpperCase()} CALLED YOU OUT!`}
         </T>
-        <T v="muted" style={{ fontSize: 12 }}>
+        <T style={{ fontSize: 12, color: '#2a1a20' }}>
           {incoming.mine
             ? `Time to fight ${incoming.rivals.join(', ')}. Room ${incoming.code}.`
             : `${incoming.n > 2 ? 'A free for all' : 'A 1v1'}${late ? ` at ${fmtWhen(incoming.at, false)}` : ''} in room ${incoming.code}.`}
@@ -831,7 +905,7 @@ export function CalloutPopup({ inside = false }: { inside?: boolean }) {
           />
           <Btn kind="plain" label="LATER" onPress={() => useCallout.setState({ incoming: null })} style={{ flex: 1 }} />
         </View>
-      </PixelBox>
+      </View>
     </View>
   );
 }

@@ -148,7 +148,7 @@ const BLAST = { x0: -70, x1: 550, y0: -110, y1: 360 };
 /** The Ore Pit: the club's main ring, a plank floor over the shaft, two scaffold planks above. */
 export const PIT: Stage = {
   id: 'pit',
-  name: 'THE ORE PIT',
+  name: 'THE CAGE',
   w: 480,
   h: 300,
   plats: [
@@ -163,7 +163,7 @@ export const PIT: Stage = {
 /** The Crystal Grotto: a narrower rock shelf, one high crystal ledge in the middle and two low ones out wide. */
 export const GROTTO: Stage = {
   id: 'grotto',
-  name: 'CRYSTAL GROTTO',
+  name: 'THE ROOFTOP',
   w: 480,
   h: 300,
   plats: [
@@ -179,7 +179,7 @@ export const GROTTO: Stage = {
 /** The Refinery: a long iron catwalk over molten ore, three short gantries in a row above it. */
 export const REFINERY: Stage = {
   id: 'refinery',
-  name: 'THE REFINERY',
+  name: 'THE CHOP SHOP',
   w: 480,
   h: 300,
   plats: [
