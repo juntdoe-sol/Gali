@@ -162,6 +162,8 @@ Deno.serve(async (req) => {
   const wallet = body?.wallet;
   const signature = body?.signature;
   if (!isWallet(wallet) || typeof signature !== 'string' || !SIG.test(signature)) return json(400, { error: 'bad request' });
+  // closed while the bot is being tuned: only the listed wallets can buy a pass
+  if (!botAllowed(wallet)) return json(403, { error: 'Bot mining is not open yet' });
 
   // the app posts right after the wallet confirms; give the RPC a few tries to see it
   let tx: Record<string, unknown> | null = null;
