@@ -130,6 +130,8 @@ export interface AiLogEntry {
   at: number;
   /** review: the 3-hourly team (Haiku); daily: the once-a-day team (Sonnet); rounds: the 15-minute round reviewer (Haiku) */
   kind: 'review' | 'daily' | 'rounds';
+  /** review and daily entries: the style the team tuned (null from a server that does not send it) */
+  style?: AiStyle | null;
   /** rounds entries: how many rounds it read, how many the AI played, and what it watches next */
   rounds?: number;
   played?: number;
@@ -383,11 +385,13 @@ export async function loadLog(ask = false): Promise<void> {
       useAi.setState({ log: null });
       return;
     }
-    const log: AiLogEntry[] = (r.data.log ?? []).map((x) => {
+    // a style no player can pick any more (the old motherlode chaser) stays out of the log
+    const log: AiLogEntry[] = (r.data.log ?? []).filter((x) => !x.style || x.style === 'safe' || x.style === 'balance' || x.style === 'solo').map((x) => {
       const day = (x.stats as { last24h?: { plays?: number } } | null)?.last24h;
       return {
         at: Date.parse(String(x.at)),
         kind: x.source === 'claude-daily' ? ('daily' as const) : ('review' as const),
+        style: x.style === 'safe' || x.style === 'balance' || x.style === 'solo' ? (x.style as AiStyle) : null,
         learned: typeof x.learned === 'string' ? x.learned : null,
         note: typeof x.note === 'string' ? x.note : null,
         feedbackReply: typeof x.feedback_reply === 'string' ? x.feedback_reply : null,

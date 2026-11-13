@@ -777,6 +777,7 @@ function AiLog({ log, busy }: { log: AiLogEntry[] | null; busy: boolean }) {
               <T v="num" style={{ fontSize: 13, color: COLORS.muted }}>
                 {when(e.at)}
                 {e.kind === 'rounds' ? ` · Round review · ${e.rounds} rounds, ${e.played} played` : e.kind === 'daily' ? ' · Daily review' : ' · Settings review'}
+                {e.kind !== 'rounds' && e.style ? ` · ${AI_STYLES.find((x) => x.id === e.style)?.label ?? ''}` : ''}
                 {e.plays !== null ? ` · ${e.plays} plays in the 24h before` : ''}
               </T>
               {e.learned ? (
@@ -792,7 +793,7 @@ function AiLog({ log, busy }: { log: AiLogEntry[] | null; busy: boolean }) {
                 ) : null
               ) : (
                 <T v="num" style={{ fontSize: 13, color: COLORS.teal, lineHeight: 16 }}>
-                  {[e.note, changes(e, log.slice(log.indexOf(e) + 1).find((x) => x.kind !== 'rounds')) || (e.note ? '' : 'No changes.')].filter(Boolean).join(' ')}
+                  {[e.note, changes(e, log.slice(log.indexOf(e) + 1).find((x) => x.kind !== 'rounds' && x.style === e.style)) || (e.note ? '' : 'No changes.')].filter(Boolean).join(' ')}
                 </T>
               )}
               {e.feedbackReply ? (
@@ -943,6 +944,7 @@ function BotSettingsPanel({ saved }: { saved: BotSettings | null }) {
           EDIT
         </T>
       </Pressable>
+      {mode === 'ai' ? <AgentSettings style={style} /> : null}
       <PopCard title={mode === 'bot' ? 'YOUR BOT RULES' : 'AI BOT LIMITS'} open={edit} onClose={() => setEdit(false)}>
         {mode === 'bot' ? (
           <>
@@ -965,6 +967,46 @@ function BotSettingsPanel({ saved }: { saved: BotSettings | null }) {
           Empty means no limit. Settings lock while the bot runs.
         </T>
       </PopCard>
+    </View>
+  );
+}
+
+/** The settings the AI agents chose for one style at their latest review, from the learning log. */
+function AgentSettings({ style }: { style: AiStyle }) {
+  const log = useAi((s) => s.log);
+  const busy = useAi((s) => s.logBusy);
+  if (log === null) {
+    return <Chip label={busy ? 'LOADING…' : "SEE THE AI AGENTS' SETTINGS"} onPress={() => void loadLog(true)} />;
+  }
+  const e = log.find((x) => x.kind !== 'rounds' && x.style === style);
+  if (!e) return null;
+  const label = AI_STYLES.find((x) => x.id === style)?.label ?? '';
+  const rows: [string, string, string][] = [
+    ['Margin', pct(e.minEdge), e.minEdge < 0 ? 'plays spots up to this much below break-even' : 'plays only spots at least this much above break-even'],
+    ['Late SOL expected', pct(e.crowdBuffer), 'how much more SOL it expects on a spot after it plays'],
+    ['Most per round', `${pct(e.maxRoundShare)} of balance`, 'the most of your bot SOL one round may use'],
+    ['Plays at', `${e.targetSlotsLeft} slots left`, 'how close to the end of the round it sends'],
+  ];
+  return (
+    <View style={[styles.aiLog, { borderBottomWidth: 0, gap: 2 }]}>
+      <T v="label" style={{ fontSize: 11, color: COLORS.gold }}>
+        {`AI AGENTS' SETTINGS · ${label} · ${when(e.at)}`}
+      </T>
+      {rows.map(([k, v, about]) => (
+        <View key={k} style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }} accessible accessibilityLabel={`${k}: ${v}, ${about}`}>
+          <T v="num" style={{ fontSize: 13, color: COLORS.muted, flex: 1 }}>
+            {k}
+          </T>
+          <T v="num" style={{ fontSize: 13, color: COLORS.text }}>
+            {v}
+          </T>
+        </View>
+      ))}
+      {e.note ? (
+        <T v="num" style={{ fontSize: 12, color: COLORS.teal, lineHeight: 15 }}>
+          {e.note}
+        </T>
+      ) : null}
     </View>
   );
 }
@@ -993,6 +1035,7 @@ function BotSettingsSummary({ s }: { s: BotSettings | null }) {
       <T v="num" style={styles.evNote}>
         Locked while your bot runs. STOP it to change these settings.
       </T>
+      {v.mode === 'ai' ? <AgentSettings style={v.style} /> : null}
     </View>
   );
 }
@@ -1017,6 +1060,8 @@ function AiPanel() {
   const oreSol = stats?.oreSol ?? 0;
   const dayNet = day ? netSol(day, oreSol) : 0;
   const passOn = Boolean(me?.expiresAt && me.expiresAt > Date.now());
+  // the dev test wallets have a pass with no end (set on the server), so nothing to buy
+  const freePass = passOn && me!.expiresAt! - Date.now() > 3650 * 86_400_000;
   useEffect(() => {
     if (!passOn) return;
     void loadLog(false);
@@ -1071,8 +1116,8 @@ function AiPanel() {
         />
         <StatCell
           label="PASS"
-          value={passOn ? new Date(me!.expiresAt!).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : claiming ? '…' : 'none'}
-          sub={passOn ? 'active' : 'needed'}
+          value={freePass ? 'FREE' : passOn ? new Date(me!.expiresAt!).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : claiming ? '…' : 'none'}
+          sub={freePass ? 'dev wallet' : passOn ? 'active' : 'needed'}
           color={passOn ? COLORS.teal : COLORS.muted}
           info="0.1 SOL gives you 7 days of Bot and AI bot, paid to Gali's revenue wallet. Buying again adds 7 more days. The SOL you mine with stays yours, inside ORE."
         />
@@ -1159,7 +1204,7 @@ function AiPanel() {
           disabled={Boolean(busy) || !live}
         />
       ) : null}
-      {!aiOn && owner ? (
+      {!aiOn && owner && !freePass ? (
         <Btn
           kind={passOn || me?.trialOpen ? 'plain' : 'gold'}
           label={busy ?? (passOn ? 'ADD 7 DAYS · 0.1 SOL' : 'GET THE BOT PASS · 0.1 SOL / 7 DAYS')}

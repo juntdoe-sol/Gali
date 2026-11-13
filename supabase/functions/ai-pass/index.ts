@@ -151,7 +151,7 @@ Deno.serve(async (req) => {
 
     const since = new Date(Date.now() - LOG_DAYS * 86_400_000).toISOString();
     const l = await fetch(
-      `${base}/rest/v1/gali_ai_params?select=at,source,note,learned,feedback_reply,min_edge,crowd_buffer,max_round_share,target_slots_left,stats&source=in.(claude,claude-daily)&at=gt.${encodeURIComponent(since)}&order=id.desc&limit=400`,
+      `${base}/rest/v1/gali_ai_params?select=at,style,source,note,learned,feedback_reply,min_edge,crowd_buffer,max_round_share,target_slots_left,stats&source=in.(claude,claude-daily)&at=gt.${encodeURIComponent(since)}&order=id.desc&limit=400`,
       { headers: h },
     );
     if (!l.ok) return json(500, { error: 'could not read the log' });
