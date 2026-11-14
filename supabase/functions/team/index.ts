@@ -19,6 +19,7 @@ const ANN_KIND = ['info', 'event', 'warn', 'maintenance'];
 const STAGES = ['idea', 'talking', 'proposal', 'deal', 'live', 'passed'];
 const CHANNELS = ['x', 'tiktok', 'gali_tv', 'discord', 'other'];
 const CONTENT_STATUS = ['idea', 'draft', 'ready', 'posted'];
+const AI_PURPOSES = ['announcement', 'gm', 'monthly', 'update', 'event', 'other'];
 const REVENUE_WALLET = 'HDa2MTDdZXnrjTs6RRUUzEqCcrWMWu1fM673Cg7pzQMw';
 const ORE_PROGRAM = 'oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv';
 /** Metaplex Core: a certificate mint (the nft function) carries the claim fee to the revenue wallet in the same transaction. */
@@ -565,6 +566,40 @@ Deno.serve(async (req) => {
         const { data, error } = await db.from('team_revenue').select('*').gte('at', new Date(Date.now() - 90 * 864e5).toISOString()).order('at', { ascending: false }).limit(5000);
         if (error) throw error;
         return reply(200, { rows: data, sync });
+      }
+
+      // ---------- AI content: the team asks, Claude makes it on the owner's PC (team_ai_requests) ----------
+      case 'ai-requests': {
+        const { data, error } = await db.from('team_ai_requests').select('*').order('created_at', { ascending: false }).limit(60);
+        if (error) throw error;
+        return reply(200, { rows: data });
+      }
+      case 'ai-request-save': {
+        const pick = (v: unknown, list: string[], d: string) => (list.includes(String(v)) ? String(v) : d);
+        const title = clean(body.title, 120);
+        if (!title) return reply(400, { error: 'Give it a short title.' });
+        const row = {
+          created_by: me.wallet,
+          kind: pick(body.kind, ['video', 'image'], 'image'),
+          purpose: pick(body.purpose, AI_PURPOSES, 'other'),
+          format: pick(body.format, ['square', 'portrait', 'wide'], 'square'),
+          language: pick(body.language, ['en', 'ms', 'both'], 'en'),
+          title, brief: clean(body.brief, 2000), due_on: dateOrNull(body.due_on),
+        };
+        const { data, error } = await db.from('team_ai_requests').insert(row).select('*').single();
+        if (error) throw error;
+        await log(me.wallet, 'content', `${me.name || short(me.wallet)} asked Claude for ${row.kind === 'video' ? 'a video' : 'an image'}: ${title}`, String(data.id));
+        return reply(200, { row: data });
+      }
+      case 'ai-request-cancel': {
+        const id = Number(body.id);
+        const { data: r } = await db.from('team_ai_requests').select('created_by,status,title').eq('id', id).maybeSingle();
+        if (!r) return reply(404, { error: 'That request is gone.' });
+        if (r.created_by !== me.wallet && !owner) return reply(403, { error: 'Only whoever asked, or the owner, can cancel it.' });
+        if (r.status !== 'new') return reply(409, { error: r.status === 'making' ? 'Claude is already making it.' : 'It is already finished.' });
+        const { error } = await db.from('team_ai_requests').update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', id).eq('status', 'new');
+        if (error) throw error;
+        return reply(200, { ok: true });
       }
 
       // ---------- autopilot fee wallet: the owner tops it up from the admin page with their own wallet ----------
