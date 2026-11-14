@@ -5,6 +5,7 @@
 // Roles: owner (everything), admin (everything but team members), moderator (team work + chat), member (team work).
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { cors, reply, verify } from '../_shared/solana.ts';
+import { FEE_LOW_LAMPORTS, FEE_WALLET, feeTransfer, SIG_RE } from '../_shared/feeTopup.ts';
 
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const db = createClient(Deno.env.get('SUPABASE_URL')!, SERVICE_KEY);
@@ -564,6 +565,52 @@ Deno.serve(async (req) => {
         const { data, error } = await db.from('team_revenue').select('*').gte('at', new Date(Date.now() - 90 * 864e5).toISOString()).order('at', { ascending: false }).limit(5000);
         if (error) throw error;
         return reply(200, { rows: data, sync });
+      }
+
+      // ---------- autopilot fee wallet: the owner tops it up from the admin page with their own wallet ----------
+      case 'fee-wallet': {
+        const no = need('money'); if (no) return no;
+        if (!RPC_URL) return reply(503, { error: 'RPC_URL is not set on the team function.' });
+        const [fee, revenue, bh, rows] = await Promise.all([
+          rpcCall('getBalance', [FEE_WALLET, { commitment: 'confirmed' }]).catch(() => null),
+          rpcCall('getBalance', [REVENUE_WALLET, { commitment: 'confirmed' }]).catch(() => null),
+          rpcCall('getLatestBlockhash', [{ commitment: 'confirmed' }]).catch(() => null),
+          db.from('gali_fee_topups').select('*').order('at', { ascending: false }).limit(50),
+        ]);
+        if (rows.error) throw rows.error;
+        return reply(200, {
+          feeWallet: FEE_WALLET, revenueWallet: REVENUE_WALLET, min: FEE_LOW_LAMPORTS,
+          fee: fee?.value ?? null, revenue: revenue?.value ?? null, blockhash: bh?.value?.blockhash ?? null, rows: rows.data,
+        });
+      }
+      case 'fee-status': { // the Overview's "needs a top-up" check: one balance read
+        const no = need('money'); if (no) return no;
+        if (!RPC_URL) return reply(503, { error: 'RPC_URL is not set on the team function.' });
+        const fee = (await rpcCall('getBalance', [FEE_WALLET, { commitment: 'confirmed' }]))?.value ?? null;
+        return reply(200, { fee, min: FEE_LOW_LAMPORTS, low: fee !== null && fee < FEE_LOW_LAMPORTS });
+      }
+      case 'fee-topup': { // record a transfer to the fee wallet, after checking it on chain
+        const no = need('money'); if (no) return no;
+        const sig = String(body.signature ?? '').trim();
+        if (!SIG_RE.test(sig)) return reply(400, { error: 'That is not a transaction signature.' });
+        if (!RPC_URL) return reply(503, { error: 'RPC_URL is not set on the team function.' });
+        // the page posts right after the wallet sends; give the RPC a few tries to see it
+        let tx: any = null;
+        for (let i = 0; i < 6 && !tx; i++) {
+          if (i) await new Promise((r) => setTimeout(r, 2000));
+          tx = await rpcCall('getTransaction', [sig, { encoding: 'jsonParsed', commitment: 'confirmed', maxSupportedTransactionVersion: 0 }]).catch(() => null);
+        }
+        const t = feeTransfer(tx);
+        if (typeof t === 'string') return reply(tx ? 400 : 404, { error: t });
+        const { data, error } = await db.from('gali_fee_topups').insert({
+          at: t.at, from_wallet: t.from, to_wallet: FEE_WALLET, lamports: t.lamports, from_before: t.fromBefore,
+          fee_before: t.feeBefore, fee_after: t.feeAfter, signature: sig, recorded_by: me.wallet,
+        }).select('*').single();
+        if (error?.code === '23505') return reply(409, { error: 'That top-up is already recorded.' });
+        if (error) throw error;
+        const sol = Math.round(t.lamports / 1e5) / 1e4;
+        await log(me.wallet, 'money', `${me.name || short(me.wallet)} topped up the autopilot fee wallet with ${sol} SOL${t.from === REVENUE_WALLET ? ' from the revenue wallet' : ` from ${short(t.from)}`}`, sig);
+        return reply(200, { row: data });
       }
 
       // ---------- in-game announcements ----------

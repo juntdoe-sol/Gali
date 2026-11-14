@@ -15,6 +15,7 @@ const suites = [
   'tests/ore-format.cjs',
   'tests/last-spot.cjs',
   'tests/autopilot.cjs',
+  'tests/fee-topup.cjs',
   'tests/ai-mining.cjs',
   'tests/score.cjs',
   'tests/arena.cjs',
