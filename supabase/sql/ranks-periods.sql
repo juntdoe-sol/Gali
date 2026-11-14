@@ -91,7 +91,9 @@ begin
     xp_close = greatest(coalesce(d.xp_close, 0), excluded.xp_close),
     pts_close = greatest(coalesce(d.pts_close, 0), excluded.pts_close);
 end $$;
-grant execute on function public.gali_seen(text, text, int, bigint, bigint) to anon, authenticated;
+-- only the play function calls this, for the signed-in wallet (signed-reports.sql); never anon
+revoke execute on function public.gali_seen(text, text, int, bigint, bigint) from public, anon, authenticated;
+grant execute on function public.gali_seen(text, text, int, bigint, bigint) to service_role;
 
 -- Lifetime ORE mined, as the app read it from ORE's Miner account on chain. The board shows the chain's
 -- number for the total; this only keeps the daily marks for the gain. A mark never goes down, so nobody
@@ -111,7 +113,9 @@ begin
     ore_open = coalesce(d.ore_open, excluded.ore_open),
     ore_close = greatest(coalesce(d.ore_close, 0), excluded.ore_close);
 end $$;
-grant execute on function public.gali_ore_seen(text, numeric) to anon, authenticated;
+-- only the play function calls this, after reading the wallet's ORE on chain (signed-reports.sql); never anon
+revoke execute on function public.gali_ore_seen(text, numeric) from public, anon, authenticated;
+grant execute on function public.gali_ore_seen(text, numeric) to service_role;
 
 -- Where each wallet stood when the period began: the last close before it, else the first open in it.
 create or replace function public.gali_period_base(p_period text)

@@ -37,4 +37,6 @@ drop policy if exists "anyone reads miners" on public.gali_miners;
 create policy "anyone reads miners" on public.gali_miners for select to anon, authenticated using (true);
 revoke insert, update, delete on public.gali_miners from anon, authenticated;
 grant select on public.gali_miners to anon, authenticated;
-grant execute on function public.gali_seen(text, text, int, bigint, bigint) to anon, authenticated;
+-- only the play function calls this, for the signed-in wallet (signed-reports.sql); never anon
+revoke execute on function public.gali_seen(text, text, int, bigint, bigint) from public, anon, authenticated;
+grant execute on function public.gali_seen(text, text, int, bigint, bigint) to service_role;
