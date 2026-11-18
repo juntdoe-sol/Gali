@@ -480,7 +480,7 @@ function TopUpCard({ open, onClose, ai }: { open: boolean; onClose: () => void; 
       <T v="num" style={[styles.evNote, { marginVertical: 6 }]}>
         {ai
           ? 'Adds SOL to your running bot without stopping it. With a run time set, the AI spreads the new total over the rounds left, so each bet grows.'
-          : 'Adds whole rounds to your running autopilot without stopping it (the 0.25% Gali fee on those rounds is paid now, as at start).'}
+          : 'Adds whole rounds to your running autopilot without stopping it (the 1% Gali fee on those rounds is paid now, as at start).'}
       </T>
       <Chip
         grow
@@ -665,7 +665,7 @@ function DeskLite() {
 
 /* ---------------- GALI AI: an ORE automation the AI plays, with a weekly pass ---------------- */
 const AI_INFO =
-  "ORE's draw is random, so no bot can see the winning spot. Gali's bot plays from your own ORE automation, with the app closed, in one of two ways. BOT: no AI, it plays exactly your rules every round (how many spots, SOL per spot, which spots to skip, a motherlode trigger). AI BOT: you pick a style and a team of five AI agents tunes it from its own results. Safe plays only spots worth more than they cost, with a margin; Solo hunter chases the solo 1 ORE and accepts losing rounds; Motherlode chaser waits for a big motherlode and plays hard for it. Your limits always hold: most per spot (ORE enforces it), most per round and a stop-loss. Gali's fee is the same 0.25% as LITE and PRO, only on rounds the bot plays. You can still lose: one spot in 25 wins. Not financial advice.";
+  "ORE's draw is random, so no bot can see the winning spot. Gali's bot plays from your own ORE automation, with the app closed, in one of two ways. BOT: no AI, it plays exactly your rules every round (how many spots, SOL per spot, which spots to skip, a motherlode trigger). AI BOT: you pick a style and a team of five AI agents tunes it from its own results. Safe plays only spots worth more than they cost, with a margin; Solo hunter chases the solo 1 ORE and accepts losing rounds; Motherlode chaser waits for a big motherlode and plays hard for it. Your limits always hold: most per spot (ORE enforces it), most per round and a stop-loss. Gali's fee is the same 1% as LITE and PRO, only on rounds the bot plays. You can still lose: one spot in 25 wins. Not financial advice.";
 const AI_PER_SPOT_DEFAULT = '0.01';
 
 const signed = (v: number, dp = 4) => `${v >= 0 ? '+' : '-'}${fmtSol(Math.abs(v), dp)}`;
@@ -1179,7 +1179,7 @@ function AiPanel() {
           <Btn
             kind={ready ? 'gold' : 'plain'}
             label={busy ?? label}
-            sub={ready ? '0.25% fee only on rounds it plays' : undefined}
+            sub={ready ? '1% fee only on rounds it plays' : undefined}
             onPress={() => {
               // settings first: saved before the bot is funded, locked while it runs
               const d = useAi.getState().draft;

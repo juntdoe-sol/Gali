@@ -402,7 +402,7 @@ export async function closeLiveAutomation(expectedOwner?: PublicKey): Promise<vo
  * ORE then lets that key choose the spots and the amount per spot each round (never more than `maxPerSpot`), and
  * nothing else: it can't withdraw or change the limit. Returned SOL goes back into the automation (reload), so the
  * balance shows how the AI is doing. STOP is the same as autopilot's: it closes the automation and returns the rest.
- * Gali's fee is the same 0.25% as LITE and PRO, taken by ORE from each round the AI plays (DiscretionaryBps) and paid
+ * Gali's fee is the same 1% as LITE and PRO, taken by ORE from each round the AI plays (DiscretionaryBps) and paid
  * to the AI key, which passes it on to the revenue wallet. Rounds the AI sits out cost nothing.
  */
 const AI_EXECUTOR_KEY = (() => {

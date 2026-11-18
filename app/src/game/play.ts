@@ -70,7 +70,7 @@ function send(a: string, body: Record<string, unknown>) {
 }
 
 /** Fire and forget. `keep` holds the report (up to 20) until the player signs in. */
-export type PlayAction = 'seen' | 'ore' | 'ko' | 'win' | 'chat' | 'bonus' | 'round';
+export type PlayAction = 'seen' | 'ore' | 'ko' | 'win' | 'chat' | 'bonus' | 'cave' | 'round';
 export function playReport(a: PlayAction, body: Record<string, unknown>, keep = false) {
   if (pass) return send(a, body);
   if (keep && waiting.length < 20) waiting.push({ a, body });
@@ -94,6 +94,25 @@ export function addBonusXp(n: number) {
   bonus = Math.min(600, bonus + add);
   if (bonus >= 100) flushBonus();
   else if (!bonusTimer) bonusTimer = setTimeout(flushBonus, 20_000);
+}
+
+/* ---------- Cave Run XP: its own server pool (100 a report, 400 a day), so fights and quests can't use it up ---------- */
+let cave = 0;
+let caveTimer: ReturnType<typeof setTimeout> | null = null;
+function flushCave() {
+  caveTimer = null;
+  while (cave > 0) {
+    const n = Math.min(100, cave);
+    cave -= n;
+    playReport('cave', { n }, true);
+  }
+}
+export function addCaveXp(n: number) {
+  const add = Math.max(0, Math.floor(n));
+  if (!add) return;
+  cave = Math.min(400, cave + add);
+  if (cave >= 100) flushCave();
+  else if (!caveTimer) caveTimer = setTimeout(flushCave, 20_000);
 }
 
 /** Ask the server to score a finished live round from ORE's own accounts (it checks everything itself). */

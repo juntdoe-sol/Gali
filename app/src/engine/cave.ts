@@ -343,7 +343,9 @@ export class CaveEngine {
     };
     const on = <K extends keyof HTMLElementEventMap>(el: HTMLElement | Window, k: K | string, f: (e: never) => void, o?: AddEventListenerOptions) => {
       el.addEventListener(k as string, f as EventListener, o);
-      this.unbind.push(() => el.removeEventListener(k as string, f as EventListener));
+      // same options as when added: a capture listener removed without `capture` stays on, and the cave's
+      // key handler would keep swallowing WASD in the lobby after the cave closed
+      this.unbind.push(() => el.removeEventListener(k as string, f as EventListener, o));
     };
     on(cv, 'pointerdown', (e: PointerEvent) => {
       e.preventDefault();

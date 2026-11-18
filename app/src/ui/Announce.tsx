@@ -1,4 +1,4 @@
-// Team announcements from the admin page (galiadmin.bounded.page > Game > Announcements).
+// Team announcements from the admin page (admin.gali.lol > Game > Announcements).
 // Reads game_announcements through Supabase REST with the public key; the row policy only returns
 // announcements that are on and inside their start/end window. A player can close one; it stays closed.
 import AsyncStorage from '@react-native-async-storage/async-storage';

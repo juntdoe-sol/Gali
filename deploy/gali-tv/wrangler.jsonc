@@ -1,0 +1,8 @@
+// Deploys tv.gali.lol (static files only) from galitv/site.
+// Run from this folder:  npx wrangler deploy
+{
+  "name": "gali-tv",
+  "compatibility_date": "2026-10-01",
+  "assets": { "directory": "../../galitv/site" },
+  "routes": [{ "pattern": "tv.gali.lol", "custom_domain": true }]
+}

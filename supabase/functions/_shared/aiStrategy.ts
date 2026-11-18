@@ -39,8 +39,8 @@ export const EMPTY_FLOOR = 1_000_000; // 0.001 SOL
  * splitting a round into several deploys would skip the Gali fee on all but the first.
  */
 export const MAX_GROUPS = 1;
-/** Gali's fee on SOL the AI deploys, the same 0.25% as LITE and PRO. ORE takes it per round (DiscretionaryBps). */
-export const AI_FEE_BPS = 25n;
+/** Gali's fee on SOL the AI deploys, the same 1% as LITE and PRO. ORE takes it per round (DiscretionaryBps). */
+export const AI_FEE_BPS = 100n;
 /** ORE's cap on a DiscretionaryBps fee (automate.rs: at most 1%). */
 export const MAX_FEE_BPS = 100n;
 /** The fee ORE takes on a round that deploys `lamports` (Automation::min_fee). */
@@ -159,7 +159,7 @@ export interface PlanInput {
   maxPerSquare: bigint;
   /** The automation's balance. */
   balance: bigint;
-  /** The automation's fee in basis points (Gali's 0.25% unless the player set more). */
+  /** The automation's fee in basis points (Gali's 1%). */
   feeBps?: bigint;
   params: AiParams;
   /**

@@ -148,7 +148,7 @@ Deno.serve(async (req) => {
   const signer = loadKey(raw);
   const conn = new Connection(rpc, 'confirmed');
   const passes = await run(conn, signer, supabaseHooks(base, key), 50_000);
-  // Gali's 0.25% collects on the AI key round by round; move it on to the revenue wallet
+  // Gali's 1% collects on the AI key round by round; move it on to the revenue wallet
   const swept = await sweepFees(conn, signer).catch((e) => (console.log(`sweep: ${String((e as Error)?.message ?? e).slice(0, 160)}`), 0n));
   const report = {
     executor: signer.publicKey.toBase58(),

@@ -181,6 +181,8 @@ function providers(env) {
   const list = [];
   const hk = env?.HELIUS_RPC_KEY;
   if (typeof hk === 'string' && hk && hk.length <= 256) list.push(`https://mainnet.helius-rpc.com/?api-key=${encodeURIComponent(hk)}`);
+  const hk2 = env?.HELIUS_RPC_KEY_2; // a second Helius account as the backup path
+  if (typeof hk2 === 'string' && hk2 && hk2.length <= 256 && hk2 !== hk) list.push(`https://mainnet.helius-rpc.com/?api-key=${encodeURIComponent(hk2)}`);
   const ak = env?.ALCHEMY_RPC_KEY;
   if (typeof ak === 'string' && /^[A-Za-z0-9_-]{8,128}$/.test(ak)) list.push(`https://solana-mainnet.g.alchemy.com/v2/${ak}`);
   return list;
@@ -574,11 +576,14 @@ async function sendChildren(env, house, ledger, parent) {
 
 const shortKey = (k) => `${k.slice(0, 4)}…${k.slice(-4)}`;
 const suffix = (n) => n.toString(36);
-const roundKey = (g, t, round) => `${g}${t}${suffix(round)}`;
+/** LEDGER_PREFIX keeps a second house's rounds and transfers apart in the shared ledger (the Cloudflare server
+ *  uses 'cf.'; the old Bounded server used none). Payout labels start with the round key, so they follow it. */
+const prefixOf = (env) => (typeof env?.LEDGER_PREFIX === 'string' && /^[a-z0-9]{1,8}\.$/.test(env.LEDGER_PREFIX) ? env.LEDGER_PREFIX : '');
+const roundKey = (g, t, round, env) => `${prefixOf(env)}${g}${t}${suffix(round)}`;
 
 /** Works out a round's result from finalized chain data and records it, or returns the result already recorded. */
 async function recordRound(env, house, ledger, { g, t, round, now }) {
-  const key = roundKey(g, t, round);
+  const key = roundKey(g, t, round, env);
   const stored = await ledger.getRound(key);
   if (stored) return stored;
   if (now - startOf(round) > MAX_SETTLE_AGE_MS) throw Object.assign(new Error('This round is too old to settle. Ask support for a refund.'), { status: 410 });
@@ -748,7 +753,7 @@ async function sweep(env, house, token, floorUi, ts) {
   if (floor < BigInt(row.floorMin)) throw new Error(`The floor must be at least ${fmt(BigInt(row.floorMin), m.decimals)} ${info.id.toUpperCase()}`);
   const amount = BigInt(row.house) - BigInt(row.owed) - floor;
   if (amount <= 0n) throw new Error('Nothing above the floor to sweep');
-  const label = `sw${t}${suffix(Math.floor(ts / 1000))}`;
+  const label = `${prefixOf(env)}sw${t}${suffix(Math.floor(ts / 1000))}`;
   const ok = await ledger.addSend({ label, token: t, items: [{ to: row.revenueAta, amount: String(amount) }], pre: [{ ata: row.revenueAta, owner: tr.revenue }], memo: `gali1sweep|${t}|${ts}`, need: amount + floor, balance: BigInt(row.house) });
   if (!ok) throw new Error('Nothing above the floor to sweep');
   const r = await sendRecorded(env, house, ledger, label);
@@ -805,7 +810,7 @@ export async function configFor(env, house) {
 
 // Browsers may call the house only from these sites (deployed with --cors passthrough, so this function answers
 // preflight itself). The Android app sends no Origin and is unaffected. ALLOWED_ORIGINS (comma separated) overrides.
-const ORIGINS_DEFAULT = ['https://betatest.gali.lol', 'https://galiisland.bounded.page', 'https://galiadmin.bounded.page', 'https://gali.fun', 'https://www.gali.fun', 'http://localhost:8081'];
+const ORIGINS_DEFAULT = ['https://betatest.gali.lol', 'https://admin.gali.lol', 'https://galiisland.bounded.page', 'https://gali.fun', 'https://www.gali.fun', 'http://localhost:8081'];
 function originsOf(env) {
   const raw = typeof env?.ALLOWED_ORIGINS === 'string' ? env.ALLOWED_ORIGINS : '';
   const list = raw.split(',').map((x) => x.trim().replace(/\/$/, '')).filter((x) => /^https?:\/\/[^\s/]+$/.test(x));

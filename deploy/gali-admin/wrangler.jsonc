@@ -1,0 +1,8 @@
+// Deploys the Gali admin page (admin.gali.lol, static files only) from admin-live/dist.
+// Run from this folder:  npx wrangler deploy
+{
+  "name": "gali-admin",
+  "compatibility_date": "2026-10-01",
+  "assets": { "directory": "../../admin-live/dist" },
+  "routes": [{ "pattern": "admin.gali.lol", "custom_domain": true }]
+}

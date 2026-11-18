@@ -27,6 +27,7 @@ import { RoundNowList } from './Dock';
 import { MilestoneQuests } from './Milestones';
 import { useNft } from '../game/nft';
 import { useOreHits, type OreHit } from '../game/oreHits';
+import { ReportBugRow } from './ReportBug';
 
 const ORE_PROGRAM_STR = 'oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv';
 
@@ -817,9 +818,10 @@ function Me() {
         <PixIcon name="bot" size={22} />
         <PixSwitch value={Boolean(save.autoPopBig)} onChange={setAutoPopBig} label="Big pop-up for every autopilot round" />
       </Card>
+      <ReportBugRow />
       {live ? (
         <T v="muted">
-          Live mode: real rounds on ORE&apos;s mainnet board, about every 80 seconds. Put SOL on 1 to 25 spots and one strikes gold. ORE keeps 1% of every spot and 10% more of spots that miss; the rest comes back for you to claim. The gold spot mines the round&apos;s ORE, split by SOL there, or all to one miner on a solo spot. Gali never holds your SOL. ORE is credited as the board Gali plays on; Gali is not affiliated with or endorsed by ORE. This is a game of chance with real money: 18+ only, and only play with SOL you can afford to lose.
+          Live mode: real rounds on ORE&apos;s mainnet board, about every 80 seconds. Put SOL on 1 to 25 spots and one strikes gold. ORE keeps 1% of every spot and 10% more of spots that miss; the rest comes back for you to claim. The gold spot mines the round&apos;s ORE, split by SOL there, or all to one miner on a solo spot. Gali never holds your SOL. ORE is credited as the board Gali plays on; Gali is not affiliated with or endorsed by ORE. Mining uses real SOL: some rounds return less than you put in. 18+ only.
         </T>
       ) : (
       <T v="muted">How it works: each minute is a round on an island with 25 mining spots. Put SOL on 1 to 25 spots. One spot strikes gold. ORE keeps 1% of every spot and 10% more of spots that miss; the rest of your SOL comes back to claim. The gold spot mines the round's ORE, split by SOL there, or on one of the round's 10 solo spots (★) taken whole by one miner, with odds equal to their share. Fewer spots pay more points: 1,000 for a single spot, 40 for all 25. A 1-in-500 motherlode pays out the whole SKR Motherlode Pool on top. Everything lands in Unclaimed until you claim it. This is a game of chance: only play with SOL you can afford to lose.</T>

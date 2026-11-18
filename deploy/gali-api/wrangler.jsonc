@@ -1,0 +1,20 @@
+// Gali API on Cloudflare (api.gali.lol): the arcade house (/games) and the read-only Solana RPC proxy (/rpc, /rpc2).
+// Replaces the Bounded functions at galiisland-api.bounded.page. The code is shared with app/rpc-backend/functions.
+// Secrets (set once each, never in this file):  npx wrangler secret put <NAME>
+//   HOUSE_KEY, GAMES_MASTER, HELIUS_RPC_KEY, ALCHEMY_RPC_KEY, ADMIN_WALLET, SUPABASE_URL, SUPABASE_SERVICE_KEY
+// Run from this folder:  npx wrangler deploy
+{
+  "name": "gali-api",
+  "main": "src/index.mjs",
+  "compatibility_date": "2026-10-01",
+  "routes": [{ "pattern": "api.gali.lol", "custom_domain": true }],
+  "vars": {
+    // keeps this house's arcade rounds apart from the old Bounded house in the shared Supabase ledger
+    "LEDGER_PREFIX": "cf."
+  },
+  // per-IP limits (requests per 60 s) so nobody can burn the Helius credits through the proxy
+  "ratelimits": [
+    { "name": "RPC_LIMIT", "namespace_id": "4101", "simple": { "limit": 300, "period": 60 } },
+    { "name": "GAMES_LIMIT", "namespace_id": "4102", "simple": { "limit": 240, "period": 60 } }
+  ]
+}

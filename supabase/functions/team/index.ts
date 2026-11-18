@@ -1,4 +1,4 @@
-// Gali team space for the admin page (galiadmin.bounded.page).
+// Gali team space for the admin page (admin.gali.lol).
 // A team wallet signs one login message; the reply is a 12-hour session that every other action carries.
 // Team wallets are rows in team_members (role owner or member). Only the owner adds or removes members.
 // Tasks, meetings, bug remarks (beta_bugs from gali.lol/beta) and the activity feed all go through here.
@@ -26,13 +26,18 @@ const ORE_PROGRAM = 'oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv';
 const CORE_PROGRAM = 'CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d';
 const ORE_MINT = 'oreoU2P8bN6jkk3jbaiVxYnG1dCXcYxwhwyK9jSybcp';
 const SKR_MINT = 'SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3';
+const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+/** The fund wallet: prizes, grants and investment land here; spends leave it after founder approval. */
+const FUND_WALLET = 'GAL1rphsmjzvEqUjNFLiY1a3RmAtsxi1ECZcCAHu5Mz6';
+const FUND_TOKENS = ['USDC', 'SOL', 'ORE', 'SKR'];
+const FOUNDER_ROLES = ['owner', 'admin'];
 const RPC_URL = Deno.env.get('RPC_URL') || Deno.env.get('SOLANA_RPC') || '';
 /** What each role may do beyond the shared team work (tasks, meetings, bugs, reviews, partners, content, health). */
 const CAPS: Record<string, string[]> = {
-  owner: ['members', 'release', 'announce', 'moderate', 'waitlist', 'revenue', 'money'],
-  admin: ['release', 'announce', 'moderate', 'waitlist', 'revenue'],
-  moderator: ['moderate', 'announce'],
-  member: [],
+  owner: ['members', 'release', 'announce', 'moderate', 'waitlist', 'revenue', 'money', 'inbox'],
+  admin: ['release', 'announce', 'moderate', 'waitlist', 'revenue', 'inbox'],
+  moderator: ['moderate', 'announce', 'inbox'],
+  member: ['inbox'],
 };
 const can = (role: string, cap: string) => (CAPS[role] ?? []).includes(cap);
 
@@ -108,8 +113,8 @@ async function syncRevenue() {
 }
 /* ---------- team chat, votes, money helpers ---------- */
 const TOKENS = ['SOL', 'ORE', 'SKR'];
-const DECIMALS: Record<string, number> = { SOL: 9, ORE: 11, SKR: 6 };
-const TOKEN_MINT: Record<string, string> = { ORE: ORE_MINT, SKR: SKR_MINT };
+const DECIMALS: Record<string, number> = { SOL: 9, ORE: 11, SKR: 6, USDC: 6 };
+const TOKEN_MINT: Record<string, string> = { ORE: ORE_MINT, SKR: SKR_MINT, USDC: USDC_MINT };
 const round = (n: number, d: number) => Math.floor(n * 10 ** d) / 10 ** d; // always round a cut down, never up
 
 /** Unread counts per thread: 'team' plus one key per member wallet that DMed me. */
@@ -165,6 +170,95 @@ async function revenueBalances() {
     }
     return out;
   } catch { return null; }
+}
+
+/** Live balances of the fund wallet (SOL, USDC, ORE, SKR; classic and Token-2022 accounts). */
+async function fundBalances() {
+  if (!RPC_URL) return null;
+  try {
+    const progs = ['TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'];
+    const [sol, ...lists] = await Promise.all([
+      rpcCall('getBalance', [FUND_WALLET, { commitment: 'confirmed' }]),
+      ...progs.map((programId) => rpcCall('getTokenAccountsByOwner', [FUND_WALLET, { programId }, { encoding: 'jsonParsed', commitment: 'confirmed' }])),
+    ]);
+    const out: Record<string, number> = { SOL: Number(sol.value ?? 0) / 1e9, USDC: 0, ORE: 0, SKR: 0 };
+    for (const l of lists) for (const a of l.value ?? []) {
+      const info = a.account?.data?.parsed?.info;
+      for (const t of ['USDC', 'ORE', 'SKR']) if (info?.mint === TOKEN_MINT[t]) out[t] += Number(info.tokenAmount?.uiAmount ?? 0);
+    }
+    return out;
+  } catch { return null; }
+}
+const DEFAULT_RULES = { solo: 200, two: 1000, cats: [] as { k: string; label: string; pct: number; about?: string }[] };
+async function fundRules() {
+  const { data } = await db.from('team_settings').select('value').eq('key', 'fund_rules').maybeSingle();
+  return { ...DEFAULT_RULES, ...((data?.value as object) ?? {}) } as typeof DEFAULT_RULES;
+}
+async function founders() {
+  const { data, error } = await db.from('team_members').select('wallet,name,role').in('role', FOUNDER_ROLES).order('added_at'); // oldest first, so the first owner is "the owner"
+  if (error) throw error;
+  return (data ?? []) as Member[];
+}
+/** Who must approve a spend: under `solo` the owner (another founder when the owner asks), under `two` any 2 founders,
+ *  from `two` up (and anything from the reserve) every founder. Nobody approves their own request. */
+function spendNeed(s: { amount_usd: number | string; category: string; created_by: string }, rules: typeof DEFAULT_RULES, fs: Member[]) {
+  const others = fs.filter((f) => f.wallet !== s.created_by).map((f) => f.wallet);
+  const usd = Number(s.amount_usd);
+  const ownerW = fs.find((f) => f.role === 'owner')?.wallet;
+  if (s.category === 'reserve' || usd >= rules.two) return { tier: 'all', label: 'Every founder', ok: (a: string[]) => others.length > 0 && others.every((w) => a.includes(w)) };
+  if (usd >= rules.solo) { const n = Math.min(2, others.length); return { tier: 'two', label: '2 founders', ok: (a: string[]) => n > 0 && a.filter((w) => others.includes(w)).length >= n }; }
+  if (ownerW && ownerW !== s.created_by) return { tier: 'owner', label: 'The owner', ok: (a: string[]) => a.includes(ownerW) };
+  return { tier: 'one', label: '1 founder', ok: (a: string[]) => a.some((w) => others.includes(w)) };
+}
+/** Did the fund wallet itself send this transaction's money? */
+async function fromFund(sig: string, token: string) {
+  const tx = await rpcCall('getTransaction', [sig, { encoding: 'jsonParsed', commitment: 'confirmed', maxSupportedTransactionVersion: 0 }]).catch(() => null);
+  if (!tx) return false;
+  if (token === 'SOL') {
+    const keys: string[] = tx.transaction.message.accountKeys.map((k: any) => (typeof k === 'string' ? k : k.pubkey));
+    const i = keys.indexOf(FUND_WALLET);
+    return i >= 0 && (tx.meta.postBalances[i] ?? 0) < (tx.meta.preBalances[i] ?? 0);
+  }
+  const sum = (list: any[]) => (list ?? []).filter((b) => b.owner === FUND_WALLET && b.mint === TOKEN_MINT[token]).reduce((a, b) => a + Number(b.uiTokenAmount?.uiAmount ?? 0), 0);
+  return sum(tx.meta.postTokenBalances) < sum(tx.meta.preTokenBalances);
+}
+
+/* ---------- books: daily SOL and MYR prices, cached in team_prices ---------- */
+const dayOf = (iso: string) => new Date(new Date(iso).getTime() + 8 * 3600_000).toISOString().slice(0, 10); // Malaysia date
+const addDay = (d: string, n: number) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 864e5).toISOString().slice(0, 10);
+/** Prices for every day from `from` to `to`: SOL in USD, and MYR per USD. Fetches what is missing, carries the last known
+ *  value over weekends and gaps, and never throws (a failed fetch just leaves values out). */
+async function pricesFor(from: string, to: string) {
+  const out: Record<string, Record<string, number>> = { SOL: {}, MYR: {} };
+  const load = async () => {
+    const { data } = await db.from('team_prices').select('day,sym,value').gte('day', addDay(from, -10)).lte('day', to).limit(10000);
+    for (const r of data ?? []) out[r.sym][r.day] = Number(r.value);
+  };
+  await load();
+  const today = dayOf(new Date().toISOString());
+  const last = to < today ? to : addDay(today, -1);
+  const missing = (sym: string) => { for (let d = from; d <= last; d = addDay(d, 1)) if (out[sym][d] === undefined) return true; return false; };
+  const rows: { day: string; sym: string; value: number }[] = [];
+  if (missing('SOL')) {
+    try {
+      const j = await (await fetch('https://api.kraken.com/0/public/OHLC?pair=SOLUSD&interval=1440')).json();
+      const list = Object.values(j.result ?? {}).find((v) => Array.isArray(v)) as any[] | undefined;
+      for (const c of list ?? []) rows.push({ day: new Date(Number(c[0]) * 1000).toISOString().slice(0, 10), sym: 'SOL', value: Number(c[4]) });
+    } catch (e) { console.error('sol prices', e); }
+  }
+  if (missing('MYR')) {
+    try {
+      const j = await (await fetch(`https://api.frankfurter.dev/v1/${addDay(from, -7)}..${to}?from=USD&to=MYR`)).json();
+      for (const [d, r] of Object.entries(j.rates ?? {})) rows.push({ day: d, sym: 'MYR', value: Number((r as any).MYR) });
+    } catch (e) { console.error('myr rates', e); }
+  }
+  if (rows.length) { await db.from('team_prices').upsert(rows.filter((r) => r.value > 0)); await load(); }
+  // carry the last known value forward (weekends, holidays, today)
+  for (const sym of ['SOL', 'MYR']) {
+    let prev: number | undefined;
+    for (let d = addDay(from, -10); d <= to; d = addDay(d, 1)) { if (out[sym][d] !== undefined) prev = out[sym][d]; else if (prev !== undefined) out[sym][d] = prev; }
+  }
+  return out;
 }
 
 /** Did this transaction land, and did the payee get the token? Best effort: a missing RPC only skips the check. */
@@ -224,7 +318,7 @@ Deno.serve(async (req) => {
     if (action === 'tv-agenda') {
       if (!(await tvKeyOk(body.tv_key))) return reply(401, { error: 'Not a known TV.' });
       const now = Date.now();
-      const { data: ownerRow } = await db.from('team_members').select('wallet').eq('role', 'owner').limit(1).maybeSingle();
+      const { data: ownerRow } = await db.from('team_members').select('wallet').eq('role', 'owner').order('added_at').limit(1).maybeSingle();
       const [meetings, tasks] = await Promise.all([
         db.from('team_meetings').select('id,title,starts_at,minutes,meet_url')
           .gte('starts_at', new Date(now - 2 * 3600_000).toISOString())
@@ -247,6 +341,28 @@ Deno.serve(async (req) => {
         .order('created_at', { ascending: false }).limit(1).maybeSingle();
       if (error) throw error;
       return reply(200, { now: new Date().toISOString(), report: data });
+    }
+
+    // Mail to hello@gali.lol, sent here by the gali-mail Cloudflare Email Worker (deploy/gali-mail), which
+    // also forwards every message to Gmail. It carries INBOX_KEY, a secret set on both sides.
+    if (action === 'inbox-in') {
+      const want = Deno.env.get('INBOX_KEY') ?? '';
+      const got = String(body.key ?? '');
+      const sha = async (s: string) => hex(await crypto.subtle.digest('SHA-256', enc.encode(s)));
+      if (want.length < 32 || (await sha(got)) !== (await sha(want))) return reply(401, { error: 'Not the mail worker.' });
+      const m = body.mail ?? {};
+      const atts = Array.isArray(m.attachments) ? m.attachments.slice(0, 30).map((a: any) => ({ name: clean(a?.name, 200), type: clean(a?.type, 100), size: Number(a?.size) || 0 })) : [];
+      const row = {
+        message_id: clean(m.message_id, 300) || null,
+        from_addr: clean(m.from_addr, 320), from_name: clean(m.from_name, 200), to_addr: clean(m.to_addr, 320),
+        reply_to: clean(m.reply_to, 320), subject: clean(m.subject, 500), body_text: clean(m.body_text, 100_000),
+        attachments: atts, raw_size: Number(m.raw_size) || 0,
+      };
+      const { error } = row.message_id
+        ? await db.from('team_inbox').upsert(row, { onConflict: 'message_id', ignoreDuplicates: true })
+        : await db.from('team_inbox').insert(row);
+      if (error) throw error;
+      return reply(200, { ok: true });
     }
 
     const me = await sessionMember(body.session);
@@ -296,9 +412,12 @@ Deno.serve(async (req) => {
           ...reviews.data!.map((r) => ({ at: r.updated_at, actor: null, kind: 'tester-review', text: `${r.username} left a ${r.stars}-star review`, ref: `review:${r.id}` })),
         ].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 150);
         const tv = new Set(tvAdmins.data!.map((x) => x.wallet));
-        const [unread, extra] = await Promise.all([unreadFor(me.wallet), boardExtra(me.wallet)]);
+        const [unread, extra, inboxN] = await Promise.all([
+          unreadFor(me.wallet), boardExtra(me.wallet),
+          can(me.role, 'inbox') ? db.from('team_inbox').select('id', { count: 'exact', head: true }).is('read_at', null) : Promise.resolve({ count: 0 }),
+        ]);
         return reply(200, {
-          me: meOut, unread, ...extra,
+          me: meOut, unread, ...extra, inboxUnread: (inboxN as { count: number | null }).count ?? 0,
           members: members.data!.map((m) => ({ ...m, tv: tv.has(m.wallet) })),
           tasks: tasks.data, meetings: meetings.data, bugs: bugs.data, builds: builds.data, feed,
           reviews: allReviews.data, partners: partners.data, content: content.data, announcements: anns.data,
@@ -402,6 +521,28 @@ Deno.serve(async (req) => {
         if (error) throw error;
         await log(me.wallet, 'meeting', `${who} scheduled "${title}"`, `meeting:${data.id}`);
         return reply(200, { meeting: data });
+      }
+      // ---------- auto-fix: approved bugs are picked up by the bug-fix worker on the owner's Mac (~/gali-bugfix) ----------
+      case 'bug-fix-approve': {
+        const no = need('release'); if (no) return no;
+        const id = Number(body.id);
+        if (!Number.isInteger(id)) return reply(400, { error: 'Bad bug id.' });
+        const note = clean(body.note, 600) || null;
+        const { data, error } = await db.from('beta_bugs').update({ fix_status: 'approved', fix_approved_by: me.wallet, fix_approved_at: new Date().toISOString(), fix_note: null, ...(note ? { team_note: note } : {}), updated_at: new Date().toISOString() })
+          .eq('id', id).or('fix_status.is.null,fix_status.in.(failed,cancelled,shipped)').select('id,title').maybeSingle();
+        if (error) throw error;
+        if (!data) return reply(400, { error: 'This bug is already queued or being fixed.' });
+        await log(me.wallet, 'bug', `${who} approved an auto-fix for bug #${data.id} "${data.title}"`, `bug:${data.id}`);
+        return reply(200, { ok: true });
+      }
+      case 'bug-fix-cancel': {
+        const no = need('release'); if (no) return no;
+        const id = Number(body.id);
+        const { data, error } = await db.from('beta_bugs').update({ fix_status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', id).eq('fix_status', 'approved').select('id,title').maybeSingle();
+        if (error) throw error;
+        if (!data) return reply(400, { error: 'Only a fix that has not started can be cancelled.' });
+        await log(me.wallet, 'bug', `${who} cancelled the auto-fix for bug #${data.id}`, `bug:${data.id}`);
+        return reply(200, { ok: true });
       }
       case 'meeting-delete': {
         const { data, error } = await db.from('team_meetings').delete().eq('id', String(body.id)).select('title').maybeSingle();
@@ -511,6 +652,29 @@ Deno.serve(async (req) => {
         return reply(200, { rows: data });
       }
 
+      // ---------- hello@gali.lol inbox (every team role) ----------
+      case 'inbox': {
+        const no = need('inbox'); if (no) return no;
+        const [list, unread] = await Promise.all([
+          db.from('team_inbox').select('*').order('received_at', { ascending: false }).limit(300),
+          db.from('team_inbox').select('id', { count: 'exact', head: true }).is('read_at', null),
+        ]);
+        if (list.error) throw list.error;
+        const names = Object.fromEntries(((await db.from('team_members').select('wallet,name')).data ?? []).map((x) => [x.wallet, x.name || short(x.wallet)]));
+        return reply(200, { rows: (list.data ?? []).map((r) => ({ ...r, read_by_name: r.read_by ? names[r.read_by] ?? short(r.read_by) : null })), unread: unread.count ?? 0 });
+      }
+      case 'inbox-read': {
+        const no = need('inbox'); if (no) return no;
+        const ids = (Array.isArray(body.ids) ? body.ids : [body.id]).map(Number).filter((n: number) => Number.isInteger(n) && n > 0).slice(0, 500);
+        if (!ids.length) return reply(400, { error: 'Which email?' });
+        const read = body.read !== false;
+        let q = db.from('team_inbox').update(read ? { read_at: new Date().toISOString(), read_by: me.wallet } : { read_at: null, read_by: null }).in('id', ids);
+        if (read) q = q.is('read_at', null);
+        const { error } = await q;
+        if (error) throw error;
+        return reply(200, { ok: true });
+      }
+
       // ---------- lobby chat moderation ----------
       case 'chat': {
         const no = need('moderate'); if (no) return no;
@@ -538,6 +702,41 @@ Deno.serve(async (req) => {
         if (body.mute) { const { error } = await db.from('lobby_chat_muted').upsert({ wallet }); if (error) throw error; }
         else { const { error } = await db.from('lobby_chat_muted').delete().eq('wallet', wallet); if (error) throw error; }
         await log(me.wallet, 'moderation', `${who} ${body.mute ? 'muted' : 'unmuted'} ${name} in lobby chat`);
+        return reply(200, { ok: true });
+      }
+
+      // ---------- docs notice board (docs.gali.lol #board; written by the board function) ----------
+      case 'ideas': { // every team member can read it
+        const { data: posts, error } = await db.from('board_posts').select('id,author_id,title,body,tag,hidden,created_at').order('created_at', { ascending: false }).limit(500);
+        if (error) throw error;
+        const ids = (posts ?? []).map((p) => p.id);
+        let votes: { post_id: string; value: number }[] = [], replies: { id: string; post_id: string; author_id: string; body: string; created_at: string }[] = [];
+        if (ids.length) {
+          const [v, r] = await Promise.all([
+            db.from('board_votes').select('post_id,value').in('post_id', ids),
+            db.from('board_replies').select('id,post_id,author_id,body,created_at').in('post_id', ids).order('created_at'),
+          ]);
+          if (v.error) throw v.error;
+          if (r.error) throw r.error;
+          votes = v.data ?? []; replies = r.data ?? [];
+        }
+        return reply(200, { posts, votes, replies });
+      }
+      case 'ideas-hide': {
+        const no = need('moderate'); if (no) return no;
+        const id = clean(body.id, 40), hidden = Boolean(body.hidden);
+        const { data, error } = await db.from('board_posts').update({ hidden }).eq('id', id).select('title').single();
+        if (error) throw error;
+        await log(me.wallet, 'moderation', `${who} ${hidden ? 'hid' : 'restored'} the board idea "${data.title}"`);
+        return reply(200, { ok: true });
+      }
+      case 'ideas-delete': {
+        const no = need('moderate'); if (no) return no;
+        const id = clean(body.id, 40), kind = body.kind === 'reply' ? 'board_replies' : 'board_posts';
+        const { data, error } = await db.from(kind).delete().eq('id', id).select(kind === 'board_posts' ? 'title' : 'body').single();
+        if (error) throw error;
+        const what = kind === 'board_posts' ? `the board idea "${(data as { title: string }).title}"` : 'a reply on the board';
+        await log(me.wallet, 'moderation', `${who} deleted ${what}`);
         return reply(200, { ok: true });
       }
 
@@ -942,6 +1141,259 @@ Deno.serve(async (req) => {
         if (error) throw error;
         const m = await member(w.wallet);
         await log(me.wallet, 'money', `${who} paid ${m?.name || short(w.wallet)} ${w.amount} ${w.token}`, `withdraw:${w.id}`);
+        return reply(200, { ok: true });
+      }
+
+      // ---------- books: every income and spend in one ledger, valued in USD and MYR ----------
+      case 'books': {
+        const to = dateOrNull(body.to) ?? dayOf(new Date().toISOString());
+        const from = dateOrNull(body.from) ?? `${to.slice(0, 4)}-01-01`;
+        if (from > to) return reply(400, { error: 'The start date is after the end date.' });
+        const [rev, funds, spends, wds, ledger, members] = await Promise.all([
+          db.rpc('team_revenue_daily', { p_from: from, p_to: to }),
+          db.from('team_funds').select('id,name,source,amount,currency,received_on,tx_sig,link').eq('status', 'received').gte('received_on', from).lte('received_on', to),
+          db.from('team_fund_spends').select('id,category,amount_usd,token,token_amount,to_wallet,purpose,paid_at,tx_sig,link').eq('status', 'paid'),
+          db.from('team_withdrawals').select('id,wallet,token,amount,paid_at,tx_sig').eq('status', 'paid'),
+          db.from('team_ledger').select('*').gte('on_date', from).lte('on_date', to).order('on_date', { ascending: false }).limit(5000),
+          db.from('team_members').select('wallet,name'),
+        ]);
+        for (const r of [rev, funds, spends, wds, ledger]) if (r.error) throw r.error;
+        const nm = (w: string) => { const m = (members.data ?? []).find((x) => x.wallet === w); return m?.name || short(w); };
+        const px = await pricesFor(from, to);
+        type Row = { date: string; kind: 'income' | 'expense'; source: string; category: string; description: string; amount: number; currency: string; usd: number | null; myr: number | null; ref: string | null; ledger_id?: number; paid_by?: string };
+        const rows: Row[] = [];
+        const value = (date: string, amount: number, cur: string, fallbackUsd: number | null = null) => {
+          const usd = cur === 'USD' || cur === 'USDC' ? amount : cur === 'SOL' && px.SOL[date] ? amount * px.SOL[date] : cur === 'MYR' && px.MYR[date] ? amount / px.MYR[date] : fallbackUsd;
+          const myr = cur === 'MYR' ? amount : usd !== null && px.MYR[date] ? usd * px.MYR[date] : null;
+          return { usd: usd === null ? null : Math.round(usd * 100) / 100, myr: myr === null ? null : Math.round(myr * 100) / 100 };
+        };
+        const SRC: Record<string, string> = { mining: 'Mining fees', arcade: 'Arcade fees', nft: 'NFT claim fees' };
+        for (const r of (rev.data ?? []) as any[]) {
+          for (const [t, v] of [['SOL', Number(r.sol)], ['ORE', Number(r.ore)], ['SKR', Number(r.skr)]] as [string, number][]) {
+            if (!(v > 0)) continue;
+            rows.push({ date: r.day, kind: 'income', source: 'Revenue wallet', category: SRC[r.source] ?? r.source, description: `${SRC[r.source] ?? r.source} for the day`, amount: v, currency: t, ...value(r.day, v, t), ref: null });
+          }
+        }
+        for (const f of funds.data ?? []) rows.push({ date: f.received_on, kind: 'income', source: 'Fund wallet', category: 'Prize / grant / investment', description: `${f.name}${f.source ? ` (${f.source})` : ''}`, amount: Number(f.amount), currency: f.currency, ...value(f.received_on, Number(f.amount), f.currency), ref: f.tx_sig ? `tx:${f.tx_sig}` : f.link });
+        for (const sp of spends.data ?? []) {
+          const d = dayOf(sp.paid_at); if (d < from || d > to) continue;
+          rows.push({ date: d, kind: 'expense', source: 'Fund wallet', category: sp.category, description: `${sp.purpose} (to ${short(sp.to_wallet)})`, amount: Number(sp.token_amount), currency: sp.token, ...value(d, Number(sp.token_amount), sp.token, Number(sp.amount_usd)), ref: sp.tx_sig ? `tx:${sp.tx_sig}` : sp.link });
+        }
+        for (const w of wds.data ?? []) {
+          const d = dayOf(w.paid_at); if (d < from || d > to) continue;
+          rows.push({ date: d, kind: 'expense', source: 'Revenue wallet', category: 'Founder payout', description: `Revenue share paid to ${nm(w.wallet)}`, amount: Number(w.amount), currency: w.token, ...value(d, Number(w.amount), w.token), ref: w.tx_sig ? `tx:${w.tx_sig}` : null });
+        }
+        for (const l of ledger.data ?? []) rows.push({ date: l.on_date, kind: l.kind, source: l.paid_by === 'company' ? 'Off chain (company)' : `Off chain (paid by ${nm(l.paid_by)})`, category: l.category, description: l.description, amount: Number(l.amount), currency: l.currency, ...value(l.on_date, Number(l.amount), l.currency), ref: l.receipt, ledger_id: l.id, paid_by: l.paid_by });
+        rows.sort((a, b) => (a.date === b.date ? a.kind.localeCompare(b.kind) : b.date.localeCompare(a.date)));
+        return reply(200, { from, to, rows, ledger: ledger.data ?? [] });
+      }
+      case 'ledger-save': {
+        const description = clean(body.description, 300);
+        if (description.length < 3) return reply(400, { error: 'Say what it was.' });
+        const on_date = dateOrNull(body.on_date);
+        if (!on_date) return reply(400, { error: 'Pick the date.' });
+        const amount = Math.round(Number(body.amount) * 1e6) / 1e6;
+        if (!(amount > 0)) return reply(400, { error: 'Enter the amount.' });
+        const currency = ['MYR', 'USD', 'SOL', 'USDC'].includes(body.currency) ? body.currency : 'MYR';
+        const paid_by = body.paid_by === 'company' || !WALLET_RE.test(String(body.paid_by ?? '')) ? 'company' : String(body.paid_by);
+        const row = { on_date, kind: body.kind === 'income' ? 'income' : 'expense', category: clean(body.category, 60) || 'other', description, amount, currency, paid_by, receipt: urlOrNull(body.receipt) };
+        if (body.id) {
+          const { data: old } = await db.from('team_ledger').select('created_by').eq('id', Number(body.id)).maybeSingle();
+          if (!old) return reply(404, { error: 'No such entry.' });
+          if (!owner && old.created_by !== me.wallet) return reply(403, { error: 'Only the owner or whoever added it can change this entry.' });
+          const { error } = await db.from('team_ledger').update(row).eq('id', Number(body.id));
+          if (error) throw error;
+        } else {
+          const { error } = await db.from('team_ledger').insert({ ...row, created_by: me.wallet });
+          if (error) throw error;
+          await log(me.wallet, 'money', `${who} added ${row.kind === 'income' ? 'income' : 'a bill'} to the books: ${amount} ${currency}, ${description.slice(0, 80)}`);
+        }
+        return reply(200, { ok: true });
+      }
+      case 'ledger-delete': {
+        const { data: old } = await db.from('team_ledger').select('created_by,description').eq('id', Number(body.id)).maybeSingle();
+        if (!old) return reply(404, { error: 'No such entry.' });
+        if (!owner && old.created_by !== me.wallet) return reply(403, { error: 'Only the owner or whoever added it can remove this entry.' });
+        const { error } = await db.from('team_ledger').delete().eq('id', Number(body.id));
+        if (error) throw error;
+        await log(me.wallet, 'money', `${who} removed "${old.description.slice(0, 80)}" from the books`);
+        return reply(200, { ok: true });
+      }
+
+      // ---------- launch checklist: what must be settled before going public ----------
+      case 'launch': {
+        const { data, error } = await db.from('team_launch').select('*').order('sort').order('id');
+        if (error) throw error;
+        return reply(200, { items: data ?? [] });
+      }
+      case 'launch-save': {
+        const title = clean(body.title, 160);
+        if (!title) return reply(400, { error: 'Give the item a title.' });
+        const num = (v: unknown) => (v === '' || v === null || v === undefined || !(Number(v) >= 0) ? null : Math.round(Number(v)));
+        const row = {
+          title, detail: clean(body.detail, 1000),
+          area: ['deadline', 'legal', 'security', 'infra', 'product', 'money', 'marketing'].includes(body.area) ? body.area : 'product',
+          priority: ['must', 'should', 'nice'].includes(body.priority) ? body.priority : 'must',
+          cost_min: num(body.cost_min), cost_max: num(body.cost_max) ?? num(body.cost_min),
+          cost_kind: body.cost_kind === 'month' ? 'month' : 'once', cost_note: clean(body.cost_note, 160),
+          owner: WALLET_RE.test(String(body.owner ?? '')) ? body.owner : null, due_on: dateOrNull(body.due_on), updated_at: new Date().toISOString(),
+        };
+        if (body.id) {
+          const { error } = await db.from('team_launch').update(row).eq('id', Number(body.id));
+          if (error) throw error;
+          await log(me.wallet, 'task', `${who} updated the launch item "${title}"`);
+        } else {
+          const { data: last } = await db.from('team_launch').select('sort').order('sort', { ascending: false }).limit(1).maybeSingle();
+          const { error } = await db.from('team_launch').insert({ ...row, sort: (last?.sort ?? 0) + 10, created_by: me.wallet });
+          if (error) throw error;
+          await log(me.wallet, 'task', `${who} added the launch item "${title}"`);
+        }
+        return reply(200, { ok: true });
+      }
+      case 'launch-toggle': {
+        const done = !!body.done;
+        const { data, error } = await db.from('team_launch').update({ done, done_by: done ? me.wallet : null, done_at: done ? new Date().toISOString() : null, updated_at: new Date().toISOString() })
+          .eq('id', Number(body.id)).select('title').maybeSingle();
+        if (error) throw error;
+        if (!data) return reply(404, { error: 'No such item.' });
+        await log(me.wallet, 'task', done ? `${who} ticked off "${data.title}" for launch` : `${who} reopened "${data.title}" for launch`);
+        return reply(200, { ok: true });
+      }
+      case 'launch-delete': {
+        if (!owner) return reply(403, { error: 'Only the owner can remove a launch item.' });
+        const { data, error } = await db.from('team_launch').delete().eq('id', Number(body.id)).select('title').maybeSingle();
+        if (error) throw error;
+        if (data) await log(me.wallet, 'task', `${who} removed the launch item "${data.title}"`);
+        return reply(200, { ok: true });
+      }
+
+      // ---------- funds: prizes, grants and investment won, applied for or received ----------
+      case 'funds': {
+        const [funds, spends, rules, fs, balances] = await Promise.all([
+          db.from('team_funds').select('*').order('created_at', { ascending: false }).limit(500),
+          db.from('team_fund_spends').select('*').order('created_at', { ascending: false }).limit(500),
+          fundRules(), founders(), fundBalances(),
+        ]);
+        if (funds.error) throw funds.error;
+        if (spends.error) throw spends.error;
+        const list = (spends.data ?? []).map((x: any) => { const n = spendNeed(x, rules, fs); return { ...x, need: n.label, tier: n.tier }; });
+        return reply(200, { funds: funds.data ?? [], spends: list, rules, founders: fs, balances, fundWallet: FUND_WALLET });
+      }
+      case 'fund-spend-request': {
+        const rules = await fundRules();
+        const category = String(body.category ?? '');
+        if (!rules.cats.some((c) => c.k === category)) return reply(400, { error: 'Pick a budget category.' });
+        const usd = Math.round(Number(body.amount_usd) * 100) / 100;
+        if (!(usd > 0)) return reply(400, { error: 'Enter the cost in USD.' });
+        const token = String(body.token ?? 'USDC').toUpperCase();
+        if (!FUND_TOKENS.includes(token)) return reply(400, { error: 'Pay in USDC, SOL, ORE or SKR.' });
+        const amount = round(Number(body.token_amount), DECIMALS[token]);
+        if (!(amount > 0)) return reply(400, { error: `Enter how much ${token} to send.` });
+        const to = clean(body.to_wallet, 44);
+        if (!WALLET_RE.test(to)) return reply(400, { error: 'That is not a Solana wallet address.' });
+        if (to === FUND_WALLET) return reply(400, { error: 'That is the fund wallet itself.' });
+        const purpose = clean(body.purpose, 600);
+        if (purpose.length < 10) return reply(400, { error: 'Say what it is for (at least a short sentence).' });
+        const { data, error } = await db.from('team_fund_spends').insert({ created_by: me.wallet, category, amount_usd: usd, token, token_amount: amount, to_wallet: to, purpose, link: urlOrNull(body.link) }).select('id').single();
+        if (error) throw error;
+        await log(me.wallet, 'money', `${who} asked the fund for $${usd} (${category}): ${purpose.slice(0, 80)}`, `spend:${data.id}`);
+        return reply(200, { ok: true });
+      }
+      case 'fund-spend-approve':
+      case 'fund-spend-reject': {
+        if (!FOUNDER_ROLES.includes(me.role)) return reply(403, { error: 'Only founders (owner and admins) approve fund spends.' });
+        const { data: sp } = await db.from('team_fund_spends').select('*').eq('id', Number(body.id)).maybeSingle();
+        if (!sp) return reply(404, { error: 'No such request.' });
+        if (sp.status !== 'requested') return reply(400, { error: `This request is already ${sp.status}.` });
+        if (sp.created_by === me.wallet) return reply(400, { error: 'Someone else has to decide on your own request.' });
+        const now = new Date().toISOString();
+        if (action === 'fund-spend-reject') {
+          const { error } = await db.from('team_fund_spends').update({ status: 'rejected', decided_by: me.wallet, decided_at: now, decision_note: clean(body.note, 300) || null }).eq('id', sp.id).eq('status', 'requested');
+          if (error) throw error;
+          await log(me.wallet, 'money', `${who} rejected a fund spend of $${sp.amount_usd}`, `spend:${sp.id}`);
+          return reply(200, { ok: true });
+        }
+        const approvals = (sp.approvals ?? []) as { wallet: string; at: string }[];
+        if (approvals.some((a) => a.wallet === me.wallet)) return reply(400, { error: 'You already approved this.' });
+        approvals.push({ wallet: me.wallet, at: now });
+        const need = spendNeed(sp, await fundRules(), await founders());
+        const done = need.ok(approvals.map((a) => a.wallet));
+        const { error } = await db.from('team_fund_spends').update({ approvals, ...(done ? { status: 'approved', decided_by: me.wallet, decided_at: now } : {}) }).eq('id', sp.id).eq('status', 'requested');
+        if (error) throw error;
+        await log(me.wallet, 'money', done ? `${who} approved a fund spend of $${sp.amount_usd}, ready to pay` : `${who} approved a fund spend of $${sp.amount_usd} (${need.label.toLowerCase()} needed)`, `spend:${sp.id}`);
+        return reply(200, { ok: true, approved: done });
+      }
+      case 'fund-spend-cancel': {
+        const { data, error } = await db.from('team_fund_spends').update({ status: 'cancelled', decided_by: me.wallet, decided_at: new Date().toISOString() })
+          .eq('id', Number(body.id)).eq('created_by', me.wallet).in('status', ['requested', 'approved']).select('amount_usd').maybeSingle();
+        if (error) throw error;
+        if (!data) return reply(400, { error: 'Only your own request, before it is paid, can be cancelled.' });
+        await log(me.wallet, 'money', `${who} cancelled a fund spend of $${data.amount_usd}`);
+        return reply(200, { ok: true });
+      }
+      case 'fund-spend-paid': {
+        if (!FOUNDER_ROLES.includes(me.role)) return reply(403, { error: 'Only founders mark fund spends paid.' });
+        const sig = clean(body.tx_sig, 100);
+        if (!/^[1-9A-HJ-NP-Za-km-z]{60,100}$/.test(sig)) return reply(400, { error: 'Paste the transaction signature from your wallet, Squads or Solscan.' });
+        const { data: sp } = await db.from('team_fund_spends').select('*').eq('id', Number(body.id)).maybeSingle();
+        if (!sp) return reply(404, { error: 'No such request.' });
+        if (sp.status !== 'approved') return reply(400, { error: sp.status === 'requested' ? 'It still needs approval before it can be paid.' : `This request is ${sp.status}.` });
+        const problem = (await checkPayout(sig, sp.to_wallet, sp.token, Number(sp.token_amount))) ?? (RPC_URL && !(await fromFund(sig, sp.token)) ? 'That transaction did not send from the fund wallet.' : null);
+        if (problem && !body.force) return reply(400, { error: problem, canForce: true });
+        const { error } = await db.from('team_fund_spends').update({ status: 'paid', tx_sig: sig, paid_at: new Date().toISOString(), paid_by: me.wallet }).eq('id', sp.id).eq('status', 'approved');
+        if (error) return reply(400, { error: error.code === '23505' ? 'That transaction is already used for another spend.' : error.message });
+        await log(me.wallet, 'money', `${who} paid a fund spend of $${sp.amount_usd} (${sp.token_amount} ${sp.token})`, `spend:${sp.id}`);
+        return reply(200, { ok: true });
+      }
+      case 'fund-rules-set': {
+        if (!owner) return reply(403, { error: 'Only the owner changes the fund budget and limits.' });
+        const solo = Math.round(Number(body.solo)), two = Math.round(Number(body.two));
+        if (!(solo > 0 && two > solo)) return reply(400, { error: 'The 2-founder limit must be above the owner limit, both above 0.' });
+        const cats = (Array.isArray(body.cats) ? body.cats : []).slice(0, 12).map((c: any) => ({
+          k: clean(c?.k, 24).toLowerCase().replace(/[^a-z0-9_]/g, '') || clean(c?.label, 24).toLowerCase().replace(/[^a-z0-9]+/g, '_'),
+          label: clean(c?.label, 40), pct: Math.round(Number(c?.pct) * 10) / 10, about: clean(c?.about, 120),
+        })).filter((c: any) => c.label && c.k && c.pct >= 0);
+        const sum = cats.reduce((a: number, c: any) => a + c.pct, 0);
+        if (!cats.length || Math.abs(sum - 100) > 0.05) return reply(400, { error: `The categories add up to ${sum}%. Make them 100%.` });
+        const { error } = await db.from('team_settings').upsert({ key: 'fund_rules', value: { solo, two, cats }, updated_at: new Date().toISOString(), updated_by: me.wallet });
+        if (error) throw error;
+        await log(me.wallet, 'money', `${who} changed the fund budget and approval limits`);
+        return reply(200, { ok: true });
+      }
+      case 'fund-save': {
+        const name = clean(body.name, 120);
+        if (!name) return reply(400, { error: 'Give the fund a name.' });
+        const amount = Number(body.amount);
+        if (!(amount >= 0)) return reply(400, { error: 'Enter the amount as a number.' });
+        const status = ['applied', 'won', 'claiming', 'received', 'lost'].includes(body.status) ? body.status : 'won';
+        const steps = (Array.isArray(body.steps) ? body.steps : []).slice(0, 30)
+          .map((s: any) => ({ text: clean(s?.text, 200), done: !!s?.done })).filter((s: any) => s.text);
+        const tx = clean(body.tx_sig, 100);
+        const row = {
+          name, source: clean(body.source, 160), kind: ['prize', 'grant', 'investment', 'other'].includes(body.kind) ? body.kind : 'prize',
+          amount, currency: clean(body.currency, 10).toUpperCase() || 'USD', status,
+          expected_on: dateOrNull(body.expected_on), received_on: dateOrNull(body.received_on) ?? (status === 'received' ? new Date().toISOString().slice(0, 10) : null),
+          to_wallet: WALLET_RE.test(String(body.to_wallet ?? '')) ? body.to_wallet : null, tx_sig: tx || null,
+          link: urlOrNull(body.link), notes: clean(body.notes, 2000), steps, updated_at: new Date().toISOString(),
+        };
+        if (body.id) {
+          const { data: before } = await db.from('team_funds').select('status').eq('id', Number(body.id)).maybeSingle();
+          if (!before) return reply(404, { error: 'No such fund.' });
+          const { error } = await db.from('team_funds').update(row).eq('id', Number(body.id));
+          if (error) throw error;
+          await log(me.wallet, 'money', before.status !== status ? `${who} moved the fund ${name} to ${status}` : `${who} updated the fund ${name}`);
+        } else {
+          const { error } = await db.from('team_funds').insert({ ...row, created_by: me.wallet });
+          if (error) throw error;
+          await log(me.wallet, 'money', `${who} added the fund ${name}`);
+        }
+        return reply(200, { ok: true });
+      }
+      case 'fund-delete': {
+        if (!owner) return reply(403, { error: 'Only the owner can remove a fund.' });
+        const { data, error } = await db.from('team_funds').delete().eq('id', Number(body.id)).select('name').maybeSingle();
+        if (error) throw error;
+        if (data) await log(me.wallet, 'money', `${who} removed the fund ${data.name}`);
         return reply(200, { ok: true });
       }
 

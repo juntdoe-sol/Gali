@@ -1,4 +1,4 @@
-import { addBonusXp, reportRound } from './play';
+import { addBonusXp, addCaveXp, reportRound } from './play';
 import { addPending, loadVerified, useVerified } from './verifiedXp';
 import { create } from 'zustand';
 import { FEATURE_GALI_PROGRAM } from '../config/features';
@@ -260,7 +260,8 @@ interface GameState {
   /** Take this wallet's XP and points from another device when they are higher than this one's. */
   mergeProgress: (p: { xp: number; points: number }) => void;
   /** XP from Cave Run. Local game XP only: it feeds the miner level and nothing else. */
-  gainXp: (n: number) => void;
+  /** `cave`: Cave Run XP, which the server counts in its own daily pool */
+  gainXp: (n: number, from?: 'cave') => void;
   doEmote: () => void;
   claimQuest: (id: string) => void;
   equip: (key: string) => void;
@@ -1111,12 +1112,13 @@ export const useGame = create<GameState>((set, get) => {
       }
     },
 
-    gainXp: (n) => {
+    gainXp: (n, from) => {
       const add = Math.max(0, Math.min(100, Math.floor(n)));
       if (add) {
         updateSave((s) => ({ ...s, xp: s.xp + add, bonusXp: s.bonusXp + add }));
         announceXp(add);
-        addBonusXp(add);
+        if (from === 'cave') addCaveXp(add);
+        else addBonusXp(add);
         addPending(add);
       }
     },

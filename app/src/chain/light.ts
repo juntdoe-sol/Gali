@@ -33,8 +33,8 @@ export const chainReady =
 /** Anything on chain at all: Gali's program, or ORE's board in live mode. */
 export const onChainMode = chainReady || oreLive;
 
-/** Gali's platform fee on SOL deployed into ORE, in basis points (25 = 0.25%, beta rate; plan is 50 or 100). */
-export const PLATFORM_FEE_BPS = 25n;
+/** Gali's platform fee on SOL deployed into ORE, in basis points (100 = 1%). */
+export const PLATFORM_FEE_BPS = 100n;
 /** Where the platform fee goes. */
 export const REVENUE_WALLET = 'HDa2MTDdZXnrjTs6RRUUzEqCcrWMWu1fM673Cg7pzQMw';
 /** The fee on a deploy of `lamports`, rounded down. */

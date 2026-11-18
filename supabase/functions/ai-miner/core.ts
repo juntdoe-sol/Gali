@@ -6,7 +6,7 @@
  * the amount per square (never more than the player's own per-square limit) and pays from the automation's balance
  * into ORE's round. It cannot withdraw, change the limit or touch anything else. Only the player can close the
  * automation, and closing returns the balance to them. On each round it plays, ORE pays the executor Gali's fee:
- * 0.25% of the SOL deployed, the same as LITE and PRO (DiscretionaryBps). Rounds the AI sits out cost nothing. The
+ * 1% of the SOL deployed, the same as LITE and PRO (DiscretionaryBps). Rounds the AI sits out cost nothing. The
  * fees pile up on the AI key; sweepFees sends everything above a float for network fees to Gali's revenue wallet.
  *
  * Each round it waits until near the end, reads the board, and plays only squares that clear the margin

@@ -128,6 +128,10 @@ async function forward(body, ctx) {
   if (typeof hk === 'string' && hk && hk.length <= 256) {
     providers.push({ key: hk, url: () => { const u = new URL('https://mainnet.helius-rpc.com/'); u.searchParams.set('api-key', hk); return u; } });
   }
+  const hk2 = ctx.env?.HELIUS_RPC_KEY_2; // a second Helius account as the backup path
+  if (typeof hk2 === 'string' && hk2 && hk2.length <= 256 && hk2 !== hk) {
+    providers.push({ key: hk2, url: () => { const u = new URL('https://mainnet.helius-rpc.com/'); u.searchParams.set('api-key', hk2); return u; } });
+  }
   const ak = ctx.env?.ALCHEMY_RPC_KEY;
   if (typeof ak === 'string' && /^[A-Za-z0-9_-]{8,128}$/.test(ak)) {
     providers.push({ key: ak, url: () => new URL(`https://solana-mainnet.g.alchemy.com/v2/${ak}`) });

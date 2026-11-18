@@ -7,6 +7,7 @@
 //   seen   { name }                     check in this wallet's name; level, XP and points are the server's own
 //   round  { round }                    score a finished live round, read from ORE's own Round and Miner accounts
 //   bonus  { n }                        XP from fights, quests and the like: at most 100 a report, 600 a day
+//   cave   { n }                        Cave Run XP: its own pool, at most 100 a report, 400 a day
 //   ore    {}                           write down this wallet's lifetime ORE mined, read from ORE's Miner account
 //   ko     { killer, scope }            this wallet was knocked out by `killer` (a wallet)
 //   win    { mode, players }            this wallet won an arena match or a raid
@@ -135,6 +136,10 @@ Deno.serve(async (req) => {
     }
     if (a === 'bonus') {
       const { data, error } = await db.rpc('gali_bonus_xp', { p_wallet: me, p_n: int(q.n, 0, 100) });
+      return error ? fail(error) : reply(200, { ok: true, added: data ?? 0 });
+    }
+    if (a === 'cave') {
+      const { data, error } = await db.rpc('gali_cave_xp', { p_wallet: me, p_n: int(q.n, 0, 100) });
       return error ? fail(error) : reply(200, { ok: true, added: data ?? 0 });
     }
     if (a === 'ore') {

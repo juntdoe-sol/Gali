@@ -624,7 +624,7 @@ export function Pair({ lpr, rounds, onPaired }: { lpr: number; rounds: number; o
                 <Row k="Rounds" v={`${rounds} × ${fmtSol(cost.perRound)} SOL`} />
                 <Row k="Spots" v="All 25" />
                 <Row k="Network fee" v={`${fmtSol(cost.fee)} SOL / round`} />
-                <Row k="Gali fee (0.25%)" v={`${fmtSol(cost.perRound * rounds * 0.0025)} SOL`} />
+                <Row k="Gali fee (1%)" v={`${fmtSol(cost.perRound * rounds * 0.01)} SOL`} />
                 <Label size={13} color={C.skr} style={{ marginTop: 16 }}>
                   {"This TV can only deploy. It can't move your SOL."}
                 </Label>

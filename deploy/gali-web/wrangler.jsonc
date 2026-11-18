@@ -1,0 +1,12 @@
+// Deploys the Gali web game (betatest.gali.lol) from the Expo web export in ../../app/dist.
+// Build first:  cd ../../app && npx expo export --platform web
+// Then here:    npx wrangler deploy
+{
+  "name": "gali-web",
+  "compatibility_date": "2026-10-01",
+  "routes": [{ "pattern": "betatest.gali.lol", "custom_domain": true }],
+  "assets": {
+    "directory": "../../app/dist",
+    "not_found_handling": "single-page-application"
+  }
+}

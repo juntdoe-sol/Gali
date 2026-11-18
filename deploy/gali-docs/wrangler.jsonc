@@ -1,0 +1,8 @@
+// Deploys docs.gali.lol (static files only) from galidocs/dist.
+// Run from this folder:  npx wrangler deploy
+{
+  "name": "gali-docs",
+  "compatibility_date": "2026-10-01",
+  "assets": { "directory": "../../../galidocs/dist" },
+  "routes": [{ "pattern": "docs.gali.lol", "custom_domain": true }]
+}
