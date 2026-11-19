@@ -61,3 +61,6 @@ tv/dist
 # private admin app (Gali Ops) and files waiting to be deleted
 admin-app/
 _to_delete/
+
+# Supabase CLI link state (project ref, org, pooler host): local only
+supabase/.temp/
