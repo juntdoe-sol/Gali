@@ -277,10 +277,21 @@ export function WalletPicker() {
                 const { hovered, pressed, focused } = st as { hovered?: boolean; pressed: boolean; focused?: boolean };
                 return (
                   <PixelBox fill={hovered ? '#1d2d5e' : '#0b1430'} hi={hovered ? COLORS.gold : '#2d4282'} lo="#04060f" shadow={pressed ? 0 : 1} style={[styles.walletRow, { transform: [{ translateY: pressed ? U : 0 }] }]}>
-                    {w.icon ? <Image source={{ uri: w.icon }} style={styles.walletIcon} /> : <PixIcon name="wallet" size={32} />}
-                    <T v="display" style={{ fontSize: 22, flex: 1 }}>
-                      {w.name}
-                    </T>
+                    {w.icon ? <Image source={{ uri: w.icon }} style={styles.walletIcon} /> : <PixIcon name={w.name === 'Email' ? 'mail' : 'wallet'} size={32} />}
+                    {w.name === 'Email' ? (
+                      <View style={{ flex: 1 }}>
+                        <T v="display" style={{ fontSize: 22 }}>
+                          Sign in with email
+                        </T>
+                        <T v="muted" style={{ fontSize: 12 }}>
+                          No wallet app? We make you one.
+                        </T>
+                      </View>
+                    ) : (
+                      <T v="display" style={{ fontSize: 22, flex: 1 }}>
+                        {w.name}
+                      </T>
+                    )}
                     {i < 9 ? <Kbd k={String(i + 1)} /> : null}
                     <T v="display" style={{ fontSize: 20, color: hovered ? COLORS.gold : COLORS.muted }}>
                       {'>'}
@@ -291,6 +302,7 @@ export function WalletPicker() {
               }}
             </Pressable>
           ))}
+          {wallets.length > 0 && wallets.every((w) => w.name === 'Email') ? <NoWallet withEmail /> : null}
           <WalletFeedback />
         </Window>
       </Scrim>
@@ -302,7 +314,7 @@ export function WalletPicker() {
  * No Solana wallet in this browser. Phones have no wallet extensions, so the way in is a wallet app's own
  * browser (Phantom and Solflare open any page there); computers can add an extension and try again.
  */
-function NoWallet() {
+function NoWallet({ withEmail }: { withEmail?: boolean }) {
   const { mouse } = useLayout();
   const connect = useGame((s) => s.connect);
   const here = typeof window !== 'undefined' && window.location ? window.location.href : 'https://betatest.gali.lol';
@@ -314,9 +326,13 @@ function NoWallet() {
   return (
     <View style={{ gap: 10 }}>
       <T style={{ fontSize: 14, lineHeight: 20 }}>
-        {mouse
-          ? 'This browser has no Solana wallet. Add the Phantom, Solflare or Jupiter extension, then try again.'
-          : 'Phone browsers have no Solana wallet. Open Gali inside your wallet app instead: it has its own browser.'}
+        {withEmail
+          ? mouse
+            ? 'Have a Solana wallet? Add the Phantom, Solflare or Jupiter extension, then try again.'
+            : 'Have a wallet app? Open Gali inside it instead: it has its own browser.'
+          : mouse
+            ? 'This browser has no Solana wallet. Add the Phantom, Solflare or Jupiter extension, then try again.'
+            : 'Phone browsers have no Solana wallet. Open Gali inside your wallet app instead: it has its own browser.'}
       </T>
       {mouse ? null : (
         <>

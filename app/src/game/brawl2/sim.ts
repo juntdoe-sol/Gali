@@ -19,12 +19,23 @@
 export type Weapon = 'pick' | 'axe' | 'hammer' | 'blade';
 export type MoveId =
   | 'nLight' | 'sLight' | 'dLight' | 'nAir' | 'sAir' | 'dAir'
-  | 'nHeavy' | 'sHeavy' | 'dHeavy' | 'recovery' | 'pound' | 'special';
+  | 'nHeavy' | 'sHeavy' | 'dHeavy' | 'recovery' | 'pound' | 'special'
+  /** the fighter's equipped skills: SKILL alone, SKILL + side, SKILL + down (moveOf picks the real one) */
+  | 'skN' | 'skS' | 'skD';
 /**
  * Special moves: one button, used when the meter is full. Each weapon family has one (game/brawl2/specials.ts
  * maps gear and NFT items to them). They are tuned to be equally strong: different, never better.
  */
 export type SpecialId = 'quake' | 'rush' | 'moon' | 'whirl' | 'dive' | 'guard';
+/**
+ * Skills: bought with NUGS (the in-game coin) and put in three slots: SKILL alone, SKILL + side, SKILL + down, each
+ * with its own cooldown. The six specials are also skills, free for everyone, a little lighter than the meter
+ * version. Every skill has the same power budget: they play differently, none is stronger (specials.ts SKILL_INFO).
+ */
+export type SkillId = SpecialId | 'grab' | 'dynamite' | 'magnet' | 'tunnel' | 'geyser' | 'cavein';
+export const SKILL_SLOTS = ['skN', 'skS', 'skD'] as const;
+/** frames between uses of one skill slot */
+export const SKILL_CD_F = 7 * 60;
 export type Mode = '1v1' | 'ffa';
 export type Difficulty = 'easy' | 'normal' | 'hard';
 
@@ -38,8 +49,10 @@ export interface Input {
   dodge: boolean;
   /** the special move (needs a full meter) */
   special?: boolean;
+  /** use a skill: the slot comes from the stick (none, side, down) */
+  skill?: boolean;
 }
-export const NO_INPUT: Input = { mx: 0, my: 0, jump: false, light: false, heavy: false, dodge: false, special: false };
+export const NO_INPUT: Input = { mx: 0, my: 0, jump: false, light: false, heavy: false, dodge: false, special: false, skill: false };
 
 export interface Move {
   /** frames before, during and after the hit */
@@ -66,6 +79,12 @@ export interface Move {
   away?: boolean;
   /** a counter stance: no hitbox; a hit that lands during it is turned back on the attacker */
   guard?: boolean;
+  /** a grab: on a hit, throw them up, forward, back or down, the way the stick points */
+  grab?: boolean;
+  /** pulls the one it hits in toward the attacker, for a follow-up */
+  pull?: boolean;
+  /** tunnels: safe while it digs, then pops up behind the nearest foe as the hit starts */
+  blink?: boolean;
 }
 
 export interface Fighter {
@@ -118,6 +137,10 @@ export interface Fighter {
   ledge: number;
   /** frames before another ledge grab */
   ledgeCool: number;
+  /** equipped skills: SKILL alone, SKILL + side, SKILL + down (null: empty slot) */
+  skills: (SkillId | null)[];
+  /** frames left before each slot can be used again */
+  skillCd: number[];
 }
 
 export interface Platform {
@@ -252,6 +275,10 @@ const PICK: Record<MoveId, Move> = {
   pound: m({ start: 8, active: 30, end: 16, hx: -8, hy: -6, hw: 24, hh: 12, dmg: 13, base: 150, growth: 150, angle: 70, air: true, slam: true }),
   // stands in for the fighter's own special (moveOf picks the real one)
   special: m({ start: 8, active: 6, end: 20, dmg: 14, base: 190, growth: 180, angle: -45 }),
+  // stand in for the fighter's skills
+  skN: m({ start: 8, active: 6, end: 20, dmg: 11, base: 160, growth: 145, angle: -45 }),
+  skS: m({ start: 8, active: 6, end: 20, dmg: 11, base: 160, growth: 145, angle: -45 }),
+  skD: m({ start: 8, active: 6, end: 20, dmg: 11, base: 160, growth: 145, angle: -45 }),
 };
 
 /** The specials, same budget each: about 14 damage and a finisher's knockback, paid for with wind-up or end lag. */
@@ -271,8 +298,47 @@ export const SPECIALS: Record<SpecialId, Move> = {
 };
 export const SPECIAL_IDS = Object.keys(SPECIALS) as SpecialId[];
 export const isSpecial = (x: unknown): x is SpecialId => typeof x === 'string' && (SPECIAL_IDS as string[]).includes(x);
-/** The move a fighter is doing (its own special for 'special'). */
-export const moveOf = (f: Pick<Fighter, 'weapon' | 'special'>, id: MoveId): Move => (id === 'special' ? SPECIALS[f.special] : MOVES[f.weapon][id]);
+
+/** A special as a skill: the same move, about a fifth lighter (it comes back every 7 seconds, not with the meter). */
+const lighter = (mv: Move): Move => ({ ...mv, dmg: Math.round(mv.dmg * 0.8), base: mv.base * 0.85, growth: mv.growth * 0.8 });
+/** Skills, one budget: about 11 damage and a light finisher's knockback, paid for with wind-up, reach or end lag. */
+export const SKILLS: Record<SkillId, Move> = {
+  quake: { ...lighter(SPECIALS.quake), start: 11 },
+  // the dash and the dive punish a miss hard: as skills they recover sooner and reach a little wider
+  rush: { ...lighter(SPECIALS.rush), dmg: 13, base: SPECIALS.rush.base * 0.95, end: 12, hw: 28, hh: 22, hy: -22 },
+  moon: lighter(SPECIALS.moon),
+  whirl: lighter(SPECIALS.whirl),
+  dive: { ...lighter(SPECIALS.dive), end: 12, hw: 24 },
+  guard: lighter(SPECIALS.guard),
+  // Ore Grab: a short reach that grabs, then throws the way you point (up when you don't)
+  grab: m({ start: 6, active: 4, end: 22, hx: 4, hy: -20, hw: 16, hh: 18, dmg: 10, base: 175, growth: 150, angle: -85, grab: true }),
+  // Dynamite Toss: lobbed ahead, it blows up a few steps away
+  dynamite: m({ start: 18, active: 5, end: 16, hx: 52, hy: -26, hw: 40, hh: 30, dmg: 11, base: 170, growth: 150, angle: -55, away: true }),
+  // Magnet Hook: a long, thin reach that drags them in
+  magnet: m({ start: 10, active: 5, end: 18, hx: 6, hy: -16, hw: 110, hh: 10, dmg: 6, base: 0, growth: 0, angle: 0, pull: true }),
+  // Tunnel Dig: dig in (safe), pop up behind the nearest foe and strike
+  tunnel: m({ start: 24, active: 5, end: 22, hx: -2, hy: -24, hw: 20, hh: 24, dmg: 10, base: 160, growth: 140, angle: -40, blink: true }),
+  // Geyser: the floor bursts a little way ahead, straight up
+  geyser: m({ start: 14, active: 8, end: 16, hx: 60, hy: -48, hw: 28, hh: 48, dmg: 11, base: 185, growth: 150, angle: -88 }),
+  // Cave-In: rocks drop from above, ahead of you, spiking down
+  cavein: m({ start: 20, active: 7, end: 18, hx: 34, hy: -60, hw: 34, hh: 60, dmg: 11, base: 150, growth: 135, angle: 75 }),
+};
+export const SKILL_IDS = Object.keys(SKILLS) as SkillId[];
+export const isSkill = (x: unknown): x is SkillId => typeof x === 'string' && (SKILL_IDS as string[]).includes(x);
+const slotOf = (id: MoveId) => (id === 'skN' ? 0 : id === 'skS' ? 1 : id === 'skD' ? 2 : -1);
+export const isSkillMove = (id: MoveId) => slotOf(id) >= 0;
+/** The skill in a fighter's move (null when it isn't a skill). */
+export function skillOf(f: Pick<Fighter, 'skills'>, id: MoveId): SkillId | null {
+  const k = slotOf(id);
+  return k >= 0 ? (f.skills?.[k] ?? null) : null;
+}
+
+/** The move a fighter is doing (its own special for 'special', its own skill for a skill slot). */
+export const moveOf = (f: Pick<Fighter, 'weapon' | 'special'> & Partial<Pick<Fighter, 'skills'>>, id: MoveId): Move => {
+  if (id === 'special') return SPECIALS[f.special];
+  const sk = slotOf(id) >= 0 ? f.skills?.[slotOf(id)] : null;
+  return sk ? SKILLS[sk] : MOVES[f.weapon][id];
+};
 
 const tune = (base: Record<MoveId, Move>, f: (mv: Move, id: MoveId) => Partial<Move>) =>
   Object.fromEntries((Object.keys(base) as MoveId[]).map((id) => [id, { ...base[id], ...f(base[id], id) }])) as Record<MoveId, Move>;
@@ -295,7 +361,7 @@ export const MOVES: Record<Weapon, Record<MoveId, Move>> = {
 
 /* ---------------- the match ---------------- */
 export interface MatchEvent {
-  t: 'hit' | 'ko' | 'jump' | 'dodge' | 'swing' | 'land' | 'spawn' | 'go' | 'end' | 'recover' | 'special' | 'counter' | 'grab' | 'sudden';
+  t: 'hit' | 'ko' | 'jump' | 'dodge' | 'swing' | 'land' | 'spawn' | 'go' | 'end' | 'recover' | 'special' | 'counter' | 'grab' | 'sudden' | 'skill' | 'blink' | 'throw';
   id?: string;
   by?: string;
   x?: number;
@@ -337,17 +403,18 @@ export function rand(match: Match): number {
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
 
-export function newFighter(o: { id: string; name: string; bot: Difficulty | null; weapon: Weapon; special?: SpecialId; team: number; at: [number, number]; facing: 1 | -1 }): Fighter {
+export function newFighter(o: { id: string; name: string; bot: Difficulty | null; weapon: Weapon; special?: SpecialId; skills?: (SkillId | null)[]; team: number; at: [number, number]; facing: 1 | -1 }): Fighter {
   return {
     id: o.id, name: o.name, bot: o.bot, weapon: o.weapon, team: o.team,
     x: o.at[0], y: o.at[1], vx: 0, vy: 0, facing: o.facing, grounded: false, on: -1,
     airJumps: 1, recoveryUsed: false, airDodgeUsed: false,
     dmg: 0, stocks: STOCKS, hitstun: 0, freeze: 0, invuln: 0, dodge: 0, dodgeCool: 0, dodgeDir: [0, 0], dropping: 0, respawn: 0,
     act: null, lastBy: null, lastAt: 0, kos: 0, falls: 0, prev: { ...NO_INPUT }, place: 0, hitN: 0, special: o.special ?? 'quake', meter: 0, hang: 0, ledge: -1, ledgeCool: 0,
+    skills: [0, 1, 2].map((k) => (isSkill(o.skills?.[k]) ? o.skills![k] : null)), skillCd: [0, 0, 0],
   };
 }
 
-export function newMatch(o: { mode: Mode; players: { id: string; name: string; bot: Difficulty | null; weapon: Weapon; special?: SpecialId }[]; seed?: number; stage?: Stage }): Match {
+export function newMatch(o: { mode: Mode; players: { id: string; name: string; bot: Difficulty | null; weapon: Weapon; special?: SpecialId; skills?: (SkillId | null)[] }[]; seed?: number; stage?: Stage }): Match {
   const stage = o.stage ?? stageFor(o.seed ?? 12345);
   const fighters = o.players.map((p, i) => newFighter({ ...p, team: i, at: stage.spawns[i % stage.spawns.length], facing: stage.spawns[i % stage.spawns.length][0] < stage.w / 2 ? 1 : -1 }));
   return { stage, mode: o.mode, frame: 0, countdown: COUNTDOWN_F, timeLeft: MATCH_F, fighters, over: false, seed: o.seed ?? 12345, events: [] };
@@ -384,15 +451,21 @@ function startMove(match: Match, f: Fighter, id: MoveId, i: Input) {
       f.on = -1;
     }
   }
-  match.events.push({ t: 'swing', id: f.id, move: id, heavy: id.endsWith('Heavy') || id === 'pound' || id === 'recovery' || id === 'special' });
+  match.events.push({ t: 'swing', id: f.id, move: id, heavy: id.endsWith('Heavy') || id === 'pound' || id === 'recovery' || id === 'special' || isSkillMove(id) });
   if (id === 'special') match.events.push({ t: 'special', id: f.id, x: f.x, y: f.y });
+  if (isSkillMove(id)) {
+    match.events.push({ t: 'skill', id: f.id, x: f.x, y: f.y, move: id });
+    // digging in: nobody can hit you until you pop out
+    if (mv.blink) f.invuln = Math.max(f.invuln, mv.start + 1);
+  }
   if (id === 'recovery') match.events.push({ t: 'recover', id: f.id, x: f.x, y: f.y });
 }
 
 /** One fighter's own movement and buttons for one frame. */
 function control(match: Match, f: Fighter, i: Input) {
   const p = f.prev;
-  const pressed = { jump: i.jump && !p.jump, light: i.light && !p.light, heavy: i.heavy && !p.heavy, dodge: i.dodge && !p.dodge, special: Boolean(i.special && !p.special) };
+  const pressed = { jump: i.jump && !p.jump, light: i.light && !p.light, heavy: i.heavy && !p.heavy, dodge: i.dodge && !p.dodge, special: Boolean(i.special && !p.special), skill: Boolean(i.skill && !p.skill) };
+  for (let k = 0; k < 3; k++) if (f.skillCd[k] > 0) f.skillCd[k]--;
   const downPressed = i.my > 0.6 && p.my <= 0.6;
   f.prev = { ...i };
   if (f.dodgeCool > 0) f.dodgeCool--;
@@ -466,13 +539,17 @@ function control(match: Match, f: Fighter, i: Input) {
     return;
   }
   // attacks
+  const slot = i.my > 0.5 ? 2 : Math.abs(i.mx) > 0.3 ? 1 : 0;
   if (!busy && pressed.special && f.meter >= METER_FULL) {
     f.meter = 0;
     startMove(match, f, 'special', i);
+  } else if (!busy && pressed.skill && f.skills[slot] && f.skillCd[slot] === 0) {
+    f.skillCd[slot] = SKILL_CD_F;
+    startMove(match, f, SKILL_SLOTS[slot], i);
   } else if (!busy && (pressed.light || pressed.heavy)) startMove(match, f, pickMove(f, i, pressed.heavy), i);
   // jump (also cancels the end of a light attack)
   const cur = f.act ? moveOf(f, f.act.move) : null;
-  const canCancel = Boolean(f.act && cur && !cur.slam && f.act.f >= cur.start + cur.active + 2 && !f.act.move.endsWith('Heavy') && f.act.move !== 'recovery' && f.act.move !== 'pound' && f.act.move !== 'special');
+  const canCancel = Boolean(f.act && cur && !cur.slam && f.act.f >= cur.start + cur.active + 2 && !f.act.move.endsWith('Heavy') && f.act.move !== 'recovery' && f.act.move !== 'pound' && f.act.move !== 'special' && !isSkillMove(f.act.move));
   if (pressed.jump && (!f.act || canCancel)) {
     if (f.grounded) {
       f.vy = -JUMP_V;
@@ -534,7 +611,7 @@ function strike(match: Match) {
       if (d === a || !alive(d) || d.invuln > 0 || a.act.hit.includes(d.id)) continue;
       if (match.mode !== 'ffa' && d.team === a.team) continue;
       if (!overlap(box, hurtbox(d))) continue;
-      const heavy = a.act.move.endsWith('Heavy') || a.act.move === 'pound' || a.act.move === 'special';
+      const heavy = a.act.move.endsWith('Heavy') || a.act.move === 'pound' || a.act.move === 'special' || isSkillMove(a.act.move);
       if (match.authority === false) {
         // a guest: only its own swings, and only the spark and sound; the host's snapshot brings the hit
         if (a.id !== match.local) continue;
@@ -566,10 +643,28 @@ function land(match: Match, a: Fighter, d: Fighter, mv: Move, heavy: boolean) {
   const kb = mv.base + (mv.growth * d.dmg) / 100;
   // the launch angle, mirrored by facing; a hit from behind still sends them away from the attacker
   const dir = d.x >= a.x ? 1 : -1;
-  const face = mv.away || Math.abs(mv.angle) >= 85 ? dir : a.facing;
-  const rad = (mv.angle * Math.PI) / 180;
+  let face: number = mv.away || Math.abs(mv.angle) >= 85 ? dir : a.facing;
+  let angle = mv.angle;
+  if (mv.grab) {
+    // the throw goes where the stick points: down spikes, toward throws forward, away throws behind, none throws up
+    const sx = a.prev.mx * a.facing;
+    if (a.prev.my > 0.5) angle = 70;
+    else if (sx > 0.3) angle = -30;
+    else if (sx < -0.3) {
+      angle = -30;
+      face = -a.facing;
+    }
+    match.events.push({ t: 'throw', id: d.id, by: a.id, x: d.x, y: d.y - BODY_H / 2 });
+  }
+  const rad = (angle * Math.PI) / 180;
   d.vx = Math.cos(rad) * kb * face;
   d.vy = Math.sin(rad) * kb;
+  if (mv.pull) {
+    // dragged in to just in front of the attacker
+    const to = a.x + a.facing * 16;
+    d.vx = Math.max(-420, Math.min(420, (to - d.x) * 7));
+    d.vy = -90;
+  }
   // grounded and sent down: bounce up instead
   if (d.grounded && d.vy > 0) d.vy = -d.vy * 0.5;
   d.grounded = d.vy >= 0 && d.grounded;
@@ -577,7 +672,7 @@ function land(match: Match, a: Fighter, d: Fighter, mv: Move, heavy: boolean) {
     d.grounded = false;
     d.on = -1;
   }
-  d.hitstun = Math.round(Math.min(60, 6 + kb * 0.05));
+  d.hitstun = mv.pull ? 24 : Math.round(Math.min(60, 6 + kb * 0.05));
   d.hang = 0;
   d.ledgeCool = 30;
   d.act = null;
@@ -690,6 +785,24 @@ function ko(match: Match, f: Fighter) {
   }
 }
 
+/** Tunnel Dig: pop up behind the nearest foe standing or falling (it stays put if nobody is in reach). */
+function tunnel(match: Match, f: Fighter) {
+  let best: Fighter | null = null;
+  for (const o of match.fighters) {
+    if (o === f || !alive(o) || (match.mode !== 'ffa' && o.team === f.team)) continue;
+    if (!best || Math.abs(o.x - f.x) < Math.abs(best.x - f.x)) best = o;
+  }
+  if (!best || Math.abs(best.x - f.x) > 170) return;
+  f.x = best.x - best.facing * 20;
+  f.y = best.y;
+  f.vx = 0;
+  f.vy = 0;
+  f.grounded = best.grounded;
+  f.on = best.on;
+  f.facing = best.facing;
+  match.events.push({ t: 'blink', id: f.id, x: f.x, y: f.y });
+}
+
 /** Falling past the end of a solid platform, close to its edge: grab the ledge. */
 function grabLedge(match: Match, f: Fighter) {
   if (f.hang > 0 || f.grounded || f.vy < 0 || f.hitstun > 0 || f.ledgeCool > 0 || f.dodge > 0) return;
@@ -762,6 +875,7 @@ export function step(match: Match, inputs: Record<string, Input>) {
     if (f.act) {
       f.act.f++;
       const mv = moveOf(f, f.act.move);
+      if (mv.blink && f.act.f === mv.start) tunnel(match, f);
       // a ground pound keeps going until it lands; everything else ends on time
       if (mv.slam) {
         if (f.act.f >= mv.start + mv.active) f.act.f = mv.start + mv.active - 1;

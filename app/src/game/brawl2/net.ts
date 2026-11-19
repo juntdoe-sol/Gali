@@ -9,7 +9,7 @@
  *    except while the miner is reeling from a hit or dead: then the host's own physics decide.
  *  - Damage, knockback, KOs and the result only ever come from the host.
  */
-import { METER_FULL, MOVES, type Fighter, type Input, type Match, type MatchEvent, type MoveId } from './sim';
+import { isSkillMove, METER_FULL, MOVES, SKILL_CD_F, SKILL_SLOTS, type Fighter, type Input, type Match, type MatchEvent, type MoveId } from './sim';
 
 export const MOVE_LIST = Object.keys(MOVES.pick) as MoveId[];
 const r1 = (n: number) => Math.round(n * 10) / 10;
@@ -22,6 +22,8 @@ export interface NetPlayer {
   weapon: string;
   /** the special move their weapon gives (specials.ts) */
   sp?: string;
+  /** their three skill slots (SKILL, SKILL + side, SKILL + down), empty string for none */
+  sk?: string[];
   /** their wallet, for the rank (the server only counts it once that wallet reports the same result) */
   w?: string;
 }
@@ -65,6 +67,12 @@ export function applySelf(f: Fighter, p: SelfPack, input: Input): boolean {
   // a special costs a full meter, and the host keeps the meter
   if (mv === 'special' && f.act?.move !== 'special') {
     if (f.meter >= METER_FULL) f.meter = 0;
+    else mv = undefined as unknown as MoveId;
+  }
+  // a skill: its slot must hold one and be off cooldown; the host keeps the cooldown
+  if (mv && isSkillMove(mv) && f.act?.move !== mv) {
+    const k = (SKILL_SLOTS as readonly string[]).indexOf(mv);
+    if (f.skills[k] && f.skillCd[k] === 0) f.skillCd[k] = SKILL_CD_F;
     else mv = undefined as unknown as MoveId;
   }
   if (!mv) f.act = null;

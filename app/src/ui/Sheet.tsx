@@ -28,6 +28,8 @@ import { MilestoneQuests } from './Milestones';
 import { useNft } from '../game/nft';
 import { useOreHits, type OreHit } from '../game/oreHits';
 import { ReportBugRow } from './ReportBug';
+import { refreshMarket, useOreStats } from '../game/oreStats';
+import { useName, useRename } from '../game/username';
 
 const ORE_PROGRAM_STR = 'oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv';
 
@@ -323,8 +325,6 @@ const hitAgo = (iso: string) => {
 /** Every Gali miner's solo wins and motherlode hits, newest first (recorded by the server from ORE's accounts). */
 function BigHits({ owner }: { owner: string | null }) {
   const { hits, status, load } = useOreHits();
-  const [more, setMore] = useState(false);
-  const [moreMine, setMoreMine] = useState(false);
   // one list at a time: your own hits, or every other Gali miner's
   const [view, setView] = useState<'you' | 'all'>('all');
   useEffect(() => {
@@ -338,9 +338,20 @@ function BigHits({ owner }: { owner: string | null }) {
   // your own hits first, then everyone else's
   const mineList = owner ? list.filter((h) => h.wallet === owner) : [];
   const others = list.filter((h) => h.wallet !== owner);
-  const mineShown = moreMine ? mineList : mineList.slice(0, 4);
-  const shown = more ? others : others.slice(0, 8);
+  // every hit at once: the sheet scrolls
+  const mineShown = mineList;
+  const shown = others;
   const who = (h: OreHit) => (h.wallet === owner ? 'You' : h.name || short(h.wallet));
+  // what a hit brought in, in dollars at today's prices: its ORE plus the SOL that came back
+  const market = useOreStats((s) => s.market);
+  useEffect(() => {
+    void refreshMarket();
+  }, []);
+  const usdOf = (h: OreHit) => {
+    if (h.ore === null || !market?.oreUsd) return null;
+    return h.ore * market.oreUsd + (h.solBack ?? 0) * (market.solUsd ?? 0);
+  };
+  const usd = (n: number) => `$${n >= 1000 ? Math.round(n).toLocaleString() : n.toFixed(2)}`;
   const row = (h: OreHit) => {
             const mine = h.wallet === owner;
             const lodeHit = h.kind === 'motherlode';
@@ -355,6 +366,12 @@ function BigHits({ owner }: { owner: string | null }) {
                     {h.ore === null ? '…' : `${fmtOreAmt(h.ore)} ORE`}
                   </T>
                 </View>
+                {usdOf(h) !== null ? (
+                  <PixelBox fill="rgba(20,241,149,0.12)" edge={COLORS.green} u={1.5} style={styles.hitUsd}>
+                    <T v="display" style={{ fontSize: 22, lineHeight: 24, color: COLORS.green }}>≈ {usd(usdOf(h)!)}</T>
+                    <T v="tiny" style={{ color: COLORS.green, letterSpacing: 1 }}>EARNED THIS ROUND</T>
+                  </PixelBox>
+                ) : null}
                 <T v="muted" style={styles.hitMeta}>
                   {lodeHit ? `MOTHERLODE${h.share !== null && h.share < 1 ? ` · ${(h.share * 100).toFixed(h.share < 0.01 ? 2 : 1)}% of the gold spot` : ''}` : '★ Solo win'} · #
                   {(h.roundId % 100000).toLocaleString()} · {h.approx ? '~' : ''}
@@ -389,7 +406,7 @@ function BigHits({ owner }: { owner: string | null }) {
         </T>
       </View>
       <T v="muted" style={{ marginTop: 4 }}>
-        Every round a Gali miner took the whole ORE on a ★ solo spot, and every motherlode they were on the gold spot for.
+        Every round a Gali miner took the whole ORE on a ★ solo spot, and every motherlode they were on the gold spot for. Dollar amounts: the ORE plus the SOL that came back, at today's prices.
       </T>
       {status === 'loading' && !hits.length ? (
         <T v="muted" style={{ marginTop: 8 }}>
@@ -414,12 +431,10 @@ function BigHits({ owner }: { owner: string | null }) {
               ) : (
                 <View style={{ gap: 6 }}>{mineShown.map(row)}</View>
               )}
-              {mineList.length > 4 ? <Btn small label={moreMine ? 'Show fewer' : `Show all ${mineList.length}`} onPress={() => setMoreMine((m) => !m)} /> : null}
             </>
           ) : (
             <>
               {!others.length ? <T v="muted">Nothing yet. The first solo win shows up here.</T> : <View style={{ gap: 6 }}>{shown.map(row)}</View>}
-              {others.length > 8 ? <Btn small label={more ? 'Show fewer' : `Show all ${others.length}`} onPress={() => setMore((m) => !m)} /> : null}
             </>
           )}
         </>
@@ -746,6 +761,114 @@ function BrawlSwitch() {
   );
 }
 
+/** On web, the player signed in with email (a Privy wallet Gali made for them), not a wallet app. */
+function emailWallet() {
+  if (Platform.OS !== 'web') return false;
+  try {
+    return globalThis.localStorage?.getItem('gali-web-wallet') === 'Email';
+  } catch {
+    return false;
+  }
+}
+
+/** Email wallets have no wallet app, so the full address (to add SOL) and the key export live here. */
+function EmailWalletRow({ owner }: { owner: string }) {
+  const toast = useGame((s) => s.toast);
+  const [send, setSend] = useState(false);
+  const copy = () =>
+    void navigator.clipboard?.writeText(owner).then(
+      () => toast('Wallet address copied', 'good'),
+      () => toast(owner, 'info'),
+    );
+  const exportKey = () =>
+    void loadChain()
+      .then((c) => c.exportEmailWallet())
+      .catch((e: unknown) => toast(e instanceof Error ? e.message : 'Could not open the key window', 'bad'));
+  return (
+    <View style={{ marginTop: 10, gap: 6 }}>
+      <T v="muted">Email wallet. Send SOL to this address to play:</T>
+      <T selectable style={{ fontSize: 12 }}>{owner}</T>
+      <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+        <Btn small label="Copy address" onPress={copy} />
+        <Btn small label="Send SOL out" onPress={() => setSend((v) => !v)} />
+        <Btn small kind="ghost" label="Show private key" onPress={exportKey} />
+      </View>
+      {send ? <SendOut owner={owner} onDone={() => setSend(false)} /> : null}
+    </View>
+  );
+}
+
+/** Send SOL from the email wallet to any Solana address: check, then the wallet's own approval. */
+function SendOut({ owner, onDone }: { owner: string; onDone: () => void }) {
+  const sol = useGame((s) => s.wallet.sol);
+  const toast = useGame((s) => s.toast);
+  const refresh = useGame((s) => s.refreshWallet);
+  const [to, setTo] = useState('');
+  const [amt, setAmt] = useState('');
+  const [check, setCheck] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  // the network fee stays behind
+  const max = Math.max(0, Math.floor((sol - 0.00001) * 1e9) / 1e9);
+  const n = Number(amt);
+  const addrOk = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(to.trim()) && to.trim() !== owner;
+  const ok = addrOk && n > 0 && n <= max;
+  const go = async () => {
+    setBusy(true);
+    setErr('');
+    try {
+      const chain = await loadChain();
+      await chain.sendSolOut(to.trim(), Math.round(n * 1e9), owner);
+      toast(`Sent ${n} SOL to ${short(to.trim())}`, 'good');
+      void refresh();
+      onDone();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not send. Try again.');
+      setCheck(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <View style={{ gap: 6, marginTop: 4 }}>
+      <TextInput value={to} onChangeText={(v) => { setTo(v); setCheck(false); setErr(''); }} placeholder="Solana address to send to" placeholderTextColor={COLORS.muted} autoCapitalize="none" autoCorrect={false} style={[INPUT, { fontSize: 13 }]} />
+      <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+        <TextInput value={amt} onChangeText={(v) => { setAmt(v.replace(/[^0-9.]/g, '')); setCheck(false); setErr(''); }} placeholder="SOL" placeholderTextColor={COLORS.muted} keyboardType="decimal-pad" style={[INPUT, { flex: 1 }]} />
+        <Btn small label="Max" onPress={() => { setAmt(String(max)); setCheck(false); }} />
+      </View>
+      {to.trim() && !addrOk ? <T style={{ color: COLORS.red, fontSize: 12 }}>{to.trim() === owner ? 'That is this wallet.' : 'That is not a Solana address.'}</T> : null}
+      {n > max ? <T style={{ color: COLORS.red, fontSize: 12 }}>You have {max} SOL to send.</T> : null}
+      {err ? <T style={{ color: COLORS.red, fontSize: 12 }}>{err}</T> : null}
+      {check ? (
+        <>
+          <T style={{ fontSize: 13 }}>Send {n} SOL to {to.trim()}? A transfer can't be undone.</T>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <Btn small kind="gold" label={busy ? 'Sending…' : 'Yes, send'} disabled={busy} onPress={() => void go()} />
+            <Btn small kind="ghost" label="Back" disabled={busy} onPress={() => setCheck(false)} />
+          </View>
+        </>
+      ) : (
+        <Btn small kind="gold" label="Review" disabled={!ok} onPress={() => setCheck(true)} />
+      )}
+    </View>
+  );
+}
+
+/** The player's Gali name, and the way to change it (free once every 30 days, sooner 0.1 SOL: see NamePrompt). */
+function NameCard() {
+  const name = useName((n) => n.name);
+  return (
+    <Card style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+      <View style={{ flex: 1 }}>
+        <T v="label">Name</T>
+        <T v="display" style={{ fontSize: 22 }}>{name || 'No name yet'}</T>
+        <T v="muted" style={{ fontSize: 12 }}>Free to change once every 30 days. Sooner costs 0.1 SOL.</T>
+      </View>
+      <Btn small label="Change name" onPress={() => useRename.getState().setOpen(true)} />
+    </Card>
+  );
+}
+
 function Me() {
   const w = useGame((s) => s.wallet);
   const save = useGame((s) => s.save);
@@ -753,6 +876,7 @@ function Me() {
   const { connect, disconnect, airdrop, setMute, setMusicOff, setAutoPopBig, refreshWallet, sweepSession } = useGame.getState();
   return (
     <>
+      <NameCard />
       <Card>
         <T v="label">Wallet</T>
         {w.owner ? (
@@ -776,6 +900,7 @@ function Me() {
               {CLUSTER === 'devnet' ? <Btn small label="+1 devnet SOL" onPress={() => void airdrop()} /> : null}
               <Btn small kind="ghost" label="Disconnect" onPress={() => void disconnect()} />
             </View>
+            {emailWallet() ? <EmailWalletRow owner={w.owner} /> : null}
           </>
         ) : (
           <>
@@ -854,6 +979,7 @@ const styles = StyleSheet.create({
   grabber: { alignSelf: 'center', width: 40, height: U * 2, backgroundColor: '#3a5290', marginTop: 8, marginBottom: 4 },
   sheetHead: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 6, paddingBottom: 10, borderBottomColor: '#22356f', borderBottomWidth: U },
   past: { padding: 12 },
+  hitUsd: { flexDirection: 'row', alignItems: 'baseline', gap: 8, alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, marginTop: 4 },
   hitMeta: { fontFamily: 'Jersey15_400Regular', fontSize: 14, lineHeight: 16, marginTop: 3, letterSpacing: 0.4, fontVariant: ['tabular-nums'] },
   hitNum: { fontSize: 15, lineHeight: 16, color: COLORS.text, fontVariant: ['tabular-nums'] },
   rowCard: { flexDirection: 'row', alignItems: 'center', gap: 10 },

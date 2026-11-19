@@ -5,6 +5,7 @@
  * The rules live in game/arena.ts and game/brawl.ts. This file passes what the canvas reports to them,
  * and shows what they say.
  */
+import { fightLoadout } from '../game/skills';
 import { MineAnywhere } from './MineAnywhere';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, View, type ViewStyle } from 'react-native';
@@ -523,7 +524,7 @@ function PowersPanel({ onClose, desk }: { onClose: () => void; desk: boolean }) 
     <View style={styles.powerList}>
       {ids.map((id) => {
         const p = POWERS[id];
-        const open = unlocked(id, lvl);
+        const open = unlocked(id, lvl, fightLoadout());
         return (
           <Pressable key={id} disabled={!open} onPress={() => pick(id)} accessibilityRole="button" accessibilityLabel={`${p.name}. ${open ? p.desc : `Unlocks at level ${p.lvl}`}`}>
             <Card style={[styles.power, cur === id && { borderColor: COLORS.gold }, !open && { opacity: 0.5 }]} glow={cur === id ? COLORS.gold : undefined}>
@@ -551,7 +552,7 @@ function PowersPanel({ onClose, desk }: { onClose: () => void; desk: boolean }) 
           <View style={styles.powerList}>
             {ACTIVES.map((id) => {
               const p = POWERS[id];
-              const open = unlocked(id, lvl);
+              const open = unlocked(id, lvl, fightLoadout());
               return (
                 <Card key={id} style={[styles.power, !open && { opacity: 0.5 }]}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>

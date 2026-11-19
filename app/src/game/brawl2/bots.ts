@@ -3,7 +3,7 @@
  * them too. Three levels differ in how fast they react, how often they attack well, and how well they recover.
  * Deterministic: they draw from the match's seeded random.
  */
-import { METER_FULL, MOVES, rand, type Difficulty, type Fighter, type Input, type Match } from './sim';
+import { METER_FULL, MOVES, rand, SKILLS, type Difficulty, type Fighter, type Input, type Match } from './sim';
 
 interface Brain {
   /** frames until the next decision; the input is held until then */
@@ -32,7 +32,7 @@ export class Bots {
       if (b.wait > 0) {
         b.wait--;
         // buttons are taps: release them after the frame they were pressed
-        out[f.id] = { ...b.out, light: false, heavy: false, dodge: false, special: false, jump: b.out.jump && b.wait > 3 };
+        out[f.id] = { ...b.out, light: false, heavy: false, dodge: false, special: false, skill: false, jump: b.out.jump && b.wait > 3 };
         b.out = out[f.id];
         continue;
       }
@@ -111,6 +111,23 @@ export class Bots {
         adx < 38 && Math.abs(dy) < 14 && f.grounded;
       if (fits) {
         i.special = true;
+        return i;
+      }
+    }
+    // a skill that would land from here (SKILL alone, + side, + down), now and then
+    if (!f.act && rand(match) < L.aim * 0.35) {
+      for (let k = 0; k < 3; k++) {
+        const sk = f.skills[k];
+        if (!sk || f.skillCd[k] > 0) continue;
+        const mv = SKILLS[sk];
+        const ahead = Math.sign(dx) === f.facing || k === 1;
+        // a move that lunges reaches further: count part of the lunge
+        const far = mv.hx + mv.hw + 8 + (mv.lunge ? Math.abs(mv.lunge[0]) * 0.22 : 0);
+        const fits = mv.blink ? adx < 160 : mv.guard ? Boolean(foe.act) && adx < 44 : ahead && adx > mv.hx - 8 && adx < far && dy < 12 && dy > mv.hy - 20;
+        if (!fits) continue;
+        i.skill = true;
+        if (k === 1) i.mx = Math.sign(dx);
+        if (k === 2) i.my = 1;
         return i;
       }
     }

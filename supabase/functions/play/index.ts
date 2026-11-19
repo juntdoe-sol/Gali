@@ -18,6 +18,13 @@
 //   tip     { body }                    University of ORE: share a mining tip (8-200 characters, 3 a day, no links;
 //                                       needs a Gali name). sql/uni-tips.sql
 //   tipvote { id, kind }                upvote ('up') or report ('report') someone else's tip, once each
+//   rename  { name, sig? }              change this wallet's Gali name: free once every 30 days, sooner needs `sig`,
+//                                       a confirmed transfer of 0.1 SOL to Gali's revenue wallet (sql/name-change.sql)
+//   cards   {}                          this wallet's Mining Cards: unused ones it bought, and ones it redeemed
+//   skills  {}                          this wallet's NUGS (in-game coin) and the Fight Club skills it owns
+//   buyskill { skill }                  buy a skill with NUGS (sql/nugs-skills.sql)
+//   redeem  { code }                    use a Mining Card code: XP and the pack now, then the card's SOL from Gali's
+//                                       house wallet (sql/mining-cards.sql)
 // Deploy: npx supabase functions deploy play
 // Secrets: DM_SECRET (shared with dm), SOLANA_RPC, TICKET_KEY (32-byte ed25519 seed, hex; see scripts/ticket-key.mjs)
 //
@@ -58,6 +65,37 @@ const cleanName = (n: unknown) => String(n ?? '').replace(/[^A-Za-z0-9 _.-]/g, '
 const cleanBody = (b: unknown) => String(b ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 80);
 const int = (v: unknown, lo: number, hi: number) => Math.min(hi, Math.max(lo, Math.round(Number(v) || 0)));
 const SCOPES = new Set(['lobby', 'island', 'arena']);
+
+/* ---------- paid renames: 0.1 SOL to Gali's revenue wallet, checked on chain ---------- */
+const REVENUE_WALLET = 'HDa2MTDdZXnrjTs6RRUUzEqCcrWMWu1fM673Cg7pzQMw';
+const NAME_FEE = 100_000_000; // lamports
+async function solRpc(method: string, params: unknown[]) {
+  const url = Deno.env.get('SOLANA_RPC');
+  if (!url) throw new Error('SOLANA_RPC is not set');
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
+  const j = await r.json();
+  if (j.error) throw new Error(j.error.message);
+  return j.result;
+}
+type ParsedIx = { program?: string; parsed?: { type?: string; info?: { source?: string; destination?: string; lamports?: number } } };
+/** Lamports `wallet` sent to the revenue wallet in transaction `sig` (confirmed, no error, under an hour old), or an error. */
+async function namePayment(sig: string, wallet: string): Promise<number | string> {
+  if (!/^[1-9A-HJ-NP-Za-km-z]{64,90}$/.test(sig)) return 'That payment does not look right.';
+  let tx: { blockTime?: number; meta?: { err?: unknown }; transaction?: { message?: { instructions?: ParsedIx[] } } } | null = null;
+  for (let i = 0; i < 4 && !tx; i++) {
+    tx = await solRpc('getTransaction', [sig, { encoding: 'jsonParsed', commitment: 'confirmed', maxSupportedTransactionVersion: 0 }]);
+    if (!tx) await new Promise((r) => setTimeout(r, 1500));
+  }
+  if (!tx) return 'The payment is not on chain yet. Wait a moment and try again.';
+  if (tx.meta?.err) return 'That payment failed on chain.';
+  if (!tx.blockTime || Date.now() / 1000 - tx.blockTime > 3600) return 'That payment is too old. Pay again to rename.';
+  let paid = 0;
+  for (const ix of tx.transaction?.message?.instructions ?? []) {
+    const info = ix.parsed?.info;
+    if (ix.program === 'system' && ix.parsed?.type === 'transfer' && info?.source === wallet && info?.destination === REVENUE_WALLET) paid += Number(info.lamports) || 0;
+  }
+  return paid >= NAME_FEE ? paid : 'That payment is not 0.1 SOL from your wallet to Gali.';
+}
 const MODES = new Set(['lms', 'koth', 'boss', 'waves']);
 const TICKET_MS = 60 * 60_000;
 /** The text a ticket signs; the app checks the same text (app/src/game/ticket.ts). */
@@ -123,6 +161,59 @@ Deno.serve(async (req) => {
       if (error) return fail(error);
       await setBase(me).catch((e) => console.error('base', (e as Error)?.message ?? e));
       return reply(200, { ok: true });
+    }
+    if (a === 'rename') {
+      const name = cleanName(q.name);
+      if (name.length < 2) return reply(400, { error: 'Use 2 to 14 letters, numbers, spaces, dots, dashes or underscores.' });
+      const sig = q.sig ? String(q.sig) : null;
+      let lamports = 0;
+      if (sig) {
+        const p = await namePayment(sig, me);
+        if (typeof p === 'string') return reply(400, { error: p });
+        lamports = p;
+      }
+      const { data, error } = await db.rpc('gali_rename', { p_wallet: me, p_name: name, p_sig: sig, p_lamports: lamports });
+      if (error) return fail(error);
+      if (data === 'pay') {
+        const { data: m } = await db.from('gali_miners').select('name_changed_at').eq('wallet', me).maybeSingle();
+        const next = m?.name_changed_at ? new Date(new Date(m.name_changed_at).getTime() + 30 * 86_400_000).toISOString() : null;
+        return reply(402, { pay: true, lamports: NAME_FEE, to: REVENUE_WALLET, next });
+      }
+      if (data === 'used') return reply(400, { error: 'That payment was already used for a rename.' });
+      if (data !== 'ok' && data !== 'same') return reply(400, { error: 'Could not change the name.' });
+      return reply(200, { ok: true, name });
+    }
+    if (a === 'skills') {
+      const [n, owned] = await Promise.all([db.rpc('gali_nugs', { p_wallet: me }), db.from('gali_skills').select('skill').eq('wallet', me)]);
+      if (n.error || owned.error) return fail(n.error ?? owned.error);
+      return reply(200, { ok: true, nugs: Number(n.data ?? 0), owned: (owned.data ?? []).map((r: { skill: string }) => r.skill) });
+    }
+    if (a === 'buyskill') {
+      const skill = String(q.skill ?? '');
+      if (!/^[a-z]{3,12}$/.test(skill)) return reply(400, { error: 'No such skill.' });
+      const { data, error } = await db.rpc('gali_buy_skill', { p_wallet: me, p_skill: skill });
+      if (error) return fail(error);
+      if (data === 'short') return reply(400, { error: 'Not enough NUGS yet. Play rounds and fights to earn more.' });
+      if (data === 'unknown') return reply(400, { error: 'That skill is not for sale.' });
+      const { data: n } = await db.rpc('gali_nugs', { p_wallet: me });
+      return reply(200, { ok: true, skill, nugs: Number(n ?? 0), owned: data === 'owned' });
+    }
+    if (a === 'cards') {
+      const [mine, used] = await Promise.all([
+        db.from('mining_cards').select('code, value, sol_lamports, bought_at').eq('owner', me).eq('status', 'unused').order('bought_at', { ascending: false }).limit(50),
+        db.from('mining_cards').select('code, value, sol_lamports, redeemed_at, payout_sig').eq('redeemed_by', me).order('redeemed_at', { ascending: false }).limit(20),
+      ]);
+      if (mine.error || used.error) return fail(mine.error ?? used.error);
+      return reply(200, { ok: true, unused: mine.data, redeemed: used.data });
+    }
+    if (a === 'redeem') {
+      const code = String(q.code ?? '').toUpperCase();
+      if (!/^GALI-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(code)) return reply(400, { error: 'That code does not look right. It reads GALI-XXXX-XXXX-XXXX.' });
+      const { data, error } = await db.rpc('mining_card_redeem', { p_wallet: me, p_code: code });
+      if (error) return fail(error);
+      if (data?.error === 'used') return reply(400, { error: 'This card was already used.' });
+      if (data?.error) return reply(400, { error: 'No card has that code.' });
+      return reply(200, { ok: true, code, value: data.value, sol_lamports: data.sol_lamports, rewards: data.rewards, payout: null });
     }
     if (a === 'round') {
       const round = BigInt(int(q.round, 0, Number.MAX_SAFE_INTEGER));

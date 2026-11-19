@@ -7,15 +7,16 @@
  * on the right), with no trip through the app, which is what made the old arena's buttons feel late.
  *
  * Keys (computer): A / D or arrows move, W / Up / Space jump, S / Down drop through or aim down,
- * J or left click light attack, K or right click heavy attack, L or Shift dodge, I or E or middle click special.
+ * J or left click light attack, K or right click heavy attack, L or Shift dodge, I or E or middle click special,
+ * U or Q a skill (alone, with A / D for the side skill, with S for the down skill).
  */
 import { canvasDpr, reducedMotion } from './screen';
 import { ctx2d, loadAtlas, makeCanvas, text, textWidth, type Ctx } from './art';
 import { drawMiner, frameAt } from './actors';
 import type { Look } from './types';
 import { Bots } from '../game/brawl2/bots';
-import { FPS, METER_FULL, STAGES, moveHitbox, moveOf, newMatch, NO_INPUT, poseOf, step, STOCKS, type Difficulty, type Fighter, type Input, type Match, type MatchEvent, type Mode, type SpecialId, type Weapon } from '../game/brawl2/sim';
-import { SPECIAL_INFO } from '../game/brawl2/specials';
+import { FPS, METER_FULL, SKILL_CD_F, STAGES, isSkill, moveHitbox, moveOf, newMatch, NO_INPUT, poseOf, skillOf, step, STOCKS, type Difficulty, type Fighter, type Input, type Match, type MatchEvent, type Mode, type SkillId, type SpecialId, type Weapon } from '../game/brawl2/sim';
+import { SKILL_INFO, SPECIAL_INFO } from '../game/brawl2/specials';
 import { WH, WW, WX0, WY0, type Scene } from './fightclubArt';
 import { animateStreetScene, paintStreetScene } from './fightclubStreetStages';
 import { paintStreetCard } from './fightclubStreetCard';
@@ -29,6 +30,8 @@ export interface BrawlSetup {
   weapon: Weapon;
   /** your special move (game/brawl2/specials.ts specialOf your weapon) */
   special: SpecialId;
+  /** your three skills: SKILL, SKILL + side, SKILL + down (game/skills.ts) */
+  skills?: (SkillId | null)[];
   seed?: number;
   /** online (game/brawl2/online.ts): this miner's id, the match, and who hosts it */
   net?: { role: 'host' | 'guest'; me: string; mid: string; host: string; players: NetPlayer[] };
@@ -79,6 +82,8 @@ const EASE_S = 0.07;
 const COLORS = ['#ffc93c', '#ff5a6a', '#4fd6ef', '#8ef06a'];
 const BOT_NAMES = ['Rusty', 'Clank', 'Pebble', 'Grit'];
 const BOT_SPECIALS: SpecialId[] = ['rush', 'quake', 'moon', 'whirl'];
+/** each bot's skills, so a fight against bots shows them too */
+const BOT_SKILLS: (SkillId | null)[][] = [['moon', 'rush', 'cavein'], ['quake', 'magnet', 'dive'], ['grab', 'dynamite', 'geyser'], ['whirl', 'tunnel', 'quake']];
 const BOT_LOOKS: Look[] = [
   { hat: 'hat-red', fit: '#7a2f5c', pick: '#b8c4d6', handle: '#6b4a32', pet: null, glow: 'none', sex: 'm' },
   { hat: 'hat-teal', fit: '#8a7a4a', pick: '#3de0c8', handle: '#2b2140', pet: null, glow: 'none', sex: 'f' },
@@ -145,7 +150,7 @@ export class BrawlEngine {
   /** your meter was full last frame (for the READY call) */
   private wasFull = false;
   private stick: { id: number; ox: number; oy: number; x: number; y: number } | null = null;
-  private held = new Map<number, 'jump' | 'light' | 'heavy' | 'dodge' | 'special'>();
+  private held = new Map<number, 'jump' | 'light' | 'heavy' | 'dodge' | 'special' | 'skill'>();
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -199,21 +204,22 @@ export class BrawlEngine {
     this.hostHeard = performance.now();
     this.looks.clear();
     this.colorOf.clear();
-    const players: { id: string; name: string; bot: Difficulty | null; weapon: Weapon; special: SpecialId }[] = [];
+    const players: { id: string; name: string; bot: Difficulty | null; weapon: Weapon; special: SpecialId; skills?: (SkillId | null)[] }[] = [];
     if (net) {
       // the same list, in the same order, on every device in the match
       for (const p of net.players) {
-        players.push({ id: p.id, name: p.id === this.me ? s.name || 'You' : p.name, bot: null, weapon: 'pick', special: p.id === this.me ? s.special : ((p.sp as SpecialId) ?? 'quake') });
+        const theirs = (p.sk ?? []).slice(0, 3).map((k) => (isSkill(k) ? k : null));
+        players.push({ id: p.id, name: p.id === this.me ? s.name || 'You' : p.name, bot: null, weapon: 'pick', special: p.id === this.me ? s.special : ((p.sp as SpecialId) ?? 'quake'), skills: p.id === this.me ? s.skills : theirs });
         this.looks.set(p.id, p.id === this.me ? s.look : ((p.look as Look) ?? BOT_LOOKS[0]));
         if (p.id !== this.me) this.heard.set(p.id, performance.now());
       }
     } else {
-      players.push({ id: ME, name: s.name || 'You', bot: null, weapon: s.weapon, special: s.special ?? 'quake' });
+      players.push({ id: ME, name: s.name || 'You', bot: null, weapon: s.weapon, special: s.special ?? 'quake', skills: s.skills });
       this.looks.set(ME, s.look);
     }
     const want = s.mode === '1v1' ? 2 : 4;
     for (let k = 0; players.length < want; k++) {
-      players.push({ id: `bot${k}`, name: BOT_NAMES[k], bot: (net ? 'normal' : s.diff) as Difficulty, weapon: 'pick', special: BOT_SPECIALS[k % BOT_SPECIALS.length] });
+      players.push({ id: `bot${k}`, name: BOT_NAMES[k], bot: (net ? 'normal' : s.diff) as Difficulty, weapon: 'pick', special: BOT_SPECIALS[k % BOT_SPECIALS.length], skills: BOT_SKILLS[k % BOT_SKILLS.length] });
       this.looks.set(`bot${k}`, BOT_LOOKS[k % BOT_LOOKS.length]);
     }
     this.match = newMatch({ mode: s.mode, players, seed: s.seed ?? Math.floor(Math.random() * 1e9) });
@@ -311,7 +317,7 @@ export class BrawlEngine {
     });
     if (Array.isArray(sn.e)) {
       // your own swings already showed their sparks; the rest is news
-      const news = sn.e.filter((ev) => ev && typeof ev === 'object' && !(ev.t === 'hit' && ev.by === this.me) && !(ev.id === this.me && ['jump', 'dodge', 'land', 'swing', 'recover', 'special', 'grab'].includes(ev.t)));
+      const news = sn.e.filter((ev) => ev && typeof ev === 'object' && !(ev.t === 'hit' && ev.by === this.me) && !(ev.id === this.me && ['jump', 'dodge', 'land', 'swing', 'recover', 'special', 'grab', 'skill', 'blink'].includes(ev.t)));
       this.react(m, news);
     }
     if (sn.m[4] === 1) m.sudden = true;
@@ -425,7 +431,7 @@ export class BrawlEngine {
   }
 
   /** The phone buttons, in CSS px: [id, x, y, radius, label]. */
-  private buttons(): ['jump' | 'light' | 'heavy' | 'dodge' | 'special', number, number, number, string][] {
+  private buttons(): ['jump' | 'light' | 'heavy' | 'dodge' | 'special' | 'skill', number, number, number, string][] {
     const r = Math.max(26, Math.min(40, this.H * 0.085));
     const bx = this.W - r * 1.6;
     const by = this.H - r * 1.5;
@@ -435,6 +441,7 @@ export class BrawlEngine {
       ['jump', bx, by, r * 1.05, 'JUMP'],
       ['dodge', bx - r * 2.4, by - r * 3.2, r * 0.8, 'DODGE'],
       ['special', bx - r * 4.4, by - r * 0.4, r * 0.9, 'SPECIAL'],
+      ['skill', bx - r * 4.6, by - r * 2.6, r * 0.85, 'SKILL'],
     ];
   }
   private buttonAt(x: number, y: number) {
@@ -463,6 +470,7 @@ export class BrawlEngine {
       heavy: k.has('k') || this.mouse.heavy || held.has('heavy'),
       dodge: k.has('l') || k.has('shift') || held.has('dodge'),
       special: k.has('i') || k.has('e') || this.mouse.special || held.has('special'),
+      skill: k.has('u') || k.has('q') || held.has('skill'),
     };
   }
 
@@ -507,7 +515,7 @@ export class BrawlEngine {
         step(m, inputs);
         if (this.role === 'host') for (const e of m.events) if (e.t !== 'swing' && e.t !== 'recover') this.outbox.push({ ...e });
         // a guest's own copy only speaks for its own miner; the host's snapshots bring the rest
-        this.react(m, guest ? m.events.filter((e) => (e.id === this.me && ['jump', 'dodge', 'land', 'swing', 'recover', 'special', 'grab'].includes(e.t)) || (e.t === 'hit' && e.by === this.me)) : m.events);
+        this.react(m, guest ? m.events.filter((e) => (e.id === this.me && ['jump', 'dodge', 'land', 'swing', 'recover', 'special', 'grab', 'skill', 'blink'].includes(e.t)) || (e.t === 'hit' && e.by === this.me)) : m.events);
       }
       if (n === 5) this.acc = 0;
     }
@@ -578,6 +586,28 @@ export class BrawlEngine {
           this.kick(200, 2.5);
           this.emit({ t: 'sfx', name: 'special' });
         }
+      } else if (e.t === 'skill') {
+        const f = m.fighters.find((x) => x.id === e.id);
+        const sk = f && e.move ? skillOf(f, e.move) : null;
+        const info = sk ? SKILL_INFO[sk] : null;
+        if (info) {
+          this.fx.push({ k: 'ring', x: e.x!, y: e.y! - 12, t0: now, dur: 360, c: info.color, s: 24 });
+          this.fx.push({ k: 'word', x: 240, y: 110, t0: now, dur: 800, c: info.color, word: e.id === this.me ? info.name : `${f!.name.slice(0, 8)}: ${info.name}`, small: true });
+          if (sk === 'cavein' || sk === 'dynamite' || sk === 'geyser') {
+            // where it lands: rocks, a blast or a burst a little way ahead
+            const ax = e.x! + f!.facing * (sk === 'cavein' ? 52 : sk === 'dynamite' ? 72 : 75);
+            const at = now + (sk === 'geyser' ? 230 : 280);
+            for (let k = 0; k < 10; k++) this.fx.push({ k: 'dust', x: ax + (k - 5) * 4, y: sk === 'cavein' ? e.y! - 70 : e.y!, t0: at, dur: 520, c: info.color, vx: (k - 5) * 18, vy: sk === 'cavein' ? 160 : -170 });
+            this.fx.push({ k: 'ring', x: ax, y: e.y! - 14, t0: at, dur: 380, c: info.color, s: 30 });
+          }
+          this.emit({ t: 'sfx', name: 'special' });
+        }
+      } else if (e.t === 'blink') {
+        for (let k = 0; k < 8; k++) this.fx.push({ k: 'dust', x: e.x! + (k - 4) * 4, y: e.y!, t0: now, dur: 420, c: '#b388ff', vx: (k - 4) * 22, vy: -60 });
+        this.fx.push({ k: 'ring', x: e.x!, y: e.y! - 10, t0: now, dur: 320, c: '#b388ff', s: 22 });
+      } else if (e.t === 'throw') {
+        this.fx.push({ k: 'word', x: 240, y: 110, t0: now, dur: 700, c: '#ffb347', word: 'THROW!', small: true });
+        this.emit({ t: 'sfx', name: 'throw' });
       } else if (e.t === 'sudden') {
         this.fx.push({ k: 'word', x: 240, y: 110, t0: now, dur: 1600, c: '#ff5a6a', word: 'SUDDEN DEATH' });
         this.kick(300, 3);
@@ -891,6 +921,23 @@ export class BrawlEngine {
       for (let i = 0; i < STOCKS; i++) {
         c.fillStyle = i < f.stocks ? col : 'rgba(255,255,255,0.15)';
         c.fillRect(x + 7 + i * (hs * 4), top + ch - hs * 4, hs * 3, hs * 3);
+      }
+      // your skills: three little squares by your card, filling back up as each cooldown runs out
+      if (f.id === this.me && f.skills.some(Boolean)) {
+        const q = Math.max(4, hs * 4);
+        const sy0 = this.touch ? top + ch + 3 : top - q - 3;
+        f.skills.forEach((sk, j) => {
+          const qx = x + j * (q + 3);
+          c.fillStyle = 'rgba(12,8,22,0.82)';
+          c.fillRect(qx, sy0, q, q);
+          if (!sk) return;
+          const col = SKILL_INFO[sk].color;
+          const left = f.skillCd[j] / SKILL_CD_F;
+          c.fillStyle = col;
+          c.globalAlpha = left > 0 ? 0.35 : 1;
+          c.fillRect(qx, sy0 + q * left, q, q * (1 - left));
+          c.globalAlpha = 1;
+        });
       }
       // the special meter along the bottom edge; full, it glows in the special's colour
       const full = f.meter >= METER_FULL;

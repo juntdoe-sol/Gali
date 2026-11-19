@@ -46,7 +46,17 @@ export const POWER_KEY: Record<ActiveId, string> = { dash: 'Q', guard: 'E', slam
 export const MEND_HP = 25;
 export const PASSIVES: PassiveId[] = ['skin', 'pet'];
 
-export const unlocked = (p: PowerId, lvl: number) => lvl >= POWERS[p].lvl;
+/**
+ * Fight Club skills count out here too: each equipped skill opens the arena power closest to it at any level
+ * (game/skills.ts), so a skill you bought is yours in the arena as well.
+ */
+export const SKILL_POWER: Record<string, ActiveId> = {
+  rush: 'dash', magnet: 'dash', tunnel: 'dash',
+  quake: 'slam', moon: 'slam', dive: 'slam', geyser: 'slam', cavein: 'slam',
+  whirl: 'spin', guard: 'guard', grab: 'splash', dynamite: 'splash',
+};
+export const unlocked = (p: PowerId, lvl: number, skills?: readonly (string | null)[]) =>
+  lvl >= POWERS[p].lvl || Boolean(skills?.some((k) => k && SKILL_POWER[k] === p));
 
 /** How far each weapon reaches, map px between the attacker (or the shard) and the victim's feet. */
 export const REACH: Record<Weapon, number> = { swing: 22, dash: 52, slam: 34, ore: 26, splash: 26, pet: 30, boss: 40, mob: 30, sting: 40, spin: 30, prop: 22 };

@@ -21,7 +21,7 @@ export function setPlayPass(p: string | null, wallet: string | null) {
 export const playWallet = () => passWallet;
 
 /** One call that needs the answer (an arena ticket). Null without a pass or on any failure. */
-export async function playCall<T>(a: 'ticket' | 'fight', body: Record<string, unknown>): Promise<T | null> {
+export async function playCall<T>(a: 'ticket' | 'fight' | 'cards' | 'skills', body: Record<string, unknown>): Promise<T | null> {
   const base = restBase();
   if (!base || !pass) return null;
   try {
@@ -37,7 +37,7 @@ export async function playCall<T>(a: 'ticket' | 'fight', body: Record<string, un
 }
 
 /** A call whose error message the player should see (University tips): { ok } or { error }. */
-export async function playAsk<T>(a: 'tip' | 'tipvote', body: Record<string, unknown>): Promise<(T & { ok: true }) | { ok?: false; error: string }> {
+export async function playAsk<T>(a: 'tip' | 'tipvote' | 'buyskill', body: Record<string, unknown>): Promise<(T & { ok: true }) | { ok?: false; error: string }> {
   const base = restBase();
   if (!base || !pass) return { error: 'Sign in first.' };
   try {
@@ -49,6 +49,54 @@ export async function playAsk<T>(a: 'tip' | 'tipvote', body: Record<string, unkn
     const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;
     if (r.ok && j.ok) return j as T & { ok: true };
     return { error: typeof j.error === 'string' ? j.error : 'Could not send. Try again.' };
+  } catch {
+    return { error: 'No connection. Try again.' };
+  }
+}
+
+export type RenameResult = { ok: true; name: string } | { pay: true; lamports: number; next: string | null } | { error: string };
+/** Change this wallet's Gali name on the server: free once every 30 days, sooner with `sig` (a paid transfer). */
+export async function playRename(name: string, sig?: string): Promise<RenameResult> {
+  const base = restBase();
+  if (!base || !pass) return { error: 'Connect your wallet and sign in to change your name.' };
+  try {
+    const r = await fetch(`${base}/functions/v1/play`, {
+      method: 'POST',
+      headers: { apikey: publicKey(), authorization: `Bearer ${publicKey()}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ a: 'rename', name, sig, pass }),
+    });
+    const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+    if (r.ok && j.ok) return { ok: true, name: String(j.name ?? name) };
+    if (r.status === 402 && j.pay) return { pay: true, lamports: Number(j.lamports) || 100_000_000, next: typeof j.next === 'string' ? j.next : null };
+    return { error: typeof j.error === 'string' ? j.error : 'Could not change the name. Try again.' };
+  } catch {
+    return { error: 'No connection. Try again.' };
+  }
+}
+
+export interface OwnedCard { code: string; value: number; sol_lamports: number; bought_at?: string; redeemed_at?: string; payout_sig?: string | null }
+/** This wallet's Mining Cards: unused ones it bought (with their codes) and ones it redeemed. Null without a pass. */
+export async function playCards(): Promise<{ unused: OwnedCard[]; redeemed: OwnedCard[] } | null> {
+  const r = await playCall<{ ok: boolean; unused: OwnedCard[]; redeemed: OwnedCard[] }>('cards', {});
+  return r?.ok ? { unused: r.unused ?? [], redeemed: r.redeemed ?? [] } : null;
+}
+
+export type RedeemResult =
+  | { ok: true; code: string; value: number; sol_lamports: number; rewards: { xp: number; items: { n: number; rarity: string }[]; extras: string[] }; payout: string | null }
+  | { error: string };
+/** Use a Mining Card code for this wallet. */
+export async function playRedeem(code: string): Promise<RedeemResult> {
+  const base = restBase();
+  if (!base || !pass) return { error: 'Connect your wallet and sign in to use a card.' };
+  try {
+    const r = await fetch(`${base}/functions/v1/play`, {
+      method: 'POST',
+      headers: { apikey: publicKey(), authorization: `Bearer ${publicKey()}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ a: 'redeem', code, pass }),
+    });
+    const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+    if (r.ok && j.ok) return j as RedeemResult;
+    return { error: typeof j.error === 'string' ? j.error : 'Could not use the card. Try again.' };
   } catch {
     return { error: 'No connection. Try again.' };
   }

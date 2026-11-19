@@ -15,6 +15,8 @@ import { useMarket } from '../game/market';
 import { MILESTONE, milestoneOfSet, useNft } from '../game/nft';
 import { play } from '../game/sfx';
 import { useName } from '../game/username';
+import { MiningCards } from './MiningCards';
+import { SkillsMarket } from './SkillShop';
 import { GearSprite, TryOnSprite } from './GearSprite';
 import { Frame, IconBtn, T, U } from './kit';
 import { LANDSCAPE_APP, useLayout } from './layout';
@@ -50,7 +52,7 @@ export function MarketWindow() {
 }
 
 function MarketBody({ wide, bottomPad }: { wide: boolean; bottomPad: number }) {
-  const { cat, rarity, pick, setCat, setRarity, setPick, hide } = useMarket();
+  const { cat, rarity, pick, setCat, setRarity, setPick, hide, section, setSection } = useMarket();
   const [book, setBook] = useState<GearBook | null>(null);
   const [view, setView] = useState<'show' | 'grid'>('show');
   const [tryOn, setTryOn] = useState(true);
@@ -110,26 +112,46 @@ function MarketBody({ wide, bottomPad }: { wide: boolean; bottomPad: number }) {
       </View>
       <View style={{ flex: 1, gap: 2 }}>
         <T v="display" numberOfLines={1} style={{ fontSize: wide ? 30 : 24, lineHeight: wide ? 30 : 24, letterSpacing: 2, color: COLORS.text }}>
-          GEAR <T v="display" style={{ fontSize: wide ? 30 : 24, lineHeight: wide ? 30 : 24, color: COLORS.teal }}>MARKET</T>
+          GALI <T v="display" style={{ fontSize: wide ? 30 : 24, lineHeight: wide ? 30 : 24, color: COLORS.teal }}>MARKET</T>
         </T>
       </View>
-      {wide || LANDSCAPE_APP ? switcher : null}
+      {(wide || LANDSCAPE_APP) && section === 'gear' ? switcher : null}
       <IconBtn onPress={hide} label="Close" kbd="ESC">
         <PixIcon name="close" size={18} />
       </IconBtn>
     </View>
   );
+  const sections = (
+    <View style={[styles.tabs, { paddingTop: 0 }, !(wide || LANDSCAPE_APP) && { paddingHorizontal: 0, paddingBottom: 0 }]}>
+      <TechTab label="GEAR" on={section === 'gear'} icon={<PixIcon name="helmet" size={16} />} onPress={() => setSection('gear')} />
+      <TechTab label="MINING CARDS" on={section === 'cards'} icon={<PixIcon name="gem" size={16} />} color={COLORS.gold} onPress={() => setSection('cards')} />
+      <TechTab label="SKILLS" on={section === 'skills'} icon={<PixIcon name="fist" size={16} />} color="#ff8ad8" onPress={() => setSection('skills')} />
+    </View>
+  );
   const headAll = wide || LANDSCAPE_APP ? (
-    head
+    <>
+      {head}
+      {sections}
+    </>
   ) : (
     <>
       {head}
       <View style={styles.subHead}>
+        {sections}
         <View style={{ flex: 1 }} />
-        {switcher}
+        {section === 'gear' ? switcher : null}
       </View>
     </>
   );
+
+  if (section === 'cards' || section === 'skills') {
+    return (
+      <View style={{ flex: 1 }}>
+        {headAll}
+        {section === 'cards' ? <MiningCards wide={wide} bottomPad={bottomPad} /> : <SkillsMarket wide={wide} bottomPad={bottomPad} />}
+      </View>
+    );
+  }
 
   const filters = (
     <>

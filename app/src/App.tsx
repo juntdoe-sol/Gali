@@ -31,6 +31,8 @@ import { MarketWindow } from './ui/Market';
 import { MineAnywhere } from './ui/MineAnywhere';
 import { MotherlodeAlert } from './ui/MotherlodeAlert';
 import { GlobalHosts } from './ui/Lobby';
+import { CardHosts } from './ui/MiningCards';
+import { watchCardRun } from './game/cardRun';
 import { Coach } from './ui/Coach';
 import { CertClaimPopup } from './ui/CertClaim';
 import { useNft } from './game/nft';
@@ -122,6 +124,7 @@ function Game() {
       window.addEventListener('keydown', unlock, true);
     } else initAudio();
     void useGame.getState().boot().then(() => startSoundscape());
+    watchCardRun();
     // Check this wallet in on the miner ranks whenever its level, XP or points change (throttled)
     const checkIn = () => {
       const g = useGame.getState();
@@ -138,7 +141,10 @@ function Game() {
       if (!owner || owner === pulled) return;
       pulled = owner;
       void fetchMiner(owner).then((m) => {
-        if (m) useGame.getState().mergeProgress(m);
+        if (!m) return;
+        useGame.getState().mergeProgress(m);
+        // the wallet's name lives on the server (renames there are limited): use it on this device too
+        if (m.name && m.name !== useName.getState().name) useName.getState().set(m.name);
       });
     };
     pull();
@@ -333,6 +339,7 @@ function Ui({ sheet, setSheet }: { sheet: SheetTab | null; setSheet: (t: SheetTa
         <DmSheet />
         <MotherlodeAlert />
         <GlobalHosts />
+        <CardHosts />
     </>
   );
 }

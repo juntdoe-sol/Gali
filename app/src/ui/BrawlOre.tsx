@@ -7,6 +7,10 @@
  * The fight runs in the canvas (pixel/BrawlOreView, engine/brawlore.ts); this screen is the menu around it and
  * the results. It opens where the old arena opened (useArena.open).
  */
+import { useSkills } from '../game/skills';
+import { SKILL_INFO } from '../game/brawl2/specials';
+import { useMarket } from '../game/market';
+import { fightLoadout } from '../game/skills';
 import React, { useEffect, useRef, useState } from 'react';
 import { Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -159,7 +163,7 @@ export function BrawlOreScreen() {
     setResult(null);
     setSoloNote(false);
     setStage('fight');
-    ref.current?.begin({ mode: omatch.mode, diff: 'normal', name: name || 'You', look: myLook(), weapon: 'pick', special: myWeapon().sp, seed: omatch.seed, net: { role: omatch.host === me ? 'host' : 'guest', me, mid: omatch.mid, host: omatch.host, players: omatch.players } });
+    ref.current?.begin({ mode: omatch.mode, diff: 'normal', name: name || 'You', look: myLook(), weapon: 'pick', special: myWeapon().sp, skills: fightLoadout(), seed: omatch.seed, net: { role: omatch.host === me ? 'host' : 'guest', me, mid: omatch.mid, host: omatch.host, players: omatch.players } });
   }, [phase, omatch, stage, name]);
 
   // nobody came: bots instead
@@ -169,20 +173,20 @@ export function BrawlOreScreen() {
     setSoloNote(true);
     setResult(null);
     setStage('fight');
-    ref.current?.begin({ mode: lastQ.current === 'ffa' ? 'ffa' : '1v1', diff: 'normal', name: name || 'You', look: myLook(), weapon: 'pick', special: myWeapon().sp });
+    ref.current?.begin({ mode: lastQ.current === 'ffa' ? 'ffa' : '1v1', diff: 'normal', name: name || 'You', look: myLook(), weapon: 'pick', special: myWeapon().sp, skills: fightLoadout() });
   }, [solo, stage, name]);
 
   const fight = () => {
     setResult(null);
     setSoloNote(false);
     setStage('fight');
-    ref.current?.begin({ mode, diff, name: name || 'You', look: myLook(), weapon: 'pick', special: myWeapon().sp });
+    ref.current?.begin({ mode, diff, name: name || 'You', look: myLook(), weapon: 'pick', special: myWeapon().sp, skills: fightLoadout() });
   };
   const find = (q: Queue, need = 0, made = false) => {
     lastQ.current = q;
     setResult(null);
     setStage('search');
-    search(q, { name: name || 'Miner', look: myLook(), weapon: 'pick', sp: myWeapon().sp }, useGame.getState().wallet.owner, { need, made });
+    search(q, { name: name || 'Miner', look: myLook(), weapon: 'pick', sp: myWeapon().sp, sk: fightLoadout().map((k) => k ?? '') }, useGame.getState().wallet.owner, { need, made });
   };
   // call out: tell the rivals, make the card; fight now (wait in the room) or later (a reminder at the time)
   const callOut = (rivals: Rival[], n: number, at: number) => {
@@ -306,6 +310,7 @@ export function BrawlOreScreen() {
                 )}
               </View>
               <SpecialCard name={wpn.info.name} line={wpn.info.line} item={wpn.item.name} color={wpn.info.color} keyHint={touch ? 'SP button' : 'I or E'} short={short} />
+              <SkillRow touch={touch} />
               <View style={styles.tabs}>
                 <Tab label="FIGHT ONLINE" on={tab === 'online'} onPress={() => setTab('online')} />
                 <Tab label="PRACTICE VS BOTS" on={tab === 'bots'} onPress={() => setTab('bots')} />
@@ -354,8 +359,8 @@ export function BrawlOreScreen() {
               )}
               <T v="muted" style={{ fontSize: 11, textAlign: 'center' }}>
                 {touch
-                  ? 'Left thumb: move. Right: JUMP, LIGHT, HEAVY, DODGE, SP. Hold down + a button to aim down. HEAVY in the air without down flies you up.'
-                  : 'A/D move · W or Space jump · S down · J light · K heavy · L or Shift dodge · I or E special. Heavy in the air flies you up; down + heavy slams.'}
+                  ? 'Left thumb: move. Right: JUMP, LIGHT, HEAVY, DODGE, SP, SKILL. Hold side or down + SKILL for your other skills. HEAVY in the air without down flies you up.'
+                  : 'A/D move · W or Space jump · S down · J light · K heavy · L or Shift dodge · I or E special · U or Q skill (+ A/D or S for the others). Heavy in the air flies you up; down + heavy slams.'}
               </T>
             </StreetCard>
           </ScrollView>
@@ -906,6 +911,28 @@ export function CalloutPopup({ inside = false }: { inside?: boolean }) {
           <Btn kind="plain" label="LATER" onPress={() => useCallout.setState({ incoming: null })} style={{ flex: 1 }} />
         </View>
       </View>
+    </View>
+  );
+}
+
+/** Your three Fight Club skills, and a way to change them (the Bag) or get more (the Market). */
+function SkillRow({ touch }: { touch: boolean }) {
+  const loadout = useSkills((st) => st.loadout);
+  const has = useSkills((st) => st.has);
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
+      <T v="tiny" style={{ color: '#ff8ad8', letterSpacing: 1 }}>SKILLS ({touch ? 'SKILL BUTTON' : 'U OR Q'})</T>
+      {loadout.map((k, j) => {
+        const info = k && has(k) ? SKILL_INFO[k] : null;
+        return (
+          <View key={j} style={{ paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, borderColor: info?.color ?? 'rgba(255,255,255,0.2)' }}>
+            <T v="tiny" style={{ color: info?.color ?? 'rgba(255,255,255,0.4)' }}>{['', '\u2194 ', '\u2193 '][j]}{info?.name ?? 'EMPTY'}</T>
+          </View>
+        );
+      })}
+      <Pressable onPress={() => useMarket.getState().show(undefined, 'skills')} accessibilityRole="button">
+        <T v="tiny" style={{ color: '#ffc93c', textDecorationLine: 'underline' }}>MORE SKILLS</T>
+      </Pressable>
     </View>
   );
 }

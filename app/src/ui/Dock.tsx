@@ -4,7 +4,8 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useTut, useTutTarget } from '../game/tutTargets';
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, useWindowDimensions, View, type StyleProp, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CLUSTER, PLATFORM_FEE_BPS, REFINING_FEE, short } from '../chain/light';
+import { CLUSTER, REFINING_FEE, short } from '../chain/light';
+import { RedeemCardRow } from './MiningCards';
 import { BLOCKS, boostFor, COLORS, pointsFor } from '../game/constants';
 import { watchMotion } from '../game/motion';
 import { DEFAULT_SMART, fmtSol, liveReturn, maskOf, randomPick, MIN_SOL_PER_BLOCK, SMART_COUNTS } from '../game/pot';
@@ -18,8 +19,6 @@ import { PixIcon } from './PixIcon';
 import type { PixName } from './pixIcons';
 import { useLayout } from './layout';
 import { openScanTv, TV_PAIR } from './TvLink';
-import { evOf } from '../game/ev';
-import { refreshMarket, useOreStats } from '../game/oreStats';
 import { botAllowed, buyPass, DEFAULT_BOT_SETTINGS, loadRoundNow, loadRounds, type AiRoundRow, type RoundNow, loadLog, netSol, refreshAi, saveBotSettings, sendFeedback, startTrial, useAi, type AiLogEntry, type AiStyle, type AiVote, type BotMode, type BotSettings } from '../game/aiMining';
 
 const SHAKE_G = 2.1;
@@ -102,6 +101,7 @@ export function Dock({ embedded, noUnclaimed, scroll }: { embedded?: boolean; no
     const body = (
       <>
         {noUnclaimed ? null : <UnclaimedRow />}
+        <RedeemCardRow />
         {tab === 'lite' ? <DeskLite /> : tab === 'ai' && FEATURE_AI_MINING ? <AiPanel /> : <DeskPro />}
       </>
     );
@@ -145,6 +145,7 @@ export function Dock({ embedded, noUnclaimed, scroll }: { embedded?: boolean; no
       {head}
       {botSwitch}
       <UnclaimedRow />
+      <RedeemCardRow />
       {tab === 'ai' && FEATURE_AI_MINING ? (
         // compact enough to fit without scrolling; the learning log and feedback pop up as cards
         <AiPanel />
@@ -504,64 +505,6 @@ function TopUpCard({ open, onClose, ai }: { open: boolean; onClose: () => void; 
 
 /* ---------------- RIGHT BAR (desktop ORE Island) LITE, like ORE: one amount, 0.01 SOL a round on all 25 spots ---------------- */
 
-/**
- * Round signal: is a SOL put on these spots right now worth more than it costs, on average (+EV), or less (-EV)?
- * Worked out from ORE's payout rules, the SOL already on each spot, the motherlode and today's ORE/SOL price.
- * `perSpot` 0 means the player has not entered an amount yet: the signal is then for a small reference stake.
- */
-const EV_REF_PER_SPOT = 0.0004;
-function EvRow({ squares, perSpot }: { squares: number[]; perSpot: number }) {
-  const live = useGame(isLive);
-  const roundId = useGame((s) => s.roundId);
-  const pot = useGame((s) => s.pot);
-  const orePool = useGame((s) => s.wallet.orePool);
-  const market = useOreStats((s) => s.market);
-  useEffect(() => {
-    if (!live) return;
-    void refreshMarket();
-    const id = setInterval(() => void refreshMarket(), 5 * 60_000);
-    return () => clearInterval(id);
-  }, [live]);
-  if (!live) return null;
-  const ref = !(perSpot > 0);
-  const stake = ref ? EV_REF_PER_SPOT : perSpot;
-  const spots = squares.length ? squares : [...Array(BLOCKS).keys()];
-  const onBoard = pot.roundId === roundId ? pot.perBlock : Array(BLOCKS).fill(0);
-  const price = market?.oreUsd && market.solUsd ? market.oreUsd / market.solUsd : 0;
-  const e = evOf(onBoard, spots, stake, orePool, price, Number(PLATFORM_FEE_BPS));
-  const plus = e ? e.ev >= 0 : false;
-  const pct = e ? `${e.pct >= 0 ? '+' : ''}${(e.pct * 100).toFixed(1)}%` : '';
-  const crowd = e ? spots.reduce((a, i) => a + (onBoard[i] ?? 0), 0) / spots.length : 0;
-  return (
-    <View style={styles.evWrap}>
-      <Row
-        icon="bolt"
-        label="Round signal"
-        info={`Expected value of this deploy, from ORE's own rules. SOL back: ORE keeps 1% of every spot and 10% more of spots that miss, so about 89.5% of each SOL comes back on average (the Gali fee is ${Number(PLATFORM_FEE_BPS) / 100}%). ORE: each spot strikes 1 time in 25; its 1 ORE, plus the motherlode 1 round in 500, is shared by SOL on that spot, so crowded spots pay less. ORE is valued at today's ORE/SOL price (Jupiter, every 5 minutes) minus ORE's 10% claim fee. +EV means the ORE you can expect is worth more than the SOL you can expect to lose. It is an average over many rounds: any one round is all or nothing on the gold spot, and more SOL can land before the round ends. Not financial advice.`}
-        right={
-          e ? (
-            <PixelBox fill={plus ? '#0f3d27' : '#3d0f15'} edge={plus ? COLORS.green : COLORS.red} u={1.5} style={styles.evPill}>
-              <T v="num" style={{ fontSize: 18, lineHeight: 19, color: plus ? COLORS.green : COLORS.red }}>
-                {plus ? '+EV' : '-EV'} {pct}
-              </T>
-            </PixelBox>
-          ) : (
-            <T v="num" style={{ fontSize: 16, color: COLORS.muted }}>
-              {price ? 'NO SPOTS' : 'WAITING FOR PRICE'}
-            </T>
-          )
-        }
-      />
-      {e ? (
-        <T v="num" style={styles.evNote}>
-          {ref ? `For ${fmtSol(stake * spots.length, 4)} SOL on ${spots.length} spot${spots.length > 1 ? 's' : ''}: ` : `Your ${fmtSol(e.cost, 4)} SOL: `}
-          ≈{fmtSol(e.solBack, 4)} SOL back + ≈{e.ore.toFixed(e.ore < 0.01 ? 5 : 3)} ORE. {plus ? 'Pays' : 'Pays off'} while spots hold under {fmtSol(e.breakEvenT, 3)} SOL each (now {fmtSol(crowd, 3)}). Estimate only: SOL can still land before the round ends.
-        </T>
-      ) : null}
-    </View>
-  );
-}
-
 /** ORE's motherlode, gold when it is big, flashing the new ORE each time it grows. */
 const LITE_PER_ROUND = 0.01;
 
@@ -629,7 +572,6 @@ function DeskLite() {
               </T>
             }
           />
-          <EvRow squares={[...Array(BLOCKS).keys()]} perSpot={rounds ? LITE_PER_ROUND / BLOCKS : 0} />
           <Row
             icon="sol"
             label="Per round"
@@ -1476,7 +1418,6 @@ function DeskPro() {
             info={live ? `1 = this round only (you approve in your wallet). More = autopilot: one wallet approval funds ORE's automation for every round, then rounds deploy with no pop-up. Stop it any time to get the unused SOL back (the Gali fee is paid up front and not refunded).` : '1 = this round only. More = autopilot repeats the same setup each round.'}
             right={<Stepper value={rounds} label="rounds" onMinus={() => editPreset({ rounds: Math.max(1, rounds - 1) })} onPlus={() => editPreset({ rounds: Math.min(100, rounds + 1) })} disabled={lock} />}
           />
-          <EvRow squares={picked} perSpot={tiles && per ? perSpot : 0} />
           <Row
             icon="sol"
             label="Per round"
@@ -1642,7 +1583,6 @@ function LitePanel({ compact }: { compact: boolean }) {
             <Chip grow label="Pick" on={mode === 'pick'} onPress={() => setLiteMode('pick')} disabled={Boolean(run)} />
           </View>
           {mode === 'smart' ? <SmartCounts value={smartN} onPick={setLiteSmart} disabled={Boolean(run)} /> : null}
-          <EvRow squares={mode === 'all' ? [...Array(BLOCKS).keys()] : selected} perSpot={n ? spot : 0} />
           <T v="muted" style={{ fontSize: 12, textAlign: 'center', marginTop: 10 }}>
             {hint}
           </T>
@@ -1773,7 +1713,6 @@ function ProPanel({ compact }: { compact: boolean }) {
               right={<Chip label="SCAN TV" onPress={openScanTv} disabled={Boolean(busy)} />}
             />
           ) : null}
-          <EvRow squares={picked} perSpot={blocks ? perBlock : 0} />
           <Row
             icon="trophy"
             label="If it strikes"
@@ -1837,8 +1776,6 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: 6, justifyContent: 'space-between' },
   line: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingVertical: 7, borderBottomWidth: U, borderColor: 'rgba(34,53,111,0.6)', borderStyle: 'dashed', minHeight: 44 },
   lineLeft: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
-  evWrap: { borderBottomWidth: U, borderColor: 'rgba(34,53,111,0.6)', borderStyle: 'dashed', paddingBottom: 7 },
-  evPill: { paddingHorizontal: 8, paddingVertical: 3 },
   evNote: { fontSize: 14, lineHeight: 16, color: COLORS.muted, marginTop: -2 },
   lineRight: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1, minWidth: 0 },
   botPanel: { paddingHorizontal: 12, paddingTop: 10, paddingBottom: 12, gap: 8 },

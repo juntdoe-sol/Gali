@@ -228,15 +228,15 @@ export function reportMiner(o: { wallet: string; name: string; level: number; xp
 }
 
 /** This wallet's saved level, XP and points, so a second device (web and app) picks up where the first left off. */
-export async function fetchMiner(wallet: string): Promise<{ xp: number; points: number; level: number } | null> {
+export async function fetchMiner(wallet: string): Promise<{ xp: number; points: number; level: number; name: string } | null> {
   const base = restBase();
   if (!base || !wallet) return null;
   try {
-    const r = await fetch(`${base}/rest/v1/gali_miners?select=xp,points,level&wallet=eq.${encodeURIComponent(wallet)}&limit=1`, { headers: headers() });
+    const r = await fetch(`${base}/rest/v1/gali_miners?select=xp,points,level,name&wallet=eq.${encodeURIComponent(wallet)}&limit=1`, { headers: headers() });
     if (!r.ok) return null;
-    const rows = (await r.json()) as { xp?: number; points?: number; level?: number }[];
+    const rows = (await r.json()) as { xp?: number; points?: number; level?: number; name?: string }[];
     const x = Array.isArray(rows) ? rows[0] : null;
-    return x ? { xp: Number(x.xp) || 0, points: Number(x.points) || 0, level: Number(x.level) || 1 } : null;
+    return x ? { xp: Number(x.xp) || 0, points: Number(x.points) || 0, level: Number(x.level) || 1, name: String(x.name ?? '') } : null;
   } catch {
     return null;
   }

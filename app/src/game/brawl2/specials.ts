@@ -8,7 +8,7 @@
  * Ready for NFT items: specialOf() takes any item with a name, and optionally a set and an id (Gear 555 items,
  * certificate rewards, future NFT drops). A new family is one entry in SPECIALS and one here.
  */
-import type { SpecialId } from './sim';
+import type { SkillId, SpecialId } from './sim';
 
 export interface SpecialInfo {
   id: SpecialId;
@@ -27,6 +27,37 @@ export const SPECIAL_INFO: Record<SpecialId, SpecialInfo> = {
   dive: { id: 'dive', name: 'LIQUIDATION', line: 'Hop and dive forward, spiking miners down.', how: 'Off the edge, over their head', color: '#ff5a6a' },
   guard: { id: 'guard', name: 'DIAMOND HANDS', line: 'Hold firm. Whoever hits you gets hit back hard.', how: 'Right before they swing', color: '#c8f0ff' },
 };
+
+/** A skill (sim.ts SKILLS): the six specials are free starters, the rest cost NUGS (supabase/sql/nugs-skills.sql). */
+export interface SkillInfo {
+  id: SkillId;
+  name: string;
+  line: string;
+  how: string;
+  color: string;
+  /** NUGS, 0 = free for everyone */
+  price: number;
+  /** a word for the kind of move, for the shop's tag */
+  kind: string;
+}
+const fromSpecial = (id: SpecialId, kind: string): SkillInfo => ({ ...SPECIAL_INFO[id], price: 0, kind });
+export const SKILL_INFO: Record<SkillId, SkillInfo> = {
+  moon: fromSpecial('moon', 'LAUNCHER'),
+  rush: fromSpecial('rush', 'DASH'),
+  quake: fromSpecial('quake', 'SHOCKWAVE'),
+  whirl: fromSpecial('whirl', 'SPIN'),
+  dive: fromSpecial('dive', 'SPIKE'),
+  guard: fromSpecial('guard', 'COUNTER'),
+  grab: { id: 'grab', name: 'ORE GRAB', line: 'Grab a miner and throw them: up, forward, behind or down.', how: 'Up close; point the stick where they should go', color: '#ffb347', price: 300, kind: 'GRAB' },
+  magnet: { id: 'magnet', name: 'MAGNET HOOK', line: 'A long magnetic pull drags a miner right up to you.', how: 'From across the stage, then hit them', color: '#ff6b9d', price: 400, kind: 'PULL' },
+  dynamite: { id: 'dynamite', name: 'DYNAMITE TOSS', line: 'Lob a stick of dynamite a few steps ahead. Boom.', how: 'Keep your distance', color: '#ff5a3c', price: 600, kind: 'THROW' },
+  geyser: { id: 'geyser', name: 'GEYSER', line: 'The floor bursts ahead of you and blasts a miner straight up.', how: 'When they stand a little way off', color: '#5ad8ff', price: 800, kind: 'TRAP' },
+  cavein: { id: 'cavein', name: 'CAVE-IN', line: 'Rocks rain down just ahead, spiking miners to the floor.', how: 'On miners near the edge', color: '#c8a070', price: 1000, kind: 'SPIKE' },
+  tunnel: { id: 'tunnel', name: 'TUNNEL DIG', line: 'Dig in, safe from hits, and pop up behind the nearest miner.', how: 'To dodge in and punish', color: '#b388ff', price: 1500, kind: 'TELEPORT' },
+};
+/** shop order: free first, then by price */
+export const SKILL_ORDER: SkillId[] = ['moon', 'rush', 'quake', 'whirl', 'dive', 'guard', 'grab', 'magnet', 'dynamite', 'geyser', 'cavein', 'tunnel'];
+export const FREE_SKILLS: SkillId[] = SKILL_ORDER.filter((k) => SKILL_INFO[k].price === 0);
 
 /** Tool kinds in an item's name. */
 const BY_TOOL: [RegExp, SpecialId][] = [

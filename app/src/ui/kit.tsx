@@ -717,6 +717,9 @@ export function Choice({ label, on, onPress, sub, icon, grow = true, disabled }:
 
 /** Text fields: a dark well with an inset bevel. Spread into a TextInput's style. */
 export const INPUT: TextStyle = {
+  // react-native-web gives every View position: relative but not TextInput: without this, an input placed straight
+  // inside a PixelBox sits under the box's absolutely positioned fill, unseen and unclickable (Report a bug)
+  position: 'relative',
   height: 46,
   paddingHorizontal: 12,
   color: COLORS.text,

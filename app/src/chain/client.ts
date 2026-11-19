@@ -18,10 +18,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getSecret, removeSecret, setSecret } from './secure';
 import { Platform } from 'react-native';
 import { webConnect, webDisconnect, webOwner, webSign, webSignMessage } from './webWallet';
-export { listWebWallets, PickWalletError, type WebWalletInfo } from './webWallet';
+export { exportEmailWallet, listWebWallets, PickWalletError, type WebWalletInfo } from './webWallet';
 import idlJson from './idl.json';
 import deployment from './deployment.json';
-import { CLUSTER, MAX_SESSION_FUND_SOL, PROGRAM_ID_STR, RPC_URL, retryingFetch, SKR_MINT_STR, TIP_LIMITS, TIP_SKR_MINT } from './light';
+import { CLUSTER, MAX_SESSION_FUND_SOL, PROGRAM_ID_STR, REVENUE_WALLET, RPC_URL, retryingFetch, SKR_MINT_STR, TIP_LIMITS, TIP_SKR_MINT } from './light';
 import { ORE_MINT, BOARD_ADDRESS, minerPda as oreMinerPda, roundPda as oreRoundPda } from './ore/consts';
 import { decodeBoard, decodeMiner, decodeRound } from './ore/accounts';
 
@@ -478,6 +478,29 @@ export async function sendPrebuilt(raw: Uint8Array, lastValidBlockHeight: number
     });
     return await trackAndConfirm(sent.signature, sent.owner, lastValidBlockHeight);
   } finally { sending = false; }
+}
+
+/**
+ * Send SOL from the connected wallet to another address (the email wallet's "Send out" in the Profile). The wallet
+ * shows its own approval; nothing is sent without it.
+ */
+export async function sendSolOut(to: string, lamports: number, expectedOwner: string): Promise<string> {
+  let dest: PublicKey;
+  try {
+    dest = new PublicKey(to.trim());
+  } catch {
+    throw new Error('That is not a Solana address.');
+  }
+  if (dest.toBase58() === expectedOwner) throw new Error('That is this wallet. Paste the address you want to send to.');
+  if (!Number.isSafeInteger(lamports) || lamports <= 0) throw new Error('Enter an amount of SOL.');
+  return sendWithWallet(async (owner) => [SystemProgram.transfer({ fromPubkey: owner, toPubkey: dest, lamports })], new PublicKey(expectedOwner));
+}
+
+/** Pay for an early rename: `lamports` from the connected wallet to Gali's revenue wallet. Returns the signature. */
+export async function payNameChange(lamports: number, expectedOwner: string): Promise<string> {
+  if (!Number.isSafeInteger(lamports) || lamports <= 0 || lamports > 200_000_000) throw new Error('Unexpected rename price');
+  const to = new PublicKey(REVENUE_WALLET);
+  return sendWithWallet(async (owner) => [SystemProgram.transfer({ fromPubkey: owner, toPubkey: to, lamports })], new PublicKey(expectedOwner));
 }
 
 export async function sendWithKey(signer: Keypair, ixs: TransactionInstruction[]): Promise<string> {

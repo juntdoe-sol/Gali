@@ -54,3 +54,6 @@ yarn-error.*
 
 # local build tarballs
 *.tar.gz
+
+# built by npm run build:email (email-login/build.mjs)
+public/email-login.js

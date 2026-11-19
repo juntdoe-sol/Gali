@@ -16,6 +16,7 @@
  * host leaves, the next smallest id takes over within a few seconds. Hits work as everywhere else in
  * Brawl (game/brawl.ts): each player is the judge of their own HP.
  */
+import { fightLoadout } from './skills';
 import { boundWallet, idFor } from './peerId';
 import { hostRank, myTicket, ticketOk, ticketsOn } from './ticket';
 import type { RealtimeChannel } from '@supabase/realtime-js';
@@ -256,7 +257,8 @@ void loadJson<Loadout>(LO_KEY, { active: null, passive: null, trail: 'plain' }).
 /** The powers you can actually use at this level: every unlocked active, and your passive (or the first unlocked). */
 export function effectiveLoadout(lvl: number): { actives: ActiveId[]; passive: PassiveId | null } {
   const lo = useArena.getState().loadout;
-  const actives = ACTIVES.filter((p) => unlocked(p, lvl));
+  const sk = fightLoadout();
+  const actives = ACTIVES.filter((p) => unlocked(p, lvl, sk));
   const passive = lo.passive && unlocked(lo.passive, lvl) ? lo.passive : PASSIVES.find((p) => unlocked(p, lvl)) ?? null;
   return { actives, passive };
 }

@@ -6,7 +6,7 @@
 // wallet's network setting doesn't matter for sending (switch it to the same network to see balances).
 import './polyfill-web';
 import { PublicKey, Transaction } from '@solana/web3.js';
-import { CLUSTER } from './light';
+import { CLUSTER, RPC_URL } from './light';
 
 export interface WebWalletInfo {
   name: string;
@@ -173,6 +173,68 @@ function injected(): Adapter[] {
   return out;
 }
 
+/* ---------- Email (Privy embedded wallet) ---------- */
+
+/** Privy app id (public). Empty: no Email option. */
+const PRIVY_APP_ID = process.env.EXPO_PUBLIC_PRIVY_APP_ID || '';
+export const EMAIL_WALLET = 'Email';
+
+/** What email-login/index.tsx exports (kept by hand: type-checking Privy's types here runs tsc out of memory). */
+interface EmailApi {
+  emailConnect(cfg: { appId: string; cluster: 'mainnet' | 'devnet'; rpcUrl: string }, silent: boolean): Promise<string | null>;
+  emailSignTransaction(bytes: Uint8Array): Promise<Uint8Array>;
+  emailSignMessage(msg: Uint8Array): Promise<Uint8Array>;
+  emailExportKey(): Promise<void>;
+  emailLogout(): Promise<void>;
+}
+let privyP: Promise<EmailApi> | null = null;
+/** Adds public/email-login.js (Privy, built on its own) the first time it's needed; it sets window.GaliEmail. */
+const privy = () =>
+  (privyP ??= new Promise<EmailApi>((ok, fail) => {
+    const w = globalThis as typeof globalThis & { GaliEmail?: EmailApi };
+    if (w.GaliEmail) return ok(w.GaliEmail);
+    const s = document.createElement('script');
+    s.src = '/email-login.js';
+    s.async = true;
+    s.onload = () => (w.GaliEmail ? ok(w.GaliEmail) : fail(new Error('Email sign-in did not load. Refresh and try again.')));
+    s.onerror = () => fail(new Error('Email sign-in could not load. Check your connection and try again.'));
+    document.head.appendChild(s);
+  }).catch((e) => {
+    privyP = null;
+    throw e;
+  }));
+const EMAIL_CFG = { appId: PRIVY_APP_ID, cluster: CLUSTER, rpcUrl: RPC_URL };
+
+let emailCached: Adapter | null = null;
+function emailAdapter(): Adapter {
+  if (emailCached) return emailCached;
+  let key: PublicKey | null = null;
+  emailCached = {
+    name: EMAIL_WALLET,
+    current: () => key,
+    async connect(silent) {
+      const a = await (await privy()).emailConnect(EMAIL_CFG, silent);
+      key = a ? new PublicKey(a) : null;
+      return key;
+    },
+    async disconnect() {
+      key = null;
+      if (privyP) await (await privy()).emailLogout();
+    },
+    async signTransaction(tx) {
+      const bytes = tx.serialize({ requireAllSignatures: false, verifySignatures: false });
+      return Transaction.from((await (await privy()).emailSignTransaction(new Uint8Array(bytes))));
+    },
+    signMessage: async (msg) => (await privy()).emailSignMessage(msg),
+  };
+  return emailCached;
+}
+
+/** Show the email wallet's private key in Privy's own window (to move it to another wallet). */
+export async function exportEmailWallet() {
+  await (await privy()).emailExportKey();
+}
+
 /* ---------- Picking a wallet ---------- */
 
 const stdCache = new Map<StdWallet, Adapter>();
@@ -190,6 +252,7 @@ function adapters(): Adapter[] {
     if (a.name === 'Solana wallet' && list.length) continue;
     list.push(a);
   }
+  if (PRIVY_APP_ID) list.push(emailAdapter());
   return list;
 }
 
@@ -232,7 +295,8 @@ function chosen(): Adapter {
   const saved = choice.get();
   const hit = saved ? all.find((a) => a.name === saved) : undefined;
   if (hit) return hit;
-  if (all.length === 1) return all[0];
+  // a lone browser wallet connects straight away; Email alone still shows the list, with the wallet-app tips
+  if (all.length === 1 && all[0].name !== EMAIL_WALLET) return all[0];
   throw new PickWalletError(all.map(({ name, icon }) => ({ name, icon })));
 }
 
@@ -240,7 +304,11 @@ function chosen(): Adapter {
 export async function webConnect(name?: string): Promise<PublicKey> {
   if (name) choice.set(name);
   const a = chosen();
-  const key = await a.connect(false);
+  // a failed or closed email sign-in forgets the choice, so the next tap shows the list again
+  const key = await a.connect(false).catch((e) => {
+    if (a.name === EMAIL_WALLET) choice.set(null);
+    throw e;
+  });
   if (!key) throw new Error('Wallet did not share an address');
   choice.set(a.name);
   return key;

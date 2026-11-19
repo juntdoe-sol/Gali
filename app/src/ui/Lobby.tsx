@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, levelFromXp, xpForLevel } from '../game/constants';
 import { useCave } from '../game/caveStore';
 import { loadChain } from '../chain/lazy';
+import { playRename, playWallet } from '../game/play';
 import { TIP_LIMITS, TIP_SKR_MINT, short } from '../chain/light';
 import { announce, joinChat, joinLobby, leaveLobby, LOBBY_EMOTES, publishLobbyMe, useLobby, type LobbyMsg } from '../game/lobby';
 import { saveLobbySpot, takeBootSpot } from '../game/lastSpot';
@@ -1091,7 +1092,12 @@ export function GlobalHosts() {
   }, []);
   return (
     <>
-      {nameReady && name && renaming ? <NamePrompt first={false} onDone={() => useRename.getState().setOpen(false)} /> : null}
+      {nameReady && name && renaming ? (
+        // its own modal, so it opens above the Profile sheet (a modal too) when Change name is tapped there
+        <Modal transparent visible animationType="fade" onRequestClose={() => useRename.getState().setOpen(false)}>
+          <NamePrompt first={false} onDone={() => useRename.getState().setOpen(false)} />
+        </Modal>
+      ) : null}
       {help ? <HowToPlay onClose={() => setHelp(false)} /> : null}
     </>
   );
@@ -1101,14 +1107,56 @@ function NamePrompt({ first, onDone }: { first: boolean; onDone: () => void }) {
   const [v, setV] = useState(useName.getState().name);
   const [err, setErr] = useState('');
   const [sex, setSex] = useState<'m' | 'f'>(useName.getState().sex);
-  const save = () => {
-    if (!cleanName(v)) {
+  const [busy, setBusy] = useState('');
+  /** the server wants 0.1 SOL for this rename (changed in the last 30 days); `next` is when it is free again */
+  const [pay, setPay] = useState<{ lamports: number; next: string | null } | null>(null);
+  const owner = useGame((s) => s.wallet.owner);
+  const finish = (name: string) => {
+    useName.getState().set(name);
+    useName.getState().setSex(sex);
+    onDone();
+  };
+  /** A connected wallet's name lives on the server: renames are free once every 30 days, sooner cost 0.1 SOL. */
+  const rename = async (name: string, sig?: string) => {
+    const r = await playRename(name, sig);
+    if ('ok' in r) return finish(r.name);
+    if ('pay' in r) return setPay({ lamports: r.lamports, next: r.next });
+    setErr(r.error);
+  };
+  const save = async () => {
+    if (busy) return;
+    const name = cleanName(v);
+    if (!name) {
       setErr('Use 2 to 14 letters, numbers, spaces, dots, dashes or underscores.');
       return;
     }
-    useName.getState().set(v);
-    useName.getState().setSex(sex);
-    onDone();
+    // first name, the same name (only the miner changed), or no wallet: nothing for the server to decide
+    if (first || name === useName.getState().name || !owner) return finish(name);
+    if (playWallet() !== owner) {
+      setErr('Sign in with your wallet first (chat or play a round), then try again.');
+      return;
+    }
+    setBusy('Saving…');
+    try {
+      await rename(name);
+    } finally {
+      setBusy('');
+    }
+  };
+  const payAndRename = async () => {
+    if (busy || !pay || !owner) return;
+    setErr('');
+    setBusy('Waiting for your wallet…');
+    try {
+      const chain = await loadChain();
+      const sig = await chain.payNameChange(pay.lamports, owner);
+      setBusy('Saving…');
+      await rename(cleanName(v), sig);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Payment did not go through.');
+    } finally {
+      setBusy('');
+    }
   };
   return (
     <Scrim>
@@ -1118,8 +1166,9 @@ function NamePrompt({ first, onDone }: { first: boolean; onDone: () => void }) {
           onChangeText={(t) => {
             setV(t);
             setErr('');
+            setPay(null);
           }}
-          onSubmitEditing={save}
+          onSubmitEditing={() => void save()}
           placeholder="Your name"
           placeholderTextColor={COLORS.muted}
           maxLength={14}
@@ -1141,8 +1190,26 @@ function NamePrompt({ first, onDone }: { first: boolean; onDone: () => void }) {
             {err}
           </T>
         ) : null}
-        <Btn kind="gold" label={first ? 'ENTER THE LOBBY' : 'SAVE NAME'} onPress={save} />
-        {!first ? <Btn kind="ghost" small label="Cancel" onPress={onDone} /> : null}
+        {pay ? (
+          <>
+            <T style={{ textAlign: 'center', fontSize: 13, lineHeight: 19 }}>
+              You changed your name in the last 30 days.{pay.next ? ` It is free again on ${new Date(pay.next).toLocaleDateString()}.` : ''} Change it now for {pay.lamports / 1e9} SOL?
+            </T>
+            <Btn kind="gold" label={busy || `PAY ${pay.lamports / 1e9} SOL & RENAME`} disabled={Boolean(busy)} onPress={() => void payAndRename()} />
+          </>
+        ) : (
+          <Btn kind="gold" label={busy || (first ? 'ENTER THE LOBBY' : 'SAVE NAME')} disabled={Boolean(busy)} onPress={() => void save()} />
+        )}
+        {!first ? (
+          <>
+            {!pay ? (
+              <T v="muted" style={{ textAlign: 'center', fontSize: 12 }}>
+                Free once every 30 days. Sooner costs 0.1 SOL.
+              </T>
+            ) : null}
+            <Btn kind="ghost" small label="Cancel" onPress={onDone} />
+          </>
+        ) : null}
       </Window>
     </Scrim>
   );

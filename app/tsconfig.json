@@ -5,5 +5,5 @@
     "resolveJsonModule": true,
     "skipLibCheck": true
   },
-  "exclude": ["node_modules", "src/tv"]
+  "exclude": ["node_modules", "src/tv", "email-login", "public/email-login.js", "dist"]
 }
