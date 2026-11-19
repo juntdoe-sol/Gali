@@ -483,6 +483,20 @@ GgGddddkdddGgG
 GgGdddkkkddGgG
 GgGddddddddGgG
 """,
+    # NUGS, the in-game coin: a lumpy gold nugget with a shine
+    'nugs': """
+.....yyyy.....
+...yylllyy....
+..yllwlyyyyy..
+.yylwlyyyyyYy.
+.ylllyyyyyyYY.
+yyllyyyyyyYYY.
+yylyyyyyyYYYYy
+.yyyyyyyYYYYYy
+.yyyyYYYYYYYy.
+..YYYYYYYYYY..
+...YYYY..YY...
+""",
 }
 
 ORDER = list(ART)

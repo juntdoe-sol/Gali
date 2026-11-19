@@ -15,6 +15,7 @@ import { useGame } from '../game/store';
 import { Btn, INPUT, PixelBox, Scrim, T, U, Window } from './kit';
 import { PixIcon } from './PixIcon';
 import { alpha, Corners, TECH, TechBtn, TechPanel, TechTab } from './tech';
+import { useSkills } from '../game/skills';
 
 export function MiningCards({ wide, bottomPad }: { wide: boolean; bottomPad: number }) {
   const [pick, setPick] = useState<CardTier>(CARD_TIERS[0]);
@@ -92,7 +93,7 @@ function CardDetail({ t, pay, setPay }: { t: CardTier; pay: 'SKR' | 'ORE'; setPa
         <T v="tiny" style={{ color: t.hue, letterSpacing: 1 }}>IN THIS CARD</T>
         {perkLines(t).map((line, i) => (
           <View key={line} style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-            <PixIcon name={i === 0 ? 'bot' : line.includes('item') ? 'gift' : line.includes('XP') ? 'star' : 'sparkle'} size={16} />
+            <PixIcon name={i === 0 ? 'bot' : line.includes('item') ? 'gift' : line.includes('NUGS') ? 'nugs' : line.includes('XP') ? 'star' : 'sparkle'} size={16} />
             <T style={{ flex: 1, fontSize: 13 }}>{line}</T>
           </View>
         ))}
@@ -292,7 +293,7 @@ function RedeemWindow() {
   const [code, setCode] = useState(start);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  const [done, setDone] = useState<{ value: number; sol: number; xp: number; items: string; paid: boolean } | null>(null);
+  const [done, setDone] = useState<{ value: number; sol: number; xp: number; nugs: number; items: string; paid: boolean } | null>(null);
   const submit = async () => {
     if (busy) return;
     setErr('');
@@ -309,10 +310,12 @@ function RedeemWindow() {
         value: r.value,
         sol: r.sol_lamports / 1e9,
         xp: r.rewards?.xp ?? 0,
+        nugs: r.rewards?.nugs ?? Math.floor((r.rewards?.xp ?? 0) / 10),
         items: (r.rewards?.items ?? []).map((i) => `${i.n} ${i.rarity}`).join(', '),
         paid: Boolean(r.payout),
       });
       beginCardRun(r.code, r.value, r.sol_lamports, Boolean(r.payout));
+      void useSkills.getState().refresh();
     } finally {
       setBusy(false);
     }
@@ -326,7 +329,7 @@ function RedeemWindow() {
             <View style={{ gap: 10, alignItems: 'center' }}>
               <CardReveal t={t} />
               <T v="display" style={{ fontSize: 24, color: t.hue }}>{t.name.toUpperCase()} CARD</T>
-              <T style={{ textAlign: 'center' }}>+{done.xp.toLocaleString()} XP added. {done.items ? `${done.items} items arrive when the NFT market opens.` : ''}</T>
+              <T style={{ textAlign: 'center' }}>+{done.xp.toLocaleString()} XP and +{done.nugs.toLocaleString()} NUGS added. {done.items ? `${done.items} items arrive when the NFT market opens.` : ''}</T>
               <T style={{ textAlign: 'center', color: COLORS.teal }}>
                 {done.paid ? `${done.sol.toFixed(4)} SOL ready to mine.` : `${done.sol.toFixed(4)} SOL is on its way from Gali. CLAIM NOW lights up in the mining panel when it lands.`}
               </T>

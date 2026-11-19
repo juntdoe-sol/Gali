@@ -30,7 +30,7 @@ import { useName, useRename } from '../game/username';
 import type { LobbyEvent, LobbyPeerView, LobbySnap } from '../engine/lobby';
 import { atlasSource } from '../pixel/atlasSource';
 import LobbyView, { type LobbyRef } from '../pixel/LobbyView';
-import { islandFight, islandGrab, islandJump, islandRide, myLook } from '../pixel/PixelMine';
+import { islandFight, islandGrab, islandJump, islandRide, islandSkill, myLook } from '../pixel/PixelMine';
 import { useIslandRides } from '../game/islandRides';
 import { useArena } from '../game/arena';
 import { BRAWLORE } from './BrawlOre';
@@ -56,6 +56,10 @@ import { TouchZone, useDomZones, zoneEvent } from './zones';
 import type { PixName } from './pixIcons';
 import { GAME_IDS, GAME_META, useArcade, type GameId } from '../game/arcade';
 import { HollowBadge } from './Season';
+import { fireSkill, SKILL_KEYS, useSkillCd, WORLD_CD_MS, type WorldMove } from '../game/skillWorld';
+import { fightLoadout, useSkills } from '../game/skills';
+import { SKILL_INFO } from '../game/brawl2/specials';
+import { SKILL_ICON } from './SkillShop';
 
 const GAME_SHORT: Record<GameId, string> = { tunnel: 'TUNNEL', pot: 'GOLD RUSH', crash: 'CRASH CART' };
 
@@ -205,6 +209,7 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
   const away = arenaOpen || caveOpen || arcadeOpen || marketOpen;
   const awayRef = useRef(away);
   awayRef.current = away;
+  const lobbySkill = useCallback((i: number) => skillAt(i, (m, c) => ref.current?.skill?.(m, c)), []);
   useEffect(() => {
     const f = ref.current?.opts;
     if (typeof f === 'function') f({ top: topH, bottom, left, right, touch, away });
@@ -225,7 +230,9 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
       const n = Number(e.key);
-      if (n >= 1 && n <= LOBBY_EMOTES.length) useLobby.getState().emote(LOBBY_EMOTES[n - 1]);
+      const sk = skillSlotOf(e.key);
+      if (sk >= 0) lobbySkill(sk);
+      else if (n >= 1 && n <= LOBBY_EMOTES.length) useLobby.getState().emote(LOBBY_EMOTES[n - 1]);
       else if (n === LOBBY_EMOTES.length + 1 || e.key.toLowerCase() === 'v') setDanceOpen((o) => !o);
     };
     window.addEventListener('gali:travel', travel);
@@ -463,6 +470,7 @@ function LobbyInner({ top, bottomInset, sheet, onTab }: { top: number; bottomIns
             <>
               <View style={styles.emoteSep} />
               <EmoteKey icon="jump" label="Jump" kbd="SPC" onPress={() => ref.current?.jump?.()} />
+              {!riding ? <SkillKeys onUse={lobbySkill} /> : null}
               {brawlOn && !riding ? <EmoteKey icon="fist" label="Hit: left click or F" kbd="LMB" onPress={() => ref.current?.attack?.()} /> : null}
               {riding || nearRide ? <EmoteKey icon="cart" label={riding ? 'Get off (E)' : 'Ride (E)'} kbd="E" onPress={() => ref.current?.ride?.()} /> : null}
               {carry && !riding ? <EmoteKey icon="pot" label={carry === 'held' ? 'Throw (T)' : 'Grab (T)'} kbd="T" on={carry === 'held'} onPress={() => ref.current?.grab?.()} /> : null}
@@ -570,7 +578,7 @@ function AuraCard({ maxWidth, onClose, onEmote }: { maxWidth: number; onClose: (
       <View style={styles.auraHead}>
         <PixIcon name="sparkle" size={22} />
         <T v="display" style={{ fontSize: 20, lineHeight: 22, color: COLORS.gold, flex: 1 }}>
-          AURA FARMING
+          EMOTES
         </T>
         <IconBtn onPress={() => onClose()} label="Close" kbd="ESC">
           <PixIcon name="close" size={16} />
@@ -638,7 +646,9 @@ function IslandAuraBar({ left, right, bottom }: { left: number; right: number; b
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
       const n = Number(e.key);
-      if (n >= 1 && n <= LOBBY_EMOTES.length) islandEmote(LOBBY_EMOTES[n - 1]);
+      const sk = skillSlotOf(e.key);
+      if (sk >= 0) skillAt(sk, islandSkill);
+      else if (n >= 1 && n <= LOBBY_EMOTES.length) islandEmote(LOBBY_EMOTES[n - 1]);
       else if (n === LOBBY_EMOTES.length + 1 || e.key.toLowerCase() === 'v') setOpen((o) => !o);
       else if (e.key === 'Escape') setOpen(false);
     };
@@ -652,6 +662,7 @@ function IslandAuraBar({ left, right, bottom }: { left: number; right: number; b
         <AuraKey on={Boolean(myDance) || open} dancing={myDance ? DANCES[myDance - 1] : null} onPress={() => setOpen((o) => !o)} />
         <View style={styles.emoteSep} />
         <EmoteKey icon="jump" label="Jump" kbd="SPC" onPress={islandJump} />
+        {!iRiding ? <SkillKeys onUse={(i) => skillAt(i, islandSkill)} /> : null}
         {brawlOn ? <EmoteKey icon="fist" label="Hit: left click or F" kbd="LMB" onPress={islandFight} /> : null}
         {carry && !iRiding ? <EmoteKey icon="pot" label={carry === 'held' ? 'Throw (T)' : 'Grab (T)'} kbd="T" on={carry === 'held'} onPress={islandGrab} /> : null}
         {iRiding || iNear ? <EmoteKey icon="cart" label={iRiding ? 'Get off (E)' : 'Ride (E)'} kbd="E" on={iRiding} onPress={islandRide} /> : null}
@@ -664,25 +675,77 @@ function IslandAuraBar({ left, right, bottom }: { left: number; right: number; b
 /** The bar's one button: dances and emotes live behind it. */
 function AuraKey({ on, dancing, onPress }: { on: boolean; dancing: string | null; onPress: () => void }) {
   return (
-    <Pressable onPressIn={onPress} accessibilityRole="button" accessibilityLabel="Aura farming: dances and emotes">
-      {(st) => {
-        const { hovered, pressed } = st as { hovered?: boolean; pressed: boolean };
+    <Tip text={dancing ? `Emotes (V). Dancing: ${dancing}` : 'Emotes: dances and reactions (V)'} side="top" width={190}>
+      <Pressable onPressIn={onPress} accessibilityRole="button" accessibilityLabel="Emotes: dances and reactions">
+        {(st) => {
+          const { hovered, pressed } = st as { hovered?: boolean; pressed: boolean };
+          return (
+            <PixelBox fill={on ? 'rgba(255,201,60,0.22)' : hovered ? '#22346a' : '#0e1838'} hi={on ? COLORS.gold : '#2d4282'} lo="#04060f" style={[styles.emote, { transform: [{ translateY: pressed ? U : hovered ? -U : 0 }] }]}>
+              <PixIcon name={dancing ? 'dance' : 'sparkle'} size={30} />
+              <Kbd k="V" style={styles.emoteKbd} />
+            </PixelBox>
+          );
+        }}
+      </Pressable>
+    </Tip>
+  );
+}
+
+/** Q, R or X: your three Fight Club skills, out in the world (game/skillWorld.ts). -1 for any other key. */
+function skillSlotOf(key: string): number {
+  return SKILL_KEYS.indexOf(key.toUpperCase() as (typeof SKILL_KEYS)[number]);
+}
+function skillAt(slot: number, play: (move: WorldMove, color: string) => void) {
+  const r = fireSkill(slot);
+  if (r) play(r.move, r.color);
+}
+
+/** The bar's three skill keys: the skill's icon in its colour, dimmed with the seconds left while it recharges. */
+function SkillKeys({ onUse }: { onUse: (slot: number) => void }) {
+  useSkills((s) => s.loadout);
+  useSkills((s) => s.owned);
+  const until = useSkillCd((s) => s.until);
+  const [, tick] = useState(0);
+  const busy = until.some((u) => u > Date.now());
+  useEffect(() => {
+    if (!busy) return;
+    const id = setInterval(() => tick((t) => t + 1), 250);
+    return () => clearInterval(id);
+  }, [busy]);
+  const lo = fightLoadout();
+  if (!lo.some(Boolean)) return null;
+  return (
+    <>
+      <View style={styles.emoteSep} />
+      {lo.map((k, i) => {
+        if (!k) return null;
+        const left = Math.max(0, until[i] - Date.now());
+        const info = SKILL_INFO[k];
         return (
-          <PixelBox fill={on ? 'rgba(255,201,60,0.22)' : hovered ? '#22346a' : '#0e1838'} hi={on ? COLORS.gold : '#2d4282'} lo="#04060f" style={[styles.auraKey, { transform: [{ translateY: pressed ? U : hovered ? -U : 0 }] }]}>
-            <PixIcon name="sparkle" size={26} />
-            <View>
-              <T v="display" style={{ fontSize: 16, lineHeight: 17, color: COLORS.gold, letterSpacing: 0.5 }}>
-                AURA FARMING
-              </T>
-              <T v="label" style={{ fontSize: 10 }}>
-                {dancing ? `DANCING: ${dancing}` : 'DANCES · EMOTES'}
-              </T>
-            </View>
-            <Kbd k="V" style={styles.emoteKbd} />
-          </PixelBox>
+          <Tip key={i} text={`${info.name}: ${info.line} (${SKILL_KEYS[i]})`} side="top" width={200}>
+            <Pressable onPressIn={() => onUse(i)} accessibilityRole="button" accessibilityLabel={`Skill ${info.name}, key ${SKILL_KEYS[i]}${left ? `, ready in ${Math.ceil(left / 1000)} seconds` : ''}`}>
+              {(st) => {
+                const { hovered, pressed } = st as { hovered?: boolean; pressed: boolean };
+                return (
+                  <PixelBox fill={hovered && !left ? '#22346a' : '#0e1838'} hi={left ? '#2d4282' : info.color} lo="#04060f" style={[styles.emote, { transform: [{ translateY: pressed ? U : hovered ? -U : 0 }] }]}>
+                    <View style={{ opacity: left ? 0.35 : 1 }}>
+                      <PixIcon name={SKILL_ICON[k]} size={30} />
+                    </View>
+                    {left ? (
+                      <View style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center' }]}>
+                        <T v="display" style={{ fontSize: 20, color: '#fff' }}>{Math.ceil(left / 1000)}</T>
+                      </View>
+                    ) : null}
+                    <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 3, backgroundColor: info.color, opacity: left ? 0.25 : 1, transform: [{ scaleX: left ? 1 - left / WORLD_CD_MS : 1 }] }} />
+                    <Kbd k={SKILL_KEYS[i]} style={styles.emoteKbd} />
+                  </PixelBox>
+                );
+              }}
+            </Pressable>
+          </Tip>
         );
-      }}
-    </Pressable>
+      })}
+    </>
   );
 }
 

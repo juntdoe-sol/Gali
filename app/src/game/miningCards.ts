@@ -68,6 +68,7 @@ export function perkLines(t: CardTier): string[] {
     `$${t.value} of SOL for autopilot mining`,
     ...t.items.map((i) => `${i.n} ${i.rarity} item${i.n > 1 ? 's' : ''}`),
     `+${t.xp.toLocaleString()} XP`,
+    `+${(t.xp / 10).toLocaleString()} NUGS`,
     ...t.extras,
   ];
 }

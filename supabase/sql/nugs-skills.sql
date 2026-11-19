@@ -25,12 +25,24 @@ create or replace function public.gali_skill_price(p_skill text)
  immutable
 as $$
   select case p_skill
-    when 'grab' then 300
-    when 'magnet' then 400
-    when 'dynamite' then 600
-    when 'geyser' then 800
-    when 'cavein' then 1000
-    when 'tunnel' then 1500
+    -- priced so a skill is something you grind for (NUGS = XP / 10); raised and six added 2026-11-19
+    when 'grab' then 2000
+    when 'slide' then 2500
+    when 'magnet' then 3000
+    when 'boomerang' then 3500
+    when 'dynamite' then 4000
+    when 'sonar' then 4500
+    when 'geyser' then 5000
+    when 'boulder' then 5500
+    when 'inferno' then 6000
+    when 'cavein' then 6500
+    when 'meteor' then 7000
+    when 'jade' then 7500
+    when 'tunnel' then 8000
+    when 'taiji' then 9000
+    when 'drill' then 10000
+    when 'thunder' then 12000
+    when 'pillar' then 15000
   end::bigint
 $$;
 

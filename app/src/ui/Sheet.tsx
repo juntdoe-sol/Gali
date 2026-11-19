@@ -28,6 +28,7 @@ import { MilestoneQuests } from './Milestones';
 import { useNft } from '../game/nft';
 import { useOreHits, type OreHit } from '../game/oreHits';
 import { ReportBugRow } from './ReportBug';
+import { SkillLoadout } from './SkillShop';
 import { refreshMarket, useOreStats } from '../game/oreStats';
 import { useName, useRename } from '../game/username';
 
@@ -909,6 +910,7 @@ function Me() {
           </>
         )}
       </Card>
+      <SkillLoadout />
       <View style={styles.grid}>
         {[
           ['Rounds played', String(w.player?.rounds ?? save.digs)],

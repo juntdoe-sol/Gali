@@ -15,7 +15,7 @@ import { PixIcon } from './PixIcon';
 import type { PixName } from './pixIcons';
 import { GUTTER, LANDSCAPE_APP, RAIL_W, TOP_H, useLayout } from './layout';
 import { HollowBadge } from './Season';
-import { useName, useRename } from '../game/username';
+import { useSkills } from '../game/skills';
 import { LODE_WORD, lodeTier, useLodeGrowth } from '../game/motherlode';
 import { refreshMarket, useOreStats } from '../game/oreStats';
 
@@ -147,17 +147,39 @@ export interface TopPlace {
 }
 const ISLAND_PLACE: TopPlace = { title: 'ORE ISLAND', sub: "Live on ORE's board", icon: 'ore' };
 
-/** The player's name on the top bar; tap to change it (every screen). */
-function NameBtn() {
-  const name = useName((s) => s.name);
+/** XP and NUGS on the top bar: an info board, not a button (the name lives in Profile). */
+function XpNugsBtn() {
+  const xp = useLevelXp();
+  const nugs = useSkills((s) => s.nugs);
+  const owner = useGame((s) => s.wallet.owner);
+  useEffect(() => {
+    if (!owner) return;
+    void useSkills.getState().refresh();
+    // XP keeps coming in while you play, and NUGS with it
+    const id = setInterval(() => void useSkills.getState().refresh(), 60_000);
+    return () => clearInterval(id);
+  }, [owner]);
   return (
-    <IconBtn onPress={() => useRename.getState().setOpen(true)} label="Change your name">
-      <T v="display" numberOfLines={1} style={{ fontSize: 18, paddingHorizontal: 10, maxWidth: 170 }}>
-        {name || 'PICK A NAME'}
-      </T>
-    </IconBtn>
+    <Tip text="Your XP, and NUGS: Gali's in-game coin (1 for every 10 XP). Spend NUGS on Fight Club skills." side="bottom" width={220}>
+      <PixelBox fill="rgba(8,13,32,0.86)" hi="rgba(60,86,160,0.5)" lo="#04060f" style={styles.stat}>
+        <View style={[styles.chipRow, { gap: 6 }]}>
+          <PixIcon name="star" size={16} />
+          <T v="display" numberOfLines={1} style={{ fontSize: 17, lineHeight: 19 }}>{compact(xp)}</T>
+          {TIGHT ? null : <T v="display" style={{ fontSize: 13, color: COLORS.muted }}>XP</T>}
+          <View style={{ width: 1, height: 16, backgroundColor: 'rgba(120,140,200,0.35)', marginHorizontal: 2 }} />
+          <PixIcon name="nugs" size={16} />
+          <T v="display" numberOfLines={1} style={{ fontSize: 17, lineHeight: 19, color: COLORS.gold }}>{nugs === null ? '…' : compact(nugs)}</T>
+          {TIGHT ? null : <T v="display" style={{ fontSize: 13, color: COLORS.muted }}>NUGS</T>}
+        </View>
+      </PixelBox>
+    </Tip>
   );
 }
+function NugsStat() {
+  const nugs = useSkills((s) => s.nugs);
+  return <Stat icon="nugs" color={COLORS.gold} value={nugs === null ? '…' : compact(nugs)} label="NUGS" />;
+}
+const compact = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e5 ? `${Math.round(n / 1e3)}K` : n.toLocaleString());
 
 /**
  * The top bar. On a computer it is the same bar on every screen (ORE Island, the lobby): only the title box
@@ -193,7 +215,7 @@ export function TopBar({ onMenu, place = ISLAND_PLACE, right }: { onMenu: () => 
         {noBadge ? null : <HollowBadge compact={w < 1300} />}
         <View style={[styles.chipRow, { flex: 1, maxWidth: 560 }]}>
           {FEATURE_GALI_PROGRAM ? <Stat icon="star" color={COLORS.gold} value={points.toLocaleString()} label="PTS" tip="Points from rounds you mined. They rank you on the season board." /> : null}
-          {noName ? null : <NameBtn />}
+          {noName ? null : <XpNugsBtn />}
           <LevelStat lvl={lvl} pct={pct} xp={xp} />
           <Stat icon="sol" value={sol.toFixed(sol >= 100 ? 1 : 3)} label="SOL" tip="SOL in your wallet." />
           {FEATURE_GALI_PROGRAM && streak >= 2 ? <Stat icon="fire" color={COLORS.red} value={`x${streak}`} tip={`${streak} rounds in a row on the gold spot.`} /> : null}
@@ -233,6 +255,7 @@ export function TopBar({ onMenu, place = ISLAND_PLACE, right }: { onMenu: () => 
         {FEATURE_GALI_PROGRAM ? <Stat icon="star" color={COLORS.gold} value={points.toLocaleString()} label="PTS" /> : null}
         <LevelStat lvl={lvl} pct={pct} xp={xp} />
         <Stat icon="sol" value={sol.toFixed(sol >= 100 ? 1 : 3)} label="SOL" />
+        <NugsStat />
         {FEATURE_GALI_PROGRAM && streak >= 2 ? <Stat icon="fire" color={COLORS.red} value={`x${streak}`} /> : null}
       </View>
     </View>

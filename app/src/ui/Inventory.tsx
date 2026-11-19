@@ -20,7 +20,6 @@ import { useName } from '../game/username';
 import { CertCard, postOnX, saveCert } from './CertClaim';
 import { CertRow, MilestoneVault } from './Milestones';
 import { BagCards } from './MiningCards';
-import { BagSkills } from './SkillShop';
 import { T, U } from './kit';
 import { PixIcon } from './PixIcon';
 import type { PixName } from './pixIcons';
@@ -455,7 +454,6 @@ export function Inventory() {
   return (
     <View style={{ gap: 14 }}>
       <Measure>{(w) => <Bay width={w} />}</Measure>
-      <BagSkills />
       <BagCards />
       <Vault />
     </View>

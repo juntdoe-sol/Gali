@@ -54,6 +54,8 @@ export const SKILL_POWER: Record<string, ActiveId> = {
   rush: 'dash', magnet: 'dash', tunnel: 'dash',
   quake: 'slam', moon: 'slam', dive: 'slam', geyser: 'slam', cavein: 'slam',
   whirl: 'spin', guard: 'guard', grab: 'splash', dynamite: 'splash',
+  slide: 'dash', drill: 'dash', boulder: 'dash', meteor: 'slam', sonar: 'spin', boomerang: 'splash',
+  inferno: 'splash', jade: 'spin', taiji: 'slam', thunder: 'splash', pillar: 'slam',
 };
 export const unlocked = (p: PowerId, lvl: number, skills?: readonly (string | null)[]) =>
   lvl >= POWERS[p].lvl || Boolean(skills?.some((k) => k && SKILL_POWER[k] === p));

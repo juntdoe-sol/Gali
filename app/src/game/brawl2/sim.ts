@@ -32,7 +32,7 @@ export type SpecialId = 'quake' | 'rush' | 'moon' | 'whirl' | 'dive' | 'guard';
  * with its own cooldown. The six specials are also skills, free for everyone, a little lighter than the meter
  * version. Every skill has the same power budget: they play differently, none is stronger (specials.ts SKILL_INFO).
  */
-export type SkillId = SpecialId | 'grab' | 'dynamite' | 'magnet' | 'tunnel' | 'geyser' | 'cavein';
+export type SkillId = SpecialId | 'grab' | 'dynamite' | 'magnet' | 'tunnel' | 'geyser' | 'cavein' | 'slide' | 'boomerang' | 'sonar' | 'boulder' | 'meteor' | 'drill' | 'inferno' | 'jade' | 'taiji' | 'thunder' | 'pillar';
 export const SKILL_SLOTS = ['skN', 'skS', 'skD'] as const;
 /** frames between uses of one skill slot */
 export const SKILL_CD_F = 7 * 60;
@@ -322,6 +322,28 @@ export const SKILLS: Record<SkillId, Move> = {
   geyser: m({ start: 14, active: 8, end: 16, hx: 60, hy: -48, hw: 28, hh: 48, dmg: 11, base: 185, growth: 150, angle: -88 }),
   // Cave-In: rocks drop from above, ahead of you, spiking down
   cavein: m({ start: 20, active: 7, end: 18, hx: 34, hy: -60, hw: 34, hh: 60, dmg: 11, base: 150, growth: 135, angle: 75 }),
+  // Cart Slide: a low slide along the floor that sweeps miners off their feet
+  slide: m({ start: 6, active: 12, end: 10, hx: 0, hy: -14, hw: 44, hh: 14, dmg: 12, base: 190, growth: 140, angle: -60, lunge: [280, 0] }),
+  // Pick Boomerang: the pickaxe spins out ahead and catches miners a few steps away
+  boomerang: m({ start: 12, active: 10, end: 18, hx: 40, hy: -22, hw: 34, hh: 14, dmg: 9, base: 160, growth: 135, angle: -30 }),
+  // Sonar Pulse: a ring all round you that pushes everyone away
+  sonar: m({ start: 13, active: 6, end: 14, hx: -34, hy: -30, hw: 68, hh: 34, dmg: 10, base: 175, growth: 140, angle: -60, away: true }),
+  // Boulder Roll: curl up and roll forward through anyone in the way
+  boulder: m({ start: 8, active: 14, end: 12, hx: 0, hy: -30, hw: 46, hh: 30, dmg: 14, base: 200, growth: 150, angle: -35, lunge: [260, 0] }),
+  // Ore Meteor: leap forward and come down like a meteor, spiking
+  meteor: m({ start: 10, active: 16, end: 20, hx: 2, hy: -12, hw: 24, hh: 18, dmg: 12, base: 160, growth: 150, angle: 70, lunge: [160, -260] }),
+  // Drill Charge: a fast, long drill dash; a miss leaves you wide open
+  drill: m({ start: 5, active: 16, end: 12, hx: 4, hy: -24, hw: 30, hh: 22, dmg: 13, base: 195, growth: 155, angle: -15, lunge: [300, 0] }),
+  // Inferno Road: a wave of fire races along the floor ahead and launches whoever stands in it
+  inferno: m({ start: 16, active: 10, end: 18, hx: 10, hy: -14, hw: 80, hh: 14, dmg: 10, base: 165, growth: 140, angle: -70 }),
+  // Jade Vortex: a wide spiral cut all round you, slower than Whirlwind and further reaching
+  jade: m({ start: 10, active: 14, end: 20, hx: -30, hy: -32, hw: 60, hh: 32, dmg: 11, base: 175, growth: 150, angle: -50, away: true }),
+  // Taiji Seal: a seal opens on the floor round you and throws everyone in it straight up
+  taiji: m({ start: 18, active: 8, end: 18, hx: -40, hy: -20, hw: 80, hh: 22, dmg: 9, base: 175, growth: 140, angle: -88 }),
+  // Thunder Cleave: a long wind-up, then lightning tears across the floor ahead
+  thunder: m({ start: 20, active: 5, end: 16, hx: 0, hy: -30, hw: 120, hh: 30, dmg: 11, base: 160, growth: 140, angle: -35 }),
+  // Golden Pillar: a column of light drops on a miner a long way off
+  pillar: m({ start: 18, active: 10, end: 16, hx: 70, hy: -70, hw: 24, hh: 70, dmg: 12, base: 190, growth: 150, angle: -88 }),
 };
 export const SKILL_IDS = Object.keys(SKILLS) as SkillId[];
 export const isSkill = (x: unknown): x is SkillId => typeof x === 'string' && (SKILL_IDS as string[]).includes(x);

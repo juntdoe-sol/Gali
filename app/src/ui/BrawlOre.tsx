@@ -9,6 +9,7 @@
  */
 import { useSkills } from '../game/skills';
 import { SKILL_INFO } from '../game/brawl2/specials';
+import { SkillLoadout } from './SkillShop';
 import { useMarket } from '../game/market';
 import { fightLoadout } from '../game/skills';
 import React, { useEffect, useRef, useState } from 'react';
@@ -176,6 +177,8 @@ export function BrawlOreScreen() {
     ref.current?.begin({ mode: lastQ.current === 'ffa' ? 'ffa' : '1v1', diff: 'normal', name: name || 'You', look: myLook(), weapon: 'pick', special: myWeapon().sp, skills: fightLoadout() });
   }, [solo, stage, name]);
 
+  // every fight starts with picking your three skills (from the ones you own)
+  const [ready, setReady] = useState<(() => void) | null>(null);
   const fight = () => {
     setResult(null);
     setSoloNote(false);
@@ -222,6 +225,8 @@ export function BrawlOreScreen() {
   }, [open, join]);
   const onEvent = (e: BrawlEvent) => {
     if (e.t === 'sfx') play(SFX[e.name] ?? 'pop');
+    else if (e.t === 'skillSfx') play(`sk_${e.k}` as Sound);
+    else if (e.t === 'hitSfx') play(`hit_${e.k}` as Sound);
     else if (e.t === 'card') setCardUrl(e.url);
     else if (e.t === 'net') sendNet(e.e, e.p);
     else if (e.t === 'end') {
@@ -332,17 +337,17 @@ export function BrawlOreScreen() {
                       <Choice key={d} label={l} sub={s} on={diff === d} onPress={() => setDiff(d)} />
                     ))}
                   </View>
-                  <Btn kind="gold" label="FIGHT" onPress={fight} />
+                  <Btn kind="gold" label="FIGHT" onPress={() => setReady(() => fight)} />
                 </>
               ) : (
                 <>
-                  <Btn kind="gold" label="FIND A MATCH" onPress={() => find(mode)} />
+                  <Btn kind="gold" label="FIND A MATCH" onPress={() => setReady(() => () => find(mode))} />
                   <Btn kind="red" label="CALL OUT A MINER" sub="Challenge a Gali miner or a friend on X" onPress={() => setCalling(true)} />
                   <T v="label" style={styles.lbl}>
                     PRIVATE ROOM
                   </T>
                   <View style={[styles.row, { alignItems: 'center' }]}>
-                    <Btn kind="plain" label="NEW ROOM" onPress={() => find(`code:${newCode()}`, 0, true)} style={{ flex: 1 }} />
+                    <Btn kind="plain" label="NEW ROOM" onPress={() => setReady(() => () => find(`code:${newCode()}`, 0, true))} style={{ flex: 1 }} />
                     <TextInput
                       value={code}
                       onChangeText={(t) => setCode(cleanCode(t))}
@@ -353,7 +358,7 @@ export function BrawlOreScreen() {
                       maxLength={4}
                       style={styles.code}
                     />
-                    <Btn kind="plain" label="JOIN" disabled={code.length !== 4} onPress={() => find(`code:${code}`)} />
+                    <Btn kind="plain" label="JOIN" disabled={code.length !== 4} onPress={() => setReady(() => () => find(`code:${code}`))} />
                   </View>
                 </>
               )}
@@ -384,11 +389,35 @@ export function BrawlOreScreen() {
             onClose={() => setCalling(false)}
             onPick={(r, n, at) => {
               setCalling(false);
-              callOut(r, n, at);
+              setReady(() => () => callOut(r, n, at));
             }}
           />
         ) : null}
         {stage === 'called' ? <Called card={cardUrl} onDone={() => setStage('menu')} /> : null}
+        {ready && stage === 'menu' ? (
+          <View style={[styles.centerAbs, { backgroundColor: 'rgba(6,4,12,0.82)' }]}>
+            <StreetCard tone="gold" style={[styles.card, { gap: 10 }]}>
+              <Neon size={26} color={COLORS.gold}>PICK YOUR SKILLS</Neon>
+              <T v="muted" style={{ textAlign: 'center', fontSize: 12 }}>
+                {touch ? 'SKILL, SKILL + side, SKILL + down.' : 'Q or U, with A / D for the side slot, with S for the down slot.'} Each waits 7 seconds after use.
+              </T>
+              <SkillLoadout title="YOUR THREE" compact />
+              <View style={styles.row}>
+                <Btn kind="plain" label="BACK" onPress={() => setReady(null)} style={{ flex: 1 }} />
+                <Btn
+                  kind="gold"
+                  label="FIGHT"
+                  onPress={() => {
+                    const go = ready;
+                    setReady(null);
+                    go();
+                  }}
+                  style={{ flex: 2 }}
+                />
+              </View>
+            </StreetCard>
+          </View>
+        ) : null}
         {stage === 'done' && result ? (
           <View style={styles.centerAbs} pointerEvents="box-none">
             <StreetCard tone={result.place === 1 ? 'gold' : 'pink'} style={styles.card}>

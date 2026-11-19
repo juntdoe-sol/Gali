@@ -82,7 +82,7 @@ export async function playCards(): Promise<{ unused: OwnedCard[]; redeemed: Owne
 }
 
 export type RedeemResult =
-  | { ok: true; code: string; value: number; sol_lamports: number; rewards: { xp: number; items: { n: number; rarity: string }[]; extras: string[] }; payout: string | null }
+  | { ok: true; code: string; value: number; sol_lamports: number; rewards: { xp: number; nugs?: number; items: { n: number; rarity: string }[]; extras: string[] }; payout: string | null }
   | { error: string };
 /** Use a Mining Card code for this wallet. */
 export async function playRedeem(code: string): Promise<RedeemResult> {

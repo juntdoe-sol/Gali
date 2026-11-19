@@ -15,11 +15,12 @@ import { ctx2d, loadAtlas, makeCanvas, text, textWidth, type Ctx } from './art';
 import { drawMiner, frameAt } from './actors';
 import type { Look } from './types';
 import { Bots } from '../game/brawl2/bots';
-import { FPS, METER_FULL, SKILL_CD_F, STAGES, isSkill, moveHitbox, moveOf, newMatch, NO_INPUT, poseOf, skillOf, step, STOCKS, type Difficulty, type Fighter, type Input, type Match, type MatchEvent, type Mode, type SkillId, type SpecialId, type Weapon } from '../game/brawl2/sim';
+import { FPS, METER_FULL, SKILL_CD_F, SKILLS, STAGES, isSkill, isSkillMove, moveHitbox, moveOf, newMatch, NO_INPUT, poseOf, skillOf, step, STOCKS, type Difficulty, type Fighter, type Input, type Match, type MatchEvent, type Mode, type SkillId, type SpecialId, type Weapon } from '../game/brawl2/sim';
 import { SKILL_INFO, SPECIAL_INFO } from '../game/brawl2/specials';
 import { WH, WW, WX0, WY0, type Scene } from './fightclubArt';
 import { animateStreetScene, paintStreetScene } from './fightclubStreetStages';
 import { paintStreetCard } from './fightclubStreetCard';
+import { SkillVfx } from './skillVfx';
 import { adoptSelf, applySelf, packSelf, packSnap, setFighter, type NetPlayer, type Snap } from '../game/brawl2/net';
 
 export interface BrawlSetup {
@@ -56,11 +57,23 @@ export type BrawlEvent =
   | { t: 'end'; result: BrawlResult }
   | { t: 'sfx'; name: 'swing' | 'hit' | 'pop' | 'slam' | 'cheer' | 'ko' | 'pick' | 'throw' | 'special' | 'ready' }
   | { t: 'menu' }
+  /** a skill started (its own sound, timed to its frames) or landed (a hit sound by element) */
+  | { t: 'skillSfx'; k: SkillId }
+  | { t: 'hitSfx'; k: 'fire' | 'ice' | 'shock' | 'gold' | 'rock' | 'cut' }
   /** a callout card, as a PNG data URL */
   | { t: 'card'; url: string }
   /** online: a message for the app to send ('bos' from the host, 'boi' from a guest) */
   | { t: 'net'; e: 'bos' | 'boi'; p: Record<string, unknown> };
 
+/** which hit sound a skill makes when it lands */
+const HIT_SOUND: Record<SkillId, 'fire' | 'ice' | 'shock' | 'gold' | 'rock' | 'cut'> = {
+  dive: 'fire', meteor: 'fire', dynamite: 'fire', inferno: 'fire',
+  taiji: 'ice', geyser: 'ice', guard: 'ice',
+  thunder: 'shock', drill: 'shock', magnet: 'shock', rush: 'shock',
+  pillar: 'gold', moon: 'gold', jade: 'gold', sonar: 'gold',
+  quake: 'rock', cavein: 'rock', boulder: 'rock', tunnel: 'rock', grab: 'rock',
+  whirl: 'cut', slide: 'cut', boomerang: 'cut',
+};
 /** your fighter's id offline */
 const ME = 'me';
 /** a guest whose host goes quiet this long ends the match; a guest the host stops hearing becomes a bot */
@@ -122,6 +135,11 @@ export class BrawlEngine {
   private looks = new Map<string, Look>();
   private colorOf = new Map<string, string>();
   private fx: Fx[] = [];
+  /** the skills' own effects: fire, projectiles, debris (engine/skillVfx.ts) */
+  private vfx = new SkillVfx((id) => {
+    const f = this.match?.fighters.find((x) => x.id === id);
+    return f && f.stocks > 0 && f.respawn <= 0 ? { x: f.x, y: f.y, facing: f.facing, vx: f.vx, vy: f.vy, alive: true } : null;
+  });
   private shake = { until: 0, mag: 0 };
   private cam = { x: 240, y: 170, z: 2 };
   private sent = false;
@@ -152,14 +170,104 @@ export class BrawlEngine {
   private stick: { id: number; ox: number; oy: number; x: number; y: number } | null = null;
   private held = new Map<number, 'jump' | 'light' | 'heavy' | 'dodge' | 'special' | 'skill'>();
 
+  /** a skill preview (the Market): two fighters, no keys, no HUD, the skill used over and over */
+  private demoSkill: SkillId | null = null;
+  private demoT = 0;
+  /** the preview's floor line (where the two miners stand) */
+  private demoFloor = 0;
+  /** the preview on a plain backdrop (the Market), or on the real stage (trailers) */
+  private demoPlain = true;
+
   constructor(
     private canvas: HTMLCanvasElement,
     private emit: (e: BrawlEvent) => void,
     private touch: boolean,
+    private preview = false,
   ) {
     this.c = ctx2d(canvas);
+    if (preview) return;
     this.bind();
     (globalThis as unknown as { __brawlore?: BrawlEngine }).__brawlore = this;
+  }
+
+  /** Preview a skill: you use it on a sparring miner, again and again. */
+  demo(k: SkillId, plain = true) {
+    this.demoPlain = plain;
+    this.demoSkill = k;
+    this.demoT = 0;
+    this.begin({ mode: '1v1', diff: 'easy', name: 'You', look: BOT_LOOKS[1], weapon: 'pick', special: 'quake', skills: [k, null, null], seed: 7 });
+    const m = this.match!;
+    m.countdown = 0;
+    // a short stage with no hazards, the same for every skill
+    for (const f of m.fighters) f.meter = 0;
+    this.demoFloor = m.fighters[0].y;
+  }
+
+  /** The preview's plain stage: a glow in the skill's colour, a floor line and the miners' shadows, nothing else. */
+  private drawBackdrop(c: Ctx, sx: (x: number) => number, sy: (y: number) => number, Z: number) {
+    const col = SKILL_INFO[this.demoSkill!].color;
+    const fy = sy(this.demoFloor);
+    const g = c.createRadialGradient(this.W / 2, fy - 20 * Z, 0, this.W / 2, fy - 20 * Z, Math.max(this.W, this.H) * 0.7);
+    g.addColorStop(0, hexA(col, 0.22));
+    g.addColorStop(1, hexA(col, 0));
+    c.fillStyle = g;
+    c.fillRect(0, 0, this.W, this.H);
+    // a pixel grid, faint, so movement reads
+    c.fillStyle = 'rgba(255,255,255,0.035)';
+    const step = 16 * Z;
+    const ox = ((sx(0) % step) + step) % step;
+    for (let x = ox; x < this.W; x += step) c.fillRect(Math.round(x), 0, 1, fy);
+    for (let y = fy - step; y > 0; y -= step) c.fillRect(0, Math.round(y), this.W, 1);
+    // the floor
+    c.fillStyle = 'rgba(8,5,16,0.9)';
+    c.fillRect(0, fy, this.W, this.H - fy);
+    c.fillStyle = hexA(col, 0.85);
+    c.fillRect(0, fy, this.W, Math.max(2, Z));
+    const m = this.match;
+    if (m) for (const f of m.fighters) {
+      if (f.stocks <= 0 || f.respawn > 0) continue;
+      const lift = Math.max(0, this.demoFloor - f.y);
+      const w = Math.max(4, 14 - lift * 0.08) * Z;
+      c.fillStyle = `rgba(0,0,0,${Math.max(0.1, 0.45 - lift * 0.004)})`;
+      c.fillRect(sx(f.x) - w / 2, fy + Z, w, 2 * Z);
+    }
+  }
+
+  /** The preview's two inputs: walk into range, use the skill, wait, and start over every few seconds. */
+  private demoInputs(m: Match): Record<string, Input> {
+    const k = this.demoSkill!;
+    const me = m.fighters[0];
+    const foe = m.fighters[1];
+    this.demoT++;
+    if (this.demoT > 4 * FPS || foe.stocks < STOCKS || me.stocks < STOCKS) {
+      this.demo(k, this.demoPlain);
+      return {};
+    }
+    // where the skill's hitbox lands: walk until the foe is inside it, then use it
+    const mv = SKILLS[k];
+    const lungeIn = mv.lunge ? Math.abs(mv.lunge[0]) * 0.06 : 0;
+    // a leap carries you a long way through the air
+    const leap = mv.lunge && mv.lunge[1] < 0 ? Math.abs(mv.lunge[0]) * 0.4 : 0;
+    const far = mv.blink ? 200 : mv.guard ? 30 : Math.max(12, mv.hx + mv.hw * 0.7 + (leap || lungeIn));
+    const dx = foe.x - me.x;
+    const t = this.demoT;
+    const mine: Input = { ...NO_INPUT };
+    const theirs: Input = { ...NO_INPUT };
+    if (t > 20 && !me.act) {
+      if (Math.abs(dx) > far) mine.mx = Math.sign(dx);
+      else if (me.skillCd[0] === 0 && (k !== 'guard' || Math.abs(dx) < 34)) {
+        if (me.facing !== Math.sign(dx)) mine.mx = Math.sign(dx) * 0.4;
+        else mine.skill = t % 2 === 0;
+      }
+    }
+    // a launcher only catches a miner above you: the sparring miner hops as you go
+    if (k === 'moon') theirs.jump = Boolean(me.act && me.act.f < 2) || (Math.abs(dx) <= far && me.skillCd[0] === 0 && t % 2 === 0);
+    if (k === 'guard') {
+      // the sparring miner swings at you, so the counter has something to answer
+      if (Math.abs(dx) > 22) theirs.mx = -Math.sign(dx) * 0.6;
+      else theirs.light = t % 24 < 2;
+    }
+    return { [me.id]: mine, [foe.id]: theirs };
   }
 
   async start(atlasUrl: string) {
@@ -232,6 +340,7 @@ export class BrawlEngine {
     let ci = 1;
     for (const p of players) this.colorOf.set(p.id, p.id === this.me ? COLORS[0] : COLORS[ci++ % COLORS.length]);
     this.fx = [];
+    this.vfx.clear();
     this.sent = false;
     this.acc = 0;
     this.cam = { x: 240, y: 170, z: this.cam.z };
@@ -490,9 +599,10 @@ export class BrawlEngine {
   }
 
   private frame(t: number) {
-    const dt = Math.min(0.1, (t - this.last) / 1000);
+    const dt = Math.max(0, Math.min(0.1, (t - this.last) / 1000));
     this.last = t;
     this.resize();
+    this.vfx.update(dt);
     const m = this.match;
     if (m && !m.over) {
       this.acc += dt;
@@ -500,6 +610,13 @@ export class BrawlEngine {
       while (this.acc >= 1 / FPS && n < 5) {
         this.acc -= 1 / FPS;
         n++;
+        if (this.demoSkill) {
+          const di = this.demoInputs(m);
+          if (this.match !== m) break;
+          step(m, di);
+          this.react(m, m.events);
+          continue;
+        }
         const guest = this.role === 'guest';
         const inputs: Record<string, Input> = guest ? {} : this.bots.inputs(m);
         const meF = m.fighters.find((f) => f.id === this.me);
@@ -523,7 +640,7 @@ export class BrawlEngine {
     if (m) {
       const meF = m.fighters.find((f) => f.id === this.me);
       const full = Boolean(meF && meF.meter >= METER_FULL && meF.stocks > 0);
-      if (full && !this.wasFull && !m.over && m.countdown === 0) {
+      if (full && !this.wasFull && !m.over && m.countdown === 0 && !this.demoSkill) {
         this.fx.push({ k: 'word', x: 240, y: 110, t0: performance.now(), dur: 800, c: SPECIAL_INFO[meF!.special].color, word: 'SPECIAL READY', small: true });
         this.emit({ t: 'sfx', name: 'ready' });
       }
@@ -558,10 +675,18 @@ export class BrawlEngine {
           const v = (big ? 120 : 70) * (0.5 + Math.random());
           this.fx.push({ k: 'spark', x: e.x!, y: e.y!, t0: now, dur: 260 + Math.random() * 200, c: k % 3 ? '#fff6c0' : this.colorOf.get(e.by!) ?? '#fff', vx: Math.cos(a) * v, vy: Math.sin(a) * v });
         }
-        this.fx.push({ k: 'ring', x: e.x!, y: e.y!, t0: now, dur: big ? 320 : 200, c: '#ffffff', s: big ? 22 : 12 });
         if (big) this.kick(260, 3.2);
         else this.kick(90, 1.2);
-        this.emit({ t: 'sfx', name: big ? 'slam' : 'hit' });
+        // a skill landing gets its own burst: fire, water, rock or sparks in its colour; anything else a white ring
+        const by = m.fighters.find((x) => x.id === e.by);
+        const hk = by?.act && isSkillMove(by.act.move) ? skillOf(by, by.act.move) : null;
+        if (hk) {
+          this.vfx.hit(hk, e.id!, e.x!, e.y!, SKILL_INFO[hk].color);
+          this.emit({ t: 'hitSfx', k: HIT_SOUND[hk] });
+        } else {
+          this.fx.push({ k: 'ring', x: e.x!, y: e.y!, t0: now, dur: big ? 320 : 200, c: '#ffffff', s: big ? 22 : 12 });
+          this.emit({ t: 'sfx', name: big ? 'slam' : 'hit' });
+        }
       } else if (e.t === 'ko') {
         const b = m.stage.blast;
         const ang = e.x! <= b.x0 + 1 ? 0 : e.x! >= b.x1 - 1 ? Math.PI : e.y! <= b.y0 + 1 ? Math.PI / 2 : -Math.PI / 2;
@@ -591,20 +716,12 @@ export class BrawlEngine {
         const sk = f && e.move ? skillOf(f, e.move) : null;
         const info = sk ? SKILL_INFO[sk] : null;
         if (info) {
-          this.fx.push({ k: 'ring', x: e.x!, y: e.y! - 12, t0: now, dur: 360, c: info.color, s: 24 });
-          this.fx.push({ k: 'word', x: 240, y: 110, t0: now, dur: 800, c: info.color, word: e.id === this.me ? info.name : `${f!.name.slice(0, 8)}: ${info.name}`, small: true });
-          if (sk === 'cavein' || sk === 'dynamite' || sk === 'geyser') {
-            // where it lands: rocks, a blast or a burst a little way ahead
-            const ax = e.x! + f!.facing * (sk === 'cavein' ? 52 : sk === 'dynamite' ? 72 : 75);
-            const at = now + (sk === 'geyser' ? 230 : 280);
-            for (let k = 0; k < 10; k++) this.fx.push({ k: 'dust', x: ax + (k - 5) * 4, y: sk === 'cavein' ? e.y! - 70 : e.y!, t0: at, dur: 520, c: info.color, vx: (k - 5) * 18, vy: sk === 'cavein' ? 160 : -170 });
-            this.fx.push({ k: 'ring', x: ax, y: e.y! - 14, t0: at, dur: 380, c: info.color, s: 30 });
-          }
-          this.emit({ t: 'sfx', name: 'special' });
+          this.vfx.skill(sk!, f!.id, SKILLS[sk!], { x: e.x!, y: e.y! }, f!.facing, info.color);
+          if (!this.demoSkill) this.fx.push({ k: 'word', x: 240, y: 110, t0: now, dur: 800, c: info.color, word: e.id === this.me ? info.name : `${f!.name.slice(0, 8)}: ${info.name}`, small: true });
+          this.emit({ t: 'skillSfx', k: sk! });
         }
       } else if (e.t === 'blink') {
-        for (let k = 0; k < 8; k++) this.fx.push({ k: 'dust', x: e.x! + (k - 4) * 4, y: e.y!, t0: now, dur: 420, c: '#b388ff', vx: (k - 4) * 22, vy: -60 });
-        this.fx.push({ k: 'ring', x: e.x!, y: e.y! - 10, t0: now, dur: 320, c: '#b388ff', s: 22 });
+        this.vfx.blink(e.x!, e.y!, SKILL_INFO.tunnel.color);
       } else if (e.t === 'throw') {
         this.fx.push({ k: 'word', x: 240, y: 110, t0: now, dur: 700, c: '#ffb347', word: 'THROW!', small: true });
         this.emit({ t: 'sfx', name: 'throw' });
@@ -662,9 +779,20 @@ export class BrawlEngine {
       x1 = Math.min(x1, m.stage.blast.x1 - 10);
       y0 = Math.max(y0, m.stage.blast.y0 + 10);
       y1 = Math.min(y1, m.stage.blast.y1 - 30);
+      // a skill preview: close on the two miners
+      if (this.demoSkill) {
+        const [a, b] = m.fighters;
+        const cx = (a.x + b.x) / 2;
+        const cy = Math.min(a.y, b.y) - 10;
+        const span = Math.max(90, Math.abs(a.x - b.x) + 40);
+        x0 = cx - span / 2;
+        x1 = cx + span / 2;
+        y0 = cy - 46;
+        y1 = cy + 16;
+      }
     }
     const zFit = Math.min(this.W / (x1 - x0 + 60), this.H / (y1 - y0 + 70));
-    const zMax = this.touch ? 3.2 : 3;
+    const zMax = this.demoSkill ? 6 : this.touch ? 3.2 : 3;
     // never zoomed out past the painted world
     const zMin = Math.max(this.W / WW, this.H / WH);
     const z = Math.max(zMin, Math.min(Math.max(zMax, zMin), zFit));
@@ -686,40 +814,43 @@ export class BrawlEngine {
     const oy = this.H / 2 - this.cam.y * Z + shy;
     const sx = (x: number) => ox + x * Z;
     const sy = (y: number) => oy + y * Z;
-    c.drawImage(scene.cv, sx(WX0), sy(WY0), WW * Z, WH * Z);
-    animateStreetScene(c, stage, now, sx, sy, Z);
-    // mine lamps swing a little and flicker
-    for (const [tx, ty] of scene.lamps) {
-      const fl = 0.8 + 0.2 * Math.sin(now / 90 + tx) * Math.sin(now / 37 + ty);
-      const sw = Math.sin(now / 900 + tx) * 1.5;
-      const lx = tx + sw;
-      const gl = c.createRadialGradient(sx(lx), sy(ty + 4), 0, sx(lx), sy(ty + 4), 40 * Z);
-      gl.addColorStop(0, hexA(scene.lamp, 0.3 * fl));
-      gl.addColorStop(1, hexA(scene.lamp, 0));
-      c.fillStyle = gl;
-      c.fillRect(sx(lx - 40), sy(ty - 36), 80 * Z, 80 * Z);
-      c.strokeStyle = '#8a8a96';
-      c.lineWidth = Math.max(1, Z * 0.6);
-      c.beginPath();
-      c.moveTo(sx(tx), sy(2));
-      c.lineTo(sx(lx), sy(ty));
-      c.stroke();
-      c.fillStyle = '#2a2a34';
-      c.fillRect(sx(lx - 3), sy(ty), 6 * Z, 2 * Z);
-      c.fillStyle = `rgba(255,${Math.round(200 + 40 * fl)},120,1)`;
-      c.fillRect(sx(lx - 2), sy(ty + 2), 4 * Z, 4 * Z);
-      c.fillStyle = '#2a2a34';
-      c.fillRect(sx(lx - 3), sy(ty + 6), 6 * Z, 1 * Z);
-    }
-    // the crowd's helmet lamps, and a cheer that runs through them when someone is knocked out
-    const cheer = now < this.shake.until;
-    for (let k = 0; k < scene.crowd.length; k++) {
-      const [cx, cy] = scene.crowd[k];
-      const on = (Math.floor(now / 400) + k * 7) % 11 !== 0;
-      if (!on) continue;
-      const hop = cheer && k % 2 ? Math.round(Math.sin(now / 60 + k)) : 0;
-      c.fillStyle = '#fff3b0';
-      c.fillRect(sx(cx), sy(cy - 1 + hop), Math.max(1, Z), Math.max(1, Z));
+    if (this.demoSkill && this.demoPlain) this.drawBackdrop(c, sx, sy, Z);
+    else {
+      c.drawImage(scene.cv, sx(WX0), sy(WY0), WW * Z, WH * Z);
+      animateStreetScene(c, stage, now, sx, sy, Z);
+      // mine lamps swing a little and flicker
+      for (const [tx, ty] of scene.lamps) {
+        const fl = 0.8 + 0.2 * Math.sin(now / 90 + tx) * Math.sin(now / 37 + ty);
+        const sw = Math.sin(now / 900 + tx) * 1.5;
+        const lx = tx + sw;
+        const gl = c.createRadialGradient(sx(lx), sy(ty + 4), 0, sx(lx), sy(ty + 4), 40 * Z);
+        gl.addColorStop(0, hexA(scene.lamp, 0.3 * fl));
+        gl.addColorStop(1, hexA(scene.lamp, 0));
+        c.fillStyle = gl;
+        c.fillRect(sx(lx - 40), sy(ty - 36), 80 * Z, 80 * Z);
+        c.strokeStyle = '#8a8a96';
+        c.lineWidth = Math.max(1, Z * 0.6);
+        c.beginPath();
+        c.moveTo(sx(tx), sy(2));
+        c.lineTo(sx(lx), sy(ty));
+        c.stroke();
+        c.fillStyle = '#2a2a34';
+        c.fillRect(sx(lx - 3), sy(ty), 6 * Z, 2 * Z);
+        c.fillStyle = `rgba(255,${Math.round(200 + 40 * fl)},120,1)`;
+        c.fillRect(sx(lx - 2), sy(ty + 2), 4 * Z, 4 * Z);
+        c.fillStyle = '#2a2a34';
+        c.fillRect(sx(lx - 3), sy(ty + 6), 6 * Z, 1 * Z);
+      }
+      // the crowd's helmet lamps, and a cheer that runs through them when someone is knocked out
+      const cheer = now < this.shake.until;
+      for (let k = 0; k < scene.crowd.length; k++) {
+        const [cx, cy] = scene.crowd[k];
+        const on = (Math.floor(now / 400) + k * 7) % 11 !== 0;
+        if (!on) continue;
+        const hop = cheer && k % 2 ? Math.round(Math.sin(now / 60 + k)) : 0;
+        c.fillStyle = '#fff3b0';
+        c.fillRect(sx(cx), sy(cy - 1 + hop), Math.max(1, Z), Math.max(1, Z));
+      }
     }
     if (!m) {
       this.drawTouch(now, false);
@@ -733,11 +864,12 @@ export class BrawlEngine {
       const o = p ? null : this.off.get(f.id);
       this.drawFighter(c, p ? { ...f, x: p.x, y: p.y } : o ? { ...f, x: f.x + o.x, y: f.y + o.y } : f, m, sx, sy, Z, now);
     }
+    this.vfx.draw(c, sx, sy, Z);
     // effects
     this.fx = this.fx.filter((e) => now - e.t0 < e.dur);
     for (const e of this.fx) this.drawFx(c, e, now, sx, sy, Z);
     // someone off screen: a bubble at the edge pointing at them
-    for (const f of m.fighters) {
+    for (const f of this.demoSkill ? [] : m.fighters) {
       if (f.stocks <= 0 || f.respawn > 0) continue;
       const X = sx(f.x), Y = sy(f.y - 12);
       if (X > 0 && X < this.W && Y > 0 && Y < this.H) continue;
@@ -752,6 +884,7 @@ export class BrawlEngine {
       c.stroke();
       drawMiner(c, this.looks.get(f.id)!, 'idle', 0, bx, by + 10, 1, f.facing);
     }
+    if (this.demoSkill) return;
     this.drawHud(c, m, now);
     this.drawTouch(now, !m.over);
   }
@@ -795,7 +928,8 @@ export class BrawlEngine {
           c.stroke();
         }
       }
-      if (!mv.guard && f.act.f >= mv.start - 1 && f.act.f < mv.start + mv.active + 1) {
+      // skills draw their own effects (engine/skillVfx.ts); everything else gets the white smear
+      if (!mv.guard && !isSkillMove(f.act.move) && f.act.f >= mv.start - 1 && f.act.f < mv.start + mv.active + 1) {
         const hb = moveHitbox(f, mv);
         c.strokeStyle = sp ? sp.color : f.act.move.endsWith('Heavy') || f.act.move === 'pound' ? '#fff3b0' : 'rgba(255,255,255,0.85)';
         c.lineWidth = Math.max(2, Z * (sp ? 2.6 : 1.6));
@@ -831,6 +965,8 @@ export class BrawlEngine {
   }
 
   private drawFx(c: Ctx, e: Fx, now: number, sx: (x: number) => number, sy: (y: number) => number, Z: number) {
+    // an effect that starts later (a delayed pop) waits
+    if (now < e.t0) return;
     const p = (now - e.t0) / e.dur;
     const t = (now - e.t0) / 1000;
     if (e.k === 'spark' || e.k === 'dust') {

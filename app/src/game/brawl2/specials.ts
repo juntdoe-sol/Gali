@@ -48,15 +48,26 @@ export const SKILL_INFO: Record<SkillId, SkillInfo> = {
   whirl: fromSpecial('whirl', 'SPIN'),
   dive: fromSpecial('dive', 'SPIKE'),
   guard: fromSpecial('guard', 'COUNTER'),
-  grab: { id: 'grab', name: 'ORE GRAB', line: 'Grab a miner and throw them: up, forward, behind or down.', how: 'Up close; point the stick where they should go', color: '#ffb347', price: 300, kind: 'GRAB' },
-  magnet: { id: 'magnet', name: 'MAGNET HOOK', line: 'A long magnetic pull drags a miner right up to you.', how: 'From across the stage, then hit them', color: '#ff6b9d', price: 400, kind: 'PULL' },
-  dynamite: { id: 'dynamite', name: 'DYNAMITE TOSS', line: 'Lob a stick of dynamite a few steps ahead. Boom.', how: 'Keep your distance', color: '#ff5a3c', price: 600, kind: 'THROW' },
-  geyser: { id: 'geyser', name: 'GEYSER', line: 'The floor bursts ahead of you and blasts a miner straight up.', how: 'When they stand a little way off', color: '#5ad8ff', price: 800, kind: 'TRAP' },
-  cavein: { id: 'cavein', name: 'CAVE-IN', line: 'Rocks rain down just ahead, spiking miners to the floor.', how: 'On miners near the edge', color: '#c8a070', price: 1000, kind: 'SPIKE' },
-  tunnel: { id: 'tunnel', name: 'TUNNEL DIG', line: 'Dig in, safe from hits, and pop up behind the nearest miner.', how: 'To dodge in and punish', color: '#b388ff', price: 1500, kind: 'TELEPORT' },
+  grab: { id: 'grab', name: 'ORE GRAB', line: 'Grab a miner and throw them: up, forward, behind or down.', how: 'Up close; point the stick where they should go', color: '#ffb347', price: 2000, kind: 'GRAB' },
+  magnet: { id: 'magnet', name: 'MAGNET HOOK', line: 'A long magnetic pull drags a miner right up to you.', how: 'From across the stage, then hit them', color: '#ff6b9d', price: 3000, kind: 'PULL' },
+  dynamite: { id: 'dynamite', name: 'DYNAMITE TOSS', line: 'Lob a stick of dynamite a few steps ahead. Boom.', how: 'Keep your distance', color: '#ff5a3c', price: 4000, kind: 'THROW' },
+  geyser: { id: 'geyser', name: 'GEYSER', line: 'The floor bursts ahead of you and blasts a miner straight up.', how: 'When they stand a little way off', color: '#5ad8ff', price: 5000, kind: 'TRAP' },
+  cavein: { id: 'cavein', name: 'CAVE-IN', line: 'Rocks rain down just ahead, spiking miners to the floor.', how: 'On miners near the edge', color: '#c8a070', price: 6500, kind: 'SPIKE' },
+  tunnel: { id: 'tunnel', name: 'TUNNEL DIG', line: 'Dig in, safe from hits, and pop up behind the nearest miner.', how: 'To dodge in and punish', color: '#b388ff', price: 8000, kind: 'TELEPORT' },
+  slide: { id: 'slide', name: 'CART SLIDE', line: 'Slide low along the floor and sweep miners off their feet.', how: 'Under a swing, along the ground', color: '#ffd84a', price: 2500, kind: 'SWEEP' },
+  boomerang: { id: 'boomerang', name: 'PICK BOOMERANG', line: 'Your pickaxe spins out ahead and catches a miner a few steps off.', how: 'Just out of their reach', color: '#9fe870', price: 3500, kind: 'RANGED' },
+  sonar: { id: 'sonar', name: 'SONAR PULSE', line: 'A ring of sound bursts out all round you and shoves everyone away.', how: 'When they crowd you', color: '#3ee6ff', price: 4500, kind: 'RING' },
+  boulder: { id: 'boulder', name: 'BOULDER ROLL', line: 'Curl up and roll forward through anyone in the way.', how: 'Across the stage at a miner who is busy', color: '#b0a090', price: 5500, kind: 'ROLL' },
+  meteor: { id: 'meteor', name: 'ORE METEOR', line: 'Leap forward and crash down like a meteor, spiking miners.', how: 'From above, at the edge', color: '#ff8a3d', price: 7000, kind: 'SLAM' },
+  drill: { id: 'drill', name: 'DRILL CHARGE', line: 'The fastest dash there is. Miss, and you are wide open.', how: 'Only when you are sure', color: '#e0e6f0', price: 10000, kind: 'CHARGE' },
+  inferno: { id: 'inferno', name: 'INFERNO ROAD', line: 'A wave of fire races along the floor and sets everyone in it alight.', how: 'Down a long flat stage', color: '#ff7a2a', price: 6000, kind: 'FIRE FIELD' },
+  jade: { id: 'jade', name: 'JADE VORTEX', line: 'A spiral of jade blades cuts all round you, wide and slow.', how: 'In the middle of a crowd', color: '#2ee6c0', price: 7500, kind: 'VORTEX' },
+  taiji: { id: 'taiji', name: 'TAIJI SEAL', line: 'A seal opens under you and freezes everyone on it, then throws them up.', how: 'When they rush in close', color: '#6ab8ff', price: 9000, kind: 'SEAL' },
+  thunder: { id: 'thunder', name: 'THUNDER CLEAVE', line: 'Charge, then split the floor ahead with lightning.', how: 'From far off, at a miner who is busy', color: '#ffd84a', price: 12000, kind: 'LIGHTNING' },
+  pillar: { id: 'pillar', name: 'GOLDEN PILLAR', line: 'A pillar of gold light drops on a miner a long way off.', how: 'At a miner across the stage', color: '#ffe27a', price: 15000, kind: 'PILLAR' },
 };
 /** shop order: free first, then by price */
-export const SKILL_ORDER: SkillId[] = ['moon', 'rush', 'quake', 'whirl', 'dive', 'guard', 'grab', 'magnet', 'dynamite', 'geyser', 'cavein', 'tunnel'];
+export const SKILL_ORDER: SkillId[] = ['moon', 'rush', 'quake', 'whirl', 'dive', 'guard', 'grab', 'slide', 'magnet', 'boomerang', 'dynamite', 'sonar', 'geyser', 'boulder', 'cavein', 'meteor', 'inferno', 'tunnel', 'jade', 'taiji', 'drill', 'thunder', 'pillar'];
 export const FREE_SKILLS: SkillId[] = SKILL_ORDER.filter((k) => SKILL_INFO[k].price === 0);
 
 /** Tool kinds in an item's name. */

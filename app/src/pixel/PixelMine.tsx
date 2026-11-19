@@ -187,6 +187,9 @@ let fightFn: (() => void) | null = null;
 let jumpFn: (() => void) | null = null;
 let grabFn: (() => void) | null = null;
 let rideFn: (() => void) | null = null;
+let skillFn: ((move: 'jump' | 'dash' | 'burst' | 'guard', color: string) => void) | null = null;
+/** One of your skills out on the island (the SKILLS keys). */
+export const islandSkill = (move: 'jump' | 'dash' | 'burst' | 'guard', color: string) => skillFn?.(move, color);
 /** The island's RIDE / GET OFF button. */
 export const islandRide = () => rideFn?.();
 /** The island's GRAB / THROW button. */
@@ -254,11 +257,13 @@ export default function PixelMine() {
   // F on the keyboard is handled inside the canvas; the FIGHT button calls islandFight
   useEffect(() => {
     fightFn = () => ref.current?.attack?.();
+    skillFn = (m, c) => ref.current?.skill?.(m, c);
     jumpFn = () => ref.current?.jump?.();
     grabFn = () => ref.current?.grab?.();
     rideFn = () => ref.current?.ride?.();
     return () => {
       fightFn = null;
+      skillFn = null;
       jumpFn = null;
       grabFn = null;
       rideFn = null;

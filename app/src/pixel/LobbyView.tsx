@@ -17,6 +17,7 @@ export interface LobbyRef extends DOMImperativeFactory {
   goTo: (...args: any[]) => void;
   opts: (...args: any[]) => void;
   attack: (...args: any[]) => void;
+  skill: (...args: any[]) => void;
   jump: (...args: any[]) => void;
   ride: (...args: any[]) => void;
   grab: (...args: any[]) => void;
@@ -43,6 +44,7 @@ export default function LobbyView({ ref, onEvent, atlas, look, opts }: { ref: Re
       goTo: (id: any) => engine.current?.goTo(String(id) as never),
       opts: (o: any) => engine.current?.setOpts(o as Partial<LobbyOpts>),
       attack: () => engine.current?.attack(),
+      skill: (move: unknown, color: unknown) => engine.current?.skill(move as 'jump' | 'dash' | 'burst' | 'guard', String(color)),
       jump: () => engine.current?.jump(),
       ride: () => engine.current?.ride(),
       grab: () => engine.current?.grab(),

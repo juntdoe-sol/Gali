@@ -107,6 +107,36 @@ const SOURCES = {
   door: require('../../assets/sfx/door.wav'),
   ko: require('../../assets/sfx/ko.wav'),
   respawn: require('../../assets/sfx/respawn.wav'),
+  // Fight Club skills: each one's wind-up and impact, timed to its frames (scripts/sfx/skill-sfx.py)
+  sk_boomerang: require('../../assets/sfx/skill-boomerang.wav'),
+  sk_boulder: require('../../assets/sfx/skill-boulder.wav'),
+  sk_cavein: require('../../assets/sfx/skill-cavein.wav'),
+  sk_dive: require('../../assets/sfx/skill-dive.wav'),
+  sk_drill: require('../../assets/sfx/skill-drill.wav'),
+  sk_dynamite: require('../../assets/sfx/skill-dynamite.wav'),
+  sk_geyser: require('../../assets/sfx/skill-geyser.wav'),
+  sk_grab: require('../../assets/sfx/skill-grab.wav'),
+  sk_guard: require('../../assets/sfx/skill-guard.wav'),
+  sk_inferno: require('../../assets/sfx/skill-inferno.wav'),
+  sk_jade: require('../../assets/sfx/skill-jade.wav'),
+  sk_magnet: require('../../assets/sfx/skill-magnet.wav'),
+  sk_meteor: require('../../assets/sfx/skill-meteor.wav'),
+  sk_moon: require('../../assets/sfx/skill-moon.wav'),
+  sk_pillar: require('../../assets/sfx/skill-pillar.wav'),
+  sk_quake: require('../../assets/sfx/skill-quake.wav'),
+  sk_rush: require('../../assets/sfx/skill-rush.wav'),
+  sk_slide: require('../../assets/sfx/skill-slide.wav'),
+  sk_sonar: require('../../assets/sfx/skill-sonar.wav'),
+  sk_taiji: require('../../assets/sfx/skill-taiji.wav'),
+  sk_thunder: require('../../assets/sfx/skill-thunder.wav'),
+  sk_tunnel: require('../../assets/sfx/skill-tunnel.wav'),
+  sk_whirl: require('../../assets/sfx/skill-whirl.wav'),
+  hit_fire: require('../../assets/sfx/hit-fire.wav'),
+  hit_ice: require('../../assets/sfx/hit-ice.wav'),
+  hit_shock: require('../../assets/sfx/hit-shock.wav'),
+  hit_gold: require('../../assets/sfx/hit-gold.wav'),
+  hit_rock: require('../../assets/sfx/hit-rock.wav'),
+  hit_cut: require('../../assets/sfx/hit-cut.wav'),
 } as const;
 export type Sound = keyof typeof SOURCES;
 
@@ -139,6 +169,8 @@ const BARKS = {
   },
 } as const;
 export type Bark = keyof (typeof BARKS)['m'];
+/** Miners' voices (grunts on a swing, cries when hit, jump, KO, win, level up). Off: players found them grating. */
+const BARKS_ON = false;
 
 /** One looping track per place. */
 const MUSIC = {
@@ -177,7 +209,7 @@ export function initAudio() {
     webInit();
     (Object.keys(SOURCES) as Sound[]).forEach((k) => void webLoad(`s:${k}`, SOURCES[k]));
     (Object.keys(ANNOUNCER) as Line[]).forEach((k) => void webLoad(`a:${k}`, ANNOUNCER[k]));
-    (['m', 'f'] as const).forEach((x) => (Object.keys(BARKS[x]) as Bark[]).forEach((k) => void webLoad(`${x}:${k}`, BARKS[x][k])));
+    if (BARKS_ON) (['m', 'f'] as const).forEach((x) => (Object.keys(BARKS[x]) as Bark[]).forEach((k) => void webLoad(`${x}:${k}`, BARKS[x][k])));
     syncMusic();
     fireReady();
     return;
@@ -259,6 +291,7 @@ export function announce(line: Line) {
 let lastBark = 0;
 /** Your miner's cry. `chance` keeps frequent actions (every swing, every jump) from talking every time. */
 export function bark(kind: Bark, sex: 'm' | 'f', chance = 1) {
+  if (!BARKS_ON) return;
   const now = Date.now();
   if (now - lastBark < 700 || Math.random() > chance) return;
   lastBark = now;

@@ -252,6 +252,8 @@ export class LobbyEngine {
   private carryCheck = 0;
   private lungeUntil = 0;
   private lungeDir = 0;
+  /** pixels a second for the lunge: a swing's small step, or a skill's dash */
+  private lungeSpeed = 60;
   private myHp = 100;
   private myKo = 0;
   private peerSeen = new Map<string, { hp: number; sw: number; ko: number }>();
@@ -495,6 +497,52 @@ export class LobbyEngine {
     }
   }
 
+  /**
+   * A Fight Club skill out in the world (the SKILLS keys on the bar): a flourish in the skill's colour, a hop or a
+   * dash, then an ordinary swing. Nothing new goes over the wire: whoever it hits checks it like any swing.
+   */
+  skill(move: 'jump' | 'dash' | 'burst' | 'guard', color: string) {
+    const wall = Date.now();
+    const b = this.snap?.brawl;
+    if (this.leaving || this.myRideKind() || this.held !== null || (b && koAge(b.me, wall) >= 0)) return;
+    const me = this.me;
+    const now = performance.now();
+    const cols = [color, '#ffffff', color];
+    if (move === 'jump') {
+      this.myJumpAt = 0;
+      this.jump();
+      this.parts.burst('star', me.x, me.y - 10, 14, 30, 34, cols, 0.7);
+    } else if (move === 'dash') {
+      // towards the nearest miner close by, else the way you face
+      let best: { x: number } | null = null;
+      let bd = 90;
+      for (const p of this.peers.values()) {
+        const d = Math.hypot(p.x - me.x, (p.y - me.y) * 1.4);
+        if (d < bd) {
+          bd = d;
+          best = p;
+        }
+      }
+      if (best && Math.abs(best.x - me.x) > 2) me.facing = best.x > me.x ? 1 : -1;
+      this.lungeDir = me.facing;
+      this.lungeSpeed = 150;
+      this.lungeUntil = now + 300;
+      this.parts.burst('dust', me.x, me.y, 10, 18, 8, ['#f2e6c8', '#d8c8a8', color], 0.5);
+    } else if (move === 'burst') {
+      this.parts.burst('star', me.x, me.y - 4, 24, 46, 22, cols, 0.8);
+      this.parts.burst('dust', me.x, me.y, 12, 30, 8, ['#f2e6c8', '#d8c8a8'], 0.6);
+      this.fx.shake(180, 1.8, wall);
+    } else {
+      this.parts.burst('star', me.x, me.y - 12, 18, 22, 10, cols, 0.9);
+      return;
+    }
+    this.emit({ t: 'sfx', name: 'swing' });
+    setTimeout(() => {
+      this.lastSwingWall = 0;
+      this.attack();
+    }, move === 'dash' ? 300 : move === 'jump' ? 220 : 80);
+  }
+
   attack() {
     // holding something: the swing throws it
     if (this.held !== null) return this.throwHeld();
@@ -528,6 +576,7 @@ export class LobbyEngine {
     const room = foe ? Math.max(0, Math.min(8, Math.abs(foe.x - me.x) - 12)) : 8;
     this.lungeUntil = now + (room / 60) * 1000;
     this.lungeDir = me.facing;
+    this.lungeSpeed = 60;
     this.fx.slash(me.x, me.y, me.facing, wall, Boolean(t) || prop >= 0);
     if (t) this.fx.shake(140, 1.4, wall + 200);
     this.emit({ t: 'swing', target: t?.id ?? null, x: me.x, y: me.y });
@@ -1451,7 +1500,7 @@ export class LobbyEngine {
     }
     const swinging = now < this.swingUntil && !downed;
     if (now < this.lungeUntil && !downed) {
-      const nx = me.x + this.lungeDir * 60 * dt;
+      const nx = me.x + this.lungeDir * this.lungeSpeed * dt;
       if (standable(m, nx, me.y)) me.x = nx;
     }
     if ((this.stick || kx || ky) && !this.leaving && !downed) {

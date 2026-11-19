@@ -4,6 +4,7 @@ export const PIX = {
   fire: require('../../assets/icons/fire.png'),
   pick: require('../../assets/icons/pick.png'),
   gem: require('../../assets/icons/gem.png'),
+  nugs: require('../../assets/icons/nugs.png'),
   wave: require('../../assets/icons/wave.png'),
   laugh: require('../../assets/icons/laugh.png'),
   note: require('../../assets/icons/note.png'),

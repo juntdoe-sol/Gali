@@ -1,5 +1,6 @@
 /**
- * Skills: the Market's SKILLS tab (buy with NUGS, the in-game coin) and the Bag's three skill slots.
+ * Skills: the Market's SKILLS tab (watch and buy with NUGS, the in-game coin) and the three skill slots (Profile, and
+ * before each Fight Club fight).
  * The moves themselves live in game/brawl2/sim.ts (SKILLS); names, colours and prices in game/brawl2/specials.ts.
  */
 import { useEffect, useRef, useState } from 'react';
@@ -14,16 +15,23 @@ import { T, U } from './kit';
 import { PixIcon } from './PixIcon';
 import type { PixName } from './pixIcons';
 import { alpha, Corners, TECH, TechBtn, TechPanel } from './tech';
+import { atlasSource } from '../pixel/atlasSource';
+import SkillDemoView from '../pixel/SkillDemoView';
+import { useMarket } from '../game/market';
 
-const ICON: Record<SkillId, PixName> = {
+export const SKILL_ICON: Record<SkillId, PixName> = {
   moon: 'jump', rush: 'bolt', quake: 'pick', whirl: 'sparkle', dive: 'fire', guard: 'gem',
   grab: 'fist', magnet: 'keys', dynamite: 'fire', geyser: 'wave', cavein: 'cave', tunnel: 'mole',
+  slide: 'cart', boomerang: 'pick', sonar: 'sound', boulder: 'planet', meteor: 'firefly', drill: 'bolt',
+  inferno: 'fire', jade: 'sparkle', taiji: 'eye', thunder: 'bolt', pillar: 'star',
 };
 /** how each kind of skill moves in its preview: a lift, a dash, a shake, a spin, a drop or a pulse */
 type Motion = 'up' | 'dash' | 'shake' | 'spin' | 'drop' | 'pulse';
 const MOTION: Record<SkillId, Motion> = {
   moon: 'up', rush: 'dash', quake: 'shake', whirl: 'spin', dive: 'drop', guard: 'pulse',
   grab: 'dash', magnet: 'dash', dynamite: 'up', geyser: 'up', cavein: 'drop', tunnel: 'pulse',
+  slide: 'dash', boomerang: 'spin', sonar: 'pulse', boulder: 'spin', meteor: 'drop', drill: 'dash',
+  inferno: 'dash', jade: 'spin', taiji: 'pulse', thunder: 'shake', pillar: 'drop',
 };
 
 /** The NUGS balance, with what they are. */
@@ -31,7 +39,7 @@ export function NugsBadge() {
   const nugs = useSkills((s) => s.nugs);
   return (
     <View style={styles.nugs}>
-      <PixIcon name="gem" size={16} />
+      <PixIcon name="nugs" size={16} />
       <T v="display" style={{ fontSize: 18, color: COLORS.gold }}>{nugs === null ? '…' : nugs.toLocaleString()}</T>
       <T v="tiny" style={{ color: TECH.dim, letterSpacing: 1 }}>NUGS</T>
     </View>
@@ -59,16 +67,17 @@ function SkillGlyph({ k, size = 44 }: { k: SkillId; size?: number }) {
   return (
     <View style={[styles.glyph, { width: size + 20, height: size + 20, backgroundColor: alpha(info.color, 0.14), borderColor: alpha(info.color, 0.5) }]}>
       <Animated.View style={{ transform }}>
-        <PixIcon name={ICON[k]} size={size} />
+        <PixIcon name={SKILL_ICON[k]} size={size} />
       </Animated.View>
     </View>
   );
 }
 
-/** The Market's SKILLS tab. */
+/** The Market's SKILLS tab: watch each skill in a real fight, buy it with NUGS. Picking your three is in Profile and before a fight. */
 export function SkillsMarket({ wide, bottomPad }: { wide: boolean; bottomPad: number }) {
   const owner = useGame((s) => s.wallet.owner);
   const refresh = useSkills((s) => s.refresh);
+  const [sel, setSel] = useState<SkillId>(SKILL_ORDER[0]);
   useEffect(() => {
     if (owner) void refresh();
   }, [owner, refresh]);
@@ -77,30 +86,34 @@ export function SkillsMarket({ wide, bottomPad }: { wide: boolean; bottomPad: nu
       <View style={styles.intro}>
         <PixIcon name="fist" size={22} />
         <T style={{ flex: 1, fontSize: 13, lineHeight: 18, color: TECH.dim }}>
-          Skills for the Fight Club: put three in your Bag and use them with SKILL (U or Q), SKILL + side and SKILL + down. Every skill is as strong as the others; they just play differently. They open arena powers too.
+          Tap a skill to watch it. Six are free; the rest cost NUGS, 1 for every 10 XP you earn. Pick your three in Profile or before a fight.
         </T>
         <NugsBadge />
       </View>
-      <T v="tiny" style={{ color: TECH.dim }}>
-        NUGS are Gali's in-game coin: 1 for every 10 XP you earn. Spending them never lowers your XP or level. They are not crypto and can't be bought or sold.
-      </T>
+      <SkillStage k={sel} wide={wide} />
       <View style={styles.grid}>
         {SKILL_ORDER.map((k) => (
-          <SkillCard key={k} info={SKILL_INFO[k]} wide={wide} />
+          <SkillTile key={k} k={k} on={sel === k} wide={wide} onPress={() => setSel(k)} />
         ))}
       </View>
+      <T v="tiny" style={{ color: TECH.dim }}>
+        Fight Club: Q or U, with A / D or S for your other two. Lobby and ORE Island: Q, R, X on the bottom bar. Each waits 7 seconds after use. NUGS are not crypto and can't be bought or sold.
+      </T>
     </ScrollView>
   );
 }
 
-function SkillCard({ info, wide }: { info: SkillInfo; wide: boolean }) {
-  const k = info.id;
+/** The selected skill, playing on loop in the fight engine, with what it does and its price. */
+function SkillStage({ k, wide }: { k: SkillId; wide: boolean }) {
+  const info = SKILL_INFO[k];
   const has = useSkills((s) => s.has(k));
   const nugs = useSkills((s) => s.nugs);
-  const loadout = useSkills((s) => s.loadout);
   const toast = useGame((s) => s.toast);
   const [busy, setBusy] = useState(false);
-  const slot = loadout.indexOf(k);
+  const [atlas, setAtlas] = useState<string | null>(null);
+  useEffect(() => {
+    atlasSource().then(setAtlas, () => setAtlas('/pixel/atlas.png'));
+  }, []);
   const buy = async () => {
     setBusy(true);
     const err = await useSkills.getState().buy(k);
@@ -108,91 +121,110 @@ function SkillCard({ info, wide }: { info: SkillInfo; wide: boolean }) {
     if (err) toast(err, 'bad');
     else {
       play('select');
-      toast(`${info.name} is yours. Put it in a slot below.`, 'good');
+      toast(`${info.name} is yours. Put it in a slot in Profile or before a fight.`, 'good');
     }
   };
+  const short = nugs !== null && nugs < info.price;
   return (
-    <View style={[styles.card, { width: wide ? '32%' : '100%', borderColor: has ? alpha(info.color, 0.55) : TECH.rule }]}>
-      <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
-        <SkillGlyph k={k} />
-        <View style={{ flex: 1, gap: 2 }}>
-          <T v="display" style={{ fontSize: 20, color: info.color }}>{info.name}</T>
-          <T v="tiny" style={{ color: TECH.dim, letterSpacing: 1 }}>{info.kind}{info.price === 0 ? ' · FREE' : ''}</T>
-        </View>
+    <View style={[styles.stage, { flexDirection: wide ? 'row' : 'column', borderColor: alpha(info.color, 0.6) }]}>
+      <View style={[styles.demo, wide ? { flex: 1.3 } : { height: 200 }]}>
+        {atlas ? <SkillDemoView atlas={atlas} skill={k} dom={{ style: { flex: 1 }, scrollEnabled: false }} /> : null}
       </View>
-      <T style={{ fontSize: 13, lineHeight: 18 }}>{info.line}</T>
-      <T v="muted" style={{ fontSize: 12 }}>Best: {info.how.toLowerCase()}.</T>
-      {has ? (
-        <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-          <T v="tiny" style={{ color: COLORS.green, letterSpacing: 1 }}>{slot >= 0 ? `IN ${SLOT_NAMES[slot]}` : 'OWNED'}</T>
-          <View style={{ flex: 1 }} />
-          {[0, 1, 2].map((j) => (
-            <TechBtn key={j} small label={['N', 'SIDE', 'DOWN'][j]} primary={slot === j} color={info.color} onPress={() => useSkills.getState().equip(j, slot === j ? null : k)} />
-          ))}
+      <View style={{ flex: 1, gap: 8, padding: 12 }}>
+        <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+          <SkillGlyph k={k} size={32} />
+          <View style={{ flex: 1 }}>
+            <T v="display" style={{ fontSize: 26, lineHeight: 28, color: info.color }}>{info.name}</T>
+            <T v="tiny" style={{ color: TECH.dim, letterSpacing: 1 }}>{info.kind}</T>
+          </View>
         </View>
-      ) : (
-        <TechBtn
-          label={busy ? 'BUYING…' : `BUY · ${info.price.toLocaleString()} NUGS`}
-          primary
-          color={info.color}
-          disabled={busy || (nugs !== null && nugs < info.price)}
-          onPress={() => void buy()}
-        />
-      )}
-      {slot >= 0 ? <Corners color={info.color} size={8} /> : null}
+        <T style={{ fontSize: 14, lineHeight: 20 }}>{info.line}</T>
+        <T v="muted" style={{ fontSize: 12 }}>Best: {info.how.toLowerCase()}.</T>
+        <View style={{ flex: 1 }} />
+        {has ? (
+          <View style={[styles.owned, { borderColor: alpha(COLORS.green, 0.5) }]}>
+            <PixIcon name="check" size={16} />
+            <T v="display" style={{ fontSize: 16, color: COLORS.green }}>{info.price === 0 ? 'FREE · YOURS' : 'YOURS'}</T>
+          </View>
+        ) : (
+          <>
+            <TechBtn label={busy ? 'BUYING…' : `BUY · ${info.price.toLocaleString()} NUGS`} primary color={info.color} disabled={busy || short} onPress={() => void buy()} />
+            {short ? <T v="tiny" style={{ color: TECH.dim }}>{(info.price - (nugs ?? 0)).toLocaleString()} NUGS to go: about {Math.ceil((info.price - (nugs ?? 0)) * 10).toLocaleString()} XP.</T> : null}
+          </>
+        )}
+      </View>
     </View>
   );
 }
 
-/** The Bag's three skill slots: tap a slot, then a skill you own. */
-export function BagSkills() {
+function SkillTile({ k, on, wide, onPress }: { k: SkillId; on: boolean; wide: boolean; onPress: () => void }) {
+  const info = SKILL_INFO[k];
+  const has = useSkills((s) => s.has(k));
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={`${info.name}, ${has ? 'yours' : `${info.price} NUGS`}`} style={[styles.tile, { width: wide ? '15.5%' : '31%', borderColor: on ? info.color : has ? alpha(info.color, 0.45) : TECH.rule, backgroundColor: on ? alpha(info.color, 0.12) : TECH.panel }]}>
+      <SkillGlyph k={k} size={28} />
+      <T v="display" numberOfLines={1} style={{ fontSize: 13, color: on ? info.color : COLORS.text, textAlign: 'center' }}>{info.name}</T>
+      <T v="tiny" style={{ color: has ? COLORS.green : COLORS.gold, letterSpacing: 1 }}>{has ? (info.price === 0 ? 'FREE' : 'YOURS') : `${info.price.toLocaleString()} NUGS`}</T>
+      {on ? <Corners color={info.color} size={6} /> : null}
+    </Pressable>
+  );
+}
+
+/**
+ * Your three skills (Profile, and before every Fight Club fight): tap a slot, then a skill you own.
+ * `compact` drops the NUGS badge and the help line, for the pre-fight picker.
+ */
+export function SkillLoadout({ title = 'FIGHT CLUB SKILLS', compact = false }: { title?: string; compact?: boolean }) {
   const loadout = useSkills((s) => s.loadout);
   const owned = useSkills((s) => s.owned);
   const refresh = useSkills((s) => s.refresh);
   const owner = useGame((s) => s.wallet.owner);
-  const [pick, setPick] = useState<number | null>(null);
+  const [pick, setPick] = useState(0);
   useEffect(() => {
     if (owner) void refresh();
   }, [owner, refresh]);
   const mine = SKILL_ORDER.filter((k) => SKILL_INFO[k].price === 0 || owned.includes(k));
   return (
-    <TechPanel title="FIGHT CLUB SKILLS" color={COLORS.gold} right={<NugsBadge />}>
+    <TechPanel title={title} color={COLORS.gold} right={compact ? undefined : <NugsBadge />}>
       <View style={{ flexDirection: 'row', gap: 8 }}>
         {[0, 1, 2].map((j) => {
           const k = loadout[j];
           const info = k ? SKILL_INFO[k] : null;
           return (
-            <Pressable key={j} onPress={() => setPick(pick === j ? null : j)} style={[styles.slot, { borderColor: pick === j ? COLORS.gold : info ? alpha(info.color, 0.6) : TECH.rule }]} accessibilityRole="button" accessibilityLabel={`${SLOT_NAMES[j]}: ${info?.name ?? 'empty'}`}>
-              <T v="tiny" style={{ color: TECH.dim, letterSpacing: 1 }}>{SLOT_NAMES[j]}</T>
-              {k ? <SkillGlyph k={k} size={28} /> : <View style={[styles.glyph, { width: 48, height: 48, borderStyle: 'dashed', borderColor: TECH.rule }]} />}
-              <T v="display" style={{ fontSize: 14, color: info?.color ?? TECH.dim, textAlign: 'center' }} numberOfLines={1}>{info?.name ?? 'EMPTY'}</T>
+            <Pressable key={j} onPress={() => setPick(j)} style={[styles.slot, { borderColor: pick === j ? COLORS.gold : info ? alpha(info.color, 0.6) : TECH.rule, backgroundColor: pick === j ? alpha(COLORS.gold, 0.1) : TECH.panel }]} accessibilityRole="button" accessibilityLabel={`${SLOT_NAMES[j]}: ${info?.name ?? 'empty'}`}>
+              <T v="tiny" style={{ color: pick === j ? COLORS.gold : TECH.dim, letterSpacing: 1 }}>{SLOT_NAMES[j]}</T>
+              {k ? <SkillGlyph k={k} size={26} /> : <View style={[styles.glyph, { width: 46, height: 46, borderStyle: 'dashed', borderColor: TECH.rule }]} />}
+              <T v="display" style={{ fontSize: 13, color: info?.color ?? TECH.dim, textAlign: 'center' }} numberOfLines={1}>{info?.name ?? 'EMPTY'}</T>
             </Pressable>
           );
         })}
       </View>
-      {pick !== null ? (
-        <View style={{ gap: 6, marginTop: 8 }}>
-          <T v="tiny" style={{ color: COLORS.gold, letterSpacing: 1 }}>PICK A SKILL FOR {SLOT_NAMES[pick]}</T>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-            {mine.map((k) => (
-              <TechBtn
-                key={k}
-                small
-                label={SKILL_INFO[k].name}
-                color={SKILL_INFO[k].color}
-                primary={loadout[pick] === k}
-                onPress={() => {
-                  useSkills.getState().equip(pick, k);
-                  setPick(null);
-                }}
-              />
-            ))}
-            <TechBtn small label="EMPTY" onPress={() => { useSkills.getState().equip(pick, null); setPick(null); }} />
-          </View>
-          <T v="muted" style={{ fontSize: 11 }}>More skills in the Market, bought with NUGS.</T>
-        </View>
-      ) : (
-        <T v="muted" style={{ fontSize: 11, marginTop: 6 }}>In the Fight Club: U or Q (or the SKILL button), with side or down for the other two. Each has its own cooldown.</T>
+      <T v="tiny" style={{ color: COLORS.gold, letterSpacing: 1, marginTop: 8 }}>TAP A SKILL FOR {SLOT_NAMES[pick]}</T>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+        {mine.map((k) => {
+          const info = SKILL_INFO[k];
+          const at = loadout.indexOf(k);
+          return (
+            <Pressable
+              key={k}
+              onPress={() => {
+                useSkills.getState().equip(pick, k);
+                setPick((p) => (p + 1) % 3);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={`${info.name}${at >= 0 ? `, in ${SLOT_NAMES[at]}` : ''}`}
+              style={[styles.chip, { borderColor: at >= 0 ? info.color : TECH.rule, backgroundColor: at >= 0 ? alpha(info.color, 0.14) : 'transparent' }]}
+            >
+              <PixIcon name={SKILL_ICON[k]} size={16} />
+              <T v="display" style={{ fontSize: 13, color: at >= 0 ? info.color : COLORS.text }}>{info.name}</T>
+            </Pressable>
+          );
+        })}
+      </View>
+      {compact ? null : (
+        <Pressable onPress={() => useMarket.getState().show(undefined, 'skills')} accessibilityRole="button" style={{ marginTop: 8 }}>
+          <T v="tiny" style={{ color: COLORS.gold, textDecorationLine: 'underline' }}>SEE ALL SKILLS IN THE MARKET</T>
+        </Pressable>
       )}
     </TechPanel>
   );
@@ -200,9 +232,15 @@ export function BagSkills() {
 
 const styles = StyleSheet.create({
   intro: { flexDirection: 'row', gap: 10, alignItems: 'center', padding: 10, borderWidth: U, borderColor: TECH.rule, backgroundColor: TECH.panel },
+  howTo: { gap: 6, padding: 10, borderWidth: U, borderColor: alpha(COLORS.gold, 0.45), backgroundColor: alpha(COLORS.gold, 0.06) },
   nugs: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, paddingVertical: 4, borderWidth: U, borderColor: alpha(COLORS.gold, 0.5), backgroundColor: alpha(COLORS.gold, 0.08) },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   card: { padding: 10, gap: 8, borderWidth: U, backgroundColor: TECH.panel },
   glyph: { alignItems: 'center', justifyContent: 'center', borderWidth: U },
+  stage: { borderWidth: U, backgroundColor: TECH.panel, overflow: 'hidden', minHeight: 230 },
+  demo: { backgroundColor: '#0b0712', minHeight: 200 },
+  owned: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 6, borderWidth: U },
+  tile: { alignItems: 'center', gap: 4, padding: 8, borderWidth: U },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, paddingVertical: 5, borderWidth: U },
   slot: { flex: 1, alignItems: 'center', gap: 5, padding: 8, borderWidth: U, backgroundColor: TECH.panel },
 });
