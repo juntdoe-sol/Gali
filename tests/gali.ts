@@ -795,13 +795,15 @@ describe('gali on ORE', () => {
       expect(bigOreGot).to.equal((orePoolBefore * 3n) / 4n);
     });
 
-    it('records and claims in the same transaction as the next deploy (as the app sends them)', async () => {
+    it('records and claims in one transaction before the next deploy (as the app sends them)', async () => {
       const p = await fundedPlayer();
       await fundJackpot(10_000);
       const roundId = 2_500;
       await motherlodeRound(roundId, 3, [p.kp.publicKey], [LAMPORTS_PER_SOL]);
       const before = await balance(p.skrAta);
-      // record + claim, then ORE's deploy moving the miner on to the next round (put_miner stands in for it here)
+      // record + claim in one transaction, then ORE's deploy moving the miner on to the next round.
+      // put_miner stands in for the deploy, but it carries the whole miner account as data (752 bytes)
+      // where ORE's real deploy carries 13, so it goes in its own transaction to stay under 1232 bytes.
       const next = zeros25();
       next[4] = LAMPORTS_PER_SOL;
       const tx = new Transaction().add(
@@ -817,12 +819,12 @@ describe('gali on ORE', () => {
             tokenProgram: TOKEN_PROGRAM_ID, associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
           })
           .instruction(),
-        await ore.methods
-          .putMiner(p.kp.publicKey, Buffer.from(minerBytes({ authority: p.kp.publicKey, roundId: roundId + 1, deployed: next })))
-          .accountsStrict({ payer: admin.publicKey, account: oreMinerPda(p.kp.publicKey), systemProgram: SystemProgram.programId })
-          .instruction(),
       );
       await provider.sendAndConfirm(tx, [p.kp]);
+      await ore.methods
+        .putMiner(p.kp.publicKey, Buffer.from(minerBytes({ authority: p.kp.publicKey, roundId: roundId + 1, deployed: next })))
+        .accountsStrict({ payer: admin.publicKey, account: oreMinerPda(p.kp.publicKey), systemProgram: SystemProgram.programId })
+        .rpc();
       const pl = await acc.player.fetch(playerPda(p.kp.publicKey));
       expect(pl.lastOreRound.toNumber()).to.equal(roundId);
       expect(pl.jackpotRound.toNumber()).to.equal(roundId);
@@ -876,6 +878,7 @@ describe('gali on ORE', () => {
 
     it('pays a round only once per player', async () => {
       const p = await fundedPlayer();
+      await fundJackpot(10_000); // its own pool, not what earlier tests left behind
       const roundId = 2_030;
       const deployed = zeros25();
       deployed[14] = LAMPORTS_PER_SOL;
