@@ -12,7 +12,7 @@ RULES = {
     'private-key': re.compile(rb'-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----'),
     'credential-url': re.compile(rb'https?://[^\s\x22\x27<>]*[?&](?:api[-_]?key|access[-_]?token|token|secret)=[A-Za-z0-9_%+./=-]{8,}', re.I),
     'url-password': re.compile(rb'https?://[^\s/:]+:[^\s/@]+@', re.I),
-    'provider-path-key': re.compile(rb'https?://[^\s/]*(?:alchemy\.com|quiknode\.pro|quicknode\.com)/[^\s\x22\x27<>]{16,}', re.I),
+    'provider-path-key': re.compile(rb'https?://[^\s/]*(?:alchemy\.com|quiknode\.pro)/[^\s\x22\x27<>]{16,}', re.I),  # quicknode.com is QuickNode's docs site; their endpoints are on quiknode.pro
     'secret-assignment': re.compile(rb'(?:private[_-]?key|secret[_-]?key|api[_-]?key|access[_-]?token|auth[_-]?token|password)[\x22\x27]?\s*[:=]\s*[\x22\x27][A-Za-z0-9_+/=-]{20,}[\x22\x27]', re.I),
 }
 BINARY = {'.png', '.jpg', '.jpeg', '.webp', '.gif', '.ico', '.wav', '.mp3', '.mp4', '.ogg', '.ttf', '.otf', '.woff', '.woff2', '.so', '.dylib', '.pdf', '.zip', '.apk', '.aab'}
