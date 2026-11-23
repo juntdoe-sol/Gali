@@ -5,7 +5,7 @@
 ### Mining ORE should feel like a game. Now it does.
 
 **A pixel open world on Solana Seeker, built on top of ORE's live mining board.**
-Walk into a shared town and ride a mine cart around it. Head to the island and deploy SOL on real ORE rounds. Stay for the arcade, the Arena and the people.
+Walk into a shared town and ride a mine cart around it. Head to the island and deploy SOL on real ORE rounds, or let a bot play them. Stay for Fight Club, the arcade, the Arena and the people.
 
 [![Live on Solana mainnet](https://img.shields.io/badge/Solana-mainnet%20beta-14F195?style=for-the-badge&logo=solana&logoColor=black)](https://betatest.gali.lol)
 [![Built for Seeker](https://img.shields.io/badge/Built%20for-Seeker-ffcf4a?style=for-the-badge)](https://expo.dev/accounts/gali-app/projects/gali/builds/3cd0a6d6-2aaf-41f0-9bf5-3cedeab7c386)
@@ -14,13 +14,13 @@ Walk into a shared town and ride a mine cart around it. Head to the island and d
 
 **[Play on desktop](https://betatest.gali.lol)** · **[Android APK](https://expo.dev/accounts/gali-app/projects/gali/builds/3cd0a6d6-2aaf-41f0-9bf5-3cedeab7c386)** · **[gali.lol](https://gali.lol)** · **[Docs](https://docs.gali.lol)** · **[Demo video](https://www.youtube.com/watch?v=PCXDZZQpGm8)** · **[@Gali_Game](https://x.com/Gali_Game)**
 
-Submitted to **CLOCK IN** (Solana Mobile) and the **Colosseum Crypto World's Fair**.
+🏆 **Winner of CLOCK IN** (Solana Mobile) and the **ORE track**. Also submitted to the **Colosseum Crypto World's Fair**.
 
 </div>
 
-> **Judges, start here.** Play the hosted build at [betatest.gali.lol](https://betatest.gali.lol) (full game, nothing to set up). To run it yourself: [Run the app locally](#run-the-app-locally), four commands, no keys. Addresses: [Program IDs](#program-ids-and-addresses).
+> **Start here.** Play the hosted build at [betatest.gali.lol](https://betatest.gali.lol) (full game, nothing to set up). To run it yourself: [Run the app locally](#run-the-app-locally), four commands, no keys. Addresses: [Program IDs](#program-ids-and-addresses).
 
-![The Gali lobby on Android: a shared pixel town during the Hollow Night season](docs/gali-lobby.jpg)
+![The Gali lobby on Android: a shared pixel town](docs/gali-lobby.jpg)
 
 ---
 
@@ -36,7 +36,8 @@ Gali turns that board into a place.
 
 - **The 25 squares become 25 spots on a pixel island.** You walk your miner there, pick spots and watch the strike land.
 - **Every deploy is a real ORE transaction,** signed by your own wallet. Gali never holds your SOL or your ORE.
-- **Between rounds there is a world.** A shared town holds up to 100 players with chat, emotes, dances and tips in SOL, ORE or SKR. Ride carts and scooters, play three arcade tables, fight in the Arena or dig in the cave.
+- **Between rounds there is a world.** A shared town holds up to 100 players with chat, DMs, emotes, dances and tips in SOL, ORE or SKR. Ride carts and scooters, fight in Fight Club or the Arena, play three arcade tables or dig in the cave.
+- **Mining follows you.** A live round chip and the DEPLOY drawer work from the lobby, the cave and the Arena, and a bot can keep playing with the app closed.
 
 The result: the same ORE round, with a reason to stay for the next one.
 
@@ -47,7 +48,7 @@ The result: the same ORE round, with a reason to stay for the next one.
 ## Try it in 60 seconds
 
 1. Open **[betatest.gali.lol](https://betatest.gali.lol)** in a desktop browser, or install the **[Android APK](https://expo.dev/accounts/gali-app/projects/gali/builds/3cd0a6d6-2aaf-41f0-9bf5-3cedeab7c386)** on a Seeker.
-2. Connect a Solana wallet and pick a miner name.
+2. Connect a Solana wallet (or sign in with email on the web) and pick a miner name.
 3. Walk down the pier (or tap **GO → ORE ISLAND**).
 4. In **LITE**, tap **+0.01** and **DEPLOY**. That is one round of 0.01 SOL across all 25 spots, on mainnet.
 5. While it runs, go back to the lobby, hop on a cart with **E** and say hi.
@@ -60,20 +61,28 @@ This is real SOL on mainnet. There is no cap on how much you deploy, so only min
 
 | | Feature | What it does | On chain |
 |---|---|---|---|
-| **Mine** | ORE Island, Lite and Pro | Lite turns an amount into rounds across all 25 spots, like ORE's own Lite. Pro lets you pick spots, SOL per round and rounds. | Yes, ORE's board |
-| | Autopilot | One approval funds ORE's own automation. Rounds keep playing with the game closed, run by a server executor that can deploy but never withdraw. STOP returns unused SOL. | Yes, ORE automation |
+| **Mine** | ORE Island, Lite and Pro | Lite turns an amount into rounds across all 25 spots, like ORE's own Lite. Pro lets you pick spots, SOL per round and rounds. Mining works from anywhere in the game. | Yes, ORE's board |
+| | Autopilot | One approval funds ORE's own automation. Rounds keep playing with the game closed, run by a server executor that can deploy but never withdraw. TOP UP adds rounds without stopping it; STOP returns unused SOL. | Yes, ORE automation |
+| | BOT tab | **Bot** plays your own rules every round. **AI bot** (Safe, Solo hunter, Motherlode chaser) is tuned by a team of AI agents from its own results. Stop-loss and limits always hold. [Details](#gali-ai-mining) | Yes, ORE automation |
+| | Rounds | Past rounds, Big Hits (every Gali solo win and motherlode with its USD value) and the current round's miners. | Reads ORE |
+| | Mining Cards | A card worth $10 to $1,000 in mining. Its code starts autopilot from the mining panel, with a reveal, progress and claim. | Yes |
 | | Claims and the hold reminder | Claim returned SOL and mined ORE. A pop-up reminds you that holding unrefined ORE earns a share of the 10% other miners pay to claim. | Yes |
-| | ORE Stats panel | Desktop: your all-time ORE, unrefined, refined and refined gained in 24 hours, plus all Gali miners combined. | Reads ORE |
-| **Play** | The lobby | A shared pixel town for up to 100 players: walk, chat, stickers, 12 dances, emotes, tips. | Tips are real transfers |
-| | Carts and scooters | Public rides all over the lobby. Anyone can take one, and it stays where you leave it for everyone. | No |
+| | ORE Stats panel | Your ORE, unrefined, refined and refined in 24 hours, plus all Gali miners combined, counted from when you joined Gali. | Reads ORE |
+| **Play** | The lobby | A shared pixel town for up to 100 players: walk, chat, DMs, stickers, 12 dances, emotes, tips. | Tips are real transfers |
+| | Fight Club | A platform fighter in the Street Fightclub warehouse: 1v1, free-for-all and private rooms online, or against bots. Six stages, 23 skills with their own effects and sounds, three picked before each fight, and a Fight Club rank. Call out other miners by name or on X. | No, XP only |
+| | Carts and scooters | Public rides all over the lobby and the island. Anyone can take one, and it stays where you leave it. | No |
 | | Arcade | Tunnel Collapse, Gold Rush Pot and Crash Cart, played in ORE or SKR against a funded house. 40-second rounds with a commit-reveal draw anyone can verify. 18+. | Yes, SPL transfers |
-| | Brawl and the Arena | HP bars and KOs anywhere in town. The Arena hosts up to 12 players in Last Miner Standing, King of the Hill or a co-op Mole King boss. Levels unlock powers. | No, XP only |
+| | The Arena | Up to 12 players in Last Miner Standing, King of the Hill or a co-op Mole King boss. Levels unlock powers. | No, XP only |
 | | Cave Run | A lantern-lit dig with a joystick and a pickaxe. Rocks, bats, gems, deeper floors. | No, XP only |
-| **Live ops** | Seasons | Hollow Night runs 24 Oct to 5 Nov: a dark island, fog, bats, ghosts and glowing pumpkins. Looks only, never odds. | No |
-| | Sound | 8-bit music for every place, a voiced announcer and miner barks, all made for Gali. | No |
-| | Quests, levels and ranks | Nine daily quests, achievements, one XP bar across mining and fighting, boards for today, month, year and all time. | Reads ORE for ORE ranks |
+| | University of ORE | A campus on ORE Island where Hardhat Chad answers questions about how ORE works. | No |
+| **Progress** | Quests, levels and ranks | Daily quests, achievements, one server-checked XP level across mining and fighting, boards for today, month, year and all time. | Reads ORE for ORE ranks |
+| | NUGS and the Market | NUGS is the in-game coin, earned from XP. Spend it on Fight Club skills in the Market, next to gear and Mining Cards; NUGS packs can be bought with SKR or ORE. | Packs are real transfers |
+| | Certificates | Milestone certificates (levels 3, 6, 10, 15, 20, 30) minted as NFTs you own, with the gear they unlock. | Yes, Metaplex Core |
+| | Invite friends | A personal invite link and card. A friend's first mining round gives both of you 1,000 points and 1,000 NUGS, and the inviter keeps 10% of the points from every round the friend mines. | No |
+| **Live ops** | Seasons and events | Time-limited looks and events in town (Hollow Night ran 24 Oct to 5 Nov). Looks only, never odds. | No |
+| | Sound | 8-bit music for every place, a sound for every skill and an announcer, all made for Gali. | No |
 
-Brawl, the Arena and Cave Run never touch SOL, ORE, SKR or mining odds. They exist to make the town fun between rounds.
+Fight Club, the Arena and Cave Run never touch SOL, ORE, SKR or mining odds. They exist to make the town fun between rounds.
 
 ---
 
@@ -107,7 +116,7 @@ Gali plays straight on ORE's program: every deploy and claim calls it directly, 
 | ORE mint | [`oreoU2P8bN6jkk3jbaiVxYnG1dCXcYxwhwyK9jSybcp`](https://solscan.io/token/oreoU2P8bN6jkk3jbaiVxYnG1dCXcYxwhwyK9jSybcp) | ORE balances, tips, arcade tables (11 decimals) |
 | SKR mint | [`SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3`](https://solscan.io/token/SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3) | SKR tips and arcade tables. `app/src/chain/light.ts` |
 | Arcade house wallet | [`9ma7yr5cMEWjZCWFHnQ1SGzYe7qQMumiRb7H6mfavPMz`](https://solscan.io/account/9ma7yr5cMEWjZCWFHnQ1SGzYe7qQMumiRb7H6mfavPMz) | Holds arcade stakes during a round, pays winners. `app/src/chain/arcade.ts` |
-| Platform fee wallet | [`HDa2MTDdZXnrjTs6RRUUzEqCcrWMWu1fM673Cg7pzQMw`](https://solscan.io/account/HDa2MTDdZXnrjTs6RRUUzEqCcrWMWu1fM673Cg7pzQMw) | Receives the 0.25% beta fee inside the deploy transaction. `app/src/chain/light.ts` |
+| Platform fee wallet | [`HDa2MTDdZXnrjTs6RRUUzEqCcrWMWu1fM673Cg7pzQMw`](https://solscan.io/account/HDa2MTDdZXnrjTs6RRUUzEqCcrWMWu1fM673Cg7pzQMw) | Receives the 1% fee inside the deploy transaction, plus NUGS packs, Mining Cards, AI passes and certificate fees. `app/src/chain/light.ts` |
 | Gali program (`programs/gali`) | `GamTh2wWNNGU6CB5G3aF7Xeu1m7fQEtd9caRGtgPcMmV` | In development. Runs on a local validator in the tests. IDL: `target/idl/gali.json` |
 | ORE mock (`programs/ore-mock`) | `oreV3EG1i9BEgiAJ8b177Z2S2rMarzak4NMv1kULvWv` | Test-only. Loaded at ORE's address on the local validator so the tests run offline |
 
@@ -123,10 +132,10 @@ flowchart LR
   end
   subgraph Gali
     ENG[Canvas engines<br/>island, lobby, arena, cave]
-    PROXY[Read proxy<br/>8 RPC methods, no keys in the app]
+    PROXY[Read proxy<br/>api.gali.lol, no keys in the app]
     ARC[Arcade server<br/>commit-reveal, house wallet]
-    SB[Supabase<br/>realtime lobby, chat, ranks]
-    EXE[Autopilot executor<br/>runs every minute]
+    SB[Supabase<br/>realtime lobby, chat, ranks,<br/>XP, NUGS, edge functions]
+    EXE[Autopilot and AI bot<br/>run every minute]
     RATE[ore-rate job<br/>hourly refining rate]
   end
   ORE[(ORE program<br/>board, rounds, miners, automation)]
@@ -142,7 +151,8 @@ flowchart LR
 ```
 
 - **Non-custodial by design.** Deploys and claims are plain ORE instructions signed by the player. Autopilot uses ORE's own `Automation` account: the executor can deploy from it and nothing else.
-- **No secrets in the client.** Chain reads go through a read-only proxy (`app/rpc-backend`) with an allow-list of eight methods. RPC keys stay on the server.
+- **No secrets in the client.** Chain reads go through a read-only proxy (`api.gali.lol`, `deploy/gali-api`) with an allow-list of methods and per-IP rate limits. RPC keys stay on the server.
+- **Hosted on Cloudflare Workers.** The web game (betatest.gali.lol), the API, docs, the TV site and the team's Gali Ops page each deploy from `deploy/` with Wrangler. Supabase runs the database, realtime and edge functions.
 - **ORE decoded by hand.** ORE is built with Steel, with no IDL. `app/src/chain/ore/` decodes its accounts at offsets checked against live mainnet data and refuses anything with the wrong owner, length or address.
 - **Realtime that fits a free tier.** Lobby positions travel twice a second over Supabase broadcast. Each one carries where the player is heading, so others walk smoothly in between. A ride costs one message to get on and one to get off; riding itself adds none.
 - **Every sprite is drawn in code.** `scripts/pixel-art.py` rebuilds the island, miners, gear, pets, props and the bitmap font into one atlas. Rides and seasonal props are code-drawn too.
@@ -153,18 +163,23 @@ flowchart LR
 
 | | |
 |---|---|
-| **20 app test suites** | Wallet safety, live clock, poll budget, lobby and its networking, rides, Brawl, the Arena, Cave Run, the arcade server and the read proxy. `cd app && npm test`, no wallet or network needed. |
+| **App test suites** | Wallet safety, live clock, poll budget, lobby and its networking, rides, Brawl, the Arena, Cave Run, autopilot, AI mining, scoring and the arcade server. `cd app && npm test`, no wallet or network needed. |
 | **33 program tests** | `programs/gali` against `programs/ore-mock` at ORE's address on a local validator. |
 | **CI on every push** | Type checks, all suites, Android and web builds, dependency checks and a secret scan over the source and the built bundles. |
 | **Verifiable arcade** | The house publishes a hash before each round and the secret after it, so anyone can check the draw. |
 | **Safe failure** | If ORE moves a field, Gali stops instead of paying from a misread value. |
+| **Server-checked progress** | XP, levels, NUGS, ranks and purchases are worked out by Supabase functions, not trusted from the app. A daily automated bug check reports to the team. |
 
 ---
 
 ## Business model
 
-- **ORE mining:** a 0.25% platform fee on SOL deployed during the beta, stated in the [docs](https://docs.gali.lol). It goes to a fixed revenue wallet in the same transaction. Gali never takes a cut of winnings.
+- **ORE mining:** a 1% platform fee on SOL deployed, stated in the [docs](https://docs.gali.lol). It goes to a fixed revenue wallet in the same transaction, on LITE, PRO, autopilot and the bot alike. Gali never takes a cut of winnings.
+- **Gali AI:** a 0.1 SOL pass for 7 days of the AI bot, after a free first week.
+- **NUGS packs:** 5,500 NUGS for $25, 15,000 for $50, 50,000 for $100, paid in SKR or ORE.
+- **Mining Cards:** sold in the Market for SKR or ORE.
 - **Arcade:** a 5% house fee on Tunnel Collapse and Gold Rush Pot, and a house edge on Crash Cart.
+- **Small fees:** 0.0025 SOL to mint a certificate; a name change is free once in 30 days, otherwise 0.1 SOL.
 - **Next:** cosmetic gear as NFTs with resale royalties (see the roadmap).
 
 ---
@@ -173,9 +188,9 @@ flowchart LR
 
 | Stage | What |
 |---|---|
-| **Now** | Mainnet beta on desktop web and Android. Weekly APK releases from tester feedback. APK 1.7 lands this week. |
-| **In development** | The Gali program (`programs/gali`): points, streaks, an SKR jackpot on ORE's motherlode, gear and staking, tested against a mock of ORE. Its screens stay behind `EXPO_PUBLIC_FEATURE_GALI_PROGRAM` until it ships. A Gali app for Android TV (`tv/`) that pairs with a Seeker. One-tap Seeker Connect. Gali AI mining (below), behind `EXPO_PUBLIC_FEATURE_AI_MINING`. |
-| **Planned** | Gear as tradeable NFTs and a player Market. Clans. More seasons. |
+| **Now** | Mainnet beta on desktop web and Android (version 1.9). Regular APK releases from tester feedback. Gali AI mining, Fight Club with skills, NUGS and the Market are live. |
+| **In development** | The Gali program (`programs/gali`): points, streaks, an SKR jackpot on ORE's motherlode, gear and staking, tested against a mock of ORE. Its screens stay behind `EXPO_PUBLIC_FEATURE_GALI_PROGRAM` until it ships. A Gali app for Android TV (`tv/`) that pairs with a Seeker. One-tap Seeker Connect. |
+| **Planned** | Gear as tradeable NFTs and a player Market. Clans. More seasons and events. |
 
 Details in [ROADMAP.md](ROADMAP.md).
 
@@ -192,6 +207,8 @@ Details in [ROADMAP.md](ROADMAP.md).
 
 Founder speech: [YouTube](https://youtu.be/Fl21Yzhqt_k).
 
+The crew also made **[Gali Mines](https://www.roblox.com/games/73526694916329/Gali-Mines)** on Roblox, a separate game for ORE junior miners.
+
 ORE is credited as the board Gali plays on. Gali is not affiliated with or endorsed by ORE.
 
 ---
@@ -204,11 +221,12 @@ ORE is credited as the board Gali plays on. Gali is not affiliated with or endor
 | --- | --- |
 | `app/` | Expo (React Native) app for Android and web. Canvas engines in `app/src/engine`, game state in `app/src/game`, chain code in `app/src/chain` |
 | `app/rpc-backend/` | Read proxy and the arcade server (`functions/games.mjs`) |
-| `supabase/` | Edge functions (`autopilot`, `ai-miner`, `ai-tune`, `ai-pass`, `ore-rate`, `dm`, chat) and SQL for chat, ranks, autopilot, AI mining and ORE stats |
+| `deploy/` | Cloudflare Workers: `gali-web` (betatest.gali.lol), `gali-api` (api.gali.lol), `gali-admin`, `gali-docs`, `gali-tv` |
+| `supabase/` | Edge functions (`play`, `autopilot`, `ai-miner`, `ai-tune`, `ai-pass`, `ore-rate`, `ore-hits`, `round-miners`, `nft`, `dm`, chat, `team`) and SQL for chat, ranks, XP, NUGS, the Market, autopilot, AI mining and ORE stats |
 | `programs/gali` | Anchor program, in development |
 | `programs/ore-mock` | Test-only stand-in for ORE's program |
 | `tests/gali.ts` | Program tests against the mock (33 cases) |
-| `admin/` | Admin page (Vite + React) |
+| `admin/` | Older admin page (Vite + React). The team now uses Gali Ops at admin.gali.lol |
 | `tv/` | Android TV app, in development |
 | `scripts/` | Pixel-art generator, ORE layout probe, devnet deploy, local test runner |
 | `video/` | The intro video, rendered from the real game engine |
@@ -233,7 +251,7 @@ Check it without a browser:
 ```bash
 cd app
 npx tsc --noEmit
-npm test            # 21 suites, no wallet or network needed
+npm test            # no wallet or network needed
 ```
 
 | Variable | Needed | Default when empty |
@@ -285,7 +303,7 @@ A BOT tab next to LITE and PRO, with two modes the player picks and saves (`gali
 
 Both modes respect the player's limits: most per spot (ORE enforces it), most per round, and a stop-loss counted from when the settings were saved. Autopilot stays separate on LITE and PRO.
 
-A player's first week is free (one per wallet, only for a wallet that never had a pass; it needs a wallet sign-in, no fee). After that a pass is 0.1 SOL for 7 days, paid to the revenue wallet. With a pass the player funds an ORE automation that names the Gali AI key as its executor. ORE's DiscretionaryBps strategy lets that key pick the spots and the amount per spot each round, never more than the player's per-spot limit, and nothing else: it can't withdraw, and STOP returns the balance. Returned SOL goes back into the automation, so the balance shows how it is doing. Gali's fee is the same 0.25% as LITE and PRO, taken by ORE from each round the AI plays and paid to the AI key, which passes it on to the revenue wallet. Rounds it sits out cost nothing. ORE only charges that fee on a round's first deploy, so the AI plays one stake size per round in one deploy.
+A player's first week is free (one per wallet, only for a wallet that never had a pass; it needs a wallet sign-in, no fee). After that a pass is 0.1 SOL for 7 days, paid to the revenue wallet. With a pass the player funds an ORE automation that names the Gali AI key as its executor. ORE's DiscretionaryBps strategy lets that key pick the spots and the amount per spot each round, never more than the player's per-spot limit, and nothing else: it can't withdraw, and STOP returns the balance. Returned SOL goes back into the automation, so the balance shows how it is doing. Gali's fee is the same 1% as LITE and PRO, taken by ORE from each round the AI plays and paid to the AI key, which passes it on to the revenue wallet. Rounds it sits out cost nothing. ORE only charges that fee on a round's first deploy, so the AI plays one stake size per round in one deploy.
 
 - **`ai-miner`** runs every minute. Near the end of each round it reads the board and plays only spots where the ORE a player can expect is worth more than the SOL ORE keeps, with a margin. It sits out every other round. A bigger motherlode makes more spots worth it. After the draw it works out each player's result from ORE's own accounts. The strategy is in `supabase/functions/_shared/aiStrategy.ts`.
 - **`ai-tune`** runs five Claude agents. Every 15 minutes a round reviewer (Haiku 5.5) reads every round the AI decided and writes lessons (`gali_ai_lessons`), shown in the AI tab. Every 3 hours a team of four reviews the settings on Haiku 5.5, and once a day on Sonnet 5.5 for a deeper review that weighs the week; both read the round reviewer's lessons. Claude spend is capped at `AI_MONTHLY_BUDGET_USD` (default $10) for all of them together, spread evenly over the month, and quiet stretches with no new rounds or votes make no calls. The team: a results analyst and a feedback reader work in parallel, a risk checker sets hard limits (a minimum margin, a maximum share of balance per round), and a lead decides the settings and writes the learning log entry, including how subscribers' feedback was used. Code clamps every value, enforces the risk limits and limits how far one review can move a setting, so a bad answer can't push the AI outside safe limits.
